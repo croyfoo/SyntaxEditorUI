@@ -70,15 +70,6 @@ private extension SyntaxHighlighterEngine {
 
     static func makeConfiguration(from support: SyntaxTreeSitterSupport) -> LanguageConfiguration? {
         let language = support.makeLanguage()
-
-        if let configuration = try? LanguageConfiguration(
-            language,
-            name: support.name,
-            bundleName: support.bundleName
-        ), configuration.queries[.highlights] != nil {
-            return configuration
-        }
-
         var candidates: [URL] = []
         var seenPaths = Set<String>()
 
@@ -102,6 +93,15 @@ private extension SyntaxHighlighterEngine {
                 return configuration
             }
         }
+
+        if let configuration = try? LanguageConfiguration(
+            language,
+            name: support.name,
+            bundleName: support.bundleName
+        ), configuration.queries[.highlights] != nil {
+            return configuration
+        }
+
         return nil
     }
 
