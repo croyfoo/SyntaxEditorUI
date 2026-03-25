@@ -4,13 +4,13 @@ import Observation
 @Observable
 public final class SyntaxEditorModel {
     public var text: String
-    public var language: SyntaxLanguage
+    public var language: any SyntaxLanguage
     public var isEditable: Bool
     public var lineWrappingEnabled: Bool
 
     public init(
         text: String = "",
-        language: SyntaxLanguage,
+        language: any SyntaxLanguage,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false
     ) {
