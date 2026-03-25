@@ -7,6 +7,7 @@
 - `@Observable` state model (`SyntaxEditorModel`)
 - SwiftUI entry point (`SyntaxEditorView`)
 - UIKit/AppKit controller API (`SyntaxEditorViewController`)
+- protocol-based language definitions (`SyntaxLanguage`)
 - tree-sitter based syntax highlighting for:
   - CSS
   - JavaScript
@@ -31,6 +32,37 @@
 - `Cmd+/`: Toggle comment (JavaScript/CSS/Swift)
 - `Cmd+Z`: Undo
 - `Shift+Cmd+Z`: Redo
+
+## Usage
+
+```swift
+let model = SyntaxEditorModel(
+    text: "const answer = 42;",
+    language: BuiltinSyntaxLanguages.javascript
+)
+
+let view = SyntaxEditorView(model: model)
+```
+
+Custom languages can provide both editor rules and highlighting by conforming to `SyntaxLanguage`.
+
+```swift
+struct CustomJSONLanguage: SyntaxLanguage {
+    var identifier: String { "custom-json" }
+    var displayName: String { "Custom JSON" }
+    var treeSitterSupport: SyntaxTreeSitterSupport {
+        BuiltinSyntaxLanguages.json.treeSitterSupport
+    }
+
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+        nil
+    }
+
+    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
+        false
+    }
+}
+```
 
 ## Testing
 

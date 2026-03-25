@@ -22,7 +22,7 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
     @ObservationIgnored
     private var isApplyingHighlight = false
     @ObservationIgnored
-    private var lastAppliedLanguage: SyntaxLanguage?
+    private var lastAppliedLanguageIdentifier: String?
     @ObservationIgnored
     private var pendingEditStartUTF16: Int?
     @ObservationIgnored
@@ -264,7 +264,7 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
     }
 
     private func applyObservedEditorState(
-        language: SyntaxLanguage,
+        language: any SyntaxLanguage,
         isEditable: Bool,
         lineWrappingEnabled: Bool,
         forceLanguageRefresh: Bool = false
@@ -275,8 +275,8 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
 
         applyLineWrappingConfiguration(lineWrappingEnabled: lineWrappingEnabled)
 
-        let languageChanged = forceLanguageRefresh || lastAppliedLanguage != language
-        lastAppliedLanguage = language
+        let languageChanged = forceLanguageRefresh || lastAppliedLanguageIdentifier != language.syntaxHighlightCacheKey
+        lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
 
         textView.typingAttributes = baseAttributes()
         if languageChanged {
@@ -477,7 +477,7 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
 
     private func scheduleHighlight(
         source: String,
-        language: SyntaxLanguage,
+        language: any SyntaxLanguage,
         refreshStartUTF16: Int = 0
     ) {
         let expectedSource = source
