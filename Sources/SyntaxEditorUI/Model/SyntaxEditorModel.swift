@@ -19,4 +19,17 @@ public final class SyntaxEditorModel {
         self.isEditable = isEditable
         self.lineWrappingEnabled = lineWrappingEnabled
     }
+
+    public convenience init(
+        text: String = "",
+        isEditable: Bool = true,
+        lineWrappingEnabled: Bool = false
+    ) {
+        self.init(
+            text: text,
+            language: BuiltinSyntaxLanguages.javascript,
+            isEditable: isEditable,
+            lineWrappingEnabled: lineWrappingEnabled
+        )
+    }
 }
