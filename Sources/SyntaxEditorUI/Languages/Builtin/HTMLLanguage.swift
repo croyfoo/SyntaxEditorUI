@@ -159,6 +159,8 @@ private extension HTMLLanguage {
         var sawSelfClosingSlash = false
         var rawTextElementName: String?
         var rawTextContentStart: Int?
+        var currentTagName = ""
+        var currentTagIsClosing = false
 
         var shouldSuppressQuoteAutoPair: Bool {
             if inComment || inSingleQuotedAttributeValue || inDoubleQuotedAttributeValue {
@@ -180,14 +182,23 @@ private extension HTMLLanguage {
             let nsText = text as NSString
             var analysis = PrefixAnalysis()
             var cursor = 0
-            var currentTagName = ""
-            var currentTagIsClosing = false
+            Self.advance(&analysis, in: nsText, cursor: &cursor, limit: nsText.length)
+            self.analysis = analysis
+        }
 
-            while cursor < nsText.length {
+        static func advance(
+            _ analysis: inout PrefixAnalysis,
+            in source: NSString,
+            cursor: inout Int,
+            limit: Int
+        ) {
+            let upperBound = max(0, min(limit, source.length))
+
+            while cursor < upperBound {
                 if analysis.inComment {
-                    if Self.hasPrefix("-->", in: nsText, at: cursor) {
+                    if Self.hasPrefix("-->", in: source, at: cursor) {
                         analysis.inComment = false
-                        cursor += 3
+                        cursor = min(cursor + 3, upperBound)
                     } else {
                         cursor += 1
                     }
@@ -195,7 +206,7 @@ private extension HTMLLanguage {
                 }
 
                 if analysis.inSingleQuotedAttributeValue {
-                    if nsText.character(at: cursor) == 39 {
+                    if source.character(at: cursor) == 39 {
                         analysis.inSingleQuotedAttributeValue = false
                         analysis.inTag = true
                     }
@@ -204,7 +215,7 @@ private extension HTMLLanguage {
                 }
 
                 if analysis.inDoubleQuotedAttributeValue {
-                    if nsText.character(at: cursor) == 34 {
+                    if source.character(at: cursor) == 34 {
                         analysis.inDoubleQuotedAttributeValue = false
                         analysis.inTag = true
                     }
@@ -213,16 +224,16 @@ private extension HTMLLanguage {
                 }
 
                 if analysis.inTag {
-                    let codeUnit = nsText.character(at: cursor)
+                    let codeUnit = source.character(at: cursor)
 
                     if codeUnit == 62 {
-                        if currentTagIsClosing {
-                            if analysis.rawTextElementName == currentTagName {
+                        if analysis.currentTagIsClosing {
+                            if analysis.rawTextElementName == analysis.currentTagName {
                                 analysis.rawTextElementName = nil
                                 analysis.rawTextContentStart = nil
                             }
-                        } else if Self.isRawTextElementName(currentTagName) {
-                            analysis.rawTextElementName = currentTagName
+                        } else if Self.isRawTextElementName(analysis.currentTagName) {
+                            analysis.rawTextElementName = analysis.currentTagName
                             analysis.rawTextContentStart = cursor + 1
                         }
 
@@ -230,8 +241,8 @@ private extension HTMLLanguage {
                         analysis.canStartAttributeValue = false
                         analysis.inUnquotedAttributeValue = false
                         analysis.sawSelfClosingSlash = false
-                        currentTagName = ""
-                        currentTagIsClosing = false
+                        analysis.currentTagName = ""
+                        analysis.currentTagIsClosing = false
                         cursor += 1
                         continue
                     }
@@ -300,17 +311,17 @@ private extension HTMLLanguage {
                 }
 
                 if let rawTextElementName = analysis.rawTextElementName {
-                    if let closingTagName = Self.rawTextClosingTagName(in: nsText, at: cursor),
+                    if let closingTagName = Self.rawTextClosingTagName(in: source, at: cursor),
                        closingTagName == rawTextElementName
                     {
-                        let rawTextPrefix = nsText.substring(
+                        let rawTextPrefix = source.substring(
                             with: NSRange(
                                 location: analysis.rawTextContentStart ?? 0,
                                 length: cursor - (analysis.rawTextContentStart ?? 0)
                             )
                         )
                         if let embeddedLanguage = HTMLLanguage.embeddedLanguage(
-                            in: nsText,
+                            in: source,
                             rawTextElementName: rawTextElementName,
                             rawTextContentStart: analysis.rawTextContentStart ?? 0
                         ),
@@ -331,8 +342,8 @@ private extension HTMLLanguage {
 
                         analysis.inTag = true
                         analysis.canStartAttributeValue = false
-                        currentTagName = closingTagName
-                        currentTagIsClosing = true
+                        analysis.currentTagName = closingTagName
+                        analysis.currentTagIsClosing = true
                         cursor += 2 + closingTagName.utf16.count
                         continue
                     }
@@ -341,26 +352,24 @@ private extension HTMLLanguage {
                     continue
                 }
 
-                if Self.hasPrefix("<!--", in: nsText, at: cursor) {
+                if Self.hasPrefix("<!--", in: source, at: cursor) {
                     analysis.inComment = true
                     cursor += 4
                     continue
                 }
 
-                if Self.startsTag(in: nsText, at: cursor) {
+                if Self.startsTag(in: source, at: cursor) {
                     analysis.inTag = true
                     analysis.canStartAttributeValue = false
-                    let tag = Self.tagDescriptor(in: nsText, at: cursor)
-                    currentTagName = tag.name
-                    currentTagIsClosing = tag.isClosing
+                    let tag = Self.tagDescriptor(in: source, at: cursor)
+                    analysis.currentTagName = tag.name
+                    analysis.currentTagIsClosing = tag.isClosing
                     cursor = tag.nextCursor
                     continue
                 }
 
                 cursor += 1
             }
-
-            self.analysis = analysis
         }
 
         private static func startsTag(in source: NSString, at offset: Int) -> Bool {
@@ -1305,30 +1314,46 @@ extension HTMLLanguage {
         in source: NSString,
         from startOffset: Int
     ) -> (name: String, range: NSRange)? {
-        var cursor = max(0, startOffset)
+        let clampedStart = max(0, min(startOffset, source.length))
+        var analysis = PrefixAnalyzer(text: source.substring(to: clampedStart)).analysis
+        var analysisCursor = clampedStart
+        var searchCursor = clampedStart
 
-        while cursor < source.length {
-            guard let candidateLocation = nextRawTextCandidateLocation(in: source, from: cursor) else {
+        while searchCursor < source.length {
+            guard let candidateLocation = nextRawTextCandidateLocation(in: source, from: searchCursor) else {
                 return nil
             }
-            cursor = candidateLocation
 
-            let analysis = PrefixAnalyzer(text: source.substring(to: cursor)).analysis
+            PrefixAnalyzer.advance(&analysis, in: source, cursor: &analysisCursor, limit: candidateLocation)
+            searchCursor = candidateLocation
+
             if analysis.inComment || analysis.inTag || analysis.rawTextElementName != nil {
-                cursor += 1
+                PrefixAnalyzer.advance(
+                    &analysis,
+                    in: source,
+                    cursor: &analysisCursor,
+                    limit: min(candidateLocation + 1, source.length)
+                )
+                searchCursor = analysisCursor
                 continue
             }
 
-            let descriptor = rawTextTagDescriptor(in: source, at: cursor)
+            let descriptor = rawTextTagDescriptor(in: source, at: candidateLocation)
             guard descriptor.isClosing == false,
                   let tagName = descriptor.name,
                   let tagEnd = endOfHTMLTag(in: source, after: descriptor.nextCursor)
             else {
-                cursor += 1
+                PrefixAnalyzer.advance(
+                    &analysis,
+                    in: source,
+                    cursor: &analysisCursor,
+                    limit: min(candidateLocation + 1, source.length)
+                )
+                searchCursor = analysisCursor
                 continue
             }
 
-            let tagRange = NSRange(location: cursor, length: tagEnd - cursor + 1)
+            let tagRange = NSRange(location: candidateLocation, length: tagEnd - candidateLocation + 1)
             return (tagName, tagRange)
         }
 
