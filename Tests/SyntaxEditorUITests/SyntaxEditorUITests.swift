@@ -47,6 +47,83 @@ private struct WrappedJSONLanguage: SyntaxLanguage {
     }
 }
 
+private struct WrappedHTMLLanguage: SyntaxLanguage {
+    var identifier: String { "wrapped-html" }
+    var displayName: String { "Wrapped HTML" }
+    var treeSitterSupport: SyntaxTreeSitterSupport { BuiltinSyntaxLanguages.html.treeSitterSupport }
+
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+        BuiltinSyntaxLanguages.html.toggleComment(source: source, selection: selection)
+    }
+
+    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
+        BuiltinSyntaxLanguages.html.isInsideLiteralOrComment(source: source, location: location)
+    }
+}
+
+private struct CustomCachedHTMLLanguage: SyntaxLanguage {
+    var identifier: String { "custom-cached-html" }
+    var displayName: String { "Custom Cached HTML" }
+    var treeSitterSupport: SyntaxTreeSitterSupport {
+        let support = BuiltinSyntaxLanguages.html.treeSitterSupport
+        return SyntaxTreeSitterSupport(
+            name: support.name,
+            bundleName: "CustomTreeSitterHTML",
+            queryDirectories: [Self.htmlQueriesURL],
+            cacheKey: "custom-cached-html-with-query-directory",
+            makeLanguage: support.makeLanguage
+        )
+    }
+
+    private static var htmlQueriesURL: URL {
+        let fileManager = FileManager.default
+        let bundleName = "\(BuiltinSyntaxLanguages.html.treeSitterSupport.bundleName).bundle"
+
+        let bundleURLs =
+            [Bundle.main.bundleURL] +
+            Bundle.allBundles.map(\.bundleURL) +
+            Bundle.allFrameworks.map(\.bundleURL)
+        for bundleURL in bundleURLs where bundleURL.lastPathComponent == bundleName {
+            let candidates = [
+                bundleURL.appendingPathComponent("queries", isDirectory: true),
+                bundleURL.appendingPathComponent("Contents/Resources/queries", isDirectory: true),
+            ]
+            if let queriesURL = candidates.first(where: { fileManager.fileExists(atPath: $0.path) }) {
+                return queriesURL
+            }
+        }
+
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let buildRoot = repoRoot.appendingPathComponent(".build", isDirectory: true)
+        if let enumerator = fileManager.enumerator(
+            at: buildRoot,
+            includingPropertiesForKeys: nil
+        ) {
+            for case let candidate as URL in enumerator {
+                guard candidate.lastPathComponent == "queries",
+                      candidate.deletingLastPathComponent().lastPathComponent == bundleName
+                else {
+                    continue
+                }
+                return candidate
+            }
+        }
+
+        return buildRoot
+    }
+
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+        BuiltinSyntaxLanguages.html.toggleComment(source: source, selection: selection)
+    }
+
+    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
+        BuiltinSyntaxLanguages.html.isInsideLiteralOrComment(source: source, location: location)
+    }
+}
+
 private struct SharedIdentifierLanguage: SyntaxLanguage {
     let identifier: String
     let displayName: String
@@ -66,6 +143,8 @@ struct SyntaxEditorUITests {
     @Test("BuiltinSyntaxLanguages.named maps supported values")
     func builtinSyntaxLanguagesNamed() {
         #expect(BuiltinSyntaxLanguages.named("css")?.identifier == BuiltinSyntaxLanguages.css.identifier)
+        #expect(BuiltinSyntaxLanguages.named("html")?.identifier == BuiltinSyntaxLanguages.html.identifier)
+        #expect(BuiltinSyntaxLanguages.named("HTM")?.identifier == BuiltinSyntaxLanguages.html.identifier)
         #expect(BuiltinSyntaxLanguages.named(" javascript ")?.identifier == BuiltinSyntaxLanguages.javascript.identifier)
         #expect(BuiltinSyntaxLanguages.named("JS")?.identifier == BuiltinSyntaxLanguages.javascript.identifier)
         #expect(BuiltinSyntaxLanguages.named("JSON")?.identifier == BuiltinSyntaxLanguages.json.identifier)
@@ -475,6 +554,651 @@ struct SyntaxEditorUITests {
         #expect(result == nil)
     }
 
+    @Test("EditorCommandEngine toggles HTML comment")
+    func editorCommandEngineToggleHTMLComment() {
+        let engine = EditorCommandEngine()
+        let source = "<div>hello</div>\n"
+
+        let first = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(first?.text == "<!-- <div>hello</div>\n -->")
+
+        let second = engine.toggleComment(
+            source: first?.text ?? "",
+            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(second?.text == source)
+    }
+
+    @Test("EditorCommandEngine does not wrap HTML comments around double hyphen text")
+    func editorCommandEngineDoesNotWrapHTMLCommentAroundDoubleHyphenText() {
+        let engine = EditorCommandEngine()
+        let source = "alpha -- beta\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not wrap HTML comments around text ending with hyphen")
+    func editorCommandEngineDoesNotWrapHTMLCommentAroundTrailingHyphenText() {
+        let engine = EditorCommandEngine()
+        let source = "alpha-\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine returns no-op for malformed HTML comment wrapper")
+    func editorCommandEngineHTMLCommentToggleNoopForMalformedComment() {
+        let engine = EditorCommandEngine()
+        let source = "<!-- <div>hello</div>\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine delegates HTML comment toggle inside script raw text")
+    func editorCommandEngineDelegatesHTMLCommentToggleInsideScriptRawText() {
+        let engine = EditorCommandEngine()
+        let startTag = "<script data=\"x>y\" type=\"text/javascript\">"
+        let source = "\(startTag)const answer = 42;\n</script>"
+        let selection = NSRange(location: startTag.utf16.count, length: "const answer = 42;\n".utf16.count)
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == "\(startTag)// const answer = 42;\n</script>")
+    }
+
+    @Test("EditorCommandEngine delegates HTML comment toggle inside self-closing script raw text")
+    func editorCommandEngineDelegatesHTMLCommentToggleInsideSelfClosingScriptRawText() {
+        let engine = EditorCommandEngine()
+        let source = "<script/>const answer = 42;\n</script>"
+        let selection = NSRange(
+            location: "<script/>".utf16.count,
+            length: "const answer = 42;\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == "<script/>// const answer = 42;\n</script>")
+    }
+
+    @Test("EditorCommandEngine keeps script raw text active for unquoted attribute values ending with slash")
+    func editorCommandEngineKeepsScriptRawTextActiveForUnquotedAttributeValuesEndingWithSlash() {
+        let engine = EditorCommandEngine()
+        let startTag = "<script src=/assets/>"
+        let source = "\(startTag)const answer = 42;\n</script>"
+        let selection = NSRange(location: startTag.utf16.count, length: "const answer = 42;\n".utf16.count)
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == "\(startTag)// const answer = 42;\n</script>")
+    }
+
+    @Test("EditorCommandEngine keeps script raw text active for general unquoted attribute values with slash")
+    func editorCommandEngineKeepsScriptRawTextActiveForGeneralUnquotedAttributeValuesWithSlash() {
+        let engine = EditorCommandEngine()
+        let startTag = "<script src=https://example.com/assets/>"
+        let source = "\(startTag)const answer = 42;\n</script>"
+        let selection = NSRange(location: startTag.utf16.count, length: "const answer = 42;\n".utf16.count)
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == "\(startTag)// const answer = 42;\n</script>")
+    }
+
+    @Test("EditorCommandEngine does not delegate unsupported script types to JavaScript rules")
+    func editorCommandEngineDoesNotDelegateUnsupportedScriptTypesToJavaScriptRules() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script type="application/json">{"enabled": true}
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "{\"enabled\": true}\n").location,
+            length: "{\"enabled\": true}\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not wrap EOF caret inside unterminated unsupported script raw text")
+    func editorCommandEngineDoesNotWrapEOFCaretInsideUnterminatedUnsupportedScriptRawText() {
+        let engine = EditorCommandEngine()
+        let source = #"<script type="application/json">{"enabled": true}"#
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: source.utf16.count, length: 0),
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not delegate unsupported script types when other attributes contain angle brackets")
+    func editorCommandEngineDoesNotDelegateUnsupportedScriptTypesWithAngleBracketAttributeText() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script data="<" type="application/json">{"enabled": true}
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "{\"enabled\": true}\n").location,
+            length: "{\"enabled\": true}\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine ignores raw-text-like attribute text when toggling HTML comments")
+    func editorCommandEngineIgnoresRawTextLikeAttributeTextWhenTogglingHTMLComments() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <div data='<script type="application/json">'>Container</div>
+        <span>Hello</span>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "<span>Hello</span>\n").location,
+            length: "<span>Hello</span>\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text.contains("<!-- <span>Hello</span>") == true)
+    }
+
+    @Test("EditorCommandEngine does not delegate non-CSS style types to CSS rules")
+    func editorCommandEngineDoesNotDelegateNonCSSTypesToCSSRules() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <style type="text/plain">body { color: red; }
+        </style>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "body { color: red; }\n").location,
+            length: "body { color: red; }\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not wrap long selections that cross unsupported script raw text")
+    func editorCommandEngineDoesNotWrapLongSelectionsCrossingUnsupportedScriptRawText() {
+        let engine = EditorCommandEngine()
+        let prefix = String(repeating: "A", count: 80)
+        let suffix = String(repeating: "B", count: 240)
+        let source = """
+        <div>\(prefix)</div>
+        <script type="application/json">{"enabled": true}</script>
+        <div>\(suffix)</div>
+        """
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: (source as NSString).length),
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not wrap partial script closing tags with HTML comments")
+    func editorCommandEngineDoesNotWrapPartialScriptClosingTagsWithHTMLComments() {
+        let engine = EditorCommandEngine()
+        let source = "<script>const answer = 42;\n</scr"
+        let selection = NSRange(
+            location: (source as NSString).range(of: "</scr").location,
+            length: "</scr".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not wrap completed script closing tag names without terminator")
+    func editorCommandEngineDoesNotWrapCompletedScriptClosingTagNamesWithoutTerminator() {
+        let engine = EditorCommandEngine()
+        let source = "<script>const answer = 42;\n</script"
+        let selection = NSRange(
+            location: (source as NSString).range(of: "</script").location,
+            length: "</script".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not wrap full script closing tags with HTML comments")
+    func editorCommandEngineDoesNotWrapFullScriptClosingTagsWithHTMLComments() {
+        let engine = EditorCommandEngine()
+        let source = "<script>const answer = 42;\n</script>"
+        let selection = NSRange(
+            location: (source as NSString).range(of: "</script>").location,
+            length: "</script>".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not wrap mixed selections that cross into script raw text")
+    func editorCommandEngineDoesNotWrapMixedSelectionsCrossingIntoScriptRawText() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <div>before</div>
+        <script>const answer = 42;
+        </script>
+        """
+        let selectionEnd = (source as NSString).range(of: "const answer").location + "const answer".utf16.count
+        let selection = NSRange(location: 0, length: selectionEnd)
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine delegates HTML comment toggle inside style raw text")
+    func editorCommandEngineDelegatesHTMLCommentToggleInsideStyleRawText() {
+        let engine = EditorCommandEngine()
+        let source = "<style>body { color: red; }\n</style>"
+        let selection = NSRange(location: 7, length: "body { color: red; }\n".utf16.count)
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == "<style>/* body { color: red; }\n */</style>")
+    }
+
+    @Test("EditorCommandEngine does not fall back to HTML comments for blank script lines")
+    func editorCommandEngineDoesNotFallbackToHTMLCommentsForBlankScriptLines() {
+        let engine = EditorCommandEngine()
+        let source = "<script>\n</script>"
+        let selection = NSRange(location: 8, length: 0)
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not fall back to HTML comments for invalid CSS raw text selections")
+    func editorCommandEngineDoesNotFallbackToHTMLCommentsForInvalidCSSRawTextSelections() {
+        let engine = EditorCommandEngine()
+        let source = "<style>body { color: red; /* note */ }\n</style>"
+        let selection = NSRange(location: 7, length: "body { color: red; /* note */ }\n".utf16.count)
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine keeps script raw text open past scripted suffix text")
+    func editorCommandEngineKeepsScriptRawTextOpenPastScriptedSuffixText() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script>const marker = \"</scripted>\";
+        const answer = 42;
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "const answer = 42;\n").location,
+            length: "const answer = 42;\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <script>const marker = \"</scripted>\";
+        // const answer = 42;
+        </script>
+        """)
+    }
+
+    @Test("EditorCommandEngine keeps script raw text open past literal closing tag text")
+    func editorCommandEngineKeepsScriptRawTextOpenPastLiteralClosingTagText() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script>const marker = \"</script>\";
+        const answer = 42;
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "const answer = 42;\n").location,
+            length: "const answer = 42;\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <script>const marker = \"</script>\";
+        // const answer = 42;
+        </script>
+        """)
+    }
+
+    @Test("EditorCommandEngine keeps script raw text open inside legacy HTML wrapper")
+    func editorCommandEngineKeepsScriptRawTextOpenInsideLegacyHTMLWrapper() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script><!--
+        </script>
+        const answer = 42;
+        //-->
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "const answer = 42;\n").location,
+            length: "const answer = 42;\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <script><!--
+        </script>
+        // const answer = 42;
+        //-->
+        </script>
+        """)
+    }
+
+    @Test("EditorCommandEngine does not rewrite legacy HTML wrapper selections")
+    func editorCommandEngineDoesNotRewriteLegacyHTMLWrapperSelections() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script><!--
+        const answer = 42;
+        //-->
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "<!--").location,
+            length: "<!--\nconst answer = 42;\n//-->".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not rewrite legacy HTML wrapper carets")
+    func editorCommandEngineDoesNotRewriteLegacyHTMLWrapperCarets() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script><!--
+        const answer = 42;
+        //-->
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "<!--").location,
+            length: 0
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not wrap long selections that cross legacy script wrapper lines")
+    func editorCommandEngineDoesNotWrapLongSelectionsCrossingLegacyScriptWrapperLines() {
+        let engine = EditorCommandEngine()
+        let prefix = String(repeating: "A", count: 80)
+        let suffix = String(repeating: "B", count: 240)
+        let source = """
+        <div>\(prefix)</div>
+        <script>
+        <!--
+        const answer = 42;
+        //-->
+        </script>
+        <div>\(suffix)</div>
+        """
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: (source as NSString).length),
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine keeps script raw text open past commented wrapper-like markers")
+    func editorCommandEngineKeepsScriptRawTextOpenPastCommentedWrapperLikeMarkers() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script>/*
+        <!--
+        */
+        const answer = 42;
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "const answer = 42;\n").location,
+            length: "const answer = 42;\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <script>/*
+        <!--
+        */
+        // const answer = 42;
+        </script>
+        """)
+    }
+
+    @Test("EditorCommandEngine does not treat wrapper-like lines inside comments as legacy wrappers")
+    func editorCommandEngineDoesNotTreatWrapperLikeCommentLinesAsLegacyWrappers() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script>const html = `
+        <!--
+        `;
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "<!--").location,
+            length: 0
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <script>const html = `
+        // <!--
+        `;
+        </script>
+        """)
+    }
+
+    @Test("EditorCommandEngine ignores commented-out raw text tags when toggling HTML comments")
+    func editorCommandEngineIgnoresCommentedOutRawTextTagsWhenTogglingHTMLComments() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!-- <script type="application/json"> -->
+        <div>hello</div>
+        """
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(
+                location: (source as NSString).range(of: "<div>").location,
+                length: "<div>hello</div>\n".utf16.count
+            ),
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <!-- <script type="application/json"> -->
+        <!-- <div>hello</div> -->
+        """)
+    }
+
+    @Test("EditorCommandEngine keeps script raw text open past literal comment marker text")
+    func editorCommandEngineKeepsScriptRawTextOpenPastLiteralCommentMarkerText() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script>const marker = "<!--";
+        const answer = 42;
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "const answer = 42;\n").location,
+            length: "const answer = 42;\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <script>const marker = "<!--";
+        // const answer = 42;
+        </script>
+        """)
+    }
+
+    @Test("EditorCommandEngine restores HTML attribute pairing after literal comment marker text")
+    func editorCommandEngineRestoresHTMLAttributePairingAfterLiteralCommentMarkerText() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script>const marker = "<!--";
+        </script>
+        <div class=
+        """
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == source + "\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
     @Test("EditorCommandEngine returns no-op for JSON comments")
     func editorCommandEngineJsonCommentNoop() {
         let engine = EditorCommandEngine()
@@ -514,6 +1238,161 @@ struct SyntaxEditorUITests {
         )
 
         #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine auto-pairs HTML quote in attribute assignment")
+    func editorCommandEngineAutoPairHTMLQuoteInAttributeAssignment() {
+        let engine = EditorCommandEngine()
+        let source = "<div class="
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == "<div class=\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine suppresses HTML quote auto-pair in comment")
+    func editorCommandEngineSuppressHTMLQuoteAutoPairInComment() {
+        let engine = EditorCommandEngine()
+        let source = "<!-- note "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses HTML quote auto-pair in comment text containing equals")
+    func editorCommandEngineSuppressHTMLQuoteAutoPairInCommentWithEquals() {
+        let engine = EditorCommandEngine()
+        let source = "<!-- data=foo "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses HTML quote auto-pair in attribute value")
+    func editorCommandEngineSuppressHTMLQuoteAutoPairInAttributeValue() {
+        let engine = EditorCommandEngine()
+        let source = "<div class=\"hero"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses HTML quote auto-pair in text node")
+    func editorCommandEngineSuppressHTMLQuoteAutoPairInTextNode() {
+        let engine = EditorCommandEngine()
+        let source = "<div>Hello "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine auto-pairs HTML quote inside script raw text")
+    func editorCommandEngineAutoPairHTMLQuoteInScriptRawText() {
+        let engine = EditorCommandEngine()
+        let prefix = "<script>const message = "
+        let source = prefix + "</script>"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: prefix.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == prefix + "\"\"" + "</script>")
+        #expect(result?.selectedRange == NSRange(location: prefix.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine suppresses HTML quote auto-pair inside script string")
+    func editorCommandEngineSuppressHTMLQuoteAutoPairInsideScriptString() {
+        let engine = EditorCommandEngine()
+        let prefix = "<script>const message = \"hello"
+        let source = prefix + "</script>"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: prefix.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine auto-pairs HTML quote inside style raw text")
+    func editorCommandEngineAutoPairHTMLQuoteInStyleRawText() {
+        let engine = EditorCommandEngine()
+        let prefix = "<style>body::before { content: "
+        let source = prefix + "</style>"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: prefix.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == prefix + "\"\"" + "</style>")
+        #expect(result?.selectedRange == NSRange(location: prefix.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine suppresses HTML quote auto-pair inside style string")
+    func editorCommandEngineSuppressHTMLQuoteAutoPairInsideStyleString() {
+        let engine = EditorCommandEngine()
+        let prefix = "<style>body::before { content: \"hello"
+        let source = prefix + "</style>"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: prefix.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses HTML quote auto-pair in raw text closing tags")
+    func editorCommandEngineSuppressHTMLQuoteAutoPairInRawTextClosingTags() {
+        let engine = EditorCommandEngine()
+        let cases = [
+            "<script>const answer = 42;</script>",
+            "<style>body::before { content: none; }</style>",
+        ]
+
+        for source in cases {
+            let nsSource = source as NSString
+            let closingTagRange = nsSource.range(of: "</")
+            let result = engine.transformInput(
+                source: source,
+                range: NSRange(location: closingTagRange.location + closingTagRange.length, length: 0),
+                replacementText: "\"",
+                language: BuiltinSyntaxLanguages.html
+            )
+
+            #expect(result == nil)
+        }
     }
 
     @Test("EditorCommandEngine auto-pairs Swift quote after URL literal prefix")
@@ -1108,6 +1987,7 @@ struct SyntaxEditorUITests {
         let engine = SyntaxHighlighterEngine()
         let cases: [(language: any SyntaxLanguage, source: String)] = [
             (BuiltinSyntaxLanguages.css, "body { color: red; }"),
+            (BuiltinSyntaxLanguages.html, "<!-- note --><div class=\"hero\">Hello</div>"),
             (BuiltinSyntaxLanguages.javascript, "const answer = 42;"),
             (BuiltinSyntaxLanguages.json, "{\"enabled\": true, \"count\": 1}"),
             (BuiltinSyntaxLanguages.swift, "let answer = 42"),
@@ -1145,6 +2025,199 @@ struct SyntaxEditorUITests {
             token.range.length > 0 &&
             token.range.upperBound <= sourceLength
         })
+    }
+
+    @Test("SyntaxHighlighterEngine highlights HTML root and embedded languages")
+    func highlighterSupportsHTMLInjections() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = """
+        😀
+        <!-- note -->
+        <style>body { color: red; }</style>
+        <script>const answer = 42;</script>
+        <div class="hero">Hello</div>
+        """
+
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let nsSource = source as NSString
+        let stylePropertyRange = nsSource.range(of: "color")
+        let scriptKeywordRange = nsSource.range(of: "const")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains { $0.captureName.hasPrefix("comment") })
+        #expect(tokens.contains { $0.captureName.hasPrefix("tag") })
+        #expect(tokens.contains { $0.captureName.hasPrefix("attribute") })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("property") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine highlights embedded languages for wrapped HTML")
+    func highlighterSupportsWrappedHTMLInjections() async {
+        let engine = SyntaxHighlighterEngine()
+        let language = WrappedHTMLLanguage()
+        let source = """
+        <style>body { color: red; }</style>
+        <script>const answer = 42;</script>
+        <section class="hero">Hello</section>
+        """
+
+        let tokens = await engine.render(source: source, language: language)
+        let nsSource = source as NSString
+        let stylePropertyRange = nsSource.range(of: "color")
+        let scriptKeywordRange = nsSource.range(of: "const")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("property") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine does not inject unsupported script types")
+    func highlighterSkipsUnsupportedScriptTypeInjections() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = #"<script type="application/json">{"enabled": true}</script>"#
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let trueRange = (source as NSString).range(of: "true")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("tag") || $0.captureName.hasPrefix("attribute")
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+        } == false)
+    }
+
+    @Test("SyntaxHighlighterEngine does not inject non-JavaScript script types")
+    func highlighterSkipsNonJavaScriptScriptTypeInjections() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = #"<script type="text/plain">const answer = true;</script>"#
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let constRange = (source as NSString).range(of: "const")
+        let trueRange = (source as NSString).range(of: "true")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
+        } == false)
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+        } == false)
+    }
+
+    @Test("SyntaxHighlighterEngine masks unsupported script types through EOF when closing tags are missing")
+    func highlighterMasksUnsupportedScriptTypesThroughEOFWithoutClosingTag() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = #"<script type="application/json">{"enabled": true}"#
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let trueRange = (source as NSString).range(of: "true")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+        } == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps highlighting supported script content past literal closing tag text")
+    func highlighterKeepsHighlightingSupportedScriptContentPastLiteralClosingTagText() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = #"<script>const marker = "</script>"; const answer = 42;</script>"#
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let answerConstRange = (source as NSString).range(of: "const answer")
+
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: answerConstRange).length > 0
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine ignores commented-out raw text tags")
+    func highlighterIgnoresCommentedOutRawTextTags() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = """
+        <!-- <script type="text/plain"> -->
+        <div class="hero">Hello</div>
+        """
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let divRange = (source as NSString).range(of: "<div")
+
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("tag") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: divRange).length > 0
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine does not stop masking on longer unsupported script closing prefixes")
+    func highlighterKeepsMaskingUnsupportedScriptContentPastLongerClosingPrefixes() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = #"<script type="application/json">{"marker":"</scripted>","enabled":true}</script>"#
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let trueRange = (source as NSString).range(of: "true")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+        } == false)
+    }
+
+    @Test("SyntaxHighlighterEngine does not inject unsupported script types when start tags contain quoted angle brackets")
+    func highlighterSkipsUnsupportedScriptTypeInjectionsWithQuotedAngleBracketInStartTag() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = #"<script data="a>b" type="application/json">{"enabled": true}</script>"#
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let trueRange = (source as NSString).range(of: "true")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+        } == false)
+    }
+
+    @Test("SyntaxHighlighterEngine ignores raw-text-like attribute text")
+    func highlighterIgnoresRawTextLikeAttributeText() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = """
+        <div data='<script type="application/json">'>Container</div>
+        <span class="hero">Hello</span>
+        """
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let spanRange = (source as NSString).range(of: "<span")
+
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("tag") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: spanRange).length > 0
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine masks unsupported script types for custom HTML support")
+    func highlighterMasksUnsupportedScriptTypesForCustomHTMLSupport() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = #"<script type="application/json">{"enabled": true}</script>"#
+        let tokens = await engine.render(source: source, language: CustomCachedHTMLLanguage())
+        let trueRange = (source as NSString).range(of: "true")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+        } == false)
     }
 
     @Test("EditorCommandEngine delegates toggle comment to custom language")

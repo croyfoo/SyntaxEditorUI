@@ -72,12 +72,13 @@ extension SyntaxLanguage {
 
 public enum BuiltinSyntaxLanguages {
     public static let css = CSSLanguage()
+    public static let html = HTMLLanguage()
     public static let javascript = JavaScriptLanguage()
     public static let json = JSONLanguage()
     public static let swift = SwiftLanguage()
 
     public static var all: [any SyntaxLanguage] {
-        [css, javascript, json, swift]
+        [css, html, javascript, json, swift]
     }
 
     public static func named(_ normalizedRawValue: String) -> (any SyntaxLanguage)? {
@@ -88,6 +89,8 @@ public enum BuiltinSyntaxLanguages {
         switch lowered {
         case "css":
             return css
+        case "html", "htm":
+            return html
         case "javascript", "js":
             return javascript
         case "json":

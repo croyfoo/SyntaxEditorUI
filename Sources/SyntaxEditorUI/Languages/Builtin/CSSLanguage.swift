@@ -16,7 +16,12 @@ public struct CSSLanguage: SyntaxLanguage {
     }
 
     public func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        SyntaxLanguageTextUtilities.toggleCSSBlockComment(source: source, selection: selection)
+        SyntaxLanguageTextUtilities.toggleWrappedComment(
+            source: source,
+            selection: selection,
+            openMarker: "/*",
+            closeMarker: "*/"
+        )
     }
 
     public func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
