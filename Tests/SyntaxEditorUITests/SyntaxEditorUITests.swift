@@ -891,6 +891,58 @@ struct SyntaxEditorUITests {
         #expect(result?.text == "<style>/* body { color: red; }\n */</style>")
     }
 
+    @Test("EditorCommandEngine keeps style raw text open past repeated literal closing tag text")
+    func editorCommandEngineKeepsStyleRawTextOpenPastRepeatedLiteralClosingTagText() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <style>body::before { content: "</style> </style>"; }
+        body { color: red; }
+        </style>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "body { color: red; }\n").location,
+            length: "body { color: red; }\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <style>body::before { content: "</style> </style>"; }
+        /* body { color: red; }
+         */</style>
+        """)
+    }
+
+    @Test("EditorCommandEngine keeps style raw text open past repeated literal closing tag text inside comments")
+    func editorCommandEngineKeepsStyleRawTextOpenPastRepeatedLiteralClosingTagTextInsideComments() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <style>/* </style> </style> */
+        body { color: red; }
+        </style>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "body { color: red; }\n").location,
+            length: "body { color: red; }\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <style>/* </style> </style> */
+        /* body { color: red; }
+         */</style>
+        """)
+    }
+
     @Test("EditorCommandEngine does not fall back to HTML comments for blank script lines")
     func editorCommandEngineDoesNotFallbackToHTMLCommentsForBlankScriptLines() {
         let engine = EditorCommandEngine()
@@ -2137,6 +2189,19 @@ struct SyntaxEditorUITests {
     func highlighterKeepsHighlightingSupportedScriptContentPastLiteralClosingTagText() async {
         let engine = SyntaxHighlighterEngine()
         let source = #"<script>const marker = "</script>"; const answer = 42;</script>"#
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let answerConstRange = (source as NSString).range(of: "const answer")
+
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: answerConstRange).length > 0
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps highlighting supported script content past repeated literal closing tag text")
+    func highlighterKeepsHighlightingSupportedScriptContentPastRepeatedLiteralClosingTagText() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = #"<script>const markers = ["</script>", "</script>"]; const answer = 42;</script>"#
         let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
         let answerConstRange = (source as NSString).range(of: "const answer")
 

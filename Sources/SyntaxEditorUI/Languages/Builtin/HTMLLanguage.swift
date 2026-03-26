@@ -161,6 +161,8 @@ private extension HTMLLanguage {
         var rawTextContentStart: Int?
         var currentTagName = ""
         var currentTagIsClosing = false
+        var currentTagStart: Int?
+        var supportedRawTextState: SupportedEmbeddedRawTextState?
 
         var shouldSuppressQuoteAutoPair: Bool {
             if inComment || inSingleQuotedAttributeValue || inDoubleQuotedAttributeValue {
@@ -231,10 +233,17 @@ private extension HTMLLanguage {
                             if analysis.rawTextElementName == analysis.currentTagName {
                                 analysis.rawTextElementName = nil
                                 analysis.rawTextContentStart = nil
+                                analysis.supportedRawTextState = nil
                             }
                         } else if Self.isRawTextElementName(analysis.currentTagName) {
                             analysis.rawTextElementName = analysis.currentTagName
                             analysis.rawTextContentStart = cursor + 1
+                            analysis.supportedRawTextState = HTMLLanguage.supportedRawTextState(
+                                in: source,
+                                rawTextElementName: analysis.currentTagName,
+                                tagStart: analysis.currentTagStart,
+                                tagEnd: cursor
+                            )
                         }
 
                         analysis.inTag = false
@@ -243,6 +252,7 @@ private extension HTMLLanguage {
                         analysis.sawSelfClosingSlash = false
                         analysis.currentTagName = ""
                         analysis.currentTagIsClosing = false
+                        analysis.currentTagStart = nil
                         cursor += 1
                         continue
                     }
@@ -311,44 +321,39 @@ private extension HTMLLanguage {
                 }
 
                 if let rawTextElementName = analysis.rawTextElementName {
-                    if let closingTagName = Self.rawTextClosingTagName(in: source, at: cursor),
-                       closingTagName == rawTextElementName
+                    let descriptor = HTMLLanguage.rawTextTagDescriptor(in: source, at: cursor)
+                    if descriptor.isClosing,
+                       descriptor.name == rawTextElementName
                     {
-                        let rawTextPrefix = source.substring(
-                            with: NSRange(
-                                location: analysis.rawTextContentStart ?? 0,
-                                length: cursor - (analysis.rawTextContentStart ?? 0)
-                            )
-                        )
-                        if let embeddedLanguage = HTMLLanguage.embeddedLanguage(
-                            in: source,
-                            rawTextElementName: rawTextElementName,
-                            rawTextContentStart: analysis.rawTextContentStart ?? 0
-                        ),
-                           embeddedLanguage.isInsideLiteralOrComment(
-                               source: rawTextPrefix,
-                               location: rawTextPrefix.utf16.count
-                           )
-                        {
-                            cursor += 1
+                        let isSuppressed = analysis.supportedRawTextState.map {
+                            $0.isInsideLiteralOrComment || $0.isInsideLegacyScriptWrapper
+                        } ?? false
+                        guard isSuppressed == false else {
+                            if var state = analysis.supportedRawTextState {
+                                state.advance()
+                                analysis.supportedRawTextState = state
+                                cursor = (analysis.rawTextContentStart ?? 0) + state.literalCursor
+                            } else {
+                                cursor += 1
+                            }
                             continue
                         }
-                        if rawTextElementName == "script",
-                           HTMLLanguage.isInsideLegacyScriptWrapper(rawTextPrefix)
-                        {
-                            cursor += 1
-                            continue
-                        }
-
                         analysis.inTag = true
                         analysis.canStartAttributeValue = false
-                        analysis.currentTagName = closingTagName
+                        analysis.currentTagName = rawTextElementName
                         analysis.currentTagIsClosing = true
-                        cursor += 2 + closingTagName.utf16.count
+                        analysis.currentTagStart = cursor
+                        cursor = descriptor.nextCursor
                         continue
                     }
 
-                    cursor += 1
+                    if var state = analysis.supportedRawTextState {
+                        state.advance()
+                        analysis.supportedRawTextState = state
+                        cursor = (analysis.rawTextContentStart ?? 0) + state.literalCursor
+                    } else {
+                        cursor += 1
+                    }
                     continue
                 }
 
@@ -364,6 +369,7 @@ private extension HTMLLanguage {
                     let tag = Self.tagDescriptor(in: source, at: cursor)
                     analysis.currentTagName = tag.name
                     analysis.currentTagIsClosing = tag.isClosing
+                    analysis.currentTagStart = cursor
                     cursor = tag.nextCursor
                     continue
                 }
@@ -418,12 +424,7 @@ private extension HTMLLanguage {
         }
 
         private static func hasPrefix(_ literal: String, in source: NSString, at offset: Int) -> Bool {
-            let length = literal.utf16.count
-            guard offset >= 0, offset + length <= source.length else {
-                return false
-            }
-
-            return source.substring(with: NSRange(location: offset, length: length)) == literal
+            HTMLLanguage.hasPrefix(literal, in: source, at: offset)
         }
 
         private static func isASCIIAlpha(_ codeUnit: unichar) -> Bool {
@@ -451,6 +452,162 @@ private extension HTMLLanguage {
             name == "script" || name == "style"
         }
 
+    }
+
+    enum SupportedEmbeddedLiteralState {
+        case javascript(JavaScriptLanguage.PrefixAnalysis)
+        case css(CSSLanguage.PrefixAnalysis)
+
+        var isInsideLiteralOrComment: Bool {
+            switch self {
+            case .javascript(let analysis):
+                return analysis.isInsideLiteralOrComment
+            case .css(let analysis):
+                return analysis.isInsideLiteralOrComment
+            }
+        }
+    }
+
+    struct SupportedEmbeddedRawTextState {
+        let rawTextElementName: String
+        let rawTextSource: NSString
+        var literalState: SupportedEmbeddedLiteralState
+        var literalCursor = 0
+        var isInsideLegacyScriptWrapper = false
+        var isAtLineStart = true
+
+        var isInsideLiteralOrComment: Bool {
+            literalState.isInsideLiteralOrComment
+        }
+
+        mutating func advance() {
+            guard literalCursor < rawTextSource.length else {
+                return
+            }
+
+            updateLegacyScriptWrapperIfNeeded()
+
+            let codeUnit = rawTextSource.character(at: literalCursor)
+            let nextLimit = min(literalCursor + 1, rawTextSource.length)
+            var nextCursor = literalCursor
+            switch literalState {
+            case .javascript(var analysis):
+                JavaScriptLanguage.PrefixAnalyzer.advance(
+                    &analysis,
+                    in: rawTextSource,
+                    cursor: &nextCursor,
+                    limit: nextLimit
+                )
+                literalState = .javascript(analysis)
+            case .css(var analysis):
+                CSSLanguage.PrefixAnalyzer.advance(
+                    &analysis,
+                    in: rawTextSource,
+                    cursor: &nextCursor,
+                    limit: nextLimit
+                )
+                literalState = .css(analysis)
+            }
+
+            literalCursor = nextCursor
+            if codeUnit == 10 || codeUnit == 13 {
+                isAtLineStart = true
+            }
+        }
+
+        private mutating func updateLegacyScriptWrapperIfNeeded() {
+            guard rawTextElementName == "script", isAtLineStart, literalCursor < rawTextSource.length else {
+                return
+            }
+
+            let codeUnit = rawTextSource.character(at: literalCursor)
+            if codeUnit == 10 || codeUnit == 13 {
+                return
+            }
+            if codeUnit == 32 || codeUnit == 9 {
+                return
+            }
+
+            if isInsideLiteralOrComment == false {
+                if HTMLLanguage.hasPrefix("<!--", in: rawTextSource, at: literalCursor) {
+                    isInsideLegacyScriptWrapper = true
+                } else if HTMLLanguage.hasPrefix("//-->", in: rawTextSource, at: literalCursor) ||
+                            HTMLLanguage.hasPrefix("-->", in: rawTextSource, at: literalCursor)
+                {
+                    isInsideLegacyScriptWrapper = false
+                }
+            }
+
+            isAtLineStart = false
+        }
+    }
+
+    static func hasPrefix(_ literal: String, in source: NSString, at offset: Int) -> Bool {
+        let length = literal.utf16.count
+        guard offset >= 0, offset + length <= source.length else {
+            return false
+        }
+
+        return source.substring(with: NSRange(location: offset, length: length)) == literal
+    }
+
+    static func supportedRawTextState(
+        in source: NSString,
+        rawTextElementName: String,
+        tagStart: Int?,
+        tagEnd: Int
+    ) -> SupportedEmbeddedRawTextState? {
+        guard let tagStart, tagStart <= tagEnd else {
+            return nil
+        }
+
+        let startTagText = source.substring(
+            with: NSRange(location: tagStart, length: tagEnd - tagStart + 1)
+        )
+        let embeddedLanguage: (any SyntaxLanguage)?
+        switch rawTextElementName {
+        case "script":
+            embeddedLanguage = scriptEmbeddedLanguage(forStartTagText: startTagText)
+        case "style":
+            embeddedLanguage = styleEmbeddedLanguage(forStartTagText: startTagText)
+        default:
+            embeddedLanguage = nil
+        }
+
+        return supportedRawTextState(
+            rawTextElementName: rawTextElementName,
+            embeddedLanguage: embeddedLanguage,
+            rawTextSource: source.substring(
+                with: NSRange(location: tagEnd + 1, length: source.length - tagEnd - 1)
+            ) as NSString
+        )
+    }
+
+    static func supportedRawTextState(
+        rawTextElementName: String,
+        embeddedLanguage: (any SyntaxLanguage)?,
+        rawTextSource: NSString
+    ) -> SupportedEmbeddedRawTextState? {
+        guard let embeddedLanguage else {
+            return nil
+        }
+
+        switch embeddedLanguage.identifier {
+        case BuiltinSyntaxLanguages.javascript.identifier where rawTextElementName == "script":
+            return SupportedEmbeddedRawTextState(
+                rawTextElementName: rawTextElementName,
+                rawTextSource: rawTextSource,
+                literalState: .javascript(JavaScriptLanguage.PrefixAnalysis())
+            )
+        case BuiltinSyntaxLanguages.css.identifier where rawTextElementName == "style":
+            return SupportedEmbeddedRawTextState(
+                rawTextElementName: rawTextElementName,
+                rawTextSource: rawTextSource,
+                literalState: .css(CSSLanguage.PrefixAnalysis())
+            )
+        default:
+            return nil
+        }
     }
 
     static func embeddedRawTextContext(in source: String, selection: NSRange) -> EmbeddedRawTextContext? {
@@ -953,9 +1110,42 @@ private extension HTMLLanguage {
         embeddedLanguage: any SyntaxLanguage,
         mutableSource: NSMutableString? = nil
     ) -> Int? {
+        let clampedSearchFrom = max(0, min(searchFrom, source.length))
+        if let state = supportedRawTextState(
+            rawTextElementName: rawTextElementName,
+            embeddedLanguage: embeddedLanguage,
+            rawTextSource: source.substring(
+                with: NSRange(location: clampedSearchFrom, length: source.length - clampedSearchFrom)
+            ) as NSString
+        ) {
+            var state = state
+            var absoluteCursor = clampedSearchFrom
+
+            while absoluteCursor < source.length {
+                let descriptor = rawTextTagDescriptor(in: source, at: absoluteCursor)
+                if descriptor.isClosing,
+                   descriptor.name == rawTextElementName
+                {
+                    if state.isInsideLiteralOrComment || state.isInsideLegacyScriptWrapper {
+                        mutableSource?.replaceCharacters(
+                            in: NSRange(location: absoluteCursor, length: 1),
+                            with: " "
+                        )
+                    } else if endOfClosingRawTextTag(in: source, after: descriptor.nextCursor) != nil {
+                        return absoluteCursor
+                    }
+                }
+
+                state.advance()
+                absoluteCursor = clampedSearchFrom + state.literalCursor
+            }
+
+            return nil
+        }
+
         var searchRange = NSRange(
-            location: searchFrom,
-            length: source.length - searchFrom
+            location: clampedSearchFrom,
+            length: source.length - clampedSearchFrom
         )
 
         while searchRange.length > 0 {
@@ -1000,8 +1190,8 @@ private extension HTMLLanguage {
             if name == rawTextElementName {
                 let embeddedPrefix = source.substring(
                     with: NSRange(
-                        location: searchFrom,
-                        length: candidate.location - searchFrom
+                        location: clampedSearchFrom,
+                        length: candidate.location - clampedSearchFrom
                     )
                 )
                 if embeddedLanguage.isInsideLiteralOrComment(
