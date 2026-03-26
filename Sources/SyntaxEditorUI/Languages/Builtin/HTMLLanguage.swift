@@ -216,7 +216,6 @@ private extension HTMLLanguage {
                     let codeUnit = nsText.character(at: cursor)
 
                     if codeUnit == 62 {
-                        let isSelfClosingTag = analysis.sawSelfClosingSlash
                         if currentTagIsClosing {
                             if analysis.rawTextElementName == currentTagName {
                                 analysis.rawTextElementName = nil
@@ -1176,88 +1175,64 @@ private extension HTMLLanguage {
         while cursor < nsText.length, nsText.character(at: cursor) == 47 {
             cursor += 1
         }
-        while cursor < nsText.length {
-            let codeUnit = nsText.character(at: cursor)
-            if codeUnit == 32 || codeUnit == 9 || codeUnit == 10 || codeUnit == 13 {
-                cursor += 1
-                continue
-            }
-            break
-        }
-        while cursor < nsText.length {
-            let codeUnit = nsText.character(at: cursor)
-            let isTagNameCharacter =
-                (65...90).contains(Int(codeUnit)) ||
-                (97...122).contains(Int(codeUnit)) ||
-                (48...57).contains(Int(codeUnit)) ||
-                codeUnit == 45 ||
-                codeUnit == 58
-            guard isTagNameCharacter else {
-                break
-            }
+        skipHTMLAttributeWhitespace(in: nsText, cursor: &cursor)
+        while cursor < nsText.length, isHTMLTagNameCharacter(nsText.character(at: cursor)) {
             cursor += 1
         }
 
         while cursor < nsText.length {
-            while cursor < nsText.length {
-                let codeUnit = nsText.character(at: cursor)
-                if codeUnit == 32 || codeUnit == 9 || codeUnit == 10 || codeUnit == 13 {
-                    cursor += 1
-                    continue
-                }
-                break
-            }
+            skipHTMLAttributeWhitespace(in: nsText, cursor: &cursor)
             guard cursor < nsText.length else { break }
 
             let current = nsText.character(at: cursor)
-            if current == 62 || current == 47 {
+            if current == 62 {
                 break
             }
-
-            let nameStart = cursor
-            while cursor < nsText.length {
-                let codeUnit = nsText.character(at: cursor)
-                let isAttributeNameCharacter =
-                    (65...90).contains(Int(codeUnit)) ||
-                    (97...122).contains(Int(codeUnit)) ||
-                    (48...57).contains(Int(codeUnit)) ||
-                    codeUnit == 45 ||
-                    codeUnit == 58
-                guard isAttributeNameCharacter else {
+            if current == 47 {
+                if isSelfClosingTagTerminator(in: nsText, from: cursor) {
                     break
                 }
                 cursor += 1
+                continue
             }
+
+            let nameStart = cursor
+            while cursor < nsText.length, isHTMLAttributeNameCharacter(nsText.character(at: cursor)) {
+                cursor += 1
+            }
+            guard cursor > nameStart else {
+                cursor += 1
+                continue
+            }
+
             let attributeName = nsText
                 .substring(with: NSRange(location: nameStart, length: cursor - nameStart))
                 .lowercased()
 
-            while cursor < nsText.length {
-                let codeUnit = nsText.character(at: cursor)
-                if codeUnit == 32 || codeUnit == 9 || codeUnit == 10 || codeUnit == 13 {
-                    cursor += 1
-                    continue
-                }
-                break
-            }
+            skipHTMLAttributeWhitespace(in: nsText, cursor: &cursor)
             guard cursor < nsText.length, nsText.character(at: cursor) == 61 else {
                 continue
             }
             cursor += 1
 
-            while cursor < nsText.length {
-                let codeUnit = nsText.character(at: cursor)
-                if codeUnit == 32 || codeUnit == 9 || codeUnit == 10 || codeUnit == 13 {
-                    cursor += 1
-                    continue
-                }
+            let valueLeadingWhitespaceStart = cursor
+            skipHTMLAttributeWhitespace(in: nsText, cursor: &cursor)
+            let skippedValueLeadingWhitespace = cursor > valueLeadingWhitespaceStart
+            guard cursor < nsText.length else { break }
+            if nsText.character(at: cursor) == 62 {
                 break
             }
-            guard cursor < nsText.length else { break }
+            if attributeName != "type",
+               skippedValueLeadingWhitespace,
+               looksLikeNextAttributeAssignment(in: nsText, from: cursor)
+            {
+                continue
+            }
 
-            let quote = nsText.character(at: cursor)
             let value: String
-            if quote == 34 || quote == 39 {
+            let valueLead = nsText.character(at: cursor)
+            if valueLead == 34 || valueLead == 39 {
+                let quote = valueLead
                 cursor += 1
                 let valueStart = cursor
                 while cursor < nsText.length, nsText.character(at: cursor) != quote {
@@ -1285,6 +1260,43 @@ private extension HTMLLanguage {
         }
 
         return nil
+    }
+
+    static func skipHTMLAttributeWhitespace(in text: NSString, cursor: inout Int) {
+        while cursor < text.length {
+            let codeUnit = text.character(at: cursor)
+            if codeUnit == 32 || codeUnit == 9 || codeUnit == 10 || codeUnit == 13 {
+                cursor += 1
+                continue
+            }
+            break
+        }
+    }
+
+    static func isHTMLAttributeNameCharacter(_ codeUnit: unichar) -> Bool {
+        guard codeUnit != 32, codeUnit != 9, codeUnit != 10, codeUnit != 13 else {
+            return false
+        }
+        return codeUnit != 34 && codeUnit != 39 && codeUnit != 47 &&
+            codeUnit != 60 && codeUnit != 61 && codeUnit != 62
+    }
+
+    static func looksLikeNextAttributeAssignment(in text: NSString, from start: Int) -> Bool {
+        var cursor = start
+        guard cursor < text.length, isHTMLAttributeNameCharacter(text.character(at: cursor)) else {
+            return false
+        }
+        while cursor < text.length, isHTMLAttributeNameCharacter(text.character(at: cursor)) {
+            cursor += 1
+        }
+        skipHTMLAttributeWhitespace(in: text, cursor: &cursor)
+        return cursor < text.length && text.character(at: cursor) == 61
+    }
+
+    static func isSelfClosingTagTerminator(in text: NSString, from start: Int) -> Bool {
+        var cursor = start + 1
+        skipHTMLAttributeWhitespace(in: text, cursor: &cursor)
+        return cursor < text.length && text.character(at: cursor) == 62
     }
 }
 

@@ -2220,6 +2220,70 @@ struct SyntaxEditorUITests {
         } == false)
     }
 
+    @Test("SyntaxHighlighterEngine skips malformed attribute tokens in unsupported script tags")
+    func highlighterSkipsMalformedAttributeTokensInUnsupportedScriptTags() async {
+        let engine = SyntaxHighlighterEngine()
+        let cases = [
+            #"<script async !foo type="application/json">{"enabled": true}</script>"#,
+            #"<script !foo=http://example.com type="application/json">{"enabled": true}</script>"#,
+            #"<script !foo=/assets/ type="application/json">{"enabled": true}</script>"#,
+            #"<script !foo="a>b" type="application/json">{"enabled": true}</script>"#,
+            #"<script !foo="bar"" type="application/json">{"enabled": true}</script>"#,
+            #"<script !foo="bar"type="application/json">{"enabled": true}</script>"#,
+            #"<script!type="application/json">{"enabled": true}</script>"#,
+        ]
+
+        for source in cases {
+            let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+            let trueRange = (source as NSString).range(of: "true")
+
+            #expect(tokens.isEmpty == false)
+            #expect(tokens.contains {
+                $0.captureName.hasPrefix("keyword") &&
+                    SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            } == false)
+        }
+    }
+
+    @Test("SyntaxHighlighterEngine ignores malformed type-like attribute suffixes")
+    func highlighterIgnoresMalformedTypeLikeAttributeSuffixes() async {
+        let engine = SyntaxHighlighterEngine()
+        let cases = [
+            #"<script !type="application/json">const answer = 42;</script>"#,
+            #"<script data!type="application/json">const answer = 42;</script>"#,
+            #"<script !foo="bar type="application/json">const answer = 42;</script>"#,
+        ]
+
+        for source in cases {
+            let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+            let constRange = (source as NSString).range(of: "const")
+
+            #expect(tokens.contains {
+                $0.captureName.hasPrefix("keyword") &&
+                    SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
+            })
+        }
+    }
+
+    @Test("SyntaxHighlighterEngine treats malformed unquoted unsupported script types as unsupported")
+    func highlighterTreatsMalformedUnquotedUnsupportedScriptTypesAsUnsupported() async {
+        let engine = SyntaxHighlighterEngine()
+        let cases = [
+            #"<script type=module=foo>const answer = true;</script>"#,
+            #"<script type=text/plain/>const answer = true;</script>"#,
+        ]
+
+        for source in cases {
+            let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+            let constRange = (source as NSString).range(of: "const")
+
+            #expect(tokens.contains {
+                $0.captureName.hasPrefix("keyword") &&
+                    SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
+            } == false)
+        }
+    }
+
     @Test("EditorCommandEngine delegates toggle comment to custom language")
     func editorCommandEngineDelegatesToggleCommentToCustomLanguage() {
         let engine = EditorCommandEngine()
