@@ -10,7 +10,7 @@ struct ContentView: View {
         } else {
             Color.clear
                 .onAppear {
-                    model = SyntaxEditorModel(text: MiniLaunchConfiguration.current.initialText)
+                    model = SyntaxEditorModel(configuration: .current)
                 }
         }
     }

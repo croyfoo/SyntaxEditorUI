@@ -27,7 +27,7 @@ public struct JavaScriptLanguage: SyntaxLanguage {
     }
 }
 
-private extension JavaScriptLanguage {
+extension JavaScriptLanguage {
     struct PrefixAnalysis {
         var inSingleQuote = false
         var inDoubleQuote = false
@@ -55,6 +55,17 @@ private extension JavaScriptLanguage {
             let nsText = text as NSString
             var analysis = PrefixAnalysis()
             var cursor = 0
+            Self.advance(&analysis, in: nsText, cursor: &cursor, limit: nsText.length)
+            self.analysis = analysis
+        }
+
+        static func advance(
+            _ analysis: inout PrefixAnalysis,
+            in source: NSString,
+            cursor: inout Int,
+            limit: Int
+        ) {
+            let upperBound = max(0, min(limit, source.length))
             let singleQuote: unichar = 39
             let doubleQuote: unichar = 34
             let backtick: unichar = 96
@@ -69,9 +80,9 @@ private extension JavaScriptLanguage {
             let newline: unichar = 10
             let carriageReturn: unichar = 13
 
-            while cursor < nsText.length {
-                let codeUnit = nsText.character(at: cursor)
-                let nextCodeUnit: unichar? = cursor + 1 < nsText.length ? nsText.character(at: cursor + 1) : nil
+            while cursor < upperBound {
+                let codeUnit = source.character(at: cursor)
+                let nextCodeUnit: unichar? = cursor + 1 < source.length ? source.character(at: cursor + 1) : nil
 
                 if analysis.inLineComment {
                     if codeUnit == newline || codeUnit == carriageReturn {
@@ -124,8 +135,8 @@ private extension JavaScriptLanguage {
                     if codeUnit == slash, !analysis.inRegexCharacterClass {
                         analysis.inRegexLiteral = false
                         cursor += 1
-                        while cursor < nsText.length {
-                            let flagUnit = nsText.character(at: cursor)
+                        while cursor < source.length {
+                            let flagUnit = source.character(at: cursor)
                             guard Self.isIdentifierPart(flagUnit) else { break }
                             cursor += 1
                         }
@@ -217,7 +228,7 @@ private extension JavaScriptLanguage {
                             cursor += 2
                             continue
                         }
-                        if Self.shouldStartRegexLiteral(in: nsText, at: cursor) {
+                        if Self.shouldStartRegexLiteral(in: source, at: cursor) {
                             analysis.inRegexLiteral = true
                             analysis.inRegexCharacterClass = false
                             analysis.regexCharacterClassHasContent = false
@@ -271,7 +282,7 @@ private extension JavaScriptLanguage {
                         cursor += 2
                         continue
                     }
-                    if Self.shouldStartRegexLiteral(in: nsText, at: cursor) {
+                    if Self.shouldStartRegexLiteral(in: source, at: cursor) {
                         analysis.inRegexLiteral = true
                         analysis.inRegexCharacterClass = false
                         analysis.regexCharacterClassHasContent = false
@@ -282,8 +293,6 @@ private extension JavaScriptLanguage {
 
                 cursor += 1
             }
-
-            self.analysis = analysis
         }
 
         private static func shouldStartRegexLiteral(in source: NSString, at slashOffset: Int) -> Bool {

@@ -18,7 +18,7 @@ struct SyntaxLanguageLineInfo {
     let hasLineComment: Bool
 }
 
-struct SyntaxLanguageCSSWrappedCommentBounds {
+struct SyntaxLanguageWrappedCommentBounds {
     let openLocation: Int
     let closeLocation: Int
 }
@@ -65,7 +65,12 @@ enum SyntaxLanguageTextUtilities {
         return applyEdits(edits, source: source, selection: safeSelection)
     }
 
-    static func toggleCSSBlockComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    static func toggleWrappedComment(
+        source: String,
+        selection: NSRange,
+        openMarker: String,
+        closeMarker: String
+    ) -> SyntaxLanguageEdit? {
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let targetLinesRange = selectedLineEnvelope(in: nsSource, selection: safeSelection)
@@ -73,20 +78,24 @@ enum SyntaxLanguageTextUtilities {
 
         let segment = nsSource.substring(with: targetLinesRange)
         let trimmed = segment.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let wrappedComment = wrappedCSSCommentBounds(in: segment) {
+        if let wrappedComment = wrappedCommentBounds(
+            in: segment,
+            openMarker: openMarker,
+            closeMarker: closeMarker
+        ) {
             let openAbsolute = targetLinesRange.location + wrappedComment.openLocation
             let closeAbsolute = targetLinesRange.location + wrappedComment.closeLocation
 
-            var openLength = 2
-            if character(in: nsSource, at: openAbsolute + 2) == " " {
-                openLength = 3
+            var openLength = openMarker.utf16.count
+            if character(in: nsSource, at: openAbsolute + openMarker.utf16.count) == " " {
+                openLength += 1
             }
 
             var closeRemovalLocation = closeAbsolute
-            var closeRemovalLength = 2
+            var closeRemovalLength = closeMarker.utf16.count
             if character(in: nsSource, at: closeAbsolute - 1) == " " {
                 closeRemovalLocation -= 1
-                closeRemovalLength = 3
+                closeRemovalLength += 1
             }
 
             return applyEdits(
@@ -105,11 +114,11 @@ enum SyntaxLanguageTextUtilities {
             )
         }
 
-        if trimmed.hasPrefix("/*"), trimmed.hasSuffix("*/") {
+        if trimmed.hasPrefix(openMarker), trimmed.hasSuffix(closeMarker) {
             return nil
         }
 
-        if segment.range(of: "/*") != nil || segment.range(of: "*/") != nil {
+        if segment.range(of: openMarker) != nil || segment.range(of: closeMarker) != nil {
             return nil
         }
 
@@ -117,11 +126,11 @@ enum SyntaxLanguageTextUtilities {
             [
                 SyntaxLanguageTextEdit(
                     range: NSRange(location: targetLinesRange.location + targetLinesRange.length, length: 0),
-                    replacement: " */"
+                    replacement: " \(closeMarker)"
                 ),
                 SyntaxLanguageTextEdit(
                     range: NSRange(location: targetLinesRange.location, length: 0),
-                    replacement: "/* "
+                    replacement: "\(openMarker) "
                 ),
             ],
             source: source,
@@ -409,9 +418,17 @@ enum SyntaxLanguageTextUtilities {
         return count % 2 == 1
     }
 
-    static func wrappedCSSCommentBounds(in segment: String) -> SyntaxLanguageCSSWrappedCommentBounds? {
+    static func wrappedCommentBounds(
+        in segment: String,
+        openMarker: String,
+        closeMarker: String
+    ) -> SyntaxLanguageWrappedCommentBounds? {
         let nsSegment = segment as NSString
-        guard nsSegment.length >= 4 else { return nil }
+        let openLength = openMarker.utf16.count
+        let closeLength = closeMarker.utf16.count
+        guard openLength > 0, closeLength > 0, nsSegment.length >= openLength + closeLength else {
+            return nil
+        }
 
         var firstNonWhitespace = 0
         while firstNonWhitespace < nsSegment.length {
@@ -422,10 +439,8 @@ enum SyntaxLanguageTextUtilities {
             }
             break
         }
-        guard firstNonWhitespace + 1 < nsSegment.length else { return nil }
-        guard nsSegment.character(at: firstNonWhitespace) == 47,
-              nsSegment.character(at: firstNonWhitespace + 1) == 42
-        else {
+        guard firstNonWhitespace + openLength <= nsSegment.length else { return nil }
+        guard nsSegment.substring(with: NSRange(location: firstNonWhitespace, length: openLength)) == openMarker else {
             return nil
         }
 
@@ -438,24 +453,22 @@ enum SyntaxLanguageTextUtilities {
             }
             break
         }
-        guard lastNonWhitespace - 1 >= 0 else { return nil }
-        guard nsSegment.character(at: lastNonWhitespace - 1) == 42,
-              nsSegment.character(at: lastNonWhitespace) == 47
-        else {
+        let closeLocation = lastNonWhitespace - closeLength + 1
+        guard closeLocation >= 0 else { return nil }
+        guard nsSegment.substring(with: NSRange(location: closeLocation, length: closeLength)) == closeMarker else {
             return nil
         }
 
         let openLocation = firstNonWhitespace
-        let closeLocation = lastNonWhitespace - 1
         guard closeLocation > openLocation else { return nil }
 
         let closeSearchRange = NSRange(
-            location: openLocation + 2,
-            length: max(0, nsSegment.length - (openLocation + 2))
+            location: openLocation + openLength,
+            length: max(0, nsSegment.length - (openLocation + openLength))
         )
-        let firstCloseLocation = nsSegment.range(of: "*/", options: [], range: closeSearchRange).location
+        let firstCloseLocation = nsSegment.range(of: closeMarker, options: [], range: closeSearchRange).location
         guard firstCloseLocation == closeLocation else { return nil }
 
-        return SyntaxLanguageCSSWrappedCommentBounds(openLocation: openLocation, closeLocation: closeLocation)
+        return SyntaxLanguageWrappedCommentBounds(openLocation: openLocation, closeLocation: closeLocation)
     }
 }

@@ -16,7 +16,12 @@ public struct CSSLanguage: SyntaxLanguage {
     }
 
     public func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        SyntaxLanguageTextUtilities.toggleCSSBlockComment(source: source, selection: selection)
+        SyntaxLanguageTextUtilities.toggleWrappedComment(
+            source: source,
+            selection: selection,
+            openMarker: "/*",
+            closeMarker: "*/"
+        )
     }
 
     public func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
@@ -27,7 +32,7 @@ public struct CSSLanguage: SyntaxLanguage {
     }
 }
 
-private extension CSSLanguage {
+extension CSSLanguage {
     struct PrefixAnalysis {
         var inSingleQuote = false
         var inDoubleQuote = false
@@ -46,15 +51,26 @@ private extension CSSLanguage {
             let nsText = text as NSString
             var analysis = PrefixAnalysis()
             var cursor = 0
+            Self.advance(&analysis, in: nsText, cursor: &cursor, limit: nsText.length)
+            self.analysis = analysis
+        }
+
+        static func advance(
+            _ analysis: inout PrefixAnalysis,
+            in source: NSString,
+            cursor: inout Int,
+            limit: Int
+        ) {
+            let upperBound = max(0, min(limit, source.length))
             let singleQuote: unichar = 39
             let doubleQuote: unichar = 34
             let backslash: unichar = 92
             let slash: unichar = 47
             let asterisk: unichar = 42
 
-            while cursor < nsText.length {
-                let codeUnit = nsText.character(at: cursor)
-                let nextCodeUnit: unichar? = cursor + 1 < nsText.length ? nsText.character(at: cursor + 1) : nil
+            while cursor < upperBound {
+                let codeUnit = source.character(at: cursor)
+                let nextCodeUnit: unichar? = cursor + 1 < source.length ? source.character(at: cursor + 1) : nil
 
                 if analysis.inBlockComment {
                     if codeUnit == asterisk, nextCodeUnit == slash {
@@ -112,8 +128,6 @@ private extension CSSLanguage {
 
                 cursor += 1
             }
-
-            self.analysis = analysis
         }
     }
 }

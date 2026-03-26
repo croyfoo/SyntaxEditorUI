@@ -1,5 +1,5 @@
 {
-  "originHash" : "04a708d1d359bfec9930c0c01f9f9248c14aee072e352f44e0d02bd25269221f",
+  "originHash" : "fdf4e23f773db96c31abb1cb9c1c0be1694e6ecb70135e38f33f770296db4f75",
   "pins" : [
     {
       "identity" : "observationbridge",
@@ -52,6 +52,15 @@
       "location" : "https://github.com/tree-sitter/tree-sitter-css",
       "state" : {
         "revision" : "c0d581e32d183a536731ed6c3a72758b27e20411",
+        "version" : "0.23.2"
+      }
+    },
+    {
+      "identity" : "tree-sitter-html",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tree-sitter/tree-sitter-html",
+      "state" : {
+        "revision" : "5a5ca8551a179998360b4a4ca2c0f366a35acc03",
         "version" : "0.23.2"
       }
     },

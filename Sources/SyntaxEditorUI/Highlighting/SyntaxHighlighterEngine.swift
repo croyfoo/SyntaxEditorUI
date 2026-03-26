@@ -1,5 +1,6 @@
 import Foundation
 import SwiftTreeSitter
+import SwiftTreeSitterLayer
 
 struct SyntaxHighlightToken {
     let range: NSRange
@@ -14,10 +15,179 @@ private enum CachedLanguageConfiguration {
 actor SyntaxHighlighterEngine {
     private let parser = Parser()
     private var configurations: [String: CachedLanguageConfiguration] = [:]
+    private var layeredHighlightingSupport: [String: Bool] = [:]
+    private var htmlPreprocessingSupport: [String: Bool] = [:]
 
     func render(source: String, language: any SyntaxLanguage) -> [SyntaxHighlightToken] {
         guard !source.isEmpty else { return [] }
         guard let configuration = configuration(for: language) else { return [] }
+
+        if usesLayeredHighlighting(
+            for: language,
+            configuration: configuration
+        ) {
+            let layeredSource =
+                usesHTMLPreprocessing(for: language, configuration: configuration)
+                ? HTMLLanguage.sourceByMaskingUnsupportedEmbeddedContent(source)
+                : source
+            return renderWithInjections(
+                source: layeredSource,
+                originalSource: source,
+                rootConfiguration: configuration
+            )
+        }
+
+        return renderDirect(source: source, configuration: configuration)
+    }
+}
+
+private extension SyntaxHighlighterEngine {
+    func usesLayeredHighlighting(
+        for language: any SyntaxLanguage,
+        configuration: LanguageConfiguration
+    ) -> Bool {
+        guard configuration.queries[.injections] != nil else {
+            return false
+        }
+
+        let cacheKey = language.treeSitterSupport.cacheKey
+        if let cached = layeredHighlightingSupport[cacheKey] {
+            return cached
+        }
+
+        let resolved = canResolveLayeredInjections(for: language.treeSitterSupport)
+        layeredHighlightingSupport[cacheKey] = resolved
+        return resolved
+    }
+
+    func usesHTMLPreprocessing(
+        for language: any SyntaxLanguage,
+        configuration: LanguageConfiguration
+    ) -> Bool {
+        let cacheKey = language.treeSitterSupport.cacheKey
+        if let cached = htmlPreprocessingSupport[cacheKey] {
+            return cached
+        }
+
+        let resolved = supportsHTMLRawTextPreprocessing(for: configuration.language)
+        htmlPreprocessingSupport[cacheKey] = resolved
+        return resolved
+    }
+
+    func supportsHTMLRawTextPreprocessing(for language: Language) -> Bool {
+        let requiredSymbols = Set(["raw_text", "script_element", "style_element"])
+        var resolvedSymbols = Set<String>()
+
+        for symbolID in 0..<language.symbolCount {
+            guard let symbolName = language.symbolName(for: symbolID),
+                  requiredSymbols.contains(symbolName)
+            else {
+                continue
+            }
+
+            resolvedSymbols.insert(symbolName)
+            if resolvedSymbols == requiredSymbols {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    func canResolveLayeredInjections(for support: SyntaxTreeSitterSupport) -> Bool {
+        guard let querySource = injectionsQuerySource(for: support) else {
+            return false
+        }
+        guard querySource.contains("@injection.language") == false else {
+            return false
+        }
+        guard containsOnlySupportedInjectionCaptures(in: querySource) else {
+            return false
+        }
+
+        let injectedLanguages = explicitInjectedLanguages(in: querySource)
+        guard injectedLanguages.isEmpty == false else {
+            return false
+        }
+
+        let availableLanguages = Set(injectedLanguageConfigurations().keys)
+        return injectedLanguages.isSubset(of: availableLanguages)
+    }
+
+    func injectionsQuerySource(for support: SyntaxTreeSitterSupport) -> String? {
+        var candidates: [URL] = []
+        var seenPaths = Set<String>()
+        let bundleFilename = "\(support.bundleName).bundle"
+
+        for queriesURL in support.queryDirectories + Self.queryDirectoryCandidates(for: support.bundleName) {
+            let standardized = queriesURL.standardizedFileURL
+            guard seenPaths.insert(standardized.path).inserted else {
+                continue
+            }
+            candidates.append(standardized)
+        }
+
+        let bundleURLs =
+            [Bundle.main.bundleURL] +
+            Bundle.allBundles.map(\.bundleURL) +
+            Bundle.allFrameworks.map(\.bundleURL)
+        for bundleURL in bundleURLs where bundleURL.lastPathComponent == bundleFilename {
+            for queriesURL in Self.bundleQueryDirectories(for: bundleURL) {
+                let standardized = queriesURL.standardizedFileURL
+                guard seenPaths.insert(standardized.path).inserted else {
+                    continue
+                }
+                candidates.append(standardized)
+            }
+        }
+
+        for queriesURL in candidates {
+            let injectionsURL = queriesURL.appendingPathComponent("injections.scm")
+            if let source = try? String(contentsOf: injectionsURL, encoding: .utf8) {
+                return source
+            }
+        }
+
+        return nil
+    }
+
+    func containsOnlySupportedInjectionCaptures(in querySource: String) -> Bool {
+        guard let regex = try? NSRegularExpression(pattern: #"@[A-Za-z0-9_.-]+"#) else {
+            return false
+        }
+
+        let sourceRange = NSRange(location: 0, length: querySource.utf16.count)
+        return regex.matches(in: querySource, range: sourceRange).allSatisfy { match in
+            guard let range = Range(match.range, in: querySource) else {
+                return false
+            }
+
+            let capture = String(querySource[range])
+            return capture == "@injection.content" || capture == "@injection.language" || capture.hasPrefix("@_")
+        }
+    }
+
+    func explicitInjectedLanguages(in querySource: String) -> Set<String> {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"#set!\s+injection\.language\s+"([^"]+)""#
+        ) else {
+            return []
+        }
+
+        let sourceRange = NSRange(location: 0, length: querySource.utf16.count)
+        let matches = regex.matches(in: querySource, range: sourceRange)
+        return Set(matches.compactMap { match in
+            guard match.numberOfRanges > 1,
+                  let range = Range(match.range(at: 1), in: querySource)
+            else {
+                return nil
+            }
+
+            return String(querySource[range]).lowercased()
+        })
+    }
+
+    func renderDirect(source: String, configuration: LanguageConfiguration) -> [SyntaxHighlightToken] {
         guard let highlightsQuery = configuration.queries[.highlights] else { return [] }
 
         do {
@@ -44,9 +214,59 @@ actor SyntaxHighlighterEngine {
             return SyntaxHighlightToken(range: range, captureName: $0.name)
         }
     }
-}
 
-private extension SyntaxHighlighterEngine {
+    func renderWithInjections(
+        source: String,
+        originalSource: String,
+        rootConfiguration: LanguageConfiguration
+    ) -> [SyntaxHighlightToken] {
+        let injectedConfigurations = injectedLanguageConfigurations()
+
+        do {
+            let layerConfiguration = LanguageLayer.Configuration(
+                languageProvider: { name in
+                    injectedConfigurations[name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()]
+                }
+            )
+            let layer = try LanguageLayer(
+                languageConfig: rootConfiguration,
+                configuration: layerConfiguration
+            )
+            layer.replaceContent(with: source)
+
+            return try layer.highlights(
+                in: NSRange(location: 0, length: source.utf16.count),
+                provider: source.predicateTextProvider
+            ).compactMap {
+                guard let range = Self.utf16Range(
+                    fromByteRange: $0.tsRange.bytes,
+                    sourceUTF16Length: source.utf16.count
+                ) else {
+                    return nil
+                }
+                return SyntaxHighlightToken(range: range, captureName: $0.name)
+            }
+        } catch {
+            return renderDirect(source: originalSource, configuration: rootConfiguration)
+        }
+    }
+
+    func injectedLanguageConfigurations() -> [String: LanguageConfiguration] {
+        let aliases = ["css", "html", "htm", "javascript", "js", "json", "swift"]
+        var resolved: [String: LanguageConfiguration] = [:]
+
+        for alias in aliases {
+            guard let language = BuiltinSyntaxLanguages.named(alias),
+                  let configuration = configuration(for: language)
+            else {
+                continue
+            }
+            resolved[alias] = configuration
+        }
+
+        return resolved
+    }
+
     func configuration(for language: any SyntaxLanguage) -> LanguageConfiguration? {
         switch configurations[language.syntaxHighlightCacheKey] {
         case .resolved(let configuration):

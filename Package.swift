@@ -17,6 +17,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/ChimeHQ/SwiftTreeSitter", exact: "0.25.0"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-css", exact: "0.23.2"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-html", exact: "0.23.2"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-javascript", exact: "0.23.1"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-json", exact: "0.24.8"),
         .package(url: "https://github.com/alex-pinkus/tree-sitter-swift", exact: "0.7.1-with-generated-files"),
@@ -27,7 +28,9 @@ let package = Package(
             name: "SyntaxEditorUI",
             dependencies: [
                 .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
+                .product(name: "SwiftTreeSitterLayer", package: "SwiftTreeSitter"),
                 .product(name: "TreeSitterCSS", package: "tree-sitter-css"),
+                .product(name: "TreeSitterHTML", package: "tree-sitter-html"),
                 .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
                 .product(name: "TreeSitterJSON", package: "tree-sitter-json"),
                 .product(name: "TreeSitterSwift", package: "tree-sitter-swift"),
