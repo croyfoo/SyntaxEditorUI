@@ -2027,6 +2027,134 @@ struct SyntaxEditorUITests {
         #expect(ranges[1].length == 1)
     }
 
+    @Test("EditorCommandEngine delegates toggle comment to custom language")
+    func editorCommandEngineDelegatesToggleCommentToCustomLanguage() {
+        let engine = EditorCommandEngine()
+        let recorder = CustomLanguageRecorder()
+        let language = RecordingLanguage(recorder: recorder, shouldTreatLocationAsLiteral: false)
+
+        let result = engine.toggleComment(
+            source: "value = 1",
+            selection: NSRange(location: 0, length: 5),
+            language: language
+        )
+
+        #expect(recorder.toggleCommentCallCount == 1)
+        #expect(result?.text == "// value = 1")
+        #expect(result?.selectedRange == NSRange(location: 3, length: 5))
+    }
+
+    @Test("EditorCommandEngine delegates quote suppression to custom language")
+    func editorCommandEngineDelegatesLiteralDetectionToCustomLanguage() {
+        let engine = EditorCommandEngine()
+        let recorder = CustomLanguageRecorder()
+        let source = "value = "
+        let language = RecordingLanguage(recorder: recorder, shouldTreatLocationAsLiteral: true)
+
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: language
+        )
+
+        #expect(result == nil)
+        #expect(recorder.literalCheckLocations == [source.utf16.count])
+    }
+
+#if canImport(AppKit)
+    @MainActor
+    private func waitUntilViewControllerCondition(
+        nanoseconds: UInt64 = 5_000_000_000,
+        _ condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .nanoseconds(Int64(nanoseconds)))
+
+        while !condition() {
+            guard clock.now < deadline else {
+                return false
+            }
+            await Task.yield()
+        }
+
+        return true
+    }
+
+    @Test("SyntaxEditorViewController enables undo support on macOS")
+    @MainActor
+    func syntaxEditorViewControllerMacUndo() {
+        let model = SyntaxEditorModel(text: "{}", language: BuiltinSyntaxLanguages.javascript)
+        let controller = SyntaxEditorViewController(model: model)
+        controller.loadViewIfNeeded()
+
+        let textView = controller.textView
+        #expect(textView.allowsUndo == true)
+    }
+
+    @Test("SyntaxEditorViewController reflects model text mutations on macOS")
+    @MainActor
+    func syntaxEditorViewControllerMacTextObservation() async {
+        let model = SyntaxEditorModel(text: "const answer = 42;", language: BuiltinSyntaxLanguages.javascript)
+        let controller = SyntaxEditorViewController(model: model)
+        controller.loadViewIfNeeded()
+
+        model.text = "{\"enabled\":true}"
+
+        #expect(await waitUntilViewControllerCondition {
+            controller.textView.string == "{\"enabled\":true}"
+        })
+    }
+
+    @Test("SyntaxEditorViewController reflects editable and wrapping changes on macOS")
+    @MainActor
+    func syntaxEditorViewControllerMacEditorStateObservation() async {
+        let model = SyntaxEditorModel(text: "body {}", language: BuiltinSyntaxLanguages.css)
+        let controller = SyntaxEditorViewController(model: model)
+        controller.loadViewIfNeeded()
+
+        model.isEditable = false
+        model.lineWrappingEnabled = true
+
+        #expect(await waitUntilViewControllerCondition {
+            controller.textView.isEditable == false
+        })
+        #expect(await waitUntilViewControllerCondition {
+            controller.scrollView.hasHorizontalScroller == false
+        })
+
+        model.lineWrappingEnabled = false
+
+        #expect(await waitUntilViewControllerCondition {
+            controller.scrollView.hasHorizontalScroller == true
+        })
+    }
+
+    @Test("SyntaxEditorViewController keeps synchronizing after language changes on macOS")
+    @MainActor
+    func syntaxEditorViewControllerMacLanguageChangeKeepsObservationAlive() async {
+        let model = SyntaxEditorModel(text: "let answer = 42", language: BuiltinSyntaxLanguages.swift)
+        let controller = SyntaxEditorViewController(model: model)
+        controller.loadViewIfNeeded()
+
+        model.language = BuiltinSyntaxLanguages.json
+        model.isEditable = false
+
+        #expect(await waitUntilViewControllerCondition {
+            controller.textView.isEditable == false
+        })
+
+        model.text = "{\"answer\":42}"
+
+        #expect(await waitUntilViewControllerCondition {
+            controller.textView.string == "{\"answer\":42}"
+        })
+    }
+#endif
+}
+
+@Suite("SyntaxHighlighterEngine", .serialized)
+struct SyntaxHighlighterEngineTests {
     @Test("SyntaxHighlighterEngine returns no tokens for empty source")
     func highlighterReturnsNoTokensForEmptySource() async {
         let engine = SyntaxHighlighterEngine()
@@ -2074,8 +2202,8 @@ struct SyntaxEditorUITests {
         #expect(tokens.isEmpty == false)
         #expect(tokens.allSatisfy { token in
             token.range.location >= 0 &&
-            token.range.length > 0 &&
-            token.range.upperBound <= sourceLength
+                token.range.length > 0 &&
+                token.range.upperBound <= sourceLength
         })
     }
 
@@ -2349,41 +2477,6 @@ struct SyntaxEditorUITests {
         }
     }
 
-    @Test("EditorCommandEngine delegates toggle comment to custom language")
-    func editorCommandEngineDelegatesToggleCommentToCustomLanguage() {
-        let engine = EditorCommandEngine()
-        let recorder = CustomLanguageRecorder()
-        let language = RecordingLanguage(recorder: recorder, shouldTreatLocationAsLiteral: false)
-
-        let result = engine.toggleComment(
-            source: "value = 1",
-            selection: NSRange(location: 0, length: 5),
-            language: language
-        )
-
-        #expect(recorder.toggleCommentCallCount == 1)
-        #expect(result?.text == "// value = 1")
-        #expect(result?.selectedRange == NSRange(location: 3, length: 5))
-    }
-
-    @Test("EditorCommandEngine delegates quote suppression to custom language")
-    func editorCommandEngineDelegatesLiteralDetectionToCustomLanguage() {
-        let engine = EditorCommandEngine()
-        let recorder = CustomLanguageRecorder()
-        let source = "value = "
-        let language = RecordingLanguage(recorder: recorder, shouldTreatLocationAsLiteral: true)
-
-        let result = engine.transformInput(
-            source: source,
-            range: NSRange(location: source.utf16.count, length: 0),
-            replacementText: "\"",
-            language: language
-        )
-
-        #expect(result == nil)
-        #expect(recorder.literalCheckLocations == [source.utf16.count])
-    }
-
     @Test("SyntaxHighlighterEngine supports custom language wrappers")
     func highlighterSupportsCustomLanguageWrappers() async {
         let engine = SyntaxHighlighterEngine()
@@ -2433,94 +2526,4 @@ struct SyntaxEditorUITests {
         #expect(jsonTokens.isEmpty == false)
         #expect(cssTokens.isEmpty == false)
     }
-
-#if canImport(AppKit)
-    @MainActor
-    private func waitUntilViewControllerCondition(
-        nanoseconds: UInt64 = 5_000_000_000,
-        _ condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .nanoseconds(Int64(nanoseconds)))
-
-        while !condition() {
-            guard clock.now < deadline else {
-                return false
-            }
-            await Task.yield()
-        }
-
-        return true
-    }
-
-    @Test("SyntaxEditorViewController enables undo support on macOS")
-    @MainActor
-    func syntaxEditorViewControllerMacUndo() {
-        let model = SyntaxEditorModel(text: "{}", language: BuiltinSyntaxLanguages.javascript)
-        let controller = SyntaxEditorViewController(model: model)
-        controller.loadViewIfNeeded()
-
-        let textView = controller.textView
-        #expect(textView.allowsUndo == true)
-    }
-
-    @Test("SyntaxEditorViewController reflects model text mutations on macOS")
-    @MainActor
-    func syntaxEditorViewControllerMacTextObservation() async {
-        let model = SyntaxEditorModel(text: "const answer = 42;", language: BuiltinSyntaxLanguages.javascript)
-        let controller = SyntaxEditorViewController(model: model)
-        controller.loadViewIfNeeded()
-
-        model.text = "{\"enabled\":true}"
-
-        #expect(await waitUntilViewControllerCondition {
-            controller.textView.string == "{\"enabled\":true}"
-        })
-    }
-
-    @Test("SyntaxEditorViewController reflects editable and wrapping changes on macOS")
-    @MainActor
-    func syntaxEditorViewControllerMacEditorStateObservation() async {
-        let model = SyntaxEditorModel(text: "body {}", language: BuiltinSyntaxLanguages.css)
-        let controller = SyntaxEditorViewController(model: model)
-        controller.loadViewIfNeeded()
-
-        model.isEditable = false
-        model.lineWrappingEnabled = true
-
-        #expect(await waitUntilViewControllerCondition {
-            controller.textView.isEditable == false
-        })
-        #expect(await waitUntilViewControllerCondition {
-            controller.scrollView.hasHorizontalScroller == false
-        })
-
-        model.lineWrappingEnabled = false
-
-        #expect(await waitUntilViewControllerCondition {
-            controller.scrollView.hasHorizontalScroller == true
-        })
-    }
-
-    @Test("SyntaxEditorViewController keeps synchronizing after language changes on macOS")
-    @MainActor
-    func syntaxEditorViewControllerMacLanguageChangeKeepsObservationAlive() async {
-        let model = SyntaxEditorModel(text: "let answer = 42", language: BuiltinSyntaxLanguages.swift)
-        let controller = SyntaxEditorViewController(model: model)
-        controller.loadViewIfNeeded()
-
-        model.language = BuiltinSyntaxLanguages.json
-        model.isEditable = false
-
-        #expect(await waitUntilViewControllerCondition {
-            controller.textView.isEditable == false
-        })
-
-        model.text = "{\"answer\":42}"
-
-        #expect(await waitUntilViewControllerCondition {
-            controller.textView.string == "{\"answer\":42}"
-        })
-    }
-#endif
 }

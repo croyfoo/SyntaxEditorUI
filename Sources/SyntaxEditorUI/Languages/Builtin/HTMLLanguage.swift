@@ -470,7 +470,8 @@ private extension HTMLLanguage {
 
     struct SupportedEmbeddedRawTextState {
         let rawTextElementName: String
-        let rawTextSource: NSString
+        let source: NSString
+        let contentStart: Int
         var literalState: SupportedEmbeddedLiteralState
         var literalCursor = 0
         var isInsideLegacyScriptWrapper = false
@@ -481,20 +482,21 @@ private extension HTMLLanguage {
         }
 
         mutating func advance() {
-            guard literalCursor < rawTextSource.length else {
+            let absoluteCursor = contentStart + literalCursor
+            guard absoluteCursor < source.length else {
                 return
             }
 
             updateLegacyScriptWrapperIfNeeded()
 
-            let codeUnit = rawTextSource.character(at: literalCursor)
-            let nextLimit = min(literalCursor + 1, rawTextSource.length)
-            var nextCursor = literalCursor
+            let codeUnit = source.character(at: absoluteCursor)
+            let nextLimit = min(absoluteCursor + 1, source.length)
+            var nextCursor = absoluteCursor
             switch literalState {
             case .javascript(var analysis):
                 JavaScriptLanguage.PrefixAnalyzer.advance(
                     &analysis,
-                    in: rawTextSource,
+                    in: source,
                     cursor: &nextCursor,
                     limit: nextLimit
                 )
@@ -502,25 +504,26 @@ private extension HTMLLanguage {
             case .css(var analysis):
                 CSSLanguage.PrefixAnalyzer.advance(
                     &analysis,
-                    in: rawTextSource,
+                    in: source,
                     cursor: &nextCursor,
                     limit: nextLimit
                 )
                 literalState = .css(analysis)
             }
 
-            literalCursor = nextCursor
+            literalCursor = nextCursor - contentStart
             if codeUnit == 10 || codeUnit == 13 {
                 isAtLineStart = true
             }
         }
 
         private mutating func updateLegacyScriptWrapperIfNeeded() {
-            guard rawTextElementName == "script", isAtLineStart, literalCursor < rawTextSource.length else {
+            let absoluteCursor = contentStart + literalCursor
+            guard rawTextElementName == "script", isAtLineStart, absoluteCursor < source.length else {
                 return
             }
 
-            let codeUnit = rawTextSource.character(at: literalCursor)
+            let codeUnit = source.character(at: absoluteCursor)
             if codeUnit == 10 || codeUnit == 13 {
                 return
             }
@@ -529,10 +532,10 @@ private extension HTMLLanguage {
             }
 
             if isInsideLiteralOrComment == false {
-                if HTMLLanguage.hasPrefix("<!--", in: rawTextSource, at: literalCursor) {
+                if HTMLLanguage.hasPrefix("<!--", in: source, at: absoluteCursor) {
                     isInsideLegacyScriptWrapper = true
-                } else if HTMLLanguage.hasPrefix("//-->", in: rawTextSource, at: literalCursor) ||
-                            HTMLLanguage.hasPrefix("-->", in: rawTextSource, at: literalCursor)
+                } else if HTMLLanguage.hasPrefix("//-->", in: source, at: absoluteCursor) ||
+                            HTMLLanguage.hasPrefix("-->", in: source, at: absoluteCursor)
                 {
                     isInsideLegacyScriptWrapper = false
                 }
@@ -577,16 +580,16 @@ private extension HTMLLanguage {
         return supportedRawTextState(
             rawTextElementName: rawTextElementName,
             embeddedLanguage: embeddedLanguage,
-            rawTextSource: source.substring(
-                with: NSRange(location: tagEnd + 1, length: source.length - tagEnd - 1)
-            ) as NSString
+            in: source,
+            contentStart: tagEnd + 1
         )
     }
 
     static func supportedRawTextState(
         rawTextElementName: String,
         embeddedLanguage: (any SyntaxLanguage)?,
-        rawTextSource: NSString
+        in source: NSString,
+        contentStart: Int
     ) -> SupportedEmbeddedRawTextState? {
         guard let embeddedLanguage else {
             return nil
@@ -596,13 +599,15 @@ private extension HTMLLanguage {
         case BuiltinSyntaxLanguages.javascript.identifier where rawTextElementName == "script":
             return SupportedEmbeddedRawTextState(
                 rawTextElementName: rawTextElementName,
-                rawTextSource: rawTextSource,
+                source: source,
+                contentStart: contentStart,
                 literalState: .javascript(JavaScriptLanguage.PrefixAnalysis())
             )
         case BuiltinSyntaxLanguages.css.identifier where rawTextElementName == "style":
             return SupportedEmbeddedRawTextState(
                 rawTextElementName: rawTextElementName,
-                rawTextSource: rawTextSource,
+                source: source,
+                contentStart: contentStart,
                 literalState: .css(CSSLanguage.PrefixAnalysis())
             )
         default:
@@ -1114,9 +1119,8 @@ private extension HTMLLanguage {
         if let state = supportedRawTextState(
             rawTextElementName: rawTextElementName,
             embeddedLanguage: embeddedLanguage,
-            rawTextSource: source.substring(
-                with: NSRange(location: clampedSearchFrom, length: source.length - clampedSearchFrom)
-            ) as NSString
+            in: source,
+            contentStart: clampedSearchFrom
         ) {
             var state = state
             var absoluteCursor = clampedSearchFrom
@@ -1505,8 +1509,9 @@ extension HTMLLanguage {
         from startOffset: Int
     ) -> (name: String, range: NSRange)? {
         let clampedStart = max(0, min(startOffset, source.length))
-        var analysis = PrefixAnalyzer(text: source.substring(to: clampedStart)).analysis
-        var analysisCursor = clampedStart
+        var analysis = PrefixAnalysis()
+        var analysisCursor = 0
+        PrefixAnalyzer.advance(&analysis, in: source, cursor: &analysisCursor, limit: clampedStart)
         var searchCursor = clampedStart
 
         while searchCursor < source.length {

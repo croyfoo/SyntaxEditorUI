@@ -1,0 +1,25 @@
+{
+  "configurations" : [
+    {
+      "id" : "3D7720B2-CA62-4E0F-9C7B-14B9C62D9934",
+      "name" : "SyntaxEditorUITests",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "SyntaxEditorUITests",
+        "name" : "SyntaxEditorUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
