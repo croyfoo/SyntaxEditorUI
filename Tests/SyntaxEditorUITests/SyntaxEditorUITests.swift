@@ -943,6 +943,34 @@ struct SyntaxEditorUITests {
         """)
     }
 
+    @Test("EditorCommandEngine keeps style raw text open past malformed closing tag syntax")
+    func editorCommandEngineKeepsStyleRawTextOpenPastMalformedClosingTagSyntax() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <style>body::before { content: none; }
+        </style foo>
+        body { color: red; }
+        </style>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "body { color: red; }\n").location,
+            length: "body { color: red; }\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <style>body::before { content: none; }
+        </style foo>
+        /* body { color: red; }
+         */</style>
+        """)
+    }
+
     @Test("EditorCommandEngine does not fall back to HTML comments for blank script lines")
     func editorCommandEngineDoesNotFallbackToHTMLCommentsForBlankScriptLines() {
         let engine = EditorCommandEngine()
@@ -1020,6 +1048,34 @@ struct SyntaxEditorUITests {
 
         #expect(result?.text == """
         <script>const marker = \"</script>\";
+        // const answer = 42;
+        </script>
+        """)
+    }
+
+    @Test("EditorCommandEngine keeps script raw text open past malformed closing tag syntax")
+    func editorCommandEngineKeepsScriptRawTextOpenPastMalformedClosingTagSyntax() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <script>const marker = 1;
+        </script foo>
+        const answer = 42;
+        </script>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "const answer = 42;\n").location,
+            length: "const answer = 42;\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.html
+        )
+
+        #expect(result?.text == """
+        <script>const marker = 1;
+        </script foo>
         // const answer = 42;
         </script>
         """)

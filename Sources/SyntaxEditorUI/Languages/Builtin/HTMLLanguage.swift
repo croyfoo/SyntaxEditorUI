@@ -161,6 +161,7 @@ private extension HTMLLanguage {
         var rawTextContentStart: Int?
         var currentTagName = ""
         var currentTagIsClosing = false
+        var currentClosingTagCanTerminateRawText = false
         var currentTagStart: Int?
         var supportedRawTextState: SupportedEmbeddedRawTextState?
 
@@ -230,7 +231,9 @@ private extension HTMLLanguage {
 
                     if codeUnit == 62 {
                         if analysis.currentTagIsClosing {
-                            if analysis.rawTextElementName == analysis.currentTagName {
+                            if analysis.currentClosingTagCanTerminateRawText,
+                               analysis.rawTextElementName == analysis.currentTagName
+                            {
                                 analysis.rawTextElementName = nil
                                 analysis.rawTextContentStart = nil
                                 analysis.supportedRawTextState = nil
@@ -252,7 +255,19 @@ private extension HTMLLanguage {
                         analysis.sawSelfClosingSlash = false
                         analysis.currentTagName = ""
                         analysis.currentTagIsClosing = false
+                        analysis.currentClosingTagCanTerminateRawText = false
                         analysis.currentTagStart = nil
+                        cursor += 1
+                        continue
+                    }
+
+                    if analysis.currentTagIsClosing {
+                        if codeUnit == 32 || codeUnit == 9 || codeUnit == 10 || codeUnit == 13 {
+                            cursor += 1
+                            continue
+                        }
+
+                        analysis.currentClosingTagCanTerminateRawText = false
                         cursor += 1
                         continue
                     }
@@ -342,6 +357,7 @@ private extension HTMLLanguage {
                         analysis.canStartAttributeValue = false
                         analysis.currentTagName = rawTextElementName
                         analysis.currentTagIsClosing = true
+                        analysis.currentClosingTagCanTerminateRawText = true
                         analysis.currentTagStart = cursor
                         cursor = descriptor.nextCursor
                         continue
@@ -369,6 +385,7 @@ private extension HTMLLanguage {
                     let tag = Self.tagDescriptor(in: source, at: cursor)
                     analysis.currentTagName = tag.name
                     analysis.currentTagIsClosing = tag.isClosing
+                    analysis.currentClosingTagCanTerminateRawText = tag.isClosing
                     analysis.currentTagStart = cursor
                     cursor = tag.nextCursor
                     continue
