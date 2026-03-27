@@ -1,5 +1,5 @@
 {
-  "originHash" : "fdf4e23f773db96c31abb1cb9c1c0be1694e6ecb70135e38f33f770296db4f75",
+  "originHash" : "cc7decc060eeab0ec10dbbbb57ffb5c9b50498f1b500637e58dc4cefc4a91784",
   "pins" : [
     {
       "identity" : "observationbridge",
@@ -89,6 +89,15 @@
       "state" : {
         "revision" : "277b583bbb024f20ba88b95c48bf5a6a0b4f2287",
         "version" : "0.7.1-with-generated-files"
+      }
+    },
+    {
+      "identity" : "tree-sitter-xml",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tree-sitter-grammars/tree-sitter-xml",
+      "state" : {
+        "revision" : "4b64dd3a03ec002258d6268d712fd93716d6ab57",
+        "version" : "0.7.0"
       }
     }
   ],

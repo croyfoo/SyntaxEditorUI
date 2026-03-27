@@ -76,9 +76,10 @@ public enum BuiltinSyntaxLanguages {
     public static let javascript = JavaScriptLanguage()
     public static let json = JSONLanguage()
     public static let swift = SwiftLanguage()
+    public static let xml = XMLLanguage()
 
     public static var all: [any SyntaxLanguage] {
-        [css, html, javascript, json, swift]
+        [css, html, javascript, json, swift, xml]
     }
 
     public static func named(_ normalizedRawValue: String) -> (any SyntaxLanguage)? {
@@ -97,6 +98,8 @@ public enum BuiltinSyntaxLanguages {
             return json
         case "swift":
             return swift
+        case "xml":
+            return xml
         default:
             return nil
         }

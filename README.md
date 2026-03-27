@@ -14,11 +14,12 @@
   - JavaScript
   - JSON
   - Swift
+  - XML
 - Core editing capabilities:
   - Auto-pair insertion: `() [] {} "" '' ```
   - Smart newline indentation (4 spaces)
   - Line indent / outdent (`Tab`, `Shift-Tab`, `Cmd+]`, `Cmd+[`)
-  - Comment toggle (`Cmd+/`) for HTML, JavaScript, CSS, and Swift
+  - Comment toggle (`Cmd+/`) for HTML, JavaScript, CSS, Swift, and XML
   - JSON comment toggle is intentionally no-op
   - Pair-aware backspace deletion
   - Matching bracket highlight
@@ -30,7 +31,7 @@
 - `Shift-Tab`: Outdent
 - `Cmd+]`: Indent
 - `Cmd+[` : Outdent
-- `Cmd+/`: Toggle comment (HTML/JavaScript/CSS/Swift)
+- `Cmd+/`: Toggle comment (HTML/JavaScript/CSS/Swift/XML)
 - `Cmd+Z`: Undo
 - `Shift+Cmd+Z`: Redo
 
@@ -51,6 +52,15 @@ HTML is also available as a builtin language:
 let htmlModel = SyntaxEditorModel(
     text: "<div class=\"message\">Hello</div>",
     language: BuiltinSyntaxLanguages.html
+)
+```
+
+XML is also available as a builtin language:
+
+```swift
+let xmlModel = SyntaxEditorModel(
+    text: "<?xml version=\"1.0\"?><note priority=\"high\">Hello</note>",
+    language: BuiltinSyntaxLanguages.xml
 )
 ```
 

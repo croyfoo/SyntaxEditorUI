@@ -149,6 +149,7 @@ struct SyntaxEditorUITests {
         #expect(BuiltinSyntaxLanguages.named("JS")?.identifier == BuiltinSyntaxLanguages.javascript.identifier)
         #expect(BuiltinSyntaxLanguages.named("JSON")?.identifier == BuiltinSyntaxLanguages.json.identifier)
         #expect(BuiltinSyntaxLanguages.named("Swift")?.identifier == BuiltinSyntaxLanguages.swift.identifier)
+        #expect(BuiltinSyntaxLanguages.named("xml")?.identifier == BuiltinSyntaxLanguages.xml.identifier)
     }
 
     @Test("BuiltinSyntaxLanguages.named rejects unsupported values")
@@ -616,6 +617,402 @@ struct SyntaxEditorUITests {
         )
 
         #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine toggles XML comment")
+    func editorCommandEngineToggleXMLComment() {
+        let engine = EditorCommandEngine()
+        let source = "<note>hello</note>\n"
+
+        let first = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(first?.text == "<!-- <note>hello</note>\n -->")
+
+        let second = engine.toggleComment(
+            source: first?.text ?? "",
+            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(second?.text == source)
+    }
+
+    @Test("EditorCommandEngine toggles XML comment from a caret inside an element line")
+    func editorCommandEngineToggleXMLCommentFromCaretInsideElementLine() {
+        let engine = EditorCommandEngine()
+        let source = "<note priority=\"high\">hello</note>\n"
+        let caret = (source as NSString).range(of: "priority").location
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: caret, length: 0),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<!-- <note priority=\"high\">hello</note>\n -->")
+    }
+
+    @Test("EditorCommandEngine does not wrap XML comments around double hyphen text")
+    func editorCommandEngineDoesNotWrapXMLCommentAroundDoubleHyphenText() {
+        let engine = EditorCommandEngine()
+        let source = "alpha -- beta\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not wrap XML comments around text ending with hyphen")
+    func editorCommandEngineDoesNotWrapXMLCommentAroundTrailingHyphenText() {
+        let engine = EditorCommandEngine()
+        let source = "alpha-\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not toggle XML comments inside CDATA content")
+    func editorCommandEngineDoesNotToggleXMLCommentInsideCDATAContent() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <![CDATA[
+        alpha
+        ]]>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "alpha").location,
+            length: 0
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not toggle XML comments inside processing instruction payload")
+    func editorCommandEngineDoesNotToggleXMLCommentInsideProcessingInstructionPayload() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <?xml-stylesheet
+        href="style.xsl"
+        type="text/xsl"?>
+        <root/>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "href").location,
+            length: 0
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not toggle XML comments inside multiline comment content")
+    func editorCommandEngineDoesNotToggleXMLCommentInsideMultilineCommentContent() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!--
+        alpha
+        -->
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "alpha").location,
+            length: 0
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine toggles XML comments inside DTD internal subsets")
+    func editorCommandEngineToggleXMLCommentInsideDTDInternalSubset() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!DOCTYPE note [
+        <!ELEMENT note (#PCDATA)>
+        ]>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "<!ELEMENT note (#PCDATA)>\n").location,
+            length: "<!ELEMENT note (#PCDATA)>\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == """
+        <!DOCTYPE note [
+        <!-- <!ELEMENT note (#PCDATA)>
+         -->]>
+        """)
+    }
+
+    @Test("EditorCommandEngine toggles XML comments from a caret inside DTD internal subset lines")
+    func editorCommandEngineToggleXMLCommentFromCaretInsideDTDInternalSubsetLine() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!DOCTYPE note [
+        <!ELEMENT note (#PCDATA)>
+        ]>
+        """
+        let caret = (source as NSString).range(of: "note (#PCDATA)").location
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: caret, length: 0),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == """
+        <!DOCTYPE note [
+        <!-- <!ELEMENT note (#PCDATA)>
+         -->]>
+        """)
+    }
+
+    @Test("EditorCommandEngine toggles XML comments for DTD declarations containing closing text literals")
+    func editorCommandEngineToggleXMLCommentForDTDDeclarationsContainingClosingTextLiterals() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!DOCTYPE note [
+        <!ENTITY marker "value ]> tail">
+        ]>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "<!ENTITY marker \"value ]> tail\">\n").location,
+            length: "<!ENTITY marker \"value ]> tail\">\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == """
+        <!DOCTYPE note [
+        <!-- <!ENTITY marker "value ]> tail">
+         -->]>
+        """)
+    }
+
+    @Test("EditorCommandEngine does not toggle XML comments on doctype opener lines")
+    func editorCommandEngineDoesNotToggleXMLCommentOnDoctypeOpenerLines() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!DOCTYPE note [
+        <!ELEMENT note (#PCDATA)>
+        ]>
+        """
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: 0),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine toggles standalone XML doctype lines")
+    func editorCommandEngineToggleStandaloneXMLDoctypeLines() {
+        let engine = EditorCommandEngine()
+        let source = "<!DOCTYPE note>\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<!-- <!DOCTYPE note>\n -->")
+    }
+
+    @Test("EditorCommandEngine toggles standalone XML doctype lines with bracket characters in literals")
+    func editorCommandEngineToggleStandaloneXMLDoctypeLinesWithBracketCharactersInLiterals() {
+        let engine = EditorCommandEngine()
+        let source = "<!DOCTYPE note SYSTEM \"foo[bar].dtd\">\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<!-- <!DOCTYPE note SYSTEM \"foo[bar].dtd\">\n -->")
+    }
+
+    @Test("EditorCommandEngine toggles standalone XML doctype lines with multiline bracket literals")
+    func editorCommandEngineToggleStandaloneXMLDoctypeLinesWithMultilineBracketLiterals() {
+        let engine = EditorCommandEngine()
+        let source = "<!DOCTYPE note SYSTEM \"foo\n[bar].dtd\">\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<!-- <!DOCTYPE note SYSTEM \"foo\n[bar].dtd\">\n -->")
+    }
+
+    @Test("EditorCommandEngine does not toggle XML comments on doctype closing lines")
+    func editorCommandEngineDoesNotToggleXMLCommentOnDoctypeClosingLines() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!DOCTYPE note [
+        <!ELEMENT note (#PCDATA)>
+        ]>
+        """
+        let closingLineLocation = (source as NSString).range(of: "]>").location
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: closingLineLocation, length: 0),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not toggle XML comments across doctype closing delimiters")
+    func editorCommandEngineDoesNotToggleXMLCommentAcrossDoctypeClosingDelimiters() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!DOCTYPE note [
+        <!ELEMENT note (#PCDATA)>
+        ]>
+        <note/>
+        """
+        let start = (source as NSString).range(of: "<!ELEMENT note (#PCDATA)>\n").location
+        let end = (source as NSString).range(of: "<note/>").location
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: start, length: end - start),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not toggle XML comments across multiline doctype opener delimiters")
+    func editorCommandEngineDoesNotToggleXMLCommentAcrossMultilineDoctypeOpenerDelimiters() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!DOCTYPE note SYSTEM
+        "foo.dtd"
+        [
+        <!ELEMENT note (#PCDATA)>
+        ]>
+        """
+        let end = (source as NSString).range(of: "<!ELEMENT note (#PCDATA)>").location
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: end),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not toggle XML comments across conditional section opener delimiters")
+    func editorCommandEngineDoesNotToggleXMLCommentAcrossConditionalSectionOpenerDelimiters() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!DOCTYPE note [
+        <![
+        IGNORE
+        [
+        <!ENTITY hidden "value">
+        ]]>
+        ]>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "<![\n").location,
+            length: "<![\nIGNORE\n[\n<!ENTITY hidden \"value\">\n]]>\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not toggle XML comments on lines containing closing delimiters with trailing content")
+    func editorCommandEngineDoesNotToggleXMLCommentOnLinesContainingClosingDelimitersWithTrailingContent() {
+        let engine = EditorCommandEngine()
+        let source = "<!DOCTYPE note [ <!ELEMENT note (#PCDATA)> ]> <note/>\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine toggles XML comments for multiline DTD declarations containing closing text literals")
+    func editorCommandEngineToggleXMLCommentForMultilineDTDDeclarationsContainingClosingTextLiterals() {
+        let engine = EditorCommandEngine()
+        let source = """
+        <!DOCTYPE note [
+        <!ENTITY marker "value
+        ]> tail">
+        ]>
+        """
+        let selection = NSRange(
+            location: (source as NSString).range(of: "<!ENTITY marker \"value\n").location,
+            length: "<!ENTITY marker \"value\n]> tail\">\n".utf16.count
+        )
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: selection,
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == """
+        <!DOCTYPE note [
+        <!-- <!ENTITY marker "value
+        ]> tail">
+         -->]>
+        """)
     }
 
     @Test("EditorCommandEngine delegates HTML comment toggle inside script raw text")
@@ -1503,6 +1900,203 @@ struct SyntaxEditorUITests {
         }
     }
 
+    @Test("EditorCommandEngine auto-pairs XML quote in attribute assignment")
+    func editorCommandEngineAutoPairXMLQuoteInAttributeAssignment() {
+        let engine = EditorCommandEngine()
+        let source = "<node attr="
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<node attr=\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine auto-pairs XML quote in processing instruction attribute assignment")
+    func editorCommandEngineAutoPairXMLQuoteInProcessingInstructionAttributeAssignment() {
+        let engine = EditorCommandEngine()
+        let source = "<?xml-stylesheet href="
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<?xml-stylesheet href=\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine auto-pairs XML quote in DTD declaration literals")
+    func editorCommandEngineAutoPairXMLQuoteInDTDDeclarationLiterals() {
+        let engine = EditorCommandEngine()
+        let cases = [
+            "<!ENTITY foo ",
+            "<!ENTITY logo SYSTEM ",
+            "<!DOCTYPE note PUBLIC ",
+        ]
+
+        for source in cases {
+            let result = engine.transformInput(
+                source: source,
+                range: NSRange(location: source.utf16.count, length: 0),
+                replacementText: "\"",
+                language: BuiltinSyntaxLanguages.xml
+            )
+
+            #expect(result?.text == source + "\"\"")
+            #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+        }
+    }
+
+    @Test("EditorCommandEngine does not auto-pair XML quote after parameter entity markers")
+    func editorCommandEngineDoesNotAutoPairXMLQuoteAfterParameterEntityMarkers() {
+        let engine = EditorCommandEngine()
+        let source = "<!ENTITY % "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine auto-pairs XML quote for non-ASCII tag names")
+    func editorCommandEngineAutoPairXMLQuoteForNonASCIINameStart() {
+        let engine = EditorCommandEngine()
+        let source = "<élement attr="
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<élement attr=\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine auto-pairs XML quote for extender tag names")
+    func editorCommandEngineAutoPairXMLQuoteForXMLNameExtenders() {
+        let engine = EditorCommandEngine()
+        let source = "<a·b attr="
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<a·b attr=\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine auto-pairs XML quote for supplementary-plane tag names")
+    func editorCommandEngineAutoPairXMLQuoteForSupplementaryPlaneNameStart() {
+        let engine = EditorCommandEngine()
+        let source = "<𐐷node attr="
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<𐐷node attr=\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine auto-pairs XML quote for extender DTD names")
+    func editorCommandEngineAutoPairXMLQuoteForXMLNameExtenderDTDNames() {
+        let engine = EditorCommandEngine()
+        let source = "<!ENTITY foo·bar SYSTEM "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == source + "\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine auto-pairs XML quote for supplementary-plane DTD names")
+    func editorCommandEngineAutoPairXMLQuoteForSupplementaryPlaneDTDNames() {
+        let engine = EditorCommandEngine()
+        let source = "<!ENTITY 𐐷foo "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result?.text == "<!ENTITY 𐐷foo \"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine does not auto-pair XML quote after DTD attribute types")
+    func editorCommandEngineDoesNotAutoPairXMLQuoteAfterDTDAttributeTypes() {
+        let engine = EditorCommandEngine()
+        let source = "<!ATTLIST note category CDATA "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses XML quote auto-pair in comment")
+    func editorCommandEngineSuppressXMLQuoteAutoPairInComment() {
+        let engine = EditorCommandEngine()
+        let source = "<!-- note "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses XML quote auto-pair in text node")
+    func editorCommandEngineSuppressXMLQuoteAutoPairInTextNode() {
+        let engine = EditorCommandEngine()
+        let source = "<node>Hello "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses XML quote auto-pair in attribute value")
+    func editorCommandEngineSuppressXMLQuoteAutoPairInAttributeValue() {
+        let engine = EditorCommandEngine()
+        let source = "<node attr=\"value"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.xml
+        )
+
+        #expect(result == nil)
+    }
+
     @Test("EditorCommandEngine auto-pairs Swift quote after URL literal prefix")
     func editorCommandEngineAutoPairSwiftQuoteAfterURLLiteral() {
         let engine = EditorCommandEngine()
@@ -2227,6 +2821,7 @@ struct SyntaxHighlighterEngineTests {
             (BuiltinSyntaxLanguages.javascript, "const answer = 42;"),
             (BuiltinSyntaxLanguages.json, "{\"enabled\": true, \"count\": 1}"),
             (BuiltinSyntaxLanguages.swift, "let answer = 42"),
+            (BuiltinSyntaxLanguages.xml, "<?xml version=\"1.0\"?><note priority=\"high\">Hello</note>"),
         ]
 
         for testCase in cases {
@@ -2291,6 +2886,26 @@ struct SyntaxHighlighterEngineTests {
             $0.captureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
         })
+    }
+
+    @Test("SyntaxHighlighterEngine highlights XML structures")
+    func highlighterSupportsXML() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE note [
+            <!ELEMENT note (#PCDATA)>
+        ]>
+        <note priority="high"><!-- reminder --><![CDATA[<escaped/>]]></note>
+        """
+
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.xml)
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains { $0.captureName.hasPrefix("keyword") })
+        #expect(tokens.contains { $0.captureName.hasPrefix("tag") })
+        #expect(tokens.contains { $0.captureName.hasPrefix("property") })
+        #expect(tokens.contains { $0.captureName.hasPrefix("comment") })
     }
 
     @Test("SyntaxHighlighterEngine highlights embedded languages for wrapped HTML")
