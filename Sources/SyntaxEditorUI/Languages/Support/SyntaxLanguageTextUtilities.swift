@@ -418,6 +418,31 @@ enum SyntaxLanguageTextUtilities {
         return count % 2 == 1
     }
 
+    static func shouldRejectMarkupCommentWrapping(_ segment: String) -> Bool {
+        let trimmed = segment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else {
+            return false
+        }
+
+        guard wrappedCommentBounds(
+            in: segment,
+            openMarker: "<!--",
+            closeMarker: "-->"
+        ) == nil else {
+            return false
+        }
+
+        if trimmed.hasPrefix("<!--"), trimmed.hasSuffix("-->") {
+            return false
+        }
+
+        if segment.range(of: "<!--") != nil || segment.range(of: "-->") != nil {
+            return true
+        }
+
+        return trimmed.contains("--") || trimmed.hasSuffix("-")
+    }
+
     static func wrappedCommentBounds(
         in segment: String,
         openMarker: String,

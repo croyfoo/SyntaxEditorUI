@@ -119,7 +119,7 @@ private extension SyntaxHighlighterEngine {
         var seenPaths = Set<String>()
         let bundleFilename = "\(support.bundleName).bundle"
 
-        for queriesURL in support.queryDirectories + Self.queryDirectoryCandidates(for: support.bundleName) {
+        for queriesURL in support.queryDirectories + Self.queryDirectoryCandidates(for: support) {
             let standardized = queriesURL.standardizedFileURL
             guard seenPaths.insert(standardized.path).inserted else {
                 continue
@@ -132,7 +132,10 @@ private extension SyntaxHighlighterEngine {
             Bundle.allBundles.map(\.bundleURL) +
             Bundle.allFrameworks.map(\.bundleURL)
         for bundleURL in bundleURLs where bundleURL.lastPathComponent == bundleFilename {
-            for queriesURL in Self.bundleQueryDirectories(for: bundleURL) {
+            for queriesURL in Self.bundleQueryDirectories(
+                for: bundleURL,
+                preferredSubdirectoryNames: Set([support.name.lowercased()])
+            ) {
                 let standardized = queriesURL.standardizedFileURL
                 guard seenPaths.insert(standardized.path).inserted else {
                     continue
@@ -252,7 +255,7 @@ private extension SyntaxHighlighterEngine {
     }
 
     func injectedLanguageConfigurations() -> [String: LanguageConfiguration] {
-        let aliases = ["css", "html", "htm", "javascript", "js", "json", "swift"]
+        let aliases = ["css", "html", "htm", "javascript", "js", "json", "swift", "xml"]
         var resolved: [String: LanguageConfiguration] = [:]
 
         for alias in aliases {
@@ -293,7 +296,7 @@ private extension SyntaxHighlighterEngine {
         var candidates: [URL] = []
         var seenPaths = Set<String>()
 
-        for queriesURL in support.queryDirectories + queryDirectoryCandidates(for: support.bundleName) {
+        for queriesURL in support.queryDirectories + queryDirectoryCandidates(for: support) {
             let standardized = queriesURL.standardizedFileURL
             guard seenPaths.insert(standardized.path).inserted else {
                 continue
@@ -325,8 +328,8 @@ private extension SyntaxHighlighterEngine {
         return nil
     }
 
-    static func queryDirectoryCandidates(for bundleName: String) -> [URL] {
-        let bundleFilename = "\(bundleName).bundle"
+    static func queryDirectoryCandidates(for support: SyntaxTreeSitterSupport) -> [URL] {
+        let bundleFilename = "\(support.bundleName).bundle"
         var roots: [URL] = []
         let fileManager = FileManager.default
         let currentDirectoryURL = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
@@ -351,10 +354,16 @@ private extension SyntaxHighlighterEngine {
         }
 
         var candidates: [URL] = []
+        let preferredSubdirectoryNames = Set([support.name.lowercased()])
 
         for root in uniqueRoots {
             let bundleURL = root.appendingPathComponent(bundleFilename, isDirectory: true)
-            candidates.append(contentsOf: bundleQueryDirectories(for: bundleURL))
+            candidates.append(
+                contentsOf: bundleQueryDirectories(
+                    for: bundleURL,
+                    preferredSubdirectoryNames: preferredSubdirectoryNames
+                )
+            )
         }
 
         let buildRoot = currentDirectoryURL.appendingPathComponent(".build", isDirectory: true)
@@ -370,7 +379,12 @@ private extension SyntaxHighlighterEngine {
                     continue
                 }
 
-                candidates.append(contentsOf: bundleQueryDirectories(for: bundleURL))
+                candidates.append(
+                    contentsOf: bundleQueryDirectories(
+                        for: bundleURL,
+                        preferredSubdirectoryNames: preferredSubdirectoryNames
+                    )
+                )
                 enumerator.skipDescendants()
             }
         }
@@ -396,13 +410,60 @@ private extension SyntaxHighlighterEngine {
         return result
     }
 
-    static func bundleQueryDirectories(for bundleURL: URL) -> [URL] {
+    static func bundleQueryDirectories(
+        for bundleURL: URL,
+        preferredSubdirectoryNames: Set<String>
+    ) -> [URL] {
         let fileManager = FileManager.default
-        let queryDirectories = [
+        var queryDirectories = [
             bundleURL.appendingPathComponent("queries", isDirectory: true),
             bundleURL.appendingPathComponent("Contents/Resources/queries", isDirectory: true),
         ]
 
+        var searchRoots = [
+            bundleURL,
+            bundleURL.appendingPathComponent("Contents/Resources", isDirectory: true),
+        ]
+        searchRoots.append(contentsOf: queryDirectories)
+
+        var preferredDirectories: [URL] = []
+        var fallbackDirectories: [URL] = []
+
+        for root in searchRoots where fileManager.fileExists(atPath: root.path) {
+            guard let children = try? fileManager.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            for child in children {
+                var isDirectory = ObjCBool(false)
+                guard fileManager.fileExists(atPath: child.path, isDirectory: &isDirectory),
+                      isDirectory.boolValue
+                else {
+                    continue
+                }
+
+                let hasHighlights = fileManager.fileExists(
+                    atPath: child.appendingPathComponent("highlights.scm").path
+                )
+                let hasInjections = fileManager.fileExists(
+                    atPath: child.appendingPathComponent("injections.scm").path
+                )
+                if hasHighlights || hasInjections {
+                    if preferredSubdirectoryNames.contains(child.lastPathComponent.lowercased()) {
+                        preferredDirectories.append(child)
+                    } else {
+                        fallbackDirectories.append(child)
+                    }
+                }
+            }
+        }
+
+        queryDirectories.append(contentsOf: preferredDirectories)
+        queryDirectories.append(contentsOf: fallbackDirectories)
         return queryDirectories.filter { fileManager.fileExists(atPath: $0.path) }
     }
 

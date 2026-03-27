@@ -63,7 +63,7 @@ public struct HTMLLanguage: SyntaxLanguage {
             selection: safeSelection
         )
         let segment = nsSource.substring(with: targetLinesRange)
-        if Self.shouldRejectHTMLCommentWrapping(for: segment) {
+        if SyntaxLanguageTextUtilities.shouldRejectMarkupCommentWrapping(segment) {
             return nil
         }
 
@@ -1340,31 +1340,6 @@ private extension HTMLLanguage {
             .first?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? type.lowercased()
-    }
-
-    private static func shouldRejectHTMLCommentWrapping(for segment: String) -> Bool {
-        let trimmed = segment.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else {
-            return false
-        }
-
-        guard SyntaxLanguageTextUtilities.wrappedCommentBounds(
-            in: segment,
-            openMarker: "<!--",
-            closeMarker: "-->"
-        ) == nil else {
-            return false
-        }
-
-        if trimmed.hasPrefix("<!--"), trimmed.hasSuffix("-->") {
-            return false
-        }
-
-        if segment.range(of: "<!--") != nil || segment.range(of: "-->") != nil {
-            return true
-        }
-
-        return trimmed.contains("--") || trimmed.hasSuffix("-")
     }
 
     static func scriptEmbeddedLanguage(forStartTagText startTagText: String) -> (any SyntaxLanguage)? {
