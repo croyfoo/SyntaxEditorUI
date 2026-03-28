@@ -20,6 +20,7 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter/tree-sitter-html", exact: "0.23.2"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-javascript", exact: "0.23.1"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-json", exact: "0.24.8"),
+        .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-objc", from: "3.0.2"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-xml", exact: "0.7.0"),
         .package(url: "https://github.com/alex-pinkus/tree-sitter-swift", exact: "0.7.1-with-generated-files"),
         .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.6.1"),
@@ -34,9 +35,13 @@ let package = Package(
                 .product(name: "TreeSitterHTML", package: "tree-sitter-html"),
                 .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
                 .product(name: "TreeSitterJSON", package: "tree-sitter-json"),
+                .product(name: "TreeSitterObjc", package: "tree-sitter-objc"),
                 .product(name: "TreeSitterSwift", package: "tree-sitter-swift"),
                 .product(name: "TreeSitterXML", package: "tree-sitter-xml"),
                 .product(name: "ObservationBridge", package: "observationbridge"),
+            ],
+            resources: [
+                .copy("Resources/ObjectiveCQueries"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

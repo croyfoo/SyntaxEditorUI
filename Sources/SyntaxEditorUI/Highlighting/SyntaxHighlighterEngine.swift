@@ -255,7 +255,19 @@ private extension SyntaxHighlighterEngine {
     }
 
     func injectedLanguageConfigurations() -> [String: LanguageConfiguration] {
-        let aliases = ["css", "html", "htm", "javascript", "js", "json", "swift", "xml"]
+        let aliases = [
+            "css",
+            "html",
+            "htm",
+            "javascript",
+            "js",
+            "json",
+            "objective-c",
+            "objectivec",
+            "objc",
+            "swift",
+            "xml",
+        ]
         var resolved: [String: LanguageConfiguration] = [:]
 
         for alias in aliases {
@@ -439,9 +451,8 @@ private extension SyntaxHighlighterEngine {
             }
 
             for child in children {
-                var isDirectory = ObjCBool(false)
-                guard fileManager.fileExists(atPath: child.path, isDirectory: &isDirectory),
-                      isDirectory.boolValue
+                guard let resourceValues = try? child.resourceValues(forKeys: [.isDirectoryKey]),
+                      resourceValues.isDirectory == true
                 else {
                     continue
                 }

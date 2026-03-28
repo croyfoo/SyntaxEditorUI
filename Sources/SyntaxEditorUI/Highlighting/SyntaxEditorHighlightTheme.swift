@@ -41,22 +41,29 @@ enum SyntaxEditorHighlightTheme {
         if name.hasPrefix("string") || name.contains("regex") {
             return .string
         }
-        if name.hasPrefix("keyword") || name.hasPrefix("operator") {
+        if name.hasPrefix("keyword")
+            || name.hasPrefix("operator")
+            || name.hasPrefix("preproc")
+            || name.hasPrefix("include")
+            || name.hasPrefix("storageclass")
+            || name.hasPrefix("exception")
+        {
             return .keyword
         }
-        if name.hasPrefix("number") || name.contains("numeric") {
+        if name.hasPrefix("number") || name.contains("numeric") || name.hasPrefix("text.uri") {
             return .number
         }
-        if name.hasPrefix("function") || name.hasPrefix("method") {
+        if name.hasPrefix("function") || name.hasPrefix("method") || name.hasPrefix("constructor") {
             return .function
         }
-        if name.hasPrefix("type") || name.hasPrefix("tag") {
+        if name.hasPrefix("type") || name.hasPrefix("tag") || name.hasPrefix("namespace") {
             return .type
         }
         if name.hasPrefix("constant") || name.hasPrefix("boolean") || name.hasPrefix("literal") {
             return .constant
         }
         if name.hasPrefix("attribute")
+            || name.hasPrefix("parameter")
             || name.hasPrefix("property")
             || name.hasPrefix("selector")
             || name.hasPrefix("variable")
@@ -64,7 +71,7 @@ enum SyntaxEditorHighlightTheme {
         {
             return .variable
         }
-        if name.hasPrefix("punctuation") {
+        if name.hasPrefix("punctuation") || name.hasPrefix("delimiter") {
             return .punctuation
         }
 
