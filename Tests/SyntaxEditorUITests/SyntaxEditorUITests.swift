@@ -148,6 +148,9 @@ struct SyntaxEditorUITests {
         #expect(BuiltinSyntaxLanguages.named(" javascript ")?.identifier == BuiltinSyntaxLanguages.javascript.identifier)
         #expect(BuiltinSyntaxLanguages.named("JS")?.identifier == BuiltinSyntaxLanguages.javascript.identifier)
         #expect(BuiltinSyntaxLanguages.named("JSON")?.identifier == BuiltinSyntaxLanguages.json.identifier)
+        #expect(BuiltinSyntaxLanguages.named("objective-c")?.identifier == BuiltinSyntaxLanguages.objectiveC.identifier)
+        #expect(BuiltinSyntaxLanguages.named("objectivec")?.identifier == BuiltinSyntaxLanguages.objectiveC.identifier)
+        #expect(BuiltinSyntaxLanguages.named("objc")?.identifier == BuiltinSyntaxLanguages.objectiveC.identifier)
         #expect(BuiltinSyntaxLanguages.named("Swift")?.identifier == BuiltinSyntaxLanguages.swift.identifier)
         #expect(BuiltinSyntaxLanguages.named("xml")?.identifier == BuiltinSyntaxLanguages.xml.identifier)
     }
@@ -185,12 +188,36 @@ struct SyntaxEditorUITests {
                 == SyntaxEditorHexColorPair(light: 0xAD3DA4, dark: 0xFC5FA3)
         )
         #expect(
+            SyntaxEditorHighlightTheme.colorPair(for: "include")
+                == SyntaxEditorHexColorPair(light: 0xAD3DA4, dark: 0xFC5FA3)
+        )
+        #expect(
             SyntaxEditorHighlightTheme.colorPair(for: "string.quoted")
                 == SyntaxEditorHexColorPair(light: 0xC41A16, dark: 0xFC6A5D)
         )
         #expect(
+            SyntaxEditorHighlightTheme.colorPair(for: "constructor")
+                == SyntaxEditorHexColorPair(light: 0x326D74, dark: 0x67B7A4)
+        )
+        #expect(
+            SyntaxEditorHighlightTheme.colorPair(for: "parameter")
+                == SyntaxEditorHexColorPair(light: 0x0E4B9E, dark: 0x9CDCFE)
+        )
+        #expect(
+            SyntaxEditorHighlightTheme.colorPair(for: "namespace")
+                == SyntaxEditorHexColorPair(light: 0x0B5CAD, dark: 0x5DD8FF)
+        )
+        #expect(
             SyntaxEditorHighlightTheme.colorPair(for: "number")
                 == SyntaxEditorHexColorPair(light: 0x1C00CF, dark: 0xD0BF69)
+        )
+        #expect(
+            SyntaxEditorHighlightTheme.colorPair(for: "text.uri")
+                == SyntaxEditorHexColorPair(light: 0x1C00CF, dark: 0xD0BF69)
+        )
+        #expect(
+            SyntaxEditorHighlightTheme.colorPair(for: "delimiter")
+                == SyntaxEditorHexColorPair(light: 0x6E7781, dark: 0xA7A7A7)
         )
         #expect(SyntaxEditorHighlightTheme.colorPair(for: "unknown.capture") == nil)
     }
@@ -501,6 +528,28 @@ struct SyntaxEditorUITests {
             source: first?.text ?? "",
             selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
             language: BuiltinSyntaxLanguages.swift
+        )
+
+        #expect(second?.text == source)
+    }
+
+    @Test("EditorCommandEngine toggles Objective-C line comments")
+    func editorCommandEngineToggleObjectiveCComments() {
+        let engine = EditorCommandEngine()
+        let source = "NSString *name = @\"Editor\";\nreturn name;\n"
+
+        let first = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.objectiveC
+        )
+
+        #expect(first?.text == "// NSString *name = @\"Editor\";\n// return name;\n")
+
+        let second = engine.toggleComment(
+            source: first?.text ?? "",
+            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            language: BuiltinSyntaxLanguages.objectiveC
         )
 
         #expect(second?.text == source)
@@ -1745,6 +1794,77 @@ struct SyntaxEditorUITests {
         #expect(result == nil)
     }
 
+    @Test("EditorCommandEngine auto-pairs Objective-C quote in code")
+    func editorCommandEngineAutoPairObjectiveCQuoteInCode() {
+        let engine = EditorCommandEngine()
+        let source = "NSString *value = "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.objectiveC
+        )
+
+        #expect(result?.text == source + "\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine suppresses Objective-C quote auto-pair inside line comment")
+    func editorCommandEngineSuppressObjectiveCQuoteAutoPairInsideLineComment() {
+        let engine = EditorCommandEngine()
+        let source = "// note: "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.objectiveC
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses Objective-C quote auto-pair inside block comment")
+    func editorCommandEngineSuppressObjectiveCQuoteAutoPairInsideBlockComment() {
+        let engine = EditorCommandEngine()
+        let source = "/* note: "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.objectiveC
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses Objective-C quote auto-pair inside Objective-C string literal")
+    func editorCommandEngineSuppressObjectiveCQuoteAutoPairInsideNSStringLiteral() {
+        let engine = EditorCommandEngine()
+        let source = "NSString *value = @\"hello"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.objectiveC
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses Objective-C quote auto-pair inside character literal")
+    func editorCommandEngineSuppressObjectiveCQuoteAutoPairInsideCharacterLiteral() {
+        let engine = EditorCommandEngine()
+        let source = "char marker = 'x"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.objectiveC
+        )
+
+        #expect(result == nil)
+    }
+
     @Test("EditorCommandEngine auto-pairs HTML quote in attribute assignment")
     func editorCommandEngineAutoPairHTMLQuoteInAttributeAssignment() {
         let engine = EditorCommandEngine()
@@ -2820,6 +2940,7 @@ struct SyntaxHighlighterEngineTests {
             (BuiltinSyntaxLanguages.html, "<!-- note --><div class=\"hero\">Hello</div>"),
             (BuiltinSyntaxLanguages.javascript, "const answer = 42;"),
             (BuiltinSyntaxLanguages.json, "{\"enabled\": true, \"count\": 1}"),
+            (BuiltinSyntaxLanguages.objectiveC, "#import <Foundation/Foundation.h>\n@interface Sample : NSObject\n@end"),
             (BuiltinSyntaxLanguages.swift, "let answer = 42"),
             (BuiltinSyntaxLanguages.xml, "<?xml version=\"1.0\"?><note priority=\"high\">Hello</note>"),
         ]
@@ -2855,6 +2976,55 @@ struct SyntaxHighlighterEngineTests {
             token.range.location >= 0 &&
                 token.range.length > 0 &&
                 token.range.upperBound <= sourceLength
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine highlights Objective-C structures")
+    func highlighterSupportsObjectiveC() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = """
+        #import <Foundation/Foundation.h>
+        @interface Sample : NSObject
+        @property (nonatomic, copy) NSString *name;
+        - (NSString *)greetingFor:(NSString *)value;
+        @end
+
+        @implementation Sample
+        - (NSString *)greetingFor:(NSString *)value {
+            // comment
+            return [NSString stringWithFormat:@"Hello, %@", value];
+        }
+        @end
+        """
+
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.objectiveC)
+        let nsSource = source as NSString
+        let importRange = nsSource.range(of: "#import")
+        let interfaceRange = nsSource.range(of: "@interface")
+        let methodRange = nsSource.range(of: "greetingFor")
+        let commentRange = nsSource.range(of: "// comment")
+        let stringRange = nsSource.range(of: "@\"Hello, %@\"")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains {
+            ($0.captureName.hasPrefix("include") || $0.captureName.hasPrefix("preproc"))
+                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: importRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("keyword")
+                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: interfaceRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("method")
+                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: methodRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("comment")
+                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: commentRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("string")
+                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stringRange).length > 0
         })
     }
 

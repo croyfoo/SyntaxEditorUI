@@ -1,5 +1,5 @@
 {
-  "originHash" : "cc7decc060eeab0ec10dbbbb57ffb5c9b50498f1b500637e58dc4cefc4a91784",
+  "originHash" : "c83506d34993e950ce47bcd503e6052a18768859d6d66d2cdaee21ec88569649",
   "pins" : [
     {
       "identity" : "observationbridge",
@@ -80,6 +80,15 @@
       "state" : {
         "revision" : "ee35a6ebefcef0c5c416c0d1ccec7370cfca5a24",
         "version" : "0.24.8"
+      }
+    },
+    {
+      "identity" : "tree-sitter-objc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tree-sitter-grammars/tree-sitter-objc",
+      "state" : {
+        "revision" : "18802acf31d0b5c1c1d50bdbc9eb0e1636cab9ed",
+        "version" : "3.0.2"
       }
     },
     {
