@@ -266,6 +266,7 @@ private extension SyntaxHighlighterEngine {
             "objectivec",
             "objc",
             "swift",
+            "toml",
             "xml",
         ]
         var resolved: [String: LanguageConfiguration] = [:]

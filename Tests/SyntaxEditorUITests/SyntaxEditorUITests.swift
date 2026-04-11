@@ -152,12 +152,13 @@ struct SyntaxEditorUITests {
         #expect(BuiltinSyntaxLanguages.named("objectivec")?.identifier == BuiltinSyntaxLanguages.objectiveC.identifier)
         #expect(BuiltinSyntaxLanguages.named("objc")?.identifier == BuiltinSyntaxLanguages.objectiveC.identifier)
         #expect(BuiltinSyntaxLanguages.named("Swift")?.identifier == BuiltinSyntaxLanguages.swift.identifier)
+        #expect(BuiltinSyntaxLanguages.named("toml")?.identifier == BuiltinSyntaxLanguages.toml.identifier)
         #expect(BuiltinSyntaxLanguages.named("xml")?.identifier == BuiltinSyntaxLanguages.xml.identifier)
     }
 
     @Test("BuiltinSyntaxLanguages.named rejects unsupported values")
     func builtinSyntaxLanguagesRejectUnsupportedValue() {
-        #expect(BuiltinSyntaxLanguages.named("toml") == nil)
+        #expect(BuiltinSyntaxLanguages.named("yaml") == nil)
     }
 
     @Test("SyntaxEditorModel stores and mutates state on MainActor")
@@ -553,6 +554,57 @@ struct SyntaxEditorUITests {
         )
 
         #expect(second?.text == source)
+    }
+
+    @Test("EditorCommandEngine toggles TOML line comments")
+    func editorCommandEngineToggleTOMLComments() {
+        let engine = EditorCommandEngine()
+        let source = "title = \"SyntaxEditorUI\"\nenabled = true\n"
+
+        let first = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(first?.text == "# title = \"SyntaxEditorUI\"\n# enabled = true\n")
+
+        let second = engine.toggleComment(
+            source: first?.text ?? "",
+            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(second?.text == source)
+    }
+
+    @Test("EditorCommandEngine toggles TOML comments without touching blank lines")
+    func editorCommandEngineToggleTOMLCommentsPreservingBlankLines() {
+        let engine = EditorCommandEngine()
+        let source = "title = \"SyntaxEditorUI\"\n\nenabled = true\n"
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result?.text == "# title = \"SyntaxEditorUI\"\n\n# enabled = true\n")
+    }
+
+    @Test("EditorCommandEngine toggles TOML comment for caret line")
+    func editorCommandEngineToggleTOMLCommentAtCaretLine() {
+        let engine = EditorCommandEngine()
+        let source = "title = \"SyntaxEditorUI\"\nenabled = true\n"
+        let caret = (source as NSString).range(of: "enabled").location
+
+        let result = engine.toggleComment(
+            source: source,
+            selection: NSRange(location: caret, length: 0),
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result?.text == "title = \"SyntaxEditorUI\"\n# enabled = true\n")
     }
 
     @Test("EditorCommandEngine toggles CSS block comment")
@@ -1865,6 +1917,306 @@ struct SyntaxEditorUITests {
         #expect(result == nil)
     }
 
+    @Test("EditorCommandEngine auto-pairs TOML quote in code")
+    func editorCommandEngineAutoPairTOMLQuoteInCode() {
+        let engine = EditorCommandEngine()
+        let source = "name = "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result?.text == source + "\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine suppresses TOML quote auto-pair inside comment")
+    func editorCommandEngineSuppressTOMLQuoteAutoPairInsideComment() {
+        let engine = EditorCommandEngine()
+        let source = "# note: "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses TOML quote auto-pair inside basic string")
+    func editorCommandEngineSuppressTOMLQuoteAutoPairInsideBasicString() {
+        let engine = EditorCommandEngine()
+        let source = "name = \"Syntax"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses TOML apostrophe auto-pair inside literal string")
+    func editorCommandEngineSuppressTOMLApostropheAutoPairInsideLiteralString() {
+        let engine = EditorCommandEngine()
+        let source = "path = 'Sources"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "'",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses TOML quote auto-pair inside multiline basic string")
+    func editorCommandEngineSuppressTOMLQuoteAutoPairInsideMultilineBasicString() {
+        let engine = EditorCommandEngine()
+        let source = "description = \"\"\"\nhello\n"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine suppresses TOML apostrophe auto-pair inside multiline literal string")
+    func editorCommandEngineSuppressTOMLApostropheAutoPairInsideMultilineLiteralString() {
+        let engine = EditorCommandEngine()
+        let source = "description = '''\nhello\n"
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "'",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test("EditorCommandEngine does not treat hash inside TOML string as comment")
+    func editorCommandEngineDoesNotTreatHashInsideTOMLStringAsComment() {
+        let engine = EditorCommandEngine()
+        let source = "name = \"value # still string\"\nnext = "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result?.text == source + "\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine recognizes closed TOML multiline basic strings ending with quote")
+    func editorCommandEngineRecognizesClosedTOMLMultilineBasicStringEndingWithQuote() {
+        let engine = EditorCommandEngine()
+        let source = "description = \"\"\"\nvalue\"\"\"\"\nnext = "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result?.text == source + "\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine recognizes closed TOML multiline literal strings ending with apostrophe")
+    func editorCommandEngineRecognizesClosedTOMLMultilineLiteralStringEndingWithApostrophe() {
+        let engine = EditorCommandEngine()
+        let source = "description = '''\nvalue''''\nnext = "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "'",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result?.text == source + "''")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine supports typing TOML multiline basic string delimiters")
+    func editorCommandEngineSupportsTypingTOMLMultilineBasicStringDelimiters() {
+        let engine = EditorCommandEngine()
+        let source = "description = "
+
+        let first = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+        let second = engine.transformInput(
+            source: first?.text ?? "",
+            range: first?.selectedRange ?? NSRange(location: 0, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+        let third = engine.transformInput(
+            source: second?.text ?? "",
+            range: second?.selectedRange ?? NSRange(location: 0, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(first?.text == source + "\"\"")
+        #expect(second?.text == source + "\"\"")
+        #expect(third?.text == source + "\"\"\"")
+        #expect(third?.selectedRange == NSRange(location: source.utf16.count + 3, length: 0))
+    }
+
+    @Test("EditorCommandEngine supports typing TOML multiline literal string delimiters")
+    func editorCommandEngineSupportsTypingTOMLMultilineLiteralStringDelimiters() {
+        let engine = EditorCommandEngine()
+        let source = "description = "
+
+        let first = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "'",
+            language: BuiltinSyntaxLanguages.toml
+        )
+        let second = engine.transformInput(
+            source: first?.text ?? "",
+            range: first?.selectedRange ?? NSRange(location: 0, length: 0),
+            replacementText: "'",
+            language: BuiltinSyntaxLanguages.toml
+        )
+        let third = engine.transformInput(
+            source: second?.text ?? "",
+            range: second?.selectedRange ?? NSRange(location: 0, length: 0),
+            replacementText: "'",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(first?.text == source + "''")
+        #expect(second?.text == source + "''")
+        #expect(third?.text == source + "'''")
+        #expect(third?.selectedRange == NSRange(location: source.utf16.count + 3, length: 0))
+    }
+
+    @Test("EditorCommandEngine invalidates pending TOML multiline delimiter after unrelated command")
+    func editorCommandEngineInvalidatesPendingTOMLMultilineDelimiterAfterUnrelatedCommand() {
+        let engine = EditorCommandEngine()
+        let source = "description = "
+
+        let first = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+        let second = engine.transformInput(
+            source: first?.text ?? "",
+            range: first?.selectedRange ?? NSRange(location: 0, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        _ = engine.indentSelection(
+            source: "value\n",
+            selection: NSRange(location: 0, length: 0)
+        )
+
+        let third = engine.transformInput(
+            source: second?.text ?? "",
+            range: second?.selectedRange ?? NSRange(location: 0, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(third?.text == source + "\"\"\"\"")
+        #expect(third?.selectedRange == NSRange(location: source.utf16.count + 3, length: 0))
+    }
+
+    @Test("EditorCommandEngine invalidates pending TOML multiline delimiter on explicit reset")
+    func editorCommandEngineInvalidatesPendingTOMLMultilineDelimiterOnExplicitReset() {
+        let engine = EditorCommandEngine()
+        let source = "description = "
+
+        let first = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+        let second = engine.transformInput(
+            source: first?.text ?? "",
+            range: first?.selectedRange ?? NSRange(location: 0, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        engine.invalidateTransientState()
+
+        let third = engine.transformInput(
+            source: second?.text ?? "",
+            range: second?.selectedRange ?? NSRange(location: 0, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(third?.text == source + "\"\"\"\"")
+        #expect(third?.selectedRange == NSRange(location: source.utf16.count + 3, length: 0))
+    }
+
+    @Test("EditorCommandEngine does not keep TOML basic strings open across line breaks")
+    func editorCommandEngineDoesNotKeepTOMLBasicStringsOpenAcrossLineBreaks() {
+        let engine = EditorCommandEngine()
+        let source = "name = \"foo\nnext = "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result?.text == source + "\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine does not keep TOML escaped basic strings open across line breaks")
+    func editorCommandEngineDoesNotKeepTOMLEscapedBasicStringsOpenAcrossLineBreaks() {
+        let engine = EditorCommandEngine()
+        let source = "name = \"foo\\\nnext = "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result?.text == source + "\"\"")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
+    @Test("EditorCommandEngine does not keep TOML literal strings open across line breaks")
+    func editorCommandEngineDoesNotKeepTOMLLiteralStringsOpenAcrossLineBreaks() {
+        let engine = EditorCommandEngine()
+        let source = "name = 'foo\nnext = "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "'",
+            language: BuiltinSyntaxLanguages.toml
+        )
+
+        #expect(result?.text == source + "''")
+        #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
+    }
+
     @Test("EditorCommandEngine auto-pairs HTML quote in attribute assignment")
     func editorCommandEngineAutoPairHTMLQuoteInAttributeAssignment() {
         let engine = EditorCommandEngine()
@@ -2923,26 +3275,25 @@ struct SyntaxEditorUITests {
 #endif
 }
 
+private let sharedSyntaxHighlighterEngine = SyntaxHighlighterEngine()
+
 @Suite("SyntaxHighlighterEngine", .serialized)
 struct SyntaxHighlighterEngineTests {
     @Test("SyntaxHighlighterEngine returns no tokens for empty source")
     func highlighterReturnsNoTokensForEmptySource() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let tokens = await engine.render(source: "", language: BuiltinSyntaxLanguages.javascript)
         #expect(tokens.isEmpty)
     }
 
-    @Test("SyntaxHighlighterEngine produces highlight tokens for supported languages")
-    func highlighterProducesTokens() async {
-        let engine = SyntaxHighlighterEngine()
+    @Test("SyntaxHighlighterEngine produces highlight tokens for lightweight direct languages")
+    func highlighterProducesTokensForLightweightDirectLanguages() async {
+        let engine = sharedSyntaxHighlighterEngine
         let cases: [(language: any SyntaxLanguage, source: String)] = [
             (BuiltinSyntaxLanguages.css, "body { color: red; }"),
-            (BuiltinSyntaxLanguages.html, "<!-- note --><div class=\"hero\">Hello</div>"),
             (BuiltinSyntaxLanguages.javascript, "const answer = 42;"),
             (BuiltinSyntaxLanguages.json, "{\"enabled\": true, \"count\": 1}"),
-            (BuiltinSyntaxLanguages.objectiveC, "#import <Foundation/Foundation.h>\n@interface Sample : NSObject\n@end"),
             (BuiltinSyntaxLanguages.swift, "let answer = 42"),
-            (BuiltinSyntaxLanguages.xml, "<?xml version=\"1.0\"?><note priority=\"high\">Hello</note>"),
         ]
 
         for testCase in cases {
@@ -2954,7 +3305,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine is stable for repeated renders")
     func highlighterRepeatedRenderStability() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = "const value = 42; const message = 'ok';"
 
         let first = await engine.render(source: source, language: BuiltinSyntaxLanguages.javascript)
@@ -2966,7 +3317,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine returns UTF-16-safe ranges for non-ASCII source")
     func highlighterHandlesNonASCIIRanges() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = "const label = \"こんにちは😀\";"
         let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.javascript)
         let sourceLength = source.utf16.count
@@ -2981,7 +3332,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine highlights Objective-C structures")
     func highlighterSupportsObjectiveC() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = """
         #import <Foundation/Foundation.h>
         @interface Sample : NSObject
@@ -3030,7 +3381,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine highlights HTML root and embedded languages")
     func highlighterSupportsHTMLInjections() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = """
         😀
         <!-- note -->
@@ -3060,7 +3411,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine highlights XML structures")
     func highlighterSupportsXML() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE note [
@@ -3078,9 +3429,51 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.contains { $0.captureName.hasPrefix("comment") })
     }
 
+    @Test("SyntaxHighlighterEngine highlights TOML structures")
+    func highlighterSupportsTOML() async {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        # comment
+        [package]
+        name = "SyntaxEditorUI"
+        enabled = true
+        count = 1
+        """
+
+        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.toml)
+        let nsSource = source as NSString
+        let commentRange = nsSource.range(of: "# comment")
+        let propertyRange = nsSource.range(of: "name")
+        let stringRange = nsSource.range(of: "\"SyntaxEditorUI\"")
+        let booleanRange = nsSource.range(of: "true")
+        let numberRange = nsSource.range(of: "1")
+
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("comment") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: commentRange).length > 0
+        })
+        #expect(tokens.contains {
+            ($0.captureName.hasPrefix("property") || $0.captureName.hasPrefix("type")) &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: propertyRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("string") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stringRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("boolean") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: booleanRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("number") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: numberRange).length > 0
+        })
+    }
+
     @Test("SyntaxHighlighterEngine highlights embedded languages for wrapped HTML")
     func highlighterSupportsWrappedHTMLInjections() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let language = WrappedHTMLLanguage()
         let source = """
         <style>body { color: red; }</style>
@@ -3106,7 +3499,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine does not inject unsupported script types")
     func highlighterSkipsUnsupportedScriptTypeInjections() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = #"<script type="application/json">{"enabled": true}</script>"#
         let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
         let trueRange = (source as NSString).range(of: "true")
@@ -3123,7 +3516,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine does not inject non-JavaScript script types")
     func highlighterSkipsNonJavaScriptScriptTypeInjections() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = #"<script type="text/plain">const answer = true;</script>"#
         let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
         let constRange = (source as NSString).range(of: "const")
@@ -3142,7 +3535,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine masks unsupported script types through EOF when closing tags are missing")
     func highlighterMasksUnsupportedScriptTypesThroughEOFWithoutClosingTag() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = #"<script type="application/json">{"enabled": true}"#
         let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
         let trueRange = (source as NSString).range(of: "true")
@@ -3156,7 +3549,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine keeps highlighting supported script content past literal closing tag text")
     func highlighterKeepsHighlightingSupportedScriptContentPastLiteralClosingTagText() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = #"<script>const marker = "</script>"; const answer = 42;</script>"#
         let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
         let answerConstRange = (source as NSString).range(of: "const answer")
@@ -3169,7 +3562,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine keeps highlighting supported script content past repeated literal closing tag text")
     func highlighterKeepsHighlightingSupportedScriptContentPastRepeatedLiteralClosingTagText() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = #"<script>const markers = ["</script>", "</script>"]; const answer = 42;</script>"#
         let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
         let answerConstRange = (source as NSString).range(of: "const answer")
@@ -3182,7 +3575,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine ignores commented-out raw text tags")
     func highlighterIgnoresCommentedOutRawTextTags() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = """
         <!-- <script type="text/plain"> -->
         <div class="hero">Hello</div>
@@ -3198,7 +3591,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine does not stop masking on longer unsupported script closing prefixes")
     func highlighterKeepsMaskingUnsupportedScriptContentPastLongerClosingPrefixes() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = #"<script type="application/json">{"marker":"</scripted>","enabled":true}</script>"#
         let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
         let trueRange = (source as NSString).range(of: "true")
@@ -3212,7 +3605,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine does not inject unsupported script types when start tags contain quoted angle brackets")
     func highlighterSkipsUnsupportedScriptTypeInjectionsWithQuotedAngleBracketInStartTag() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = #"<script data="a>b" type="application/json">{"enabled": true}</script>"#
         let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
         let trueRange = (source as NSString).range(of: "true")
@@ -3226,7 +3619,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine ignores raw-text-like attribute text")
     func highlighterIgnoresRawTextLikeAttributeText() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = """
         <div data='<script type="application/json">'>Container</div>
         <span class="hero">Hello</span>
@@ -3242,7 +3635,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine masks unsupported script types for custom HTML support")
     func highlighterMasksUnsupportedScriptTypesForCustomHTMLSupport() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let source = #"<script type="application/json">{"enabled": true}</script>"#
         let tokens = await engine.render(source: source, language: CustomCachedHTMLLanguage())
         let trueRange = (source as NSString).range(of: "true")
@@ -3256,7 +3649,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine skips malformed attribute tokens in unsupported script tags")
     func highlighterSkipsMalformedAttributeTokensInUnsupportedScriptTags() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let cases = [
             #"<script async !foo type="application/json">{"enabled": true}</script>"#,
             #"<script !foo=http://example.com type="application/json">{"enabled": true}</script>"#,
@@ -3281,7 +3674,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine ignores malformed type-like attribute suffixes")
     func highlighterIgnoresMalformedTypeLikeAttributeSuffixes() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let cases = [
             #"<script !type="application/json">const answer = 42;</script>"#,
             #"<script data!type="application/json">const answer = 42;</script>"#,
@@ -3301,7 +3694,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine treats malformed unquoted unsupported script types as unsupported")
     func highlighterTreatsMalformedUnquotedUnsupportedScriptTypesAsUnsupported() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let cases = [
             #"<script type=module=foo>const answer = true;</script>"#,
             #"<script type=text/plain/>const answer = true;</script>"#,
@@ -3320,7 +3713,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine supports custom language wrappers")
     func highlighterSupportsCustomLanguageWrappers() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let language = WrappedJSONLanguage()
         let tokens = await engine.render(
             source: "{\"enabled\": true, \"count\": 1}",
@@ -3349,7 +3742,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine separates shared identifiers by support")
     func highlighterSeparatesSharedIdentifiersBySupport() async {
-        let engine = SyntaxHighlighterEngine()
+        let engine = sharedSyntaxHighlighterEngine
         let json = SharedIdentifierLanguage(
             identifier: "shared-language",
             displayName: "Shared JSON",

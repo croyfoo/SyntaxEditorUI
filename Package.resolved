@@ -1,5 +1,5 @@
 {
-  "originHash" : "c83506d34993e950ce47bcd503e6052a18768859d6d66d2cdaee21ec88569649",
+  "originHash" : "44ace6fddc46705b0b4ec209badfee75940f8e286506e5a6e2360afd665a6d92",
   "pins" : [
     {
       "identity" : "observationbridge",
@@ -98,6 +98,15 @@
       "state" : {
         "revision" : "277b583bbb024f20ba88b95c48bf5a6a0b4f2287",
         "version" : "0.7.1-with-generated-files"
+      }
+    },
+    {
+      "identity" : "tree-sitter-toml",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tree-sitter-grammars/tree-sitter-toml",
+      "state" : {
+        "revision" : "64b56832c2cffe41758f28e05c756a3a98d16f41",
+        "version" : "0.7.0"
       }
     },
     {

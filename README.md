@@ -15,12 +15,13 @@
   - JSON
   - Objective-C
   - Swift
+  - TOML
   - XML
 - Core editing capabilities:
   - Auto-pair insertion: `() [] {} "" '' ```
   - Smart newline indentation (4 spaces)
   - Line indent / outdent (`Tab`, `Shift-Tab`, `Cmd+]`, `Cmd+[`)
-  - Comment toggle (`Cmd+/`) for HTML, JavaScript, CSS, Objective-C, Swift, and XML
+  - Comment toggle (`Cmd+/`) for HTML, JavaScript, CSS, Objective-C, Swift, TOML, and XML
   - JSON comment toggle is intentionally no-op
   - Pair-aware backspace deletion
   - Matching bracket highlight
@@ -32,7 +33,7 @@
 - `Shift-Tab`: Outdent
 - `Cmd+]`: Indent
 - `Cmd+[` : Outdent
-- `Cmd+/`: Toggle comment (HTML/JavaScript/CSS/Objective-C/Swift/XML)
+- `Cmd+/`: Toggle comment (HTML/JavaScript/CSS/Objective-C/Swift/TOML/XML)
 - `Cmd+Z`: Undo
 - `Shift+Cmd+Z`: Redo
 
@@ -71,6 +72,15 @@ Objective-C is also available as a builtin language:
 let objectiveCModel = SyntaxEditorModel(
     text: "#import <Foundation/Foundation.h>\n@interface Example : NSObject\n@end",
     language: BuiltinSyntaxLanguages.objectiveC
+)
+```
+
+TOML is also available as a builtin language:
+
+```swift
+let tomlModel = SyntaxEditorModel(
+    text: "[package]\nname = \"SyntaxEditorUI\"\nenabled = true",
+    language: BuiltinSyntaxLanguages.toml
 )
 ```
 
