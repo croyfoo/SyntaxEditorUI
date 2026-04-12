@@ -77,10 +77,11 @@ public enum BuiltinSyntaxLanguages {
     public static let json = JSONLanguage()
     public static let objectiveC = ObjectiveCLanguage()
     public static let swift = SwiftLanguage()
+    public static let toml = TOMLLanguage()
     public static let xml = XMLLanguage()
 
     public static var all: [any SyntaxLanguage] {
-        [css, html, javascript, json, objectiveC, swift, xml]
+        [css, html, javascript, json, objectiveC, swift, toml, xml]
     }
 
     public static func named(_ normalizedRawValue: String) -> (any SyntaxLanguage)? {
@@ -101,6 +102,8 @@ public enum BuiltinSyntaxLanguages {
             return objectiveC
         case "swift":
             return swift
+        case "toml":
+            return toml
         case "xml":
             return xml
         default:

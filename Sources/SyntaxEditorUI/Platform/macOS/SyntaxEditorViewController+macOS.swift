@@ -77,6 +77,8 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
     @ObservationIgnored
     private var isApplyingUndoRedo = false
     @ObservationIgnored
+    private var isApplyingCommandSelection = false
+    @ObservationIgnored
     private var observationHandles = Set<ObservationHandle>()
 
     public init(model: SyntaxEditorModel) {
@@ -164,6 +166,9 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
     }
 
     public func textViewDidChangeSelection(_ notification: Notification) {
+        if !isApplyingCommandSelection {
+            commandEngine.invalidateTransientState()
+        }
         applyMatchingBracketHighlight()
     }
 
@@ -305,6 +310,7 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
 
         let textNeedsUpdate = forceTextUpdate || textView.string != text
         if textNeedsUpdate {
+            commandEngine.invalidateTransientState()
             textView.string = text
         }
 
@@ -375,7 +381,9 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
                 textView.string = result.text
             }
         }
+        isApplyingCommandSelection = true
         textView.setSelectedRange(result.selectedRange)
+        isApplyingCommandSelection = false
         textView.typingAttributes = baseAttributes()
         isApplyingModel = false
 

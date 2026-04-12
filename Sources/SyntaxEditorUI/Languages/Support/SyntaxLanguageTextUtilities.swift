@@ -24,25 +24,32 @@ struct SyntaxLanguageWrappedCommentBounds {
 }
 
 enum SyntaxLanguageTextUtilities {
-    static func toggleLineComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    static func toggleLineComment(
+        source: String,
+        selection: NSRange,
+        commentPrefix: String = "//"
+    ) -> SyntaxLanguageEdit? {
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let lineRanges = selectedLineRanges(in: nsSource, selection: safeSelection)
         guard !lineRanges.isEmpty else { return nil }
 
-        let lines = lineRanges.map { lineInfo(in: nsSource, lineRange: $0) }
+        let lines = lineRanges.map {
+            lineInfo(in: nsSource, lineRange: $0, commentPrefix: commentPrefix)
+        }
         let actionable = lines.filter { !$0.isBlank }
         guard !actionable.isEmpty else { return nil }
 
         let shouldUncomment = actionable.allSatisfy(\.hasLineComment)
         var edits: [SyntaxLanguageTextEdit] = []
+        let prefixLength = commentPrefix.utf16.count
 
         for line in actionable {
             guard let firstNonWhitespaceOffset = line.firstNonWhitespaceOffset else { continue }
             if shouldUncomment {
-                let afterSlashOffset = firstNonWhitespaceOffset + 2
-                var removeLength = 2
-                if let next = character(in: nsSource, at: afterSlashOffset), next == " " {
+                let afterPrefixOffset = firstNonWhitespaceOffset + prefixLength
+                var removeLength = prefixLength
+                if let next = character(in: nsSource, at: afterPrefixOffset), next == " " {
                     removeLength += 1
                 }
                 edits.append(
@@ -55,7 +62,7 @@ enum SyntaxLanguageTextUtilities {
                 edits.append(
                     SyntaxLanguageTextEdit(
                         range: NSRange(location: firstNonWhitespaceOffset, length: 0),
-                        replacement: "// "
+                        replacement: "\(commentPrefix) "
                     )
                 )
             }
@@ -258,7 +265,11 @@ enum SyntaxLanguageTextUtilities {
         return removedUTF16
     }
 
-    static func lineInfo(in source: NSString, lineRange: NSRange) -> SyntaxLanguageLineInfo {
+    static func lineInfo(
+        in source: NSString,
+        lineRange: NSRange,
+        commentPrefix: String = "//"
+    ) -> SyntaxLanguageLineInfo {
         let contentRange = lineContentRange(in: source, lineRange: lineRange)
 
         var firstNonWhitespace: Int?
@@ -276,8 +287,7 @@ enum SyntaxLanguageTextUtilities {
         let isBlank = firstNonWhitespace == nil
         let hasLineComment: Bool
         if let firstNonWhitespace {
-            hasLineComment = character(in: source, at: firstNonWhitespace) == "/" &&
-                character(in: source, at: firstNonWhitespace + 1) == "/"
+            hasLineComment = hasPrefix(in: source, at: firstNonWhitespace, prefix: commentPrefix)
         } else {
             hasLineComment = false
         }
@@ -371,6 +381,15 @@ enum SyntaxLanguageTextUtilities {
             return nil
         }
         return source.substring(with: composedRange).first
+    }
+
+    static func hasPrefix(in source: NSString, at offset: Int, prefix: String) -> Bool {
+        let prefixLength = prefix.utf16.count
+        guard offset >= 0, prefixLength > 0, offset + prefixLength <= source.length else {
+            return false
+        }
+
+        return source.substring(with: NSRange(location: offset, length: prefixLength)) == prefix
     }
 
     static func previousNonWhitespaceOffset(in source: NSString, before location: Int) -> Int? {

@@ -6,12 +6,22 @@ struct EditorCommandResult {
     let refreshStartUTF16: Int
 }
 
-struct EditorCommandEngine {
+final class EditorCommandEngine {
     private let indentUnit = "    "
+    private var pendingTOMLMultilineDelimiter: PendingTOMLMultilineDelimiter?
 
     enum DeletionIntent {
         case unspecified
         case backward
+    }
+
+    private struct PendingTOMLMultilineDelimiter {
+        let cursorLocation: Int
+        let quote: Character
+    }
+
+    func invalidateTransientState() {
+        pendingTOMLMultilineDelimiter = nil
     }
 
     func transformInput(
@@ -23,6 +33,11 @@ struct EditorCommandEngine {
     ) -> EditorCommandResult? {
         let nsSource = source as NSString
         let safeRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: nsSource.length)
+        let singleCharacterInput = replacementText.utf16.count == 1 ? replacementText.first : nil
+
+        if !(singleCharacterInput.map(isQuote) ?? false) {
+            invalidateTransientState()
+        }
 
         if replacementText == "\n" {
             return smartNewline(source: source, range: safeRange)
@@ -49,6 +64,7 @@ struct EditorCommandEngine {
     }
 
     func indentSelection(source: String, selection: NSRange) -> EditorCommandResult? {
+        invalidateTransientState()
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let lineStarts = SyntaxLanguageTextUtilities.lineStartOffsets(in: nsSource, selection: safeSelection)
@@ -65,6 +81,7 @@ struct EditorCommandEngine {
     }
 
     func outdentSelection(source: String, selection: NSRange) -> EditorCommandResult? {
+        invalidateTransientState()
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let lineStarts = SyntaxLanguageTextUtilities.lineStartOffsets(in: nsSource, selection: safeSelection)
@@ -96,6 +113,7 @@ struct EditorCommandEngine {
         selection: NSRange,
         language: any SyntaxLanguage
     ) -> EditorCommandResult? {
+        invalidateTransientState()
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         guard let edit = language.toggleComment(source: source, selection: safeSelection) else { return nil }
@@ -140,11 +158,39 @@ private extension EditorCommandEngine {
             "`": "`",
         ]
 
+        if shouldInsertPendingTOMLMultilineDelimiter(
+            range: range,
+            input: input,
+            language: language
+        ) {
+            pendingTOMLMultilineDelimiter = nil
+            let updated = nsSource.replacingCharacters(in: range, with: String(input))
+            return EditorCommandResult(
+                text: updated,
+                selectedRange: NSRange(location: range.location + 1, length: 0),
+                refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(in: source, around: range.location)
+            )
+        }
+
+        pendingTOMLMultilineDelimiter = nil
+
         if isQuote(input),
            range.length == 0,
            let next = SyntaxLanguageTextUtilities.character(in: nsSource, at: range.location),
            next == input
         {
+            if shouldStartTOMLMultilineDelimiterPending(
+                source: nsSource,
+                range: range,
+                input: input,
+                language: language
+            ) {
+                pendingTOMLMultilineDelimiter = PendingTOMLMultilineDelimiter(
+                    cursorLocation: range.location + 1,
+                    quote: input
+                )
+            }
+
             return EditorCommandResult(
                 text: source,
                 selectedRange: NSRange(location: range.location + 1, length: 0),
@@ -311,6 +357,42 @@ private extension EditorCommandEngine {
 
     func isQuote(_ character: Character) -> Bool {
         character == "\"" || character == "'" || character == "`"
+    }
+
+    func shouldInsertPendingTOMLMultilineDelimiter(
+        range: NSRange,
+        input: Character,
+        language: any SyntaxLanguage
+    ) -> Bool {
+        guard language.identifier == BuiltinSyntaxLanguages.toml.identifier,
+              let pendingTOMLMultilineDelimiter,
+              range.length == 0,
+              pendingTOMLMultilineDelimiter.cursorLocation == range.location,
+              pendingTOMLMultilineDelimiter.quote == input
+        else {
+            return false
+        }
+
+        return true
+    }
+
+    func shouldStartTOMLMultilineDelimiterPending(
+        source: NSString,
+        range: NSRange,
+        input: Character,
+        language: any SyntaxLanguage
+    ) -> Bool {
+        guard language.identifier == BuiltinSyntaxLanguages.toml.identifier,
+              range.length == 0,
+              input == "\"" || input == "'",
+              range.location > 0,
+              let previous = SyntaxLanguageTextUtilities.character(in: source, at: range.location - 1),
+              let next = SyntaxLanguageTextUtilities.character(in: source, at: range.location)
+        else {
+            return false
+        }
+
+        return previous == input && next == input
     }
 
     func closingCharacter(for opening: Character) -> Character {

@@ -17,7 +17,11 @@ public struct ObjectiveCLanguage: SyntaxLanguage {
     }
 
     public func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        SyntaxLanguageTextUtilities.toggleLineComment(source: source, selection: selection)
+        SyntaxLanguageTextUtilities.toggleLineComment(
+            source: source,
+            selection: selection,
+            commentPrefix: "//"
+        )
     }
 
     public func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
