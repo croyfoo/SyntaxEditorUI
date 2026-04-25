@@ -5,8 +5,9 @@
 ## Features
 
 - `@Observable` state model (`SyntaxEditorModel`)
-- SwiftUI entry point (`SyntaxEditorView`)
-- UIKit/AppKit controller API (`SyntaxEditorViewController`)
+- SwiftUI entry point (`SyntaxEditor`)
+- UIKit/AppKit native view API (`SyntaxEditorView`)
+- UIKit/AppKit controller wrapper API (`SyntaxEditorViewController`)
 - protocol-based language definitions (`SyntaxLanguage`)
 - tree-sitter based syntax highlighting for:
   - CSS
@@ -45,7 +46,8 @@ let model = SyntaxEditorModel(
     language: BuiltinSyntaxLanguages.javascript
 )
 
-let view = SyntaxEditorView(model: model)
+let editor = SyntaxEditor(model: model)
+let editorView = SyntaxEditorView(model: model)
 ```
 
 HTML is also available as a builtin language:

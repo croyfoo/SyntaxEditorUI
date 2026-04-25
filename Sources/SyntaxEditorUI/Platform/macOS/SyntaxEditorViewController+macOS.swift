@@ -47,10 +47,9 @@ private final class SyntaxEditorNativeTextView: NSTextView {
 
 @MainActor
 @Observable
-public final class SyntaxEditorViewController: NSViewController, NSTextViewDelegate {
+public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     public private(set) var model: SyntaxEditorModel
     public let textView: NSTextView
-    public let scrollView: NSScrollView
     @ObservationIgnored
     private let fallbackUndoManager = UndoManager()
     @ObservationIgnored
@@ -81,6 +80,8 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
     @ObservationIgnored
     private var observationHandles = Set<ObservationHandle>()
 
+    private var scrollView: NSScrollView { self }
+
     public init(model: SyntaxEditorModel) {
         self.model = model
 
@@ -100,9 +101,8 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
         self.textStorage = textStorage
         self.textContainer = textContainer
         self.textView = nativeTextView
-        self.scrollView = NSScrollView(frame: .zero)
 
-        super.init(nibName: nil, bundle: nil)
+        super.init(frame: .zero)
 
         nativeTextView.shortcutHandler = { [weak self] action in
             guard let self else { return false }
@@ -110,23 +110,6 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
         }
 
         startModelObservation()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        highlightTask?.cancel()
-    }
-
-    public override func loadView() {
-        view = scrollView
-    }
-
-    public override func viewDidLoad() {
-        super.viewDidLoad()
         configureScrollView()
         configureTextView()
         applyObservedText(
@@ -139,6 +122,15 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
             lineWrappingEnabled: model.lineWrappingEnabled,
             forceLanguageRefresh: true
         )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        highlightTask?.cancel()
     }
 
     public func textDidChange(_ notification: Notification) {
@@ -641,6 +633,62 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
             textContainer.widthTracksTextView = false
             textContainer.lineBreakMode = .byClipping
         }
+    }
+}
+
+@MainActor
+@Observable
+public final class SyntaxEditorViewController: NSViewController, NSTextViewDelegate {
+    public private(set) var model: SyntaxEditorModel
+    @ObservationIgnored
+    public let editorView: SyntaxEditorView
+
+    public var textView: NSTextView {
+        editorView.textView
+    }
+
+    public var scrollView: NSScrollView {
+        editorView
+    }
+
+    public init(model: SyntaxEditorModel) {
+        self.model = model
+        self.editorView = SyntaxEditorView(model: model)
+
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    public override func loadView() {
+        view = editorView
+    }
+
+    public func textDidChange(_ notification: Notification) {
+        editorView.textDidChange(notification)
+    }
+
+    public func textViewDidChangeSelection(_ notification: Notification) {
+        editorView.textViewDidChangeSelection(notification)
+    }
+
+    public func textView(
+        _ textView: NSTextView,
+        shouldChangeTextIn affectedCharRange: NSRange,
+        replacementString: String?
+    ) -> Bool {
+        editorView.textView(
+            textView,
+            shouldChangeTextIn: affectedCharRange,
+            replacementString: replacementString
+        )
+    }
+
+    public func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        editorView.textView(textView, doCommandBy: commandSelector)
     }
 }
 

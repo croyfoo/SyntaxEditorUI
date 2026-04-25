@@ -5,11 +5,12 @@ import UIKit
 
 @MainActor
 @Observable
-public final class SyntaxEditorViewController: UIViewController, UITextViewDelegate {
+public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     public private(set) var model: SyntaxEditorModel
-    public let textView: UITextView
     @ObservationIgnored
     private let fallbackUndoManager = UndoManager()
+
+    private var textView: UITextView { self }
 
     @ObservationIgnored
     private let highlighter = SyntaxHighlighterEngine()
@@ -46,27 +47,8 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
         let textContainer = NSTextContainer(size: .zero)
         layoutManager.addTextContainer(textContainer)
 
-        self.textView = UITextView(frame: .zero, textContainer: textContainer)
-
-        super.init(nibName: nil, bundle: nil)
+        super.init(frame: .zero, textContainer: textContainer)
         startModelObservation()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        highlightTask?.cancel()
-    }
-
-    public override func loadView() {
-        view = textView
-    }
-
-    public override func viewDidLoad() {
-        super.viewDidLoad()
         configureTextView()
         configureTraitChangeObservation()
         applyObservedText(
@@ -81,14 +63,24 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
         )
     }
 
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        highlightTask?.cancel()
+    }
+
     public override var keyCommands: [UIKeyCommand]? {
-        [
+        let editorCommands = [
             makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleIndentCommand), title: "Indent"),
             makeKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleOutdentCommand), title: "Outdent"),
             makeKeyCommand(input: "/", modifierFlags: [.command], action: #selector(handleToggleCommentCommand), title: "Toggle Comment"),
             makeKeyCommand(input: "]", modifierFlags: [.command], action: #selector(handleIndentCommand), title: "Indent"),
             makeKeyCommand(input: "[", modifierFlags: [.command], action: #selector(handleOutdentCommand), title: "Outdent"),
         ]
+        return (super.keyCommands ?? []) + editorCommands
     }
 
     public func textViewDidChange(_ textView: UITextView) {
@@ -480,7 +472,7 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
     }
 
     @objc private func handleDismissKeyboardCommand() {
-        view.window?.endEditing(true)
+        window?.endEditing(true)
     }
 
     private func scheduleHighlight(
@@ -608,6 +600,54 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
             )
             textView.textContainer.lineBreakMode = .byClipping
         }
+    }
+}
+
+@MainActor
+@Observable
+public final class SyntaxEditorViewController: UIViewController, UITextViewDelegate {
+    public private(set) var model: SyntaxEditorModel
+    @ObservationIgnored
+    public let editorView: SyntaxEditorView
+
+    public var textView: UITextView {
+        editorView
+    }
+
+    public init(model: SyntaxEditorModel) {
+        self.model = model
+        self.editorView = SyntaxEditorView(model: model)
+
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    public override func loadView() {
+        view = editorView
+    }
+
+    public func textViewDidChange(_ textView: UITextView) {
+        editorView.textViewDidChange(textView)
+    }
+
+    public func textViewDidChangeSelection(_ textView: UITextView) {
+        editorView.textViewDidChangeSelection(textView)
+    }
+
+    public func textView(
+        _ textView: UITextView,
+        shouldChangeTextIn range: NSRange,
+        replacementText text: String
+    ) -> Bool {
+        editorView.textView(
+            textView,
+            shouldChangeTextIn: range,
+            replacementText: text
+        )
     }
 }
 
