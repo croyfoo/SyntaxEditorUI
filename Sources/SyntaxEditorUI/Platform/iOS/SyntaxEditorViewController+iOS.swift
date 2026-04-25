@@ -604,18 +604,18 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 }
 
 @MainActor
-public final class SyntaxEditorViewController: UIViewController {
+@Observable
+public final class SyntaxEditorViewController: UIViewController, UITextViewDelegate {
+    public private(set) var model: SyntaxEditorModel
+    @ObservationIgnored
     public let editorView: SyntaxEditorView
-
-    public var model: SyntaxEditorModel {
-        editorView.model
-    }
 
     public var textView: UITextView {
         editorView
     }
 
     public init(model: SyntaxEditorModel) {
+        self.model = model
         self.editorView = SyntaxEditorView(model: model)
 
         super.init(nibName: nil, bundle: nil)
@@ -628,6 +628,26 @@ public final class SyntaxEditorViewController: UIViewController {
 
     public override func loadView() {
         view = editorView
+    }
+
+    public func textViewDidChange(_ textView: UITextView) {
+        editorView.textViewDidChange(textView)
+    }
+
+    public func textViewDidChangeSelection(_ textView: UITextView) {
+        editorView.textViewDidChangeSelection(textView)
+    }
+
+    public func textView(
+        _ textView: UITextView,
+        shouldChangeTextIn range: NSRange,
+        replacementText text: String
+    ) -> Bool {
+        editorView.textView(
+            textView,
+            shouldChangeTextIn: range,
+            replacementText: text
+        )
     }
 }
 

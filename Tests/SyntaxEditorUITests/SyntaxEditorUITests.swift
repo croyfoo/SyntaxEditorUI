@@ -1,6 +1,11 @@
 import Foundation
+import Observation
 import Testing
 @testable import SyntaxEditorUI
+
+#if canImport(UIKit)
+import UIKit
+#endif
 
 #if canImport(AppKit)
 import AppKit
@@ -60,6 +65,16 @@ private struct WrappedHTMLLanguage: SyntaxLanguage {
         BuiltinSyntaxLanguages.html.isInsideLiteralOrComment(source: source, location: location)
     }
 }
+
+private func requireObservable<T: Observable>(_ value: T) {}
+
+#if canImport(UIKit)
+private func requireUITextViewDelegate(_ value: any UITextViewDelegate) {}
+#endif
+
+#if canImport(AppKit)
+private func requireNSTextViewDelegate(_ value: any NSTextViewDelegate) {}
+#endif
 
 private struct CustomCachedHTMLLanguage: SyntaxLanguage {
     var identifier: String { "custom-cached-html" }
@@ -3184,6 +3199,26 @@ struct SyntaxEditorUITests {
         #expect(recorder.literalCheckLocations == [source.utf16.count])
     }
 
+#if canImport(UIKit)
+    @Test("SyntaxEditorViewController preserves Observable conformance on iOS")
+    @MainActor
+    func syntaxEditorViewControllerIOSObservableCompatibility() {
+        let model = SyntaxEditorModel(text: "{}", language: BuiltinSyntaxLanguages.javascript)
+        let controller = SyntaxEditorViewController(model: model)
+
+        requireObservable(controller)
+        requireUITextViewDelegate(controller)
+        #expect(controller.model === model)
+        #expect(
+            controller.textView(
+                controller.textView,
+                shouldChangeTextIn: NSRange(location: 0, length: 0),
+                replacementText: "a"
+            )
+        )
+    }
+#endif
+
 #if canImport(AppKit)
     @MainActor
     private func waitUntilEditorCondition(
@@ -3268,6 +3303,24 @@ struct SyntaxEditorUITests {
 
         let textView = controller.textView
         #expect(textView.allowsUndo == true)
+    }
+
+    @Test("SyntaxEditorViewController preserves Observable conformance on macOS")
+    @MainActor
+    func syntaxEditorViewControllerMacObservableCompatibility() {
+        let model = SyntaxEditorModel(text: "{}", language: BuiltinSyntaxLanguages.javascript)
+        let controller = SyntaxEditorViewController(model: model)
+
+        requireObservable(controller)
+        requireNSTextViewDelegate(controller)
+        #expect(controller.model === model)
+        #expect(
+            controller.textView(
+                controller.textView,
+                shouldChangeTextIn: NSRange(location: 0, length: 0),
+                replacementString: "a"
+            )
+        )
     }
 
     @Test("SyntaxEditorViewController reflects model text mutations on macOS")
