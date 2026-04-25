@@ -3186,7 +3186,7 @@ struct SyntaxEditorUITests {
 
 #if canImport(AppKit)
     @MainActor
-    private func waitUntilViewControllerCondition(
+    private func waitUntilEditorCondition(
         nanoseconds: UInt64 = 5_000_000_000,
         _ condition: @escaping @MainActor () -> Bool
     ) async -> Bool {
@@ -3201,6 +3201,62 @@ struct SyntaxEditorUITests {
         }
 
         return true
+    }
+
+    @Test("SyntaxEditorView reflects model text mutations on macOS")
+    @MainActor
+    func syntaxEditorViewMacTextObservation() async {
+        let model = SyntaxEditorModel(text: "const answer = 42;", language: BuiltinSyntaxLanguages.javascript)
+        let editorView = SyntaxEditorView(model: model)
+
+        model.text = "{\"enabled\":true}"
+
+        #expect(await waitUntilEditorCondition {
+            editorView.textView.string == "{\"enabled\":true}"
+        })
+    }
+
+    @Test("SyntaxEditorView reflects editable and wrapping changes on macOS")
+    @MainActor
+    func syntaxEditorViewMacEditorStateObservation() async {
+        let model = SyntaxEditorModel(text: "body {}", language: BuiltinSyntaxLanguages.css)
+        let editorView = SyntaxEditorView(model: model)
+
+        model.isEditable = false
+        model.lineWrappingEnabled = true
+
+        #expect(await waitUntilEditorCondition {
+            editorView.textView.isEditable == false
+        })
+        #expect(await waitUntilEditorCondition {
+            editorView.hasHorizontalScroller == false
+        })
+
+        model.lineWrappingEnabled = false
+
+        #expect(await waitUntilEditorCondition {
+            editorView.hasHorizontalScroller == true
+        })
+    }
+
+    @Test("SyntaxEditorView keeps synchronizing after language changes on macOS")
+    @MainActor
+    func syntaxEditorViewMacLanguageChangeKeepsObservationAlive() async {
+        let model = SyntaxEditorModel(text: "let answer = 42", language: BuiltinSyntaxLanguages.swift)
+        let editorView = SyntaxEditorView(model: model)
+
+        model.language = BuiltinSyntaxLanguages.json
+        model.isEditable = false
+
+        #expect(await waitUntilEditorCondition {
+            editorView.textView.isEditable == false
+        })
+
+        model.text = "{\"answer\":42}"
+
+        #expect(await waitUntilEditorCondition {
+            editorView.textView.string == "{\"answer\":42}"
+        })
     }
 
     @Test("SyntaxEditorViewController enables undo support on macOS")
@@ -3223,7 +3279,7 @@ struct SyntaxEditorUITests {
 
         model.text = "{\"enabled\":true}"
 
-        #expect(await waitUntilViewControllerCondition {
+        #expect(await waitUntilEditorCondition {
             controller.textView.string == "{\"enabled\":true}"
         })
     }
@@ -3238,16 +3294,16 @@ struct SyntaxEditorUITests {
         model.isEditable = false
         model.lineWrappingEnabled = true
 
-        #expect(await waitUntilViewControllerCondition {
+        #expect(await waitUntilEditorCondition {
             controller.textView.isEditable == false
         })
-        #expect(await waitUntilViewControllerCondition {
+        #expect(await waitUntilEditorCondition {
             controller.scrollView.hasHorizontalScroller == false
         })
 
         model.lineWrappingEnabled = false
 
-        #expect(await waitUntilViewControllerCondition {
+        #expect(await waitUntilEditorCondition {
             controller.scrollView.hasHorizontalScroller == true
         })
     }
@@ -3262,13 +3318,13 @@ struct SyntaxEditorUITests {
         model.language = BuiltinSyntaxLanguages.json
         model.isEditable = false
 
-        #expect(await waitUntilViewControllerCondition {
+        #expect(await waitUntilEditorCondition {
             controller.textView.isEditable == false
         })
 
         model.text = "{\"answer\":42}"
 
-        #expect(await waitUntilViewControllerCondition {
+        #expect(await waitUntilEditorCondition {
             controller.textView.string == "{\"answer\":42}"
         })
     }

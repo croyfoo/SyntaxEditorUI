@@ -5,34 +5,34 @@ import SyntaxEditorUI
 import UIKit
 
 @MainActor
-struct MiniEditorHostView: UIViewControllerRepresentable {
+struct MiniEditorHostView: UIViewRepresentable {
     let model: SyntaxEditorModel
 
-    func makeUIViewController(context: Context) -> SyntaxEditorViewController {
-        let controller = SyntaxEditorViewController(model: model)
-        controller.textView.accessibilityIdentifier = "mini.editor"
-        return controller
+    func makeUIView(context: Context) -> SyntaxEditorView {
+        let editorView = SyntaxEditorView(model: model)
+        editorView.accessibilityIdentifier = "mini.editor"
+        return editorView
     }
 
-    func updateUIViewController(_ uiViewController: SyntaxEditorViewController, context: Context) {
-        uiViewController.textView.accessibilityIdentifier = "mini.editor"
+    func updateUIView(_ uiView: SyntaxEditorView, context: Context) {
+        uiView.accessibilityIdentifier = "mini.editor"
     }
 }
 #elseif canImport(AppKit)
 import AppKit
 
 @MainActor
-struct MiniEditorHostView: NSViewControllerRepresentable {
+struct MiniEditorHostView: NSViewRepresentable {
     let model: SyntaxEditorModel
 
-    func makeNSViewController(context: Context) -> SyntaxEditorViewController {
-        let controller = SyntaxEditorViewController(model: model)
-        controller.textView.setAccessibilityIdentifier("mini.editor")
-        return controller
+    func makeNSView(context: Context) -> SyntaxEditorView {
+        let editorView = SyntaxEditorView(model: model)
+        editorView.textView.setAccessibilityIdentifier("mini.editor")
+        return editorView
     }
 
-    func updateNSViewController(_ nsViewController: SyntaxEditorViewController, context: Context) {
-        nsViewController.textView.setAccessibilityIdentifier("mini.editor")
+    func updateNSView(_ nsView: SyntaxEditorView, context: Context) {
+        nsView.textView.setAccessibilityIdentifier("mini.editor")
     }
 }
 #endif

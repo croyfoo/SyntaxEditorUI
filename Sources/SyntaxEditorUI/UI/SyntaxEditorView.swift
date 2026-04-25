@@ -1,33 +1,33 @@
 import SwiftUI
 
 #if canImport(UIKit)
-private struct SyntaxEditorViewContainer: UIViewControllerRepresentable {
+private struct SyntaxEditorContainer: UIViewRepresentable {
     let model: SyntaxEditorModel
 
-    func makeUIViewController(context: Context) -> SyntaxEditorViewController {
-        SyntaxEditorViewController(model: model)
+    func makeUIView(context: Context) -> SyntaxEditorView {
+        SyntaxEditorView(model: model)
     }
 
-    func updateUIViewController(_ uiViewController: SyntaxEditorViewController, context: Context) {
-        // Model observation keeps the controller synchronized.
+    func updateUIView(_ uiView: SyntaxEditorView, context: Context) {
+        // Model observation keeps the native view synchronized.
     }
 }
 #elseif canImport(AppKit)
-private struct SyntaxEditorViewContainer: NSViewControllerRepresentable {
+private struct SyntaxEditorContainer: NSViewRepresentable {
     let model: SyntaxEditorModel
 
-    func makeNSViewController(context: Context) -> SyntaxEditorViewController {
-        SyntaxEditorViewController(model: model)
+    func makeNSView(context: Context) -> SyntaxEditorView {
+        SyntaxEditorView(model: model)
     }
 
-    func updateNSViewController(_ nsViewController: SyntaxEditorViewController, context: Context) {
-        // Model observation keeps the controller synchronized.
+    func updateNSView(_ nsView: SyntaxEditorView, context: Context) {
+        // Model observation keeps the native view synchronized.
     }
 }
 #endif
 
 @MainActor
-public struct SyntaxEditorView: View {
+public struct SyntaxEditor: View {
     let model: SyntaxEditorModel
 
     public init(model: SyntaxEditorModel) {
@@ -35,7 +35,7 @@ public struct SyntaxEditorView: View {
     }
 
     public var body: some View {
-        SyntaxEditorViewContainer(model: model)
+        SyntaxEditorContainer(model: model)
             .id(ObjectIdentifier(model))
     }
 }
