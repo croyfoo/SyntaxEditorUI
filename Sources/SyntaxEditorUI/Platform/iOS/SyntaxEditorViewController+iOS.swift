@@ -231,7 +231,7 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
     private func startModelObservation() {
         observationHandles.removeAll()
 
-        model.observe(\.text, options: [.removeDuplicates]) { [weak self] text in
+        model.observe(\.text) { [weak self] text in
             guard let self else { return }
             self.applyObservedText(text)
         }
