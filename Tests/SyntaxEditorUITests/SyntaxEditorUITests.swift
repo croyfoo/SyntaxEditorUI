@@ -70,10 +70,57 @@ private func requireObservable<T: Observable>(_ value: T) {}
 
 #if canImport(UIKit)
 private func requireUITextViewDelegate(_ value: any UITextViewDelegate) {}
+
+private let syntaxEditorKeyCommandModifierMask: UIKeyModifierFlags = [
+    .command,
+    .control,
+    .alternate,
+    .shift,
+]
+
+@MainActor
+private func hasSyntaxEditorKeyCommand(
+    _ commands: [UIKeyCommand]?,
+    input: String,
+    modifierFlags: UIKeyModifierFlags
+) -> Bool {
+    commands?.contains { command in
+        command.input == input
+            && command.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == modifierFlags
+    } ?? false
+}
+
+@MainActor
+@discardableResult
+private func performSyntaxEditorSelector(_ selectorName: String, on view: SyntaxEditorView) -> Bool {
+    let selector = NSSelectorFromString(selectorName)
+    guard view.responds(to: selector) else {
+        Issue.record("SyntaxEditorView does not respond to \(selectorName)")
+        return false
+    }
+
+    _ = view.perform(selector)
+    return true
+}
 #endif
 
 #if canImport(AppKit)
 private func requireNSTextViewDelegate(_ value: any NSTextViewDelegate) {}
+
+private func makeMacCommandKeyEvent(_ character: String) -> NSEvent? {
+    NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [.command],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: character,
+        charactersIgnoringModifiers: character,
+        isARepeat: false,
+        keyCode: 0
+    )
+}
 #endif
 
 private struct CustomCachedHTMLLanguage: SyntaxLanguage {
@@ -3217,6 +3264,137 @@ struct SyntaxEditorUITests {
             )
         )
     }
+
+    @Test("SyntaxEditorView omits editing key commands while read-only on iOS")
+    @MainActor
+    func syntaxEditorViewIOSReadOnlyOmitsEditingKeyCommands() {
+        let model = SyntaxEditorModel(
+            text: "let answer = 42",
+            language: BuiltinSyntaxLanguages.swift,
+            isEditable: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+
+        let readOnlyCommands = editorView.keyCommands
+        #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "\t", modifierFlags: []))
+        #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "\t", modifierFlags: [.shift]))
+        #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "]", modifierFlags: [.command]))
+        #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "[", modifierFlags: [.command]))
+        #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "/", modifierFlags: [.command]))
+
+        model.isEditable = true
+
+        let editableCommands = editorView.keyCommands
+        #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "\t", modifierFlags: []))
+        #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "\t", modifierFlags: [.shift]))
+        #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "]", modifierFlags: [.command]))
+        #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "[", modifierFlags: [.command]))
+        #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "/", modifierFlags: [.command]))
+    }
+
+    @Test("SyntaxEditorView read-only handlers do not mutate text on iOS")
+    @MainActor
+    func syntaxEditorViewIOSReadOnlyHandlersDoNotMutateText() {
+        let source = "let answer = 42"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: BuiltinSyntaxLanguages.swift,
+            isEditable: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        editorView.selectedRange = NSRange(location: 0, length: source.utf16.count)
+
+        #expect(!editorView.textView(
+            editorView,
+            shouldChangeTextIn: NSRange(location: 0, length: 0),
+            replacementText: "\t"
+        ))
+        #expect(performSyntaxEditorSelector("handleIndentCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("handleOutdentCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("handleToggleCommentCommand", on: editorView))
+
+        #expect(model.text == source)
+        #expect(editorView.text == source)
+    }
+
+    @Test("SyntaxEditorView read-only undo and redo do not mutate text on iOS")
+    @MainActor
+    func syntaxEditorViewIOSReadOnlyUndoRedoDoNotMutateText() {
+        let source = "let answer = 42"
+        let model = SyntaxEditorModel(text: source, language: BuiltinSyntaxLanguages.swift)
+        let editorView = SyntaxEditorView(model: model)
+        editorView.selectedRange = NSRange(location: 0, length: 0)
+
+        #expect(performSyntaxEditorSelector("handleIndentCommand", on: editorView))
+        let indentedSource = "    \(source)"
+        #expect(model.text == indentedSource)
+        #expect(editorView.text == indentedSource)
+
+        model.isEditable = false
+
+        #expect(!editorView.canPerformAction(Selector(("undo:")), withSender: nil))
+        #expect(!editorView.canPerformAction(Selector(("redo:")), withSender: nil))
+        #expect(performSyntaxEditorSelector("handleUndoCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("handleRedoCommand", on: editorView))
+
+        #expect(model.text == indentedSource)
+        #expect(editorView.text == indentedSource)
+
+        guard let undoManager = editorView.undoManager else {
+            Issue.record("SyntaxEditorView has no undo manager")
+            return
+        }
+
+        undoManager.undo()
+        undoManager.redo()
+
+        #expect(!undoManager.canUndo)
+        #expect(!undoManager.canRedo)
+        #expect(model.text == indentedSource)
+        #expect(editorView.text == indentedSource)
+
+        model.isEditable = true
+
+        #expect(undoManager.canUndo)
+        undoManager.undo()
+
+        #expect(model.text == source)
+        #expect(editorView.text == source)
+    }
+
+    @Test("SyntaxEditorView keeps selection and copy available while read-only on iOS")
+    @MainActor
+    func syntaxEditorViewIOSReadOnlyKeepsSelectionAndCopy() {
+        let source = "copy me"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: BuiltinSyntaxLanguages.javascript,
+            isEditable: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        editorView.isSelectable = true
+
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.loadViewIfNeeded()
+        controller.view.addSubview(editorView)
+        window.makeKeyAndVisible()
+
+        #expect(editorView.becomeFirstResponder())
+
+        let selectedRange = NSRange(location: 0, length: 4)
+        editorView.selectedRange = selectedRange
+
+        withExtendedLifetime(window) {
+            #expect(editorView.isSelectable)
+            #expect(editorView.selectedRange == selectedRange)
+            #expect(editorView.canPerformAction(
+                #selector(UIResponderStandardEditActions.copy(_:)),
+                withSender: nil
+            ))
+        }
+    }
 #endif
 
 #if canImport(AppKit)
@@ -3292,6 +3470,151 @@ struct SyntaxEditorUITests {
         #expect(await waitUntilEditorCondition {
             editorView.textView.string == "{\"answer\":42}"
         })
+    }
+
+    @Test("SyntaxEditorView read-only delegate commands do not mutate text on macOS")
+    @MainActor
+    func syntaxEditorViewMacReadOnlyDelegateCommandsDoNotMutateText() {
+        let source = "let answer = 42"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: BuiltinSyntaxLanguages.swift,
+            isEditable: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: source.utf16.count))
+
+        #expect(!editorView.textView(
+            editorView.textView,
+            shouldChangeTextIn: NSRange(location: 0, length: 0),
+            replacementString: "\t"
+        ))
+
+        let commandSelectors = [
+            #selector(NSResponder.insertTab(_:)),
+            #selector(NSResponder.insertBacktab(_:)),
+            #selector(NSResponder.insertNewline(_:)),
+            #selector(NSResponder.deleteBackward(_:)),
+        ]
+
+        for commandSelector in commandSelectors {
+            #expect(!editorView.textView(editorView.textView, doCommandBy: commandSelector))
+            #expect(model.text == source)
+            #expect(editorView.textView.string == source)
+        }
+    }
+
+    @Test("SyntaxEditorView read-only key equivalents do not mutate text on macOS")
+    @MainActor
+    func syntaxEditorViewMacReadOnlyKeyEquivalentsDoNotMutateText() {
+        let source = "let answer = 42"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: BuiltinSyntaxLanguages.swift,
+            isEditable: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: source.utf16.count))
+
+        for character in ["/", "]", "["] {
+            guard let event = makeMacCommandKeyEvent(character) else {
+                Issue.record("Failed to create command key event for \(character)")
+                continue
+            }
+
+            _ = editorView.textView.performKeyEquivalent(with: event)
+            #expect(model.text == source)
+            #expect(editorView.textView.string == source)
+        }
+    }
+
+    @Test("SyntaxEditorView preserves undo history when undo manager runs while read-only on macOS")
+    @MainActor
+    func syntaxEditorViewMacReadOnlyUndoManagerPreservesHistory() async {
+        let source = "let answer = 42"
+        let onceIndentedSource = "    \(source)"
+        let twiceIndentedSource = "        \(source)"
+        let model = SyntaxEditorModel(text: source, language: BuiltinSyntaxLanguages.swift)
+        let editorView = SyntaxEditorView(model: model)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = editorView
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(editorView.textView)
+        defer { window.orderOut(nil) }
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        guard let undoManager = editorView.textView.undoManager else {
+            Issue.record("SyntaxEditorView text view has no undo manager")
+            return
+        }
+        undoManager.groupsByEvent = false
+
+        func runUndoGroupedCommand(_ action: () -> Bool) {
+            undoManager.beginUndoGrouping()
+            let handled = action()
+            undoManager.endUndoGrouping()
+            #expect(handled)
+        }
+
+        runUndoGroupedCommand {
+            editorView.textView(
+                editorView.textView,
+                doCommandBy: #selector(NSResponder.insertTab(_:))
+            )
+        }
+        runUndoGroupedCommand {
+            editorView.textView(
+                editorView.textView,
+                doCommandBy: #selector(NSResponder.insertTab(_:))
+            )
+        }
+        #expect(model.text == twiceIndentedSource)
+
+        model.isEditable = false
+        undoManager.undo()
+        undoManager.undo()
+
+        #expect(!undoManager.canUndo)
+        #expect(!undoManager.canRedo)
+        #expect(model.text == twiceIndentedSource)
+        #expect(editorView.textView.string == twiceIndentedSource)
+
+        model.isEditable = true
+
+        #expect(undoManager.canUndo)
+        undoManager.undo()
+
+        #expect(model.text == onceIndentedSource)
+        #expect(editorView.textView.string == onceIndentedSource)
+        #expect(undoManager.canUndo)
+        undoManager.undo()
+
+        #expect(model.text == source)
+        #expect(editorView.textView.string == source)
+        #expect(undoManager.canRedo)
+
+        model.isEditable = false
+        undoManager.redo()
+        undoManager.redo()
+
+        #expect(model.text == source)
+        #expect(editorView.textView.string == source)
+        #expect(!undoManager.canUndo)
+        #expect(!undoManager.canRedo)
+
+        model.isEditable = true
+
+        #expect(undoManager.canRedo)
+        undoManager.redo()
+
+        #expect(model.text == twiceIndentedSource)
+        #expect(editorView.textView.string == twiceIndentedSource)
     }
 
     @Test("SyntaxEditorViewController enables undo support on macOS")

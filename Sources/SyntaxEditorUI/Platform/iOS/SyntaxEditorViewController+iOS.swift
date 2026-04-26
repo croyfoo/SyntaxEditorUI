@@ -4,11 +4,41 @@ import ObservationBridge
 import UIKit
 
 @MainActor
+private final class SyntaxEditorReadOnlyGuardedUndoManager: UndoManager {
+    var allowsMutation: () -> Bool = { true }
+
+    override var canUndo: Bool {
+        allowsMutation() && super.canUndo
+    }
+
+    override var canRedo: Bool {
+        allowsMutation() && super.canRedo
+    }
+
+    override func undo() {
+        guard allowsMutation() else { return }
+        super.undo()
+    }
+
+    override func redo() {
+        guard allowsMutation() else { return }
+        super.redo()
+    }
+
+    override func undoNestedGroup() {
+        guard allowsMutation() else { return }
+        super.undoNestedGroup()
+    }
+}
+
+@MainActor
 @Observable
 public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     public private(set) var model: SyntaxEditorModel
     @ObservationIgnored
     private let fallbackUndoManager = UndoManager()
+    @ObservationIgnored
+    private let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
 
     private var textView: UITextView { self }
 
@@ -48,6 +78,9 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         layoutManager.addTextContainer(textContainer)
 
         super.init(frame: .zero, textContainer: textContainer)
+        guardedUndoManager.allowsMutation = { [weak self] in
+            self?.model.isEditable ?? true
+        }
         startModelObservation()
         configureTextView()
         configureTraitChangeObservation()
@@ -72,7 +105,15 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         highlightTask?.cancel()
     }
 
+    public override var undoManager: UndoManager? {
+        guardedUndoManager
+    }
+
     public override var keyCommands: [UIKeyCommand]? {
+        guard model.isEditable else {
+            return super.keyCommands
+        }
+
         let editorCommands = [
             makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleIndentCommand), title: "Indent"),
             makeKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleOutdentCommand), title: "Outdent"),
@@ -81,6 +122,15 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
             makeKeyCommand(input: "[", modifierFlags: [.command], action: #selector(handleOutdentCommand), title: "Outdent"),
         ]
         return (super.keyCommands ?? []) + editorCommands
+    }
+
+    public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if !model.isEditable,
+           action == Selector(("undo:")) || action == Selector(("redo:")) {
+            return false
+        }
+
+        return super.canPerformAction(action, withSender: sender)
     }
 
     public func textViewDidChange(_ textView: UITextView) {
@@ -122,6 +172,11 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     ) -> Bool {
         guard !isApplyingModel, !isApplyingHighlight else {
             return true
+        }
+
+        guard model.isEditable else {
+            pendingEditStartUTF16 = nil
+            return false
         }
 
         pendingEditStartUTF16 = range.location
@@ -288,6 +343,11 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     private func applyCommandResult(_ result: EditorCommandResult) {
+        guard model.isEditable else {
+            refreshKeyboardAccessoryState()
+            return
+        }
+
         let previousText = textView.text ?? ""
         let previousSelection = textView.selectedRange
         let textChanged = previousText != result.text
@@ -357,16 +417,31 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         guard restore != counterpart else { return }
         guard let activeUndoManager = activeUndoManager else { return }
 
-        activeUndoManager.registerUndo(withTarget: self) { target in
+        registerUndoAction(restore: restore, counterpart: counterpart, in: activeUndoManager)
+    }
+
+    private func registerUndoAction(
+        restore: EditorUndoState,
+        counterpart: EditorUndoState,
+        in undoManager: UndoManager
+    ) {
+        guard restore != counterpart else { return }
+
+        undoManager.registerUndo(withTarget: self) { target in
             target.applyUndoAction(restore: restore, counterpart: counterpart)
         }
 
-        if !activeUndoManager.isUndoing, !activeUndoManager.isRedoing {
-            activeUndoManager.setActionName("Edit")
+        if !undoManager.isUndoing, !undoManager.isRedoing {
+            undoManager.setActionName("Edit")
         }
     }
 
     private func applyUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
+        guard model.isEditable else {
+            refreshKeyboardAccessoryState()
+            return
+        }
+
         registerUndoAction(restore: counterpart, counterpart: restore)
 
         isApplyingUndoRedo = true
@@ -412,6 +487,8 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     @objc private func handleIndentCommand() {
+        guard model.isEditable else { return }
+
         let source = textView.text ?? ""
         guard let result = commandEngine.indentSelection(
             source: source,
@@ -423,6 +500,8 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     @objc private func handleOutdentCommand() {
+        guard model.isEditable else { return }
+
         let source = textView.text ?? ""
         guard let result = commandEngine.outdentSelection(
             source: source,
@@ -434,6 +513,8 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     @objc private func handleToggleCommentCommand() {
+        guard model.isEditable else { return }
+
         let source = textView.text ?? ""
         guard let result = commandEngine.toggleComment(
             source: source,
@@ -446,6 +527,11 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     @objc private func handleUndoCommand() {
+        guard model.isEditable else {
+            refreshKeyboardAccessoryState()
+            return
+        }
+
         let handled = UIApplication.shared.sendAction(
             Selector(("undo:")),
             to: nil,
@@ -459,6 +545,11 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     @objc private func handleRedoCommand() {
+        guard model.isEditable else {
+            refreshKeyboardAccessoryState()
+            return
+        }
+
         let handled = UIApplication.shared.sendAction(
             Selector(("redo:")),
             to: nil,
