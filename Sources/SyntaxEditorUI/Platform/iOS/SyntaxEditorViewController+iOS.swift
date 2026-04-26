@@ -4,11 +4,41 @@ import ObservationBridge
 import UIKit
 
 @MainActor
+private final class SyntaxEditorReadOnlyGuardedUndoManager: UndoManager {
+    var allowsMutation: () -> Bool = { true }
+
+    override var canUndo: Bool {
+        allowsMutation() && super.canUndo
+    }
+
+    override var canRedo: Bool {
+        allowsMutation() && super.canRedo
+    }
+
+    override func undo() {
+        guard allowsMutation() else { return }
+        super.undo()
+    }
+
+    override func redo() {
+        guard allowsMutation() else { return }
+        super.redo()
+    }
+
+    override func undoNestedGroup() {
+        guard allowsMutation() else { return }
+        super.undoNestedGroup()
+    }
+}
+
+@MainActor
 @Observable
 public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     public private(set) var model: SyntaxEditorModel
     @ObservationIgnored
     private let fallbackUndoManager = UndoManager()
+    @ObservationIgnored
+    private let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
 
     private var textView: UITextView { self }
 
@@ -48,6 +78,9 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         layoutManager.addTextContainer(textContainer)
 
         super.init(frame: .zero, textContainer: textContainer)
+        guardedUndoManager.allowsMutation = { [weak self] in
+            self?.model.isEditable ?? true
+        }
         startModelObservation()
         configureTextView()
         configureTraitChangeObservation()
@@ -70,6 +103,10 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 
     deinit {
         highlightTask?.cancel()
+    }
+
+    public override var undoManager: UndoManager? {
+        guardedUndoManager
     }
 
     public override var keyCommands: [UIKeyCommand]? {
@@ -400,18 +437,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     private func applyUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
-        let undoManager = activeUndoManager
-        let wasUndoing = undoManager?.isUndoing == true
-        let wasRedoing = undoManager?.isRedoing == true
-
         guard model.isEditable else {
-            preserveSkippedUndoAction(
-                restore: restore,
-                counterpart: counterpart,
-                in: undoManager,
-                wasUndoing: wasUndoing,
-                wasRedoing: wasRedoing
-            )
             refreshKeyboardAccessoryState()
             return
         }
@@ -427,46 +453,6 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
             )
         )
         isApplyingUndoRedo = false
-    }
-
-    private func preserveSkippedUndoAction(
-        restore: EditorUndoState,
-        counterpart: EditorUndoState,
-        in undoManager: UndoManager?,
-        wasUndoing: Bool,
-        wasRedoing: Bool
-    ) {
-        guard let undoManager, wasUndoing || wasRedoing else { return }
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-
-            if wasUndoing {
-                self.registerUndoAction(restore: restore, counterpart: counterpart, in: undoManager)
-            } else if wasRedoing {
-                self.requeueRedoAction(restore: restore, counterpart: counterpart, in: undoManager)
-            }
-
-            self.refreshKeyboardAccessoryState()
-        }
-    }
-
-    private func requeueRedoAction(
-        restore: EditorUndoState,
-        counterpart: EditorUndoState,
-        in undoManager: UndoManager
-    ) {
-        undoManager.beginUndoGrouping()
-        undoManager.registerUndo(withTarget: self) { target in
-            target.registerUndoAction(restore: restore, counterpart: counterpart, in: undoManager)
-        }
-        undoManager.endUndoGrouping()
-
-        undoManager.undo()
-        // Rebuilding redo can replay native text undo; keep read-only UI aligned with the owner model.
-        if !model.isEditable, textView.text != model.text {
-            applyObservedText(model.text, forceTextUpdate: true)
-        }
     }
 
     private func applyTextMutation(

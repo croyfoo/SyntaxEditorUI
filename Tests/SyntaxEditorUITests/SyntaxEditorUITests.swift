@@ -3339,6 +3339,27 @@ struct SyntaxEditorUITests {
 
         #expect(model.text == indentedSource)
         #expect(editorView.text == indentedSource)
+
+        guard let undoManager = editorView.undoManager else {
+            Issue.record("SyntaxEditorView has no undo manager")
+            return
+        }
+
+        undoManager.undo()
+        undoManager.redo()
+
+        #expect(!undoManager.canUndo)
+        #expect(!undoManager.canRedo)
+        #expect(model.text == indentedSource)
+        #expect(editorView.text == indentedSource)
+
+        model.isEditable = true
+
+        #expect(undoManager.canUndo)
+        undoManager.undo()
+
+        #expect(model.text == source)
+        #expect(editorView.text == source)
     }
 
     @Test("SyntaxEditorView keeps selection and copy available while read-only on iOS")
@@ -3511,7 +3532,8 @@ struct SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewMacReadOnlyUndoManagerPreservesHistory() async {
         let source = "let answer = 42"
-        let indentedSource = "    \(source)"
+        let onceIndentedSource = "    \(source)"
+        let twiceIndentedSource = "        \(source)"
         let model = SyntaxEditorModel(text: source, language: BuiltinSyntaxLanguages.swift)
         let editorView = SyntaxEditorView(model: model)
         let window = NSWindow(
@@ -3527,29 +3549,50 @@ struct SyntaxEditorUITests {
 
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
 
-        #expect(editorView.textView(
-            editorView.textView,
-            doCommandBy: #selector(NSResponder.insertTab(_:))
-        ))
-        #expect(model.text == indentedSource)
-
         guard let undoManager = editorView.textView.undoManager else {
             Issue.record("SyntaxEditorView text view has no undo manager")
             return
         }
+        undoManager.groupsByEvent = false
+
+        func runUndoGroupedCommand(_ action: () -> Bool) {
+            undoManager.beginUndoGrouping()
+            let handled = action()
+            undoManager.endUndoGrouping()
+            #expect(handled)
+        }
+
+        runUndoGroupedCommand {
+            editorView.textView(
+                editorView.textView,
+                doCommandBy: #selector(NSResponder.insertTab(_:))
+            )
+        }
+        runUndoGroupedCommand {
+            editorView.textView(
+                editorView.textView,
+                doCommandBy: #selector(NSResponder.insertTab(_:))
+            )
+        }
+        #expect(model.text == twiceIndentedSource)
 
         model.isEditable = false
         undoManager.undo()
+        undoManager.undo()
 
-        #expect(model.text == indentedSource)
-        #expect(editorView.textView.string == indentedSource)
-        #expect(await waitUntilEditorCondition {
-            undoManager.canUndo
-        })
-        #expect(model.text == indentedSource)
-        #expect(editorView.textView.string == indentedSource)
+        #expect(!undoManager.canUndo)
+        #expect(!undoManager.canRedo)
+        #expect(model.text == twiceIndentedSource)
+        #expect(editorView.textView.string == twiceIndentedSource)
 
         model.isEditable = true
+
+        #expect(undoManager.canUndo)
+        undoManager.undo()
+
+        #expect(model.text == onceIndentedSource)
+        #expect(editorView.textView.string == onceIndentedSource)
+        #expect(undoManager.canUndo)
         undoManager.undo()
 
         #expect(model.text == source)
@@ -3558,20 +3601,20 @@ struct SyntaxEditorUITests {
 
         model.isEditable = false
         undoManager.redo()
-
-        #expect(model.text == source)
-        #expect(editorView.textView.string == source)
-        #expect(await waitUntilEditorCondition {
-            undoManager.canRedo
-        })
-        #expect(model.text == source)
-        #expect(editorView.textView.string == source)
-
-        model.isEditable = true
         undoManager.redo()
 
-        #expect(model.text == indentedSource)
-        #expect(editorView.textView.string == indentedSource)
+        #expect(model.text == source)
+        #expect(editorView.textView.string == source)
+        #expect(!undoManager.canUndo)
+        #expect(!undoManager.canRedo)
+
+        model.isEditable = true
+
+        #expect(undoManager.canRedo)
+        undoManager.redo()
+
+        #expect(model.text == twiceIndentedSource)
+        #expect(editorView.textView.string == twiceIndentedSource)
     }
 
     @Test("SyntaxEditorViewController enables undo support on macOS")
