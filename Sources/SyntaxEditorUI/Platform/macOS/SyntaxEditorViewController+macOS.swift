@@ -173,6 +173,11 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             return true
         }
 
+        guard model.isEditable else {
+            pendingEditStartUTF16 = nil
+            return false
+        }
+
         pendingEditStartUTF16 = affectedCharRange.location
 
         guard let replacementString else {
@@ -194,6 +199,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     public func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard model.isEditable else {
+            return false
+        }
+
         switch commandSelector {
         case #selector(NSResponder.insertTab(_:)):
             return runIndentCommand()
@@ -343,6 +352,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func applyCommandResult(_ result: EditorCommandResult) {
+        guard model.isEditable else {
+            return
+        }
+
         let previousText = textView.string
         let previousSelection = textView.selectedRange()
         let textChanged = previousText != result.text
@@ -411,16 +424,41 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         guard restore != counterpart else { return }
         guard let activeUndoManager = activeUndoManager else { return }
 
-        activeUndoManager.registerUndo(withTarget: self) { target in
+        registerUndoAction(restore: restore, counterpart: counterpart, in: activeUndoManager)
+    }
+
+    private func registerUndoAction(
+        restore: EditorUndoState,
+        counterpart: EditorUndoState,
+        in undoManager: UndoManager
+    ) {
+        guard restore != counterpart else { return }
+
+        undoManager.registerUndo(withTarget: self) { target in
             target.applyUndoAction(restore: restore, counterpart: counterpart)
         }
 
-        if !activeUndoManager.isUndoing, !activeUndoManager.isRedoing {
-            activeUndoManager.setActionName("Edit")
+        if !undoManager.isUndoing, !undoManager.isRedoing {
+            undoManager.setActionName("Edit")
         }
     }
 
     private func applyUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
+        let undoManager = activeUndoManager
+        let wasUndoing = undoManager?.isUndoing == true
+        let wasRedoing = undoManager?.isRedoing == true
+
+        guard model.isEditable else {
+            preserveSkippedUndoAction(
+                restore: restore,
+                counterpart: counterpart,
+                in: undoManager,
+                wasUndoing: wasUndoing,
+                wasRedoing: wasRedoing
+            )
+            return
+        }
+
         registerUndoAction(restore: counterpart, counterpart: restore)
 
         isApplyingUndoRedo = true
@@ -432,6 +470,44 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             )
         )
         isApplyingUndoRedo = false
+    }
+
+    private func preserveSkippedUndoAction(
+        restore: EditorUndoState,
+        counterpart: EditorUndoState,
+        in undoManager: UndoManager?,
+        wasUndoing: Bool,
+        wasRedoing: Bool
+    ) {
+        guard let undoManager, wasUndoing || wasRedoing else { return }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            if wasUndoing {
+                self.registerUndoAction(restore: restore, counterpart: counterpart, in: undoManager)
+            } else if wasRedoing {
+                self.requeueRedoAction(restore: restore, counterpart: counterpart, in: undoManager)
+            }
+        }
+    }
+
+    private func requeueRedoAction(
+        restore: EditorUndoState,
+        counterpart: EditorUndoState,
+        in undoManager: UndoManager
+    ) {
+        undoManager.beginUndoGrouping()
+        undoManager.registerUndo(withTarget: self) { target in
+            target.registerUndoAction(restore: restore, counterpart: counterpart, in: undoManager)
+        }
+        undoManager.endUndoGrouping()
+
+        undoManager.undo()
+        // Rebuilding redo can replay native text undo; keep read-only UI aligned with the owner model.
+        if !model.isEditable, textView.string != model.text {
+            applyObservedText(model.text, forceTextUpdate: true)
+        }
     }
 
     private func applyTextMutation(
@@ -471,6 +547,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func runIndentCommand() -> Bool {
+        guard model.isEditable else {
+            return false
+        }
+
         let source = textView.string
         guard let result = commandEngine.indentSelection(
             source: source,
@@ -483,6 +563,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func runOutdentCommand() -> Bool {
+        guard model.isEditable else {
+            return false
+        }
+
         let source = textView.string
         guard let result = commandEngine.outdentSelection(
             source: source,
@@ -495,6 +579,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func runToggleCommentCommand() -> Bool {
+        guard model.isEditable else {
+            return false
+        }
+
         let source = textView.string
         guard let result = commandEngine.toggleComment(
             source: source,
