@@ -102,6 +102,24 @@ private func performSyntaxEditorSelector(_ selectorName: String, on view: Syntax
     _ = view.perform(selector)
     return true
 }
+
+@MainActor
+private func waitUntilIOSEditorCondition(
+    nanoseconds: UInt64 = 5_000_000_000,
+    _ condition: @escaping @MainActor () -> Bool
+) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .nanoseconds(Int64(nanoseconds)))
+
+    while !condition() {
+        guard clock.now < deadline else {
+            return false
+        }
+        await Task.yield()
+    }
+
+    return true
+}
 #endif
 
 #if canImport(AppKit)
@@ -3263,6 +3281,44 @@ struct SyntaxEditorUITests {
                 replacementText: "a"
             )
         )
+    }
+
+    @Test("SyntaxEditorView reflects model text mutations on iOS")
+    @MainActor
+    func syntaxEditorViewIOSTextObservation() async {
+        let model = SyntaxEditorModel(text: "const answer = 42;", language: BuiltinSyntaxLanguages.javascript)
+        let editorView = SyntaxEditorView(model: model)
+
+        model.text = "{\"enabled\":true}"
+
+        #expect(await waitUntilIOSEditorCondition {
+            editorView.text == "{\"enabled\":true}"
+        })
+    }
+
+    @Test("SyntaxEditorView reflects editable and wrapping changes on iOS")
+    @MainActor
+    func syntaxEditorViewIOSEditorStateObservation() async {
+        let model = SyntaxEditorModel(text: "body {}", language: BuiltinSyntaxLanguages.css)
+        let editorView = SyntaxEditorView(model: model)
+
+        model.isEditable = false
+        model.lineWrappingEnabled = true
+
+        #expect(await waitUntilIOSEditorCondition {
+            editorView.isEditable == false
+        })
+        #expect(await waitUntilIOSEditorCondition {
+            editorView.textContainer.widthTracksTextView
+                && editorView.textContainer.lineBreakMode == .byWordWrapping
+        })
+
+        model.lineWrappingEnabled = false
+
+        #expect(await waitUntilIOSEditorCondition {
+            !editorView.textContainer.widthTracksTextView
+                && editorView.textContainer.lineBreakMode == .byClipping
+        })
     }
 
     @Test("SyntaxEditorView omits editing key commands while read-only on iOS")

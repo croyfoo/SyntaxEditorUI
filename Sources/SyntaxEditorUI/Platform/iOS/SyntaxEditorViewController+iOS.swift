@@ -65,7 +65,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     @ObservationIgnored
     private var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     @ObservationIgnored
-    private var observationHandles = Set<ObservationHandle>()
+    private let modelObservations = ObservationScope()
 
     public init(model: SyntaxEditorModel) {
         self.model = model
@@ -276,23 +276,23 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     private func startModelObservation() {
-        observationHandles.removeAll()
+        modelObservations.update {
+            model.observe(\.text) { [weak self] text in
+                guard let self else { return }
+                self.applyObservedText(text)
+            }
+            .store(in: modelObservations)
 
-        model.observe(\.text) { [weak self] text in
-            guard let self else { return }
-            self.applyObservedText(text)
+            model.observe([\.language, \.isEditable, \.lineWrappingEnabled]) { [weak self] in
+                guard let self else { return }
+                self.applyObservedEditorState(
+                    language: self.model.language,
+                    isEditable: self.model.isEditable,
+                    lineWrappingEnabled: self.model.lineWrappingEnabled
+                )
+            }
+            .store(in: modelObservations)
         }
-        .store(in: &observationHandles)
-
-        model.observe([\.language, \.isEditable, \.lineWrappingEnabled]) { [weak self] in
-            guard let self else { return }
-            self.applyObservedEditorState(
-                language: self.model.language,
-                isEditable: self.model.isEditable,
-                lineWrappingEnabled: self.model.lineWrappingEnabled
-            )
-        }
-        .store(in: &observationHandles)
     }
 
     private func applyObservedText(_ text: String, forceTextUpdate: Bool = false) {
