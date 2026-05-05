@@ -62,7 +62,7 @@ final class MiniUITests: XCTestCase {
     }
 
     private func editorElement() -> XCUIElement {
-        let editor = app.textViews["mini.editor"]
+        let editor = app.textViews.firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         return editor
     }
