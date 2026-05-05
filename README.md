@@ -50,11 +50,6 @@ let editor = SyntaxEditor(model: model)
 let editorView = SyntaxEditorView(model: model)
 ```
 
-## Breaking API Notes
-
-- On iOS, `SyntaxEditorView` is a `UIScrollView`-based editor container, not a `UITextView` subclass. Code that needs UIKit text APIs should use `editorView.textView`.
-- On iOS, horizontal and vertical scrolling are owned by `SyntaxEditorView`; the embedded `textView` is kept at a zero internal `contentOffset`.
-
 HTML is also available as a builtin language:
 
 ```swift
@@ -120,3 +115,8 @@ xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme MiniUITests -desti
 ```
 
 `Mini` is a lightweight manual verification app for iOS/macOS and an iOS UITest harness for the editor package. It launches a concrete `SyntaxEditorUI` surface instead of the generated template UI, so it can be used to validate real editor behavior.
+
+## Breaking API Notes
+
+- On iOS, `SyntaxEditorView` is a `UIScrollView`-based editor container, not a `UITextView` subclass. Code that needs UIKit text APIs should use `editorView.textView`.
+- On iOS, horizontal and vertical scrolling are owned by `SyntaxEditorView`; the embedded `textView` is kept at a zero internal `contentOffset`.

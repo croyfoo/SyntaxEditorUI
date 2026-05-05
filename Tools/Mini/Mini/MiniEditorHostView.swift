@@ -17,7 +17,6 @@ struct MiniEditorHostView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SyntaxEditorView, context: Context) {
-        uiView.textView.accessibilityIdentifier = "mini.editor"
         applyHorizontalScrollOffsetIfNeeded(to: uiView)
     }
 
@@ -93,7 +92,6 @@ struct MiniEditorHostView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: SyntaxEditorView, context: Context) {
-        nsView.textView.setAccessibilityIdentifier("mini.editor")
     }
 }
 #endif
