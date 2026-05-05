@@ -148,19 +148,20 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             return self.handleShortcut(action)
         }
 
-        startModelObservation()
         configureScrollView()
         configureTextView()
-        applyObservedText(
-            model.text,
-            forceTextUpdate: true
-        )
         applyObservedEditorState(
             language: model.language,
             isEditable: model.isEditable,
             lineWrappingEnabled: model.lineWrappingEnabled,
-            forceLanguageRefresh: true
+            forceLanguageRefresh: true,
+            schedulesHighlight: false
         )
+        applyObservedText(
+            model.text,
+            forceTextUpdate: true
+        )
+        startModelObservation()
     }
 
     @available(*, unavailable)
@@ -368,7 +369,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         language: any SyntaxLanguage,
         isEditable: Bool,
         lineWrappingEnabled: Bool,
-        forceLanguageRefresh: Bool = false
+        forceLanguageRefresh: Bool = false,
+        schedulesHighlight: Bool = true
     ) {
         if textView.isEditable != isEditable {
             textView.isEditable = isEditable
@@ -381,7 +383,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
 
         textView.typingAttributes = baseAttributes()
-        if languageChanged {
+        if languageChanged && schedulesHighlight {
             scheduleHighlight(
                 source: textView.string,
                 language: language,

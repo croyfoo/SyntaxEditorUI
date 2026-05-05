@@ -18,7 +18,8 @@ final class MiniContentViewModel {
 
             editorModel = SyntaxEditorModel(
                 text: text(for: preset),
-                language: preset.language
+                language: preset.language,
+                lineWrappingEnabled: false
             )
         }
     }

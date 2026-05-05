@@ -50,6 +50,11 @@ let editor = SyntaxEditor(model: model)
 let editorView = SyntaxEditorView(model: model)
 ```
 
+## Breaking API Notes
+
+- On iOS, `SyntaxEditorView` is a `UIScrollView`-based editor container, not a `UITextView` subclass. Code that needs UIKit text APIs should use `editorView.textView`.
+- On iOS, horizontal and vertical scrolling are owned by `SyntaxEditorView`; the embedded `textView` is kept at a zero internal `contentOffset`.
+
 HTML is also available as a builtin language:
 
 ```swift

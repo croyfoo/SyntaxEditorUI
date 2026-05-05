@@ -3,6 +3,7 @@ import XCTest
 final class MiniUITests: XCTestCase {
     private enum LaunchArgument {
         static let emptyDocument = "--uitest-empty-document"
+        static let horizontalScrollDocument = "--uitest-horizontal-scroll-document"
     }
 
     private var app: XCUIApplication!
@@ -40,6 +41,24 @@ final class MiniUITests: XCTestCase {
 
         let htmlEditor = editorElement()
         XCTAssertTrue(waitForEditorText(htmlEditor, toContain: "<script>"))
+    }
+
+    @MainActor
+    func testHorizontalScrollRenderingProofScreenshot() throws {
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments.append(LaunchArgument.horizontalScrollDocument)
+        app.launchEnvironment["SYNTAXEDITORUI_HORIZONTAL_LAYOUT_LOGS"] = "1"
+        app.launch()
+
+        let editor = editorElement()
+        XCTAssertTrue(waitForEditorText(editor, toContain: "rendered_after_scroll"))
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+
+        let screenshot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func editorElement() -> XCUIElement {

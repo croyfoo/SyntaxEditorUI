@@ -120,6 +120,53 @@ private func waitUntilIOSEditorCondition(
 
     return true
 }
+
+private let longIOSSyntaxEditorLine = String(
+    repeating: "let extremelyLongIdentifierName = syntaxEditorHorizontalScrollValue; ",
+    count: 16
+)
+
+@MainActor
+private func layoutIOSEditorView(
+    _ editorView: SyntaxEditorView,
+    width: CGFloat = 160,
+    height: CGFloat = 120
+) {
+    editorView.frame = CGRect(x: 0, y: 0, width: width, height: height)
+    editorView.setNeedsLayout()
+    editorView.layoutIfNeeded()
+}
+
+@MainActor
+private func iOSEditorHasHorizontalOverflow(_ editorView: SyntaxEditorView) -> Bool {
+    layoutIOSEditorView(editorView)
+    return editorView.contentSize.width > editorView.bounds.width + 1
+        && editorView.textContainer.size.width > editorView.bounds.width
+        && editorView.textContainer.size.width <= editorView.contentSize.width + 1
+}
+
+@MainActor
+private func iOSEditorTextLocationNearVisibleMid(
+    _ editorView: SyntaxEditorView,
+    utf16Length: Int
+) -> Int {
+    let visibleMidX = editorView.contentOffset.x + editorView.bounds.width / 2
+    for location in 0..<min(utf16Length, 160) {
+        guard let position = editorView.textView.position(
+            from: editorView.textView.beginningOfDocument,
+            offset: location
+        ) else {
+            continue
+        }
+
+        let caretRect = editorView.textView.caretRect(for: position)
+        if abs(caretRect.midX - visibleMidX) <= 12 {
+            return location
+        }
+    }
+
+    return 0
+}
 #endif
 
 #if canImport(AppKit)
@@ -3299,8 +3346,9 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorView reflects editable and wrapping changes on iOS")
     @MainActor
     func syntaxEditorViewIOSEditorStateObservation() async {
-        let model = SyntaxEditorModel(text: "body {}", language: BuiltinSyntaxLanguages.css)
+        let model = SyntaxEditorModel(text: longIOSSyntaxEditorLine, language: BuiltinSyntaxLanguages.swift)
         let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
 
         model.isEditable = false
         model.lineWrappingEnabled = true
@@ -3309,15 +3357,308 @@ struct SyntaxEditorUITests {
             editorView.isEditable == false
         })
         #expect(await waitUntilIOSEditorCondition {
-            editorView.textContainer.widthTracksTextView
+            layoutIOSEditorView(editorView)
+            return editorView.textContainer.widthTracksTextView
                 && editorView.textContainer.lineBreakMode == .byWordWrapping
+                && editorView.showsHorizontalScrollIndicator == false
+                && editorView.alwaysBounceHorizontal == false
+                && editorView.contentSize.width <= editorView.bounds.width + 1
         })
 
         model.lineWrappingEnabled = false
 
         #expect(await waitUntilIOSEditorCondition {
-            !editorView.textContainer.widthTracksTextView
+            layoutIOSEditorView(editorView)
+            return !editorView.textContainer.widthTracksTextView
                 && editorView.textContainer.lineBreakMode == .byClipping
+                && editorView.showsHorizontalScrollIndicator
+                && editorView.alwaysBounceHorizontal
+                && editorView.contentSize.width > editorView.bounds.width + 1
+                && editorView.textContainer.size.width <= editorView.contentSize.width + 1
+        })
+
+        editorView.setContentOffset(CGPoint(x: 24, y: 0), animated: false)
+        #expect(editorView.contentOffset.x > 0)
+
+        model.lineWrappingEnabled = true
+
+        #expect(await waitUntilIOSEditorCondition {
+            layoutIOSEditorView(editorView)
+            return editorView.contentOffset.x == 0
+                && editorView.contentSize.width <= editorView.bounds.width + 1
+        })
+    }
+
+    @Test("SyntaxEditorView enables horizontal scrolling for initial long iOS line")
+    @MainActor
+    func syntaxEditorViewIOSInitialLongLineScrollsHorizontally() async {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+
+        #expect(await waitUntilIOSEditorCondition {
+            iOSEditorHasHorizontalOverflow(editorView)
+        })
+
+        let viewportContentSize = CGSize(
+            width: editorView.bounds.width,
+            height: editorView.contentSize.height
+        )
+        editorView.contentSize = viewportContentSize
+        layoutIOSEditorView(editorView)
+        #expect(editorView.contentSize.width > editorView.bounds.width + 1)
+
+        editorView.setContentOffset(CGPoint(x: 24, y: 0), animated: false)
+        #expect(editorView.contentOffset.x > 0)
+    }
+
+    @Test("SyntaxEditorView grows horizontal content size after observed iOS text update")
+    @MainActor
+    func syntaxEditorViewIOSObservedLongTextUpdateGrowsHorizontalContentSize() async {
+        let model = SyntaxEditorModel(
+            text: "let short = true",
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
+
+        model.text = longIOSSyntaxEditorLine
+
+        #expect(await waitUntilIOSEditorCondition {
+            iOSEditorHasHorizontalOverflow(editorView)
+        })
+    }
+
+    @Test("SyntaxEditorView grows horizontal content size after direct iOS text assignment")
+    @MainActor
+    func syntaxEditorViewIOSDirectTextAssignmentGrowsHorizontalContentSize() async {
+        let model = SyntaxEditorModel(
+            text: "let short = true",
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
+
+        editorView.text = longIOSSyntaxEditorLine
+
+        #expect(model.text == longIOSSyntaxEditorLine)
+        #expect(await waitUntilIOSEditorCondition {
+            iOSEditorHasHorizontalOverflow(editorView)
+        })
+    }
+
+    @Test("SyntaxEditorView keeps iOS scroll ownership while editing")
+    @MainActor
+    func syntaxEditorViewIOSKeepsScrollOwnershipWhileEditing() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        editorView.setContentOffset(CGPoint(x: 80, y: 0), animated: false)
+        #expect(editorView.contentOffset.x > 0)
+
+        let insertionLocation = iOSEditorTextLocationNearVisibleMid(
+            editorView,
+            utf16Length: longIOSSyntaxEditorLine.utf16.count
+        )
+        #expect(insertionLocation > 0)
+
+        editorView.selectedRange = NSRange(location: insertionLocation, length: 0)
+        layoutIOSEditorView(editorView)
+        let stableOuterOffsetX = editorView.contentOffset.x
+        #expect(stableOuterOffsetX > 0)
+        editorView.textView.contentOffset = CGPoint(x: 48, y: 24)
+
+        let insertionStart = editorView.textView.position(
+            from: editorView.textView.beginningOfDocument,
+            offset: insertionLocation
+        )
+        #expect(insertionStart != nil)
+        guard let insertionStart,
+              let insertionRange = editorView.textView.textRange(from: insertionStart, to: insertionStart)
+        else {
+            return
+        }
+        editorView.textView.replace(insertionRange, withText: "x")
+        editorView.textViewDidChange(editorView.textView)
+        layoutIOSEditorView(editorView)
+
+        #expect(editorView.textView.contentOffset == .zero)
+        #expect(editorView.textView.bounds.origin == .zero)
+        #expect(abs(editorView.contentOffset.x - stableOuterOffsetX) <= 1)
+    }
+
+    @Test("SyntaxEditorView keeps iOS scroll ownership while moving cursor")
+    @MainActor
+    func syntaxEditorViewIOSKeepsScrollOwnershipWhileMovingCursor() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        editorView.setContentOffset(CGPoint(x: 80, y: 0), animated: false)
+        let stableOuterOffsetX = editorView.contentOffset.x
+        #expect(stableOuterOffsetX > 0)
+
+        let targetLocation = iOSEditorTextLocationNearVisibleMid(
+            editorView,
+            utf16Length: longIOSSyntaxEditorLine.utf16.count
+        )
+        #expect(targetLocation > 0)
+
+        editorView.selectedRange = NSRange(location: targetLocation, length: 0)
+        layoutIOSEditorView(editorView)
+
+        #expect(editorView.textView.contentOffset == .zero)
+        #expect(editorView.textView.bounds.origin == .zero)
+        #expect(abs(editorView.contentOffset.x - stableOuterOffsetX) <= 1)
+    }
+
+    @Test("SyntaxEditorView ignores oversized iOS ancestor scroll requests while moving cursor")
+    @MainActor
+    func syntaxEditorViewIOSIgnoresOversizedAncestorScrollRequestsWhileMovingCursor() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        editorView.setContentOffset(CGPoint(x: 80, y: 0), animated: false)
+        let stableOuterOffsetX = editorView.contentOffset.x
+        #expect(stableOuterOffsetX > 0)
+
+        editorView.scrollRectToVisible(editorView.textView.frame, animated: true)
+        layoutIOSEditorView(editorView)
+        #expect(abs(editorView.contentOffset.x - stableOuterOffsetX) <= 1)
+
+        let targetLocation = iOSEditorTextLocationNearVisibleMid(
+            editorView,
+            utf16Length: longIOSSyntaxEditorLine.utf16.count
+        )
+        #expect(targetLocation > 0)
+
+        editorView.selectedRange = NSRange(location: targetLocation, length: 0)
+        editorView.scrollRectToVisible(editorView.textView.frame, animated: true)
+        layoutIOSEditorView(editorView)
+
+        #expect(editorView.textView.contentOffset == .zero)
+        #expect(editorView.textView.bounds.origin == .zero)
+        #expect(abs(editorView.contentOffset.x - stableOuterOffsetX) <= 1)
+    }
+
+    @Test("SyntaxEditorView routes iOS native range scroll requests through outer scroll view")
+    @MainActor
+    func syntaxEditorViewIOSRoutesNativeRangeScrollRequestsThroughOuterScrollView() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        editorView.setContentOffset(CGPoint(x: 80, y: 0), animated: false)
+        let stableOuterOffsetX = editorView.contentOffset.x
+        #expect(stableOuterOffsetX > 0)
+
+        let targetLocation = min(longIOSSyntaxEditorLine.utf16.count - 1, 120)
+        #expect(editorView.textView.position(
+            from: editorView.textView.beginningOfDocument,
+            offset: targetLocation
+        ) != nil)
+
+        editorView.textView.scrollRangeToVisible(NSRange(location: targetLocation, length: 0))
+        layoutIOSEditorView(editorView)
+
+        #expect(editorView.textView.contentOffset == .zero)
+        #expect(editorView.textView.bounds.origin == .zero)
+        #expect(editorView.contentOffset.x > stableOuterOffsetX)
+    }
+
+    @Test("SyntaxEditorView ignores unrelated far-right iOS native scroll rect requests while moving cursor")
+    @MainActor
+    func syntaxEditorViewIOSIgnoresUnrelatedFarRightNativeScrollRectRequestsWhileMovingCursor() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        editorView.setContentOffset(CGPoint(x: 80, y: 0), animated: false)
+        let targetLocation = iOSEditorTextLocationNearVisibleMid(
+            editorView,
+            utf16Length: longIOSSyntaxEditorLine.utf16.count
+        )
+        #expect(targetLocation > 0)
+        editorView.selectedRange = NSRange(location: targetLocation, length: 0)
+        layoutIOSEditorView(editorView)
+
+        let stableOuterOffsetX = editorView.contentOffset.x
+        let farRightRect = CGRect(
+            x: max(0, editorView.textView.bounds.width - 2),
+            y: editorView.textView.caretRect(for: editorView.textView.selectedTextRange?.end ?? editorView.textView.endOfDocument).minY,
+            width: 2,
+            height: editorView.bounds.height
+        )
+
+        editorView.textView.scrollRectToVisible(farRightRect, animated: true)
+        layoutIOSEditorView(editorView)
+
+        #expect(editorView.textView.contentOffset == .zero)
+        #expect(editorView.textView.bounds.origin == .zero)
+        #expect(abs(editorView.contentOffset.x - stableOuterOffsetX) <= 1)
+    }
+
+    @Test("SyntaxEditorView clears stale horizontal content size after iOS wrapping toggles")
+    @MainActor
+    func syntaxEditorViewIOSWrappingToggleClearsStaleHorizontalContentSize() async {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(model: model)
+
+        #expect(await waitUntilIOSEditorCondition {
+            layoutIOSEditorView(editorView)
+            return editorView.contentSize.width <= editorView.bounds.width + 1
+        })
+
+        model.lineWrappingEnabled = false
+
+        #expect(await waitUntilIOSEditorCondition {
+            iOSEditorHasHorizontalOverflow(editorView)
+        })
+
+        editorView.setContentOffset(CGPoint(x: 24, y: 0), animated: false)
+        #expect(editorView.contentOffset.x > 0)
+
+        model.lineWrappingEnabled = true
+
+        #expect(await waitUntilIOSEditorCondition {
+            layoutIOSEditorView(editorView)
+            return editorView.contentOffset.x == 0
+                && editorView.contentSize.width <= editorView.bounds.width + 1
         })
     }
 
@@ -3346,6 +3687,12 @@ struct SyntaxEditorUITests {
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "]", modifierFlags: [.command]))
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "[", modifierFlags: [.command]))
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "/", modifierFlags: [.command]))
+
+        let indentActionTarget = editorView.textView.target(
+            forAction: NSSelectorFromString("handleIndentCommand"),
+            withSender: nil
+        ) as AnyObject?
+        #expect(indentActionTarget === editorView)
     }
 
     @Test("SyntaxEditorView read-only handlers do not mutate text on iOS")
@@ -3361,7 +3708,7 @@ struct SyntaxEditorUITests {
         editorView.selectedRange = NSRange(location: 0, length: source.utf16.count)
 
         #expect(!editorView.textView(
-            editorView,
+            editorView.textView,
             shouldChangeTextIn: NSRange(location: 0, length: 0),
             replacementText: "\t"
         ))
@@ -3438,6 +3785,7 @@ struct SyntaxEditorUITests {
         window.makeKeyAndVisible()
 
         #expect(editorView.becomeFirstResponder())
+        #expect(editorView.isFirstResponder)
 
         let selectedRange = NSRange(location: 0, length: 4)
         editorView.selectedRange = selectedRange
@@ -3450,6 +3798,9 @@ struct SyntaxEditorUITests {
                 withSender: nil
             ))
         }
+
+        #expect(editorView.resignFirstResponder())
+        #expect(!editorView.isFirstResponder)
     }
 #endif
 
