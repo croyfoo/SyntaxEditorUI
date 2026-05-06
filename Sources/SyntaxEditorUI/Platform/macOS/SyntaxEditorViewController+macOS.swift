@@ -91,6 +91,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     @ObservationIgnored
     private let textStorage: NSTextStorage
     @ObservationIgnored
+    private let layoutManager: NSLayoutManager
+    @ObservationIgnored
     private let textContainer: NSTextContainer
 
     @ObservationIgnored
@@ -135,6 +137,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         let nativeTextView = SyntaxEditorNativeTextView(frame: .zero, textContainer: textContainer)
         self.textStorage = textStorage
+        self.layoutManager = layoutManager
         self.textContainer = textContainer
         self.textView = nativeTextView
 
@@ -172,6 +175,11 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
     deinit {
         highlightTask?.cancel()
+    }
+
+    public override func layout() {
+        super.layout()
+        applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
     }
 
     public func textDidChange(_ notification: Notification) {
@@ -314,12 +322,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         textView.isContinuousSpellCheckingEnabled = false
         textView.isGrammarCheckingEnabled = false
 
-        applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
-
         textView.isVerticallyResizable = true
-        textView.minSize = .zero
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.typingAttributes = baseAttributes()
+
+        applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
     }
 
     private var activeUndoManager: UndoManager? {
@@ -378,7 +384,6 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         }
 
         applyLineWrappingConfiguration(lineWrappingEnabled: lineWrappingEnabled)
-        scrollView.hasHorizontalScroller = !lineWrappingEnabled
 
         let languageChanged = forceLanguageRefresh || lastAppliedLanguageIdentifier != language.syntaxHighlightCacheKey
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
@@ -700,20 +705,123 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func applyLineWrappingConfiguration(lineWrappingEnabled: Bool) {
+        var layoutGeometryChanged = false
+        let contentSize = effectiveScrollContentSize
+
+        if scrollView.hasHorizontalScroller == lineWrappingEnabled {
+            scrollView.hasHorizontalScroller = !lineWrappingEnabled
+            layoutGeometryChanged = true
+        }
+
+        if textView.minSize.height != contentSize.height {
+            textView.minSize = NSSize(width: 0, height: contentSize.height)
+        }
+
+        let maxTextViewSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        if textView.maxSize != maxTextViewSize {
+            textView.maxSize = maxTextViewSize
+        }
+
         if lineWrappingEnabled {
-            textView.isHorizontallyResizable = false
-            textContainer.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
-            textContainer.widthTracksTextView = true
-            textContainer.lineBreakMode = .byWordWrapping
+            if textView.isHorizontallyResizable {
+                textView.isHorizontallyResizable = false
+                layoutGeometryChanged = true
+            }
+            if textView.autoresizingMask != [.width] {
+                textView.autoresizingMask = [.width]
+                layoutGeometryChanged = true
+            }
+
+            let wrappingWidth = max(0, contentSize.width)
+            var frame = textView.frame
+            let frameHeight = max(frame.height, contentSize.height)
+            if !frame.width.isNearlyEqual(to: wrappingWidth) || !frame.height.isNearlyEqual(to: frameHeight) {
+                frame.size = NSSize(width: wrappingWidth, height: frameHeight)
+                textView.frame = frame
+                layoutGeometryChanged = true
+            }
+
+            let containerSize = NSSize(width: wrappingWidth, height: CGFloat.greatestFiniteMagnitude)
+            if !textContainer.containerSize.isNearlyEqual(to: containerSize) {
+                textContainer.containerSize = containerSize
+                layoutGeometryChanged = true
+            }
+            if !textContainer.widthTracksTextView {
+                textContainer.widthTracksTextView = true
+                layoutGeometryChanged = true
+            }
+            if textContainer.lineBreakMode != .byWordWrapping {
+                textContainer.lineBreakMode = .byWordWrapping
+                layoutGeometryChanged = true
+            }
+
+            if resetHorizontalClipOriginForWrapping() {
+                layoutGeometryChanged = true
+            }
         } else {
-            textView.isHorizontallyResizable = true
-            textContainer.containerSize = NSSize(
+            if !textView.isHorizontallyResizable {
+                textView.isHorizontallyResizable = true
+                layoutGeometryChanged = true
+            }
+            if !textView.autoresizingMask.isEmpty {
+                textView.autoresizingMask = []
+                layoutGeometryChanged = true
+            }
+
+            let containerSize = NSSize(
                 width: CGFloat.greatestFiniteMagnitude,
                 height: CGFloat.greatestFiniteMagnitude
             )
-            textContainer.widthTracksTextView = false
-            textContainer.lineBreakMode = .byClipping
+            if !textContainer.containerSize.isNearlyEqual(to: containerSize) {
+                textContainer.containerSize = containerSize
+                layoutGeometryChanged = true
+            }
+            if textContainer.widthTracksTextView {
+                textContainer.widthTracksTextView = false
+                layoutGeometryChanged = true
+            }
+            if textContainer.lineBreakMode != .byClipping {
+                textContainer.lineBreakMode = .byClipping
+                layoutGeometryChanged = true
+            }
         }
+
+        if layoutGeometryChanged {
+            invalidateTextLayoutAfterGeometryChange()
+        }
+    }
+
+    private var effectiveScrollContentSize: NSSize {
+        let contentSize = scrollView.contentSize
+        return NSSize(
+            width: contentSize.width > 0 ? contentSize.width : bounds.width,
+            height: contentSize.height > 0 ? contentSize.height : bounds.height
+        )
+    }
+
+    private func resetHorizontalClipOriginForWrapping() -> Bool {
+        let clipView = scrollView.contentView
+        guard !clipView.bounds.origin.x.isNearlyEqual(to: 0) else { return false }
+
+        clipView.scroll(to: NSPoint(x: 0, y: clipView.bounds.origin.y))
+        scrollView.reflectScrolledClipView(clipView)
+        return true
+    }
+
+    private func invalidateTextLayoutAfterGeometryChange() {
+        layoutManager.textContainerChangedGeometry(textContainer)
+
+        if textStorage.length > 0 {
+            let fullRange = NSRange(location: 0, length: textStorage.length)
+            layoutManager.invalidateDisplay(forCharacterRange: fullRange)
+        }
+
+        layoutManager.ensureLayout(for: textContainer)
+        textView.needsDisplay = true
+        scrollView.contentView.needsDisplay = true
     }
 }
 
@@ -787,6 +895,19 @@ private extension NSColor {
         let green = CGFloat((hex >> 8) & 0xFF) / 255.0
         let blue = CGFloat(hex & 0xFF) / 255.0
         return NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1.0)
+    }
+}
+
+private extension CGFloat {
+    func isNearlyEqual(to other: CGFloat, tolerance: CGFloat = 0.5) -> Bool {
+        abs(self - other) <= tolerance
+    }
+}
+
+private extension NSSize {
+    func isNearlyEqual(to other: NSSize, tolerance: CGFloat = 0.5) -> Bool {
+        width.isNearlyEqual(to: other.width, tolerance: tolerance)
+            && height.isNearlyEqual(to: other.height, tolerance: tolerance)
     }
 }
 #endif

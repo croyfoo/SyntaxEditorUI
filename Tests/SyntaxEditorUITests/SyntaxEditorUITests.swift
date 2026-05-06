@@ -1027,6 +1027,21 @@ struct SyntaxEditorUITests {
         return true
     }
 
+    @MainActor
+    private func layoutMacEditorView(
+        _ editorView: SyntaxEditorView,
+        width: CGFloat = 220,
+        height: CGFloat = 140
+    ) {
+        editorView.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        editorView.needsLayout = true
+        editorView.layoutSubtreeIfNeeded()
+    }
+
+    private func approximatelyEqual(_ lhs: CGFloat, _ rhs: CGFloat, tolerance: CGFloat = 0.5) -> Bool {
+        abs(lhs - rhs) <= tolerance
+    }
+
     @Test("SyntaxEditorView reflects model text mutations on macOS")
     @MainActor
     func syntaxEditorViewMacTextObservation() async {
@@ -1060,6 +1075,40 @@ struct SyntaxEditorUITests {
 
         #expect(await waitUntilEditorCondition {
             editorView.hasHorizontalScroller == true
+        })
+    }
+
+    @Test("SyntaxEditorView redraws macOS text after enabling wrapping from a horizontal scroll")
+    @MainActor
+    func syntaxEditorViewMacWrappingResetsHorizontalClipOrigin() async {
+        let model = SyntaxEditorModel(
+            text: String(repeating: "let horizontalScrollNeedsWrapping = true; ", count: 32),
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutMacEditorView(editorView)
+
+        editorView.textView.frame.size.width = 1_600
+        editorView.contentView.scroll(to: NSPoint(x: 600, y: editorView.contentView.bounds.origin.y))
+        editorView.reflectScrolledClipView(editorView.contentView)
+        #expect(editorView.contentView.bounds.origin.x > 0)
+
+        model.lineWrappingEnabled = true
+
+        #expect(await waitUntilEditorCondition {
+            guard let textContainer = editorView.textView.textContainer else {
+                return false
+            }
+
+            return editorView.hasHorizontalScroller == false
+                && editorView.contentView.bounds.origin.x <= 0.5
+                && editorView.textView.visibleRect.origin.x <= 0.5
+                && editorView.textView.isHorizontallyResizable == false
+                && textContainer.widthTracksTextView == true
+                && textContainer.lineBreakMode == .byWordWrapping
+                && approximatelyEqual(textContainer.containerSize.width, editorView.contentSize.width)
+                && approximatelyEqual(editorView.textView.frame.width, editorView.contentSize.width)
         })
     }
 
