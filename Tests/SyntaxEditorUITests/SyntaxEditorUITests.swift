@@ -1251,6 +1251,110 @@ struct SyntaxEditorUITests {
         })
     }
 
+    @Test("SyntaxEditorView wraps to unobscured macOS content width")
+    @MainActor
+    func syntaxEditorViewMacWrappingAccountsForContentInsets() async {
+        let model = SyntaxEditorModel(
+            text: String(repeating: "let insetAwareWrappingWidth = true; ", count: 16),
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(model: model)
+        editorView.contentInsets = NSEdgeInsets(top: 12, left: 80, bottom: 0, right: 24)
+        layoutMacEditorView(editorView, width: 360, height: 160)
+
+        #expect(await waitUntilEditorCondition {
+            guard let textContainer = editorView.textView.textContainer else {
+                return false
+            }
+
+            let contentInsets = editorView.contentView.contentInsets
+            let expectedWidth = editorView.contentSize.width - contentInsets.left
+            let expectedHeight = editorView.contentSize.height - contentInsets.bottom
+            let expectedClipOriginX = -contentInsets.left
+            return editorView.hasHorizontalScroller == false
+                && approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX)
+                && textContainer.widthTracksTextView == true
+                && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
+                && approximatelyEqual(editorView.textView.frame.width, expectedWidth)
+                && approximatelyEqual(editorView.textView.minSize.height, expectedHeight)
+        })
+    }
+
+    @Test("SyntaxEditorView updates macOS wrapping geometry after resize")
+    @MainActor
+    func syntaxEditorViewMacWrappingTracksResizedContentWidth() async {
+        let model = SyntaxEditorModel(
+            text: String(repeating: "let resizedWrappingWidth = true; ", count: 16),
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutMacEditorView(editorView, width: 520, height: 180)
+
+        #expect(await waitUntilEditorCondition {
+            guard let textContainer = editorView.textView.textContainer else {
+                return false
+            }
+
+            return approximatelyEqual(textContainer.containerSize.width, editorView.contentSize.width)
+                && approximatelyEqual(editorView.textView.frame.width, editorView.contentSize.width)
+        })
+
+        layoutMacEditorView(editorView, width: 240, height: 180)
+
+        #expect(await waitUntilEditorCondition {
+            guard let textContainer = editorView.textView.textContainer else {
+                return false
+            }
+
+            return editorView.contentView.bounds.origin.x <= 0.5
+                && approximatelyEqual(textContainer.containerSize.width, editorView.contentSize.width)
+                && approximatelyEqual(editorView.textView.frame.width, editorView.contentSize.width)
+        })
+    }
+
+    @Test("SyntaxEditorView keeps inset macOS wrapping geometry after resize")
+    @MainActor
+    func syntaxEditorViewMacWrappingTracksInsetContentWidthAfterResize() async {
+        let model = SyntaxEditorModel(
+            text: String(repeating: "let insetResizeWrappingWidth = true; ", count: 16),
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(model: model)
+        editorView.contentInsets = NSEdgeInsets(top: 0, left: 96, bottom: 0, right: 0)
+        layoutMacEditorView(editorView, width: 560, height: 180)
+
+        #expect(await waitUntilEditorCondition {
+            guard let textContainer = editorView.textView.textContainer else {
+                return false
+            }
+
+            let contentInsets = editorView.contentView.contentInsets
+            let expectedWidth = editorView.contentSize.width - contentInsets.left
+            let expectedClipOriginX = -contentInsets.left
+            return approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX)
+                && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
+                && approximatelyEqual(editorView.textView.frame.width, expectedWidth)
+        })
+
+        layoutMacEditorView(editorView, width: 320, height: 180)
+
+        #expect(await waitUntilEditorCondition {
+            guard let textContainer = editorView.textView.textContainer else {
+                return false
+            }
+
+            let contentInsets = editorView.contentView.contentInsets
+            let expectedWidth = editorView.contentSize.width - contentInsets.left
+            let expectedClipOriginX = -contentInsets.left
+            return approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX)
+                && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
+                && approximatelyEqual(editorView.textView.frame.width, expectedWidth)
+        })
+    }
+
     @Test("SyntaxEditorView keeps synchronizing after language changes on macOS")
     @MainActor
     func syntaxEditorViewMacLanguageChangeKeepsObservationAlive() async {

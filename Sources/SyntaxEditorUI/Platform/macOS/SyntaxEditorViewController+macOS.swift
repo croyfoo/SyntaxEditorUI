@@ -116,6 +116,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     @ObservationIgnored
     private var isApplyingCommandSelection = false
     @ObservationIgnored
+    private var isApplyingLineWrappingConfiguration = false
+    @ObservationIgnored
+    private var isScrollViewConfigured = false
+    @ObservationIgnored
     private let modelObservations = ObservationScope()
 
     private var scrollView: NSScrollView { self }
@@ -179,6 +183,13 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
     public override func layout() {
         super.layout()
+        applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
+    }
+
+    public override func tile() {
+        super.tile()
+        guard isScrollViewConfigured, !isApplyingLineWrappingConfiguration else { return }
+
         applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
     }
 
@@ -306,6 +317,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         scrollView.hasHorizontalScroller = !model.lineWrappingEnabled
         scrollView.autohidesScrollers = true
         scrollView.documentView = textView
+        isScrollViewConfigured = true
     }
 
     private func configureTextView() {
@@ -705,13 +717,20 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func applyLineWrappingConfiguration(lineWrappingEnabled: Bool) {
+        guard !isApplyingLineWrappingConfiguration else { return }
+
+        isApplyingLineWrappingConfiguration = true
+        defer { isApplyingLineWrappingConfiguration = false }
+
         var layoutGeometryChanged = false
-        let contentSize = effectiveScrollContentSize
 
         if scrollView.hasHorizontalScroller == lineWrappingEnabled {
             scrollView.hasHorizontalScroller = !lineWrappingEnabled
+            scrollView.tile()
             layoutGeometryChanged = true
         }
+
+        let contentSize = effectiveScrollContentSize
 
         if textView.minSize.height != contentSize.height {
             textView.minSize = NSSize(width: 0, height: contentSize.height)
@@ -796,17 +815,21 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
     private var effectiveScrollContentSize: NSSize {
         let contentSize = scrollView.contentSize
+        let contentInsets = scrollView.contentView.contentInsets
+        let width = contentSize.width > 0 ? contentSize.width : bounds.width
+        let height = contentSize.height > 0 ? contentSize.height : bounds.height
         return NSSize(
-            width: contentSize.width > 0 ? contentSize.width : bounds.width,
-            height: contentSize.height > 0 ? contentSize.height : bounds.height
+            width: max(0, width - max(0, contentInsets.left)),
+            height: max(0, height - max(0, contentInsets.bottom))
         )
     }
 
     private func resetHorizontalClipOriginForWrapping() -> Bool {
         let clipView = scrollView.contentView
-        guard !clipView.bounds.origin.x.isNearlyEqual(to: 0) else { return false }
+        let targetOriginX = -max(0, clipView.contentInsets.left)
+        guard !clipView.bounds.origin.x.isNearlyEqual(to: targetOriginX) else { return false }
 
-        clipView.scroll(to: NSPoint(x: 0, y: clipView.bounds.origin.y))
+        clipView.scroll(to: NSPoint(x: targetOriginX, y: clipView.bounds.origin.y))
         scrollView.reflectScrolledClipView(clipView)
         return true
     }
