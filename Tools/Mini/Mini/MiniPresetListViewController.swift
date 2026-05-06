@@ -129,22 +129,52 @@ final class MiniPresetListViewController: NSViewController, NSTableViewDataSourc
     }
 
     override func loadView() {
-        tableView.addTableColumn(NSTableColumn(identifier: .presetColumn))
-        tableView.headerView = nil
-        tableView.style = .sourceList
-        tableView.dataSource = self
-        tableView.delegate = self
-
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        view = scrollView
+        view = NSView(frame: .zero)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        configureHierarchy()
+        configureTableView()
+        tableView.reloadData()
         bindModel()
         renderSelection()
+    }
+
+    private func configureHierarchy() {
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        view.addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+
+    private func configureTableView() {
+        let tableColumn = NSTableColumn(identifier: .presetColumn)
+        tableColumn.resizingMask = .autoresizingMask
+        tableView.addTableColumn(tableColumn)
+        tableView.headerView = nil
+        tableView.style = .sourceList
+        tableView.backgroundColor = .clear
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.rowSizeStyle = .default
+        tableView.intercellSpacing = NSSize(width: 0, height: 2)
+        tableView.allowsEmptySelection = false
+        tableView.allowsMultipleSelection = false
+        tableView.autoresizingMask = [.width]
+        tableView.dataSource = self
+        tableView.delegate = self
+
+        scrollView.documentView = tableView
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -182,8 +212,6 @@ final class MiniPresetListViewController: NSViewController, NSTableViewDataSourc
     }
 
     private func renderSelection() {
-        tableView.reloadData()
-
         guard let selectedIndex = MiniPreviewPreset.all.firstIndex(where: { $0.id == model.currentPresetID }) else {
             tableView.deselectAll(nil)
             return
@@ -198,12 +226,14 @@ final class MiniPresetListViewController: NSViewController, NSTableViewDataSourc
 
         let textField = NSTextField(labelWithString: "")
         textField.translatesAutoresizingMaskIntoConstraints = false
+        textField.font = .preferredFont(forTextStyle: .body)
+        textField.lineBreakMode = .byTruncatingTail
         cell.addSubview(textField)
         cell.textField = textField
 
         NSLayoutConstraint.activate([
-            textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
+            textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
             textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
 

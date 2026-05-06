@@ -157,9 +157,6 @@ final class MiniSplitViewController: NSSplitViewController {
         self.presetListViewController = MiniPresetListViewController(model: model)
 
         super.init(nibName: nil, bundle: nil)
-
-        configureSplitItems()
-        bindModel()
     }
 
     @available(*, unavailable)
@@ -167,10 +164,20 @@ final class MiniSplitViewController: NSSplitViewController {
         nil
     }
 
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        configureSplitItems()
+        bindModel()
+    }
+
     private func configureSplitItems() {
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: presetListViewController)
+        sidebarItem.allowsFullHeightLayout = true
         sidebarItem.minimumThickness = 180
         sidebarItem.maximumThickness = 260
+        sidebarItem.preferredThicknessFraction = 0.22
+        sidebarItem.titlebarSeparatorStyle = .none
         sidebarItem.canCollapse = false
         addSplitViewItem(sidebarItem)
         renderDetail()
@@ -200,9 +207,13 @@ final class MiniSplitViewController: NSSplitViewController {
 
         let editorViewController = SyntaxEditorViewController(model: editorModel)
         editorViewController.title = model.currentPreset.title
+        editorViewController.scrollView.automaticallyAdjustsContentInsets = true
 
         let detailItem = NSSplitViewItem(viewController: editorViewController)
         detailItem.minimumThickness = 320
+        if #available(macOS 26.0, *) {
+            detailItem.automaticallyAdjustsSafeAreaInsets = true
+        }
         addSplitViewItem(detailItem)
 
         self.editorViewController = editorViewController
