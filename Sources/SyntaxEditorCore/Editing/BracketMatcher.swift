@@ -1,6 +1,6 @@
 import Foundation
 
-struct BracketMatcher {
+package struct BracketMatcher {
     private static let openToClose: [Character: Character] = [
         "(": ")",
         "[": "]",
@@ -13,7 +13,7 @@ struct BracketMatcher {
         "}": "{",
     ]
 
-    static func matchedRanges(in source: String, caretUTF16Offset: Int) -> [NSRange] {
+    package static func matchedRanges(in source: String, caretUTF16Offset: Int) -> [NSRange] {
         let nsSource = source as NSString
         guard nsSource.length > 0 else { return [] }
 

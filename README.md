@@ -1,6 +1,7 @@
 # SyntaxEditorUI
 
 `SyntaxEditorUI` is a lightweight cross-platform code editor package for iOS/macOS.
+Its internal `SyntaxEditorCore` target keeps the non-UI editor model, language definitions, editing logic, and highlighting engine separated from platform UI code.
 
 ## Features
 
@@ -41,6 +42,8 @@
 ## Usage
 
 ```swift
+import SyntaxEditorUI
+
 let model = SyntaxEditorModel(
     text: "const answer = 42;",
     language: BuiltinSyntaxLanguages.javascript
@@ -109,9 +112,16 @@ struct CustomJSONLanguage: SyntaxLanguage {
 ## Testing
 
 ```bash
+swift test
 xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITests -destination 'platform=macOS'
 xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITests -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest'
-xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme MiniUITests -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest'
 ```
 
-`Mini` is a lightweight manual verification app for iOS/macOS and an iOS UITest harness for the editor package. It launches a concrete `SyntaxEditorUI` surface instead of the generated template UI, so it can be used to validate real editor behavior.
+`Mini` is a lightweight manual verification app for iOS/macOS. It is not a public product and does not own package regression tests.
+
+## Breaking API Notes
+
+- Non-UI implementation moved into the internal `SyntaxEditorCore` target. `SyntaxEditorCore` is not a public package product; clients should keep importing `SyntaxEditorUI` only.
+- `SyntaxEditorModel`, `BuiltinSyntaxLanguages`, `SyntaxLanguage`, and related non-UI APIs remain available from `SyntaxEditorUI` via module re-export.
+- On iOS, `SyntaxEditorView` is now the single native text input and scroll view. The previous embedded `UITextView` API has been removed.
+- On iOS, use `SyntaxEditorView` / `SyntaxEditorViewController.editorView` directly for text, selection, editability, wrapping, and scrolling. `SyntaxEditorView.textView` and `SyntaxEditorViewController.textView` are no longer available.

@@ -1,30 +1,38 @@
 import Foundation
 
-struct EditorCommandResult {
-    let text: String
-    let selectedRange: NSRange
-    let refreshStartUTF16: Int
+package struct EditorCommandResult {
+    package let text: String
+    package let selectedRange: NSRange
+    package let refreshStartUTF16: Int
+
+    package init(text: String, selectedRange: NSRange, refreshStartUTF16: Int) {
+        self.text = text
+        self.selectedRange = selectedRange
+        self.refreshStartUTF16 = refreshStartUTF16
+    }
 }
 
-final class EditorCommandEngine {
+package final class EditorCommandEngine {
     private let indentUnit = "    "
     private var pendingTOMLMultilineDelimiter: PendingTOMLMultilineDelimiter?
 
-    enum DeletionIntent {
+    package enum DeletionIntent {
         case unspecified
         case backward
     }
+
+    package init() {}
 
     private struct PendingTOMLMultilineDelimiter {
         let cursorLocation: Int
         let quote: Character
     }
 
-    func invalidateTransientState() {
+    package func invalidateTransientState() {
         pendingTOMLMultilineDelimiter = nil
     }
 
-    func transformInput(
+    package func transformInput(
         source: String,
         range: NSRange,
         replacementText: String,
@@ -63,7 +71,7 @@ final class EditorCommandEngine {
         return nil
     }
 
-    func indentSelection(source: String, selection: NSRange) -> EditorCommandResult? {
+    package func indentSelection(source: String, selection: NSRange) -> EditorCommandResult? {
         invalidateTransientState()
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
@@ -80,7 +88,7 @@ final class EditorCommandEngine {
         )
     }
 
-    func outdentSelection(source: String, selection: NSRange) -> EditorCommandResult? {
+    package func outdentSelection(source: String, selection: NSRange) -> EditorCommandResult? {
         invalidateTransientState()
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
@@ -108,7 +116,7 @@ final class EditorCommandEngine {
         )
     }
 
-    func toggleComment(
+    package func toggleComment(
         source: String,
         selection: NSRange,
         language: any SyntaxLanguage

@@ -1,10 +1,10 @@
 import Foundation
 
-struct TextMutation: Equatable {
-    let range: NSRange
-    let replacement: String
+package struct TextMutation: Equatable {
+    package let range: NSRange
+    package let replacement: String
 
-    static func diff(from oldText: String, to newText: String) -> TextMutation? {
+    package static func diff(from oldText: String, to newText: String) -> TextMutation? {
         guard oldText != newText else { return nil }
 
         let oldUTF16 = Array(oldText.utf16)

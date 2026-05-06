@@ -2,9 +2,9 @@ import Foundation
 import SwiftTreeSitter
 import SwiftTreeSitterLayer
 
-struct SyntaxHighlightToken {
-    let range: NSRange
-    let captureName: String
+package struct SyntaxHighlightToken {
+    package let range: NSRange
+    package let captureName: String
 }
 
 private enum CachedLanguageConfiguration {
@@ -12,13 +12,15 @@ private enum CachedLanguageConfiguration {
     case missing
 }
 
-actor SyntaxHighlighterEngine {
+package actor SyntaxHighlighterEngine {
     private let parser = Parser()
     private var configurations: [String: CachedLanguageConfiguration] = [:]
     private var layeredHighlightingSupport: [String: Bool] = [:]
     private var htmlPreprocessingSupport: [String: Bool] = [:]
 
-    func render(source: String, language: any SyntaxLanguage) -> [SyntaxHighlightToken] {
+    package init() {}
+
+    package func render(source: String, language: any SyntaxLanguage) -> [SyntaxHighlightToken] {
         guard !source.isEmpty else { return [] }
         guard let configuration = configuration(for: language) else { return [] }
 

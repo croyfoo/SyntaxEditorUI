@@ -65,7 +65,7 @@ public struct SyntaxTreeSitterSupport: Sendable {
 }
 
 extension SyntaxLanguage {
-    var syntaxHighlightCacheKey: String {
+    package var syntaxHighlightCacheKey: String {
         "\(identifier)|\(treeSitterSupport.cacheKey)"
     }
 }

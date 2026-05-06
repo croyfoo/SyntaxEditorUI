@@ -42,31 +42,36 @@ final class SyntaxEditorKeyboardAccessoryModel {
 }
 
 @MainActor
-final class SyntaxEditorKeyboardAccessoryView: UIToolbar {
+final class SyntaxEditorKeyboardAccessoryView: UIInputView {
     private var hostingController: UIHostingController<SyntaxEditorKeyboardAccessoryContent>?
-    
+
     init(model: SyntaxEditorKeyboardAccessoryModel) {
-        super.init(frame: .zero)
-        isTranslucent = true
+        super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 44), inputViewStyle: .keyboard)
+        allowsSelfSizing = true
 
         let swiftUIView = SyntaxEditorKeyboardAccessoryContent(model: model)
         let hostingController = UIHostingController(rootView: swiftUIView)
         hostingController.view.backgroundColor = .clear
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         self.hostingController = hostingController
 
-        let customButton = UIBarButtonItem(customView:hostingController.view )
-        if #available(iOS 26.0, *) {
-            customButton.hidesSharedBackground = false
-            customButton.sharesBackground = true
-        }
-        setItems([customButton], animated: false)
-        sizeToFit()
-        
+        addSubview(hostingController.view)
+        NSLayoutConstraint.activate([
+            hostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hostingController.view.topAnchor.constraint(equalTo: topAnchor),
+            hostingController.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+        ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: 44)
     }
 }
 
@@ -102,19 +107,18 @@ private struct SyntaxEditorKeyboardAccessoryContent: View {
         systemName: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button{
+        Button {
             action()
-        }label:{
-            ZStack{
+        } label: {
+            ZStack {
                 Circle()
                     .fill(.clear)
-                Image(systemName:systemName)
+                Image(systemName: systemName)
             }
         }
         .tint(.primary)
         .buttonBorderShape(.capsule)
         .buttonStyle(.borderless)
-    
     }
 }
 
