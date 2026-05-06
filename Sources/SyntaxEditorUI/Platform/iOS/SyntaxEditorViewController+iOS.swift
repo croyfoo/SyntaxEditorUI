@@ -934,7 +934,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         let targetLineBreakMode: NSLineBreakMode = model.lineWrappingEnabled ? .byWordWrapping : .byClipping
         var updates: [(range: NSRange, style: NSParagraphStyle)] = []
 
-        textStorage.enumerateAttribute(.paragraphStyle, in: textRange) { value, range, _ in
+        unsafe textStorage.enumerateAttribute(.paragraphStyle, in: textRange) { value, range, _ in
             let paragraphStyle = ((value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle)
                 ?? NSMutableParagraphStyle()
             guard value == nil || paragraphStyle.lineBreakMode != targetLineBreakMode else { return }
@@ -950,7 +950,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
             textStorage.addAttribute(.paragraphStyle, value: update.style, range: update.range)
         }
         textStorage.endEditing()
-        layoutManager.invalidateLayout(forCharacterRange: textRange, actualCharacterRange: nil)
+        unsafe layoutManager.invalidateLayout(forCharacterRange: textRange, actualCharacterRange: nil)
         layoutManager.invalidateDisplay(forCharacterRange: textRange)
     }
 
