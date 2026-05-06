@@ -112,12 +112,12 @@ struct CustomJSONLanguage: SyntaxLanguage {
 ## Testing
 
 ```bash
+swift test
 xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITests -destination 'platform=macOS'
 xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITests -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest'
-xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme MiniUITests -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest'
 ```
 
-`Mini` is a lightweight manual verification app for iOS/macOS and an iOS UITest harness for the editor package. It launches a concrete `SyntaxEditorUI` surface instead of the generated template UI, so it can be used to validate real editor behavior.
+`Mini` is a lightweight manual verification app for iOS/macOS. It is not a public product and does not own package regression tests.
 
 ## Breaking API Notes
 

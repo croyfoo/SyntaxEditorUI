@@ -154,6 +154,32 @@ struct SyntaxEditorUITests {
         )
     }
 
+    @Test("SyntaxEditorView applies transformed iOS text input to the model")
+    @MainActor
+    func syntaxEditorViewIOSAppliesTransformedTextInputToModel() {
+        let model = SyntaxEditorModel(text: "", language: BuiltinSyntaxLanguages.javascript)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        #expect(!editorView.textView(
+            editorView.textView,
+            shouldChangeTextIn: NSRange(location: 0, length: 0),
+            replacementText: "{"
+        ))
+        #expect(editorView.text == "{}")
+        #expect(model.text == "{}")
+        #expect(editorView.selectedRange == NSRange(location: 1, length: 0))
+
+        #expect(!editorView.textView(
+            editorView.textView,
+            shouldChangeTextIn: editorView.selectedRange,
+            replacementText: "\n"
+        ))
+        #expect(editorView.text == "{\n    \n}")
+        #expect(model.text == "{\n    \n}")
+        #expect(editorView.selectedRange == NSRange(location: 6, length: 0))
+    }
+
     @Test("SyntaxEditorView reflects model text mutations on iOS")
     @MainActor
     func syntaxEditorViewIOSTextObservation() async {
