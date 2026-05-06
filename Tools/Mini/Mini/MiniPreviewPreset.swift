@@ -10,7 +10,7 @@ extension MiniPreviewPreset:Hashable,Identifiable{
 }
 
 struct MiniPreviewPreset {
-    enum ID: String, CaseIterable {
+    enum ID: String, CaseIterable, Sendable {
         case css
         case html
         case javascript
@@ -66,7 +66,7 @@ struct MiniPreviewPreset {
         sampleText: """
         const answer = 42;
         function greet(name) {
-            return `Hello, ${name}!`;
+            return `Hello, ${name}! ` + "\(String(repeating: "Hello, ", count: 120))";
         }
         """,
         language: BuiltinSyntaxLanguages.javascript

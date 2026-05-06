@@ -1,10 +1,206 @@
-import SwiftUI
+import SyntaxEditorUI
+
+#if canImport(UIKit)
+import UIKit
 
 @main
-struct MiniApp: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
+@MainActor
+final class AppDelegate: UIResponder, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(
+            name: "Default Configuration",
+            sessionRole: connectingSceneSession.role
+        )
+        configuration.delegateClass = SceneDelegate.self
+        return configuration
     }
 }
+
+@MainActor
+final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+
+    func scene(
+        _ scene: UIScene,
+        willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        guard let windowScene = scene as? UIWindowScene else { return }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = MiniSplitViewController(
+            model: MiniContentViewModel(configuration: .current)
+        )
+        self.window = window
+        window.makeKeyAndVisible()
+    }
+}
+#elseif canImport(AppKit)
+import AppKit
+import ObservationBridge
+
+@main
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static var sharedDelegate: AppDelegate?
+    private var windowController: MiniWindowController?
+
+    static func main() {
+        let application = NSApplication.shared
+        let delegate = AppDelegate()
+        sharedDelegate = delegate
+        application.delegate = delegate
+        application.setActivationPolicy(.regular)
+        application.run()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let windowController = MiniWindowController(
+            model: MiniContentViewModel(configuration: .current)
+        )
+        self.windowController = windowController
+        windowController.showWindow(nil)
+        NSApp.activate()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+}
+
+@MainActor
+final class MiniWindowController: NSWindowController, NSToolbarDelegate {
+    private let model: MiniContentViewModel
+    private let splitViewController: MiniSplitViewController
+    private let modelObservations = ObservationScope()
+    private let editorObservations = ObservationScope()
+    private var lineWrappingItem: NSToolbarItemGroup?
+
+    init(model: MiniContentViewModel) {
+        self.model = model
+        self.splitViewController = MiniSplitViewController(model: model)
+
+        let window = NSWindow(contentViewController: splitViewController)
+        window.setContentSize(NSSize(width: 1000, height: 700))
+        window.minSize = NSSize(width: 760, height: 480)
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarSeparatorStyle = .automatic
+//        window.titleVisibility = .hidden
+//        window.titlebarAppearsTransparent = false
+        window.toolbarStyle = .unified
+        window.title = model.currentPreset.title
+        window.center()
+
+        super.init(window: window)
+
+        configureToolbar()
+        bindModel()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private func configureToolbar() {
+        let toolbar = NSToolbar(identifier: .miniToolbar)
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        window?.toolbar = toolbar
+    }
+
+    private func bindModel() {
+        modelObservations.update {
+            model.observe([\.currentPresetID, \.editorModel]) { [weak self] in
+                self?.renderWindowState()
+                self?.bindEditorModel()
+            }
+            .store(in: modelObservations)
+        }
+        bindEditorModel()
+    }
+
+    private func bindEditorModel() {
+        editorObservations.update {
+            model.editorModel.observe(\.lineWrappingEnabled) { [weak self] _ in
+                self?.updateLineWrappingItem()
+            }
+            .store(in: editorObservations)
+        }
+    }
+
+    private func renderWindowState() {
+        window?.title = model.currentPreset.title
+        updateLineWrappingItem()
+    }
+
+    private func updateLineWrappingItem() {
+        lineWrappingItem?.setSelected(model.editorModel.lineWrappingEnabled, at: 0)
+    }
+
+    @objc private func toggleLineWrapping() {
+        model.editorModel.lineWrappingEnabled.toggle()
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.sidebarTrackingSeparator, .flexibleSpace, .lineWrapping]
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.sidebarTrackingSeparator, .flexibleSpace, .lineWrapping]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        if itemIdentifier == .sidebarTrackingSeparator {
+            return NSTrackingSeparatorToolbarItem(
+                identifier: itemIdentifier,
+                splitView: splitViewController.splitView,
+                dividerIndex: 0
+            )
+        }
+
+        guard itemIdentifier == .lineWrapping else { return nil }
+
+        let image = NSImage(
+            systemSymbolName: "text.alignleft",
+            accessibilityDescription: "Wrap Lines"
+        ) ?? NSImage()
+        let item = NSToolbarItemGroup(
+            itemIdentifier: itemIdentifier,
+            images: [image],
+            selectionMode: .selectAny,
+            labels: ["Wrap Lines"],
+            target: self,
+            action: #selector(toggleLineWrapping)
+        )
+        item.label = "Wrap Lines"
+        item.paletteLabel = "Wrap Lines"
+        item.toolTip = "Toggle line wrapping"
+        item.controlRepresentation = .expanded
+        item.view?.setAccessibilityIdentifier("mini.toolbar.lineWrapping")
+
+        lineWrappingItem = item
+        updateLineWrappingItem()
+        return item
+    }
+}
+
+private extension NSToolbar.Identifier {
+    static let miniToolbar = NSToolbar.Identifier("MiniToolbar")
+}
+
+private extension NSToolbarItem.Identifier {
+    static let lineWrapping = NSToolbarItem.Identifier("LineWrapping")
+}
+#endif
