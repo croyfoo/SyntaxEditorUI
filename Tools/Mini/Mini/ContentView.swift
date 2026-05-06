@@ -18,6 +18,14 @@ struct ContentView: View {
             MiniEditorHostView(model: model.editorModel)
                 .id(ObjectIdentifier(model.editorModel))
                 .navigationTitle(model.currentPreset.title)
+                .toolbar {
+                    ToolbarItem(placement: .secondaryAction) {
+                        Toggle(isOn: $model.editorModel.lineWrappingEnabled) {
+                            Label("Line Wrapping", systemImage: "text.alignleft")
+                        }
+                        .accessibilityIdentifier("mini.toolbar.lineWrapping")
+                    }
+                }
         }
     }
 }

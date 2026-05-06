@@ -145,6 +145,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
                 super.text = nextText
                 selectedRange = clampedTextRange(previousSelection, in: nextText)
                 typingAttributes = baseAttributes()
+                applyParagraphStyleToExistingText()
                 updateTextContainerForCurrentWrappingMode()
                 updateScrollableContentSizeForCurrentWrappingMode()
                 isApplyingModel = false
@@ -515,12 +516,15 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
             let previousSelection = selectedRange
             super.text = text
             selectedRange = clampedTextRange(previousSelection, in: text)
+            typingAttributes = baseAttributes()
+            applyParagraphStyleToExistingText()
             updateTextContainerForCurrentWrappingMode()
             updateScrollableContentSizeForCurrentWrappingMode()
             setNeedsLayout()
+        } else {
+            typingAttributes = baseAttributes()
         }
 
-        typingAttributes = baseAttributes()
         if textNeedsUpdate {
             scheduleHighlight(
                 source: text,
@@ -543,6 +547,9 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         }
 
         applyLineWrappingConfiguration(lineWrappingEnabled: lineWrappingEnabled)
+        applyParagraphStyleToExistingText()
+        updateTextContainerForCurrentWrappingMode()
+        updateScrollableContentSizeForCurrentWrappingMode()
 
         let languageChanged = forceLanguageRefresh || lastAppliedLanguageIdentifier != language.syntaxHighlightCacheKey
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
@@ -906,15 +913,45 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineBreakMode = model.lineWrappingEnabled ? .byWordWrapping : .byClipping
-
         let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.monospacedSystemFont(ofSize: 14, weight: .regular),
             .foregroundColor: UIColor.syntaxEditor(dynamic: SyntaxEditorHighlightTheme.baseForeground),
-            .paragraphStyle: paragraphStyle,
+            .paragraphStyle: baseParagraphStyle(),
         ]
         return attributes
+    }
+
+    private func baseParagraphStyle() -> NSParagraphStyle {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = model.lineWrappingEnabled ? .byWordWrapping : .byClipping
+        return paragraphStyle
+    }
+
+    private func applyParagraphStyleToExistingText() {
+        let textRange = NSRange(location: 0, length: textStorage.length)
+        guard textRange.length > 0 else { return }
+
+        let targetLineBreakMode: NSLineBreakMode = model.lineWrappingEnabled ? .byWordWrapping : .byClipping
+        var updates: [(range: NSRange, style: NSParagraphStyle)] = []
+
+        textStorage.enumerateAttribute(.paragraphStyle, in: textRange) { value, range, _ in
+            let paragraphStyle = ((value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle)
+                ?? NSMutableParagraphStyle()
+            guard value == nil || paragraphStyle.lineBreakMode != targetLineBreakMode else { return }
+
+            paragraphStyle.lineBreakMode = targetLineBreakMode
+            updates.append((range, paragraphStyle.copy() as! NSParagraphStyle))
+        }
+
+        guard !updates.isEmpty else { return }
+
+        textStorage.beginEditing()
+        for update in updates {
+            textStorage.addAttribute(.paragraphStyle, value: update.style, range: update.range)
+        }
+        textStorage.endEditing()
+        layoutManager.invalidateLayout(forCharacterRange: textRange, actualCharacterRange: nil)
+        layoutManager.invalidateDisplay(forCharacterRange: textRange)
     }
 
     private func styleAttributes(for captureName: String) -> [NSAttributedString.Key: Any] {
@@ -942,9 +979,20 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     private func updateTextContainerForCurrentWrappingMode() {
+        let lineWrappingEnabled = model.lineWrappingEnabled
+        let lineBreakMode: NSLineBreakMode = lineWrappingEnabled ? .byWordWrapping : .byClipping
+        if textContainer.widthTracksTextView != lineWrappingEnabled {
+            textContainer.widthTracksTextView = lineWrappingEnabled
+        }
+        if textContainer.lineBreakMode != lineBreakMode {
+            textContainer.lineBreakMode = lineBreakMode
+        }
+        alwaysBounceHorizontal = !lineWrappingEnabled
+        showsHorizontalScrollIndicator = !lineWrappingEnabled
+
         guard bounds.width > 0, bounds.height > 0 else { return }
 
-        if model.lineWrappingEnabled {
+        if lineWrappingEnabled {
             let wrappedWidth = max(0, bounds.width - textContainerInset.left - textContainerInset.right)
             let nextSize = CGSize(width: wrappedWidth, height: defaultTextContainerSize.height)
             if !textContainer.size.isNearlyEqual(to: nextSize) {

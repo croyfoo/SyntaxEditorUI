@@ -112,6 +112,16 @@ private func iOSEditorHasHorizontalOverflow(_ editorView: SyntaxEditorView) -> B
 }
 
 @MainActor
+private func iOSEditorHorizontalOverflowDiagnostics(_ editorView: SyntaxEditorView) -> String {
+    layoutIOSEditorView(editorView)
+    return "widthTracksTextView=\(editorView.textContainer.widthTracksTextView) "
+        + "contentSize=\(editorView.contentSize) "
+        + "bounds=\(editorView.bounds) "
+        + "textContainer.size=\(editorView.textContainer.size) "
+        + "lineBreakMode=\(String(describing: iOSEditorLineBreakMode(editorView)))"
+}
+
+@MainActor
 private func iOSEditorRenderedContentFrame(_ editorView: SyntaxEditorView) -> CGRect? {
     CGRect(origin: .zero, size: editorView.contentSize)
 }
@@ -126,6 +136,19 @@ private func iOSEditorHasBackgroundAttribute(_ editorView: SyntaxEditorView, at 
     }
 
     return attributedText.attribute(.backgroundColor, at: location, effectiveRange: nil) != nil
+}
+
+@MainActor
+private func iOSEditorLineBreakMode(_ editorView: SyntaxEditorView, at location: Int = 0) -> NSLineBreakMode? {
+    guard let attributedText = editorView.attributedText,
+          location >= 0,
+          location < attributedText.length
+    else {
+        return nil
+    }
+
+    return (attributedText.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle)?
+        .lineBreakMode
 }
 
 @MainActor
@@ -267,6 +290,8 @@ struct SyntaxEditorUITests {
             layoutIOSEditorView(editorView)
             return editorView.textContainer.widthTracksTextView
                 && editorView.contentSize.width <= editorView.bounds.width + 1
+                && editorView.contentSize.height > editorView.bounds.height + 1
+                && iOSEditorLineBreakMode(editorView) == .byWordWrapping
         })
 
         model.lineWrappingEnabled = false
@@ -276,6 +301,7 @@ struct SyntaxEditorUITests {
             return !editorView.textContainer.widthTracksTextView
                 && editorView.contentSize.width > editorView.bounds.width + 1
                 && editorView.textContainer.size.width > editorView.bounds.width
+                && iOSEditorLineBreakMode(editorView) == .byClipping
         })
 
         editorView.setContentOffset(CGPoint(x: 24, y: 0), animated: false)
@@ -769,9 +795,13 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = false
 
-        #expect(await waitUntilIOSEditorCondition {
+        let restoredHorizontalOverflow = await waitUntilIOSEditorCondition {
             iOSEditorHasHorizontalOverflow(editorView)
-        })
+        }
+        if !restoredHorizontalOverflow {
+            print(iOSEditorHorizontalOverflowDiagnostics(editorView))
+        }
+        #expect(restoredHorizontalOverflow)
 
         editorView.setContentOffset(CGPoint(x: 24, y: 0), animated: false)
         #expect(editorView.contentOffset.x > 0)

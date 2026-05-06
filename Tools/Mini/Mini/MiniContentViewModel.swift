@@ -15,11 +15,11 @@ final class MiniContentViewModel {
             }
 
             currentPresetID = selectedPresetID
-
+            let lineWrappingEnabled = editorModel.lineWrappingEnabled
             editorModel = SyntaxEditorModel(
                 text: text(for: preset),
                 language: preset.language,
-                lineWrappingEnabled: false
+                lineWrappingEnabled: lineWrappingEnabled
             )
         }
     }
