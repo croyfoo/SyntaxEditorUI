@@ -120,6 +120,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     @ObservationIgnored
     private var isScrollViewConfigured = false
     @ObservationIgnored
+    private var lastAppliedColorTheme: SyntaxEditorColorTheme?
+    @ObservationIgnored
     private let modelObservations = ObservationScope()
 
     private var scrollView: NSScrollView { self }
@@ -162,6 +164,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             language: model.language,
             isEditable: model.isEditable,
             lineWrappingEnabled: model.lineWrappingEnabled,
+            colorTheme: model.colorTheme,
             forceLanguageRefresh: true,
             schedulesHighlight: false
         )
@@ -335,13 +338,24 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         textView.isGrammarCheckingEnabled = false
 
         textView.isVerticallyResizable = true
-        textView.typingAttributes = baseAttributes()
+        configureBaseTextViewAppearance()
 
         applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
     }
 
     private var activeUndoManager: UndoManager? {
         textView.undoManager ?? fallbackUndoManager
+    }
+
+    private func configureBaseTextViewAppearance() {
+        let base = baseAttributes()
+        textView.font = base[.font] as? NSFont ?? textView.font
+        textView.textColor = base[.foregroundColor] as? NSColor ?? textView.textColor
+        textView.typingAttributes = base
+    }
+
+    private func updateTypingAttributes() {
+        textView.typingAttributes = baseAttributes()
     }
 
     private func startModelObservation() {
@@ -352,12 +366,13 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             }
             .store(in: modelObservations)
 
-            model.observe([\.language, \.isEditable, \.lineWrappingEnabled]) { [weak self] in
+            model.observe([\.language, \.isEditable, \.lineWrappingEnabled, \.colorTheme.id]) { [weak self] in
                 guard let self else { return }
                 self.applyObservedEditorState(
                     language: self.model.language,
                     isEditable: self.model.isEditable,
-                    lineWrappingEnabled: self.model.lineWrappingEnabled
+                    lineWrappingEnabled: self.model.lineWrappingEnabled,
+                    colorTheme: self.model.colorTheme
                 )
             }
             .store(in: modelObservations)
@@ -374,7 +389,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             textView.string = text
         }
 
-        textView.typingAttributes = baseAttributes()
+        updateTypingAttributes()
         if textNeedsUpdate {
             scheduleHighlight(
                 source: text,
@@ -388,9 +403,17 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         language: any SyntaxLanguage,
         isEditable: Bool,
         lineWrappingEnabled: Bool,
+        colorTheme: SyntaxEditorColorTheme,
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
+        let previousColorTheme = lastAppliedColorTheme
+        let colorThemeChanged = previousColorTheme.map { $0 != colorTheme } ?? true
+        if colorThemeChanged {
+            applyBaseForegroundColorChange(from: previousColorTheme, to: colorTheme)
+        }
+        lastAppliedColorTheme = colorTheme
+
         if textView.isEditable != isEditable {
             textView.isEditable = isEditable
         }
@@ -400,14 +423,42 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         let languageChanged = forceLanguageRefresh || lastAppliedLanguageIdentifier != language.syntaxHighlightCacheKey
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
 
-        textView.typingAttributes = baseAttributes()
-        if languageChanged && schedulesHighlight {
+        updateTypingAttributes()
+        if (languageChanged || colorThemeChanged) && schedulesHighlight {
             scheduleHighlight(
                 source: textView.string,
                 language: language,
                 refreshStartUTF16: 0
             )
         }
+    }
+
+    private func applyBaseForegroundColorChange(
+        from previousColorTheme: SyntaxEditorColorTheme?,
+        to colorTheme: SyntaxEditorColorTheme
+    ) {
+        guard let previousColorTheme else { return }
+
+        let textRange = NSRange(location: 0, length: textStorage.length)
+        guard textRange.length > 0 else { return }
+
+        var rangesToUpdate: [NSRange] = []
+        unsafe textStorage.enumerateAttribute(.foregroundColor, in: textRange) { value, range, _ in
+            guard let color = value as? NSColor,
+                  color.isEqual(previousColorTheme.baseForeground)
+            else {
+                return
+            }
+            rangesToUpdate.append(range)
+        }
+
+        guard !rangesToUpdate.isEmpty else { return }
+
+        textStorage.beginEditing()
+        for range in rangesToUpdate {
+            textStorage.addAttribute(.foregroundColor, value: colorTheme.baseForeground, range: range)
+        }
+        textStorage.endEditing()
     }
 
     private func applyCommandResult(_ result: EditorCommandResult) {
@@ -693,7 +744,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             guard clamped.length > 0 else { continue }
             textStorage.addAttribute(
                 .backgroundColor,
-                value: NSColor.syntaxEditor(dynamic: SyntaxEditorHighlightTheme.bracketBackground).withAlphaComponent(0.24),
+                value: NSColor.syntaxEditorAlpha(model.colorTheme.bracketBackground, alpha: 0.24),
                 range: clamped
             )
         }
@@ -705,15 +756,15 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
         [
             .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
-            .foregroundColor: NSColor.syntaxEditor(dynamic: SyntaxEditorHighlightTheme.baseForeground),
+            .foregroundColor: model.colorTheme.baseForeground,
         ]
     }
 
     private func styleAttributes(for captureName: String) -> [NSAttributedString.Key: Any] {
-        guard let pair = SyntaxEditorHighlightTheme.colorPair(for: captureName) else {
+        guard let color = SyntaxEditorHighlightTheme.color(for: captureName, in: model.colorTheme) else {
             return [:]
         }
-        return [.foregroundColor: NSColor.syntaxEditor(dynamic: pair)]
+        return [.foregroundColor: color]
     }
 
     private func applyLineWrappingConfiguration(lineWrappingEnabled: Bool) {
@@ -905,19 +956,14 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
 }
 
 private extension NSColor {
-    static func syntaxEditor(dynamic pair: SyntaxEditorHexColorPair) -> NSColor {
+    static func syntaxEditorAlpha(_ color: NSColor, alpha: CGFloat) -> NSColor {
         NSColor(name: nil) { appearance in
-            let match = appearance.bestMatch(from: [.darkAqua, .vibrantDark, .aqua, .vibrantLight])
-            let isDark = match == .darkAqua || match == .vibrantDark
-            return syntaxEditor(hex: isDark ? pair.dark : pair.light)
+            var resolvedColor = color.withAlphaComponent(alpha)
+            appearance.performAsCurrentDrawingAppearance {
+                resolvedColor = color.withAlphaComponent(alpha)
+            }
+            return resolvedColor
         }
-    }
-
-    static func syntaxEditor(hex: UInt32) -> NSColor {
-        let red = CGFloat((hex >> 16) & 0xFF) / 255.0
-        let green = CGFloat((hex >> 8) & 0xFF) / 255.0
-        let blue = CGFloat(hex & 0xFF) / 255.0
-        return NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1.0)
     }
 }
 

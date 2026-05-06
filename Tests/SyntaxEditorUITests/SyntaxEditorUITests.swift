@@ -13,6 +13,87 @@ import AppKit
 
 private func requireObservable<T: Observable>(_ value: T) {}
 
+private func syntaxEditorUITestColor(hex: UInt32) -> SyntaxEditorColor {
+    let red = CGFloat((hex >> 16) & 0xFF) / 255.0
+    let green = CGFloat((hex >> 8) & 0xFF) / 255.0
+    let blue = CGFloat(hex & 0xFF) / 255.0
+
+#if canImport(UIKit)
+    return UIColor(red: red, green: green, blue: blue, alpha: 1.0)
+#elseif canImport(AppKit)
+    return NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1.0)
+#endif
+}
+
+private func syntaxEditorUITestColorTheme(
+    baseForeground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x101112),
+    bracketBackground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x202122),
+    comment: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x303132),
+    string: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x404142),
+    keyword: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x505152),
+    number: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x606162),
+    function: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x707172),
+    type: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x808182),
+    constant: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x909192),
+    variable: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xA0A1A2),
+    punctuation: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xB0B1B2)
+) -> SyntaxEditorColorTheme {
+    SyntaxEditorColorTheme(
+        baseForeground: baseForeground,
+        bracketBackground: bracketBackground,
+        comment: comment,
+        string: string,
+        keyword: keyword,
+        number: number,
+        function: function,
+        type: type,
+        constant: constant,
+        variable: variable,
+        punctuation: punctuation
+    )
+}
+
+private func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: SyntaxEditorColor) -> Bool {
+    guard let lhs else { return false }
+
+#if canImport(UIKit)
+    var lhsRed: CGFloat = 0
+    var lhsGreen: CGFloat = 0
+    var lhsBlue: CGFloat = 0
+    var lhsAlpha: CGFloat = 0
+    var rhsRed: CGFloat = 0
+    var rhsGreen: CGFloat = 0
+    var rhsBlue: CGFloat = 0
+    var rhsAlpha: CGFloat = 0
+
+    guard lhs.getRed(&lhsRed, green: &lhsGreen, blue: &lhsBlue, alpha: &lhsAlpha),
+          rhs.getRed(&rhsRed, green: &rhsGreen, blue: &rhsBlue, alpha: &rhsAlpha)
+    else {
+        return lhs.isEqual(rhs)
+    }
+#elseif canImport(AppKit)
+    guard let lhs = lhs.usingColorSpace(.genericRGB),
+          let rhs = rhs.usingColorSpace(.genericRGB)
+    else {
+        return lhs.isEqual(rhs)
+    }
+
+    let lhsRed = lhs.redComponent
+    let lhsGreen = lhs.greenComponent
+    let lhsBlue = lhs.blueComponent
+    let lhsAlpha = lhs.alphaComponent
+    let rhsRed = rhs.redComponent
+    let rhsGreen = rhs.greenComponent
+    let rhsBlue = rhs.blueComponent
+    let rhsAlpha = rhs.alphaComponent
+#endif
+
+    return abs(lhsRed - rhsRed) < 0.002
+        && abs(lhsGreen - rhsGreen) < 0.002
+        && abs(lhsBlue - rhsBlue) < 0.002
+        && abs(lhsAlpha - rhsAlpha) < 0.002
+}
+
 #if canImport(UIKit)
 private let syntaxEditorKeyCommandModifierMask: UIKeyModifierFlags = [
     .command,
@@ -189,6 +270,18 @@ private func iOSEditorHasBackgroundAttribute(_ editorView: SyntaxEditorView, at 
 }
 
 @MainActor
+private func iOSEditorForegroundColor(_ editorView: SyntaxEditorView, at location: Int) -> UIColor? {
+    guard let attributedText = editorView.attributedText,
+          location >= 0,
+          location < attributedText.length
+    else {
+        return nil
+    }
+
+    return attributedText.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor
+}
+
+@MainActor
 private func iOSEditorLineBreakMode(_ editorView: SyntaxEditorView, at location: Int = 0) -> NSLineBreakMode? {
     guard let attributedText = editorView.attributedText,
           location >= 0,
@@ -227,6 +320,20 @@ private func iOSEditorTextLocationNearVisibleMid(
 
 #if canImport(AppKit)
 private func requireNSTextViewDelegate(_ value: any NSTextViewDelegate) {}
+
+@MainActor
+private func macEditorForegroundColor(_ editorView: SyntaxEditorView, at location: Int) -> NSColor? {
+    guard let textStorage = editorView.textView.textStorage else {
+        return nil
+    }
+    guard location >= 0,
+          location < textStorage.length
+    else {
+        return nil
+    }
+
+    return textStorage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor
+}
 
 private func makeMacCommandKeyEvent(_ character: String) -> NSEvent? {
     NSEvent.keyEvent(
@@ -323,6 +430,34 @@ struct SyntaxEditorUITests {
         })
     }
 
+    @Test("SyntaxEditorView reflects custom iOS color theme")
+    @MainActor
+    func syntaxEditorViewIOSColorThemeObservation() async {
+        let source = "let value = \"text\""
+        let initialTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456)
+        )
+        let updatedTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let model = SyntaxEditorModel(
+            text: source,
+            language: BuiltinSyntaxLanguages.swift,
+            colorTheme: initialTheme
+        )
+        let editorView = SyntaxEditorView(model: model)
+
+        #expect(await waitUntilIOSEditorCondition {
+            syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground)
+        })
+
+        model.colorTheme = updatedTheme
+
+        #expect(await waitUntilIOSEditorCondition {
+            syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
+        })
+    }
+
     @Test("SyntaxEditorView reflects editable and wrapping changes on iOS")
     @MainActor
     func syntaxEditorViewIOSEditorStateObservation() async {
@@ -363,6 +498,45 @@ struct SyntaxEditorUITests {
             layoutIOSEditorView(editorView)
             return editorView.contentSize.width <= editorView.bounds.width + 1
         })
+    }
+
+    @Test("SyntaxEditorView preserves iOS syntax colors after editor state changes")
+    @MainActor
+    func syntaxEditorViewIOSEditorStateDoesNotResetSyntaxColors() async {
+        let source = "let value = \"text\""
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let model = SyntaxEditorModel(
+            text: source,
+            language: BuiltinSyntaxLanguages.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        editorView.textStorage.addAttribute(
+            .foregroundColor,
+            value: theme.keyword,
+            range: NSRange(location: 0, length: 3)
+        )
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        model.lineWrappingEnabled = true
+
+        #expect(await waitUntilIOSEditorCondition {
+            layoutIOSEditorView(editorView)
+            return editorView.textContainer.widthTracksTextView
+        })
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        model.isEditable = false
+
+        #expect(await waitUntilIOSEditorCondition {
+            editorView.isEditable == false
+        })
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
     @Test("SyntaxEditorView enables horizontal scrolling for initial long iOS line")
@@ -1225,6 +1399,71 @@ struct SyntaxEditorUITests {
         #expect(await waitUntilEditorCondition {
             editorView.textView.string == "{\"enabled\":true}"
         })
+    }
+
+    @Test("SyntaxEditorView reflects custom macOS color theme")
+    @MainActor
+    func syntaxEditorViewMacColorThemeObservation() async {
+        let source = "let value = \"text\""
+        let initialTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456)
+        )
+        let updatedTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let model = SyntaxEditorModel(
+            text: source,
+            language: BuiltinSyntaxLanguages.swift,
+            colorTheme: initialTheme
+        )
+        let editorView = SyntaxEditorView(model: model)
+
+        #expect(await waitUntilEditorCondition {
+            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground)
+        })
+
+        model.colorTheme = updatedTheme
+
+        #expect(await waitUntilEditorCondition {
+            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
+        })
+    }
+
+    @Test("SyntaxEditorView preserves macOS syntax colors after editor state changes")
+    @MainActor
+    func syntaxEditorViewMacEditorStateDoesNotResetSyntaxColors() async {
+        let source = "let value = \"text\""
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let model = SyntaxEditorModel(
+            text: source,
+            language: BuiltinSyntaxLanguages.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(model: model)
+
+        editorView.textView.textStorage?.addAttribute(
+            .foregroundColor,
+            value: theme.keyword,
+            range: NSRange(location: 0, length: 3)
+        )
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        model.lineWrappingEnabled = true
+
+        #expect(await waitUntilEditorCondition {
+            editorView.hasHorizontalScroller == false
+        })
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        model.isEditable = false
+
+        #expect(await waitUntilEditorCondition {
+            editorView.textView.isEditable == false
+        })
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
     @Test("SyntaxEditorView reflects editable and wrapping changes on macOS")

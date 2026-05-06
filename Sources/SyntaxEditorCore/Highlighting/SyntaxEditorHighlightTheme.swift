@@ -1,41 +1,128 @@
 import Foundation
 
-package struct SyntaxEditorHexColorPair: Sendable, Hashable {
-    package let light: UInt32
-    package let dark: UInt32
+#if canImport(UIKit)
+import UIKit
 
-    package init(light: UInt32, dark: UInt32) {
-        self.light = light
-        self.dark = dark
+public typealias SyntaxEditorColor = UIColor
+#elseif canImport(AppKit)
+import AppKit
+
+public typealias SyntaxEditorColor = NSColor
+#endif
+
+public struct SyntaxEditorColorTheme: Identifiable, Hashable {
+    public let id: UUID
+    public let baseForeground: SyntaxEditorColor
+    public let bracketBackground: SyntaxEditorColor
+    public let comment: SyntaxEditorColor
+    public let string: SyntaxEditorColor
+    public let keyword: SyntaxEditorColor
+    public let number: SyntaxEditorColor
+    public let function: SyntaxEditorColor
+    public let type: SyntaxEditorColor
+    public let constant: SyntaxEditorColor
+    public let variable: SyntaxEditorColor
+    public let punctuation: SyntaxEditorColor
+
+    public init(
+        baseForeground: SyntaxEditorColor,
+        bracketBackground: SyntaxEditorColor,
+        comment: SyntaxEditorColor,
+        string: SyntaxEditorColor,
+        keyword: SyntaxEditorColor,
+        number: SyntaxEditorColor,
+        function: SyntaxEditorColor,
+        type: SyntaxEditorColor,
+        constant: SyntaxEditorColor,
+        variable: SyntaxEditorColor,
+        punctuation: SyntaxEditorColor
+    ) {
+        self.id = UUID()
+        self.baseForeground = baseForeground
+        self.bracketBackground = bracketBackground
+        self.comment = comment
+        self.string = string
+        self.keyword = keyword
+        self.number = number
+        self.function = function
+        self.type = type
+        self.constant = constant
+        self.variable = variable
+        self.punctuation = punctuation
+    }
+
+    private static let xcodeID = UUID()
+
+    private init(
+        id: UUID,
+        baseForeground: SyntaxEditorColor,
+        bracketBackground: SyntaxEditorColor,
+        comment: SyntaxEditorColor,
+        string: SyntaxEditorColor,
+        keyword: SyntaxEditorColor,
+        number: SyntaxEditorColor,
+        function: SyntaxEditorColor,
+        type: SyntaxEditorColor,
+        constant: SyntaxEditorColor,
+        variable: SyntaxEditorColor,
+        punctuation: SyntaxEditorColor
+    ) {
+        self.id = id
+        self.baseForeground = baseForeground
+        self.bracketBackground = bracketBackground
+        self.comment = comment
+        self.string = string
+        self.keyword = keyword
+        self.number = number
+        self.function = function
+        self.type = type
+        self.constant = constant
+        self.variable = variable
+        self.punctuation = punctuation
+    }
+
+    public static var xcode: SyntaxEditorColorTheme {
+        SyntaxEditorColorTheme(
+            id: xcodeID,
+            baseForeground: .syntaxEditorDynamic(light: 0x1F2328, dark: 0xE6E6E6),
+            bracketBackground: .syntaxEditorDynamic(light: 0xF5E890, dark: 0x665C2B),
+            comment: .syntaxEditorDynamic(light: 0x6A737D, dark: 0x6C7986),
+            string: .syntaxEditorDynamic(light: 0xC41A16, dark: 0xFC6A5D),
+            keyword: .syntaxEditorDynamic(light: 0xAD3DA4, dark: 0xFC5FA3),
+            number: .syntaxEditorDynamic(light: 0x1C00CF, dark: 0xD0BF69),
+            function: .syntaxEditorDynamic(light: 0x326D74, dark: 0x67B7A4),
+            type: .syntaxEditorDynamic(light: 0x0B5CAD, dark: 0x5DD8FF),
+            constant: .syntaxEditorDynamic(light: 0x643820, dark: 0xD0BF69),
+            variable: .syntaxEditorDynamic(light: 0x0E4B9E, dark: 0x9CDCFE),
+            punctuation: .syntaxEditorDynamic(light: 0x6E7781, dark: 0xA7A7A7)
+        )
+    }
+
+    public static func == (lhs: SyntaxEditorColorTheme, rhs: SyntaxEditorColorTheme) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
 }
 
 package enum SyntaxEditorHighlightTheme {
-    package static let baseForeground = SyntaxEditorHexColorPair(light: 0x1F2328, dark: 0xE6E6E6)
-    package static let bracketBackground = SyntaxEditorHexColorPair(light: 0xF5E890, dark: 0x665C2B)
-
-    package static func colorPair(for captureName: String) -> SyntaxEditorHexColorPair? {
-        switch tokenCategory(for: captureName.lowercased()) {
-        case .comment:
-            return SyntaxEditorHexColorPair(light: 0x6A737D, dark: 0x6C7986)
-        case .string:
-            return SyntaxEditorHexColorPair(light: 0xC41A16, dark: 0xFC6A5D)
-        case .keyword:
-            return SyntaxEditorHexColorPair(light: 0xAD3DA4, dark: 0xFC5FA3)
-        case .number:
-            return SyntaxEditorHexColorPair(light: 0x1C00CF, dark: 0xD0BF69)
-        case .function:
-            return SyntaxEditorHexColorPair(light: 0x326D74, dark: 0x67B7A4)
-        case .type:
-            return SyntaxEditorHexColorPair(light: 0x0B5CAD, dark: 0x5DD8FF)
-        case .constant:
-            return SyntaxEditorHexColorPair(light: 0x643820, dark: 0xD0BF69)
-        case .variable:
-            return SyntaxEditorHexColorPair(light: 0x0E4B9E, dark: 0x9CDCFE)
-        case .punctuation:
-            return SyntaxEditorHexColorPair(light: 0x6E7781, dark: 0xA7A7A7)
-        case .none:
-            return nil
+    package static func color(
+        for captureName: String,
+        in theme: SyntaxEditorColorTheme = .xcode
+    ) -> SyntaxEditorColor? {
+        return switch tokenCategory(for: captureName.lowercased()) {
+        case .comment: theme.comment
+        case .string: theme.string
+        case .keyword: theme.keyword
+        case .number: theme.number
+        case .function: theme.function
+        case .type: theme.type
+        case .constant: theme.constant
+        case .variable: theme.variable
+        case .punctuation: theme.punctuation
+        case .none: nil
         }
     }
 
@@ -95,6 +182,52 @@ package enum SyntaxEditorHighlightTheme {
         case punctuation
     }
 }
+
+#if canImport(UIKit)
+private extension UIColor {
+    static func syntaxEditorDynamic(light: UInt32, dark: UInt32) -> UIColor {
+        UIColor { traitCollection in
+            syntaxEditor(hex: traitCollection.userInterfaceStyle == .dark ? dark : light)
+        }
+    }
+
+    static func syntaxEditor(hex: UInt32) -> UIColor {
+        let red = CGFloat((hex >> 16) & 0xFF) / 255.0
+        let green = CGFloat((hex >> 8) & 0xFF) / 255.0
+        let blue = CGFloat(hex & 0xFF) / 255.0
+        return UIColor(red: red, green: green, blue: blue, alpha: 1.0)
+    }
+}
+#elseif canImport(AppKit)
+private extension NSColor {
+    static func syntaxEditorDynamic(light: UInt32, dark: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let match = appearance.bestMatch(from: [
+                .darkAqua,
+                .accessibilityHighContrastDarkAqua,
+                .vibrantDark,
+                .accessibilityHighContrastVibrantDark,
+                .aqua,
+                .accessibilityHighContrastAqua,
+                .vibrantLight,
+                .accessibilityHighContrastVibrantLight,
+            ])
+            let isDark = match == .darkAqua
+                || match == .accessibilityHighContrastDarkAqua
+                || match == .vibrantDark
+                || match == .accessibilityHighContrastVibrantDark
+            return syntaxEditor(hex: isDark ? dark : light)
+        }
+    }
+
+    static func syntaxEditor(hex: UInt32) -> NSColor {
+        let red = CGFloat((hex >> 16) & 0xFF) / 255.0
+        let green = CGFloat((hex >> 8) & 0xFF) / 255.0
+        let blue = CGFloat(hex & 0xFF) / 255.0
+        return NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1.0)
+    }
+}
+#endif
 
 package enum SyntaxEditorRangeUtilities {
     package static func clampedRange(_ range: NSRange, utf16Length: Int) -> NSRange {
