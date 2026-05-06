@@ -123,7 +123,57 @@ private func iOSEditorHorizontalOverflowDiagnostics(_ editorView: SyntaxEditorVi
 
 @MainActor
 private func iOSEditorRenderedContentFrame(_ editorView: SyntaxEditorView) -> CGRect? {
-    CGRect(origin: .zero, size: editorView.contentSize)
+    let width = editorView.textContainer.size.width
+        + editorView.textContainerInset.left
+        + editorView.textContainerInset.right
+    guard width > 0 else { return nil }
+
+    return CGRect(
+        x: 0,
+        y: 0,
+        width: width,
+        height: max(editorView.contentSize.height, editorView.bounds.height)
+    )
+}
+
+@MainActor
+private func iOSEditorVisibleTextContainerRect(_ editorView: SyntaxEditorView) -> CGRect {
+    CGRect(
+        x: max(0, editorView.contentOffset.x - editorView.textContainerInset.left),
+        y: max(0, editorView.contentOffset.y - editorView.textContainerInset.top),
+        width: min(
+            editorView.textContainer.size.width,
+            editorView.bounds.width + editorView.textContainerInset.left + editorView.textContainerInset.right
+        ),
+        height: editorView.bounds.height
+            + editorView.textContainerInset.top
+            + editorView.textContainerInset.bottom
+    )
+}
+
+@MainActor
+private func iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(_ editorView: SyntaxEditorView) -> Bool {
+    guard let textLayoutManager = editorView.textLayoutManager else {
+        return false
+    }
+
+    let visibleRect = iOSEditorVisibleTextContainerRect(editorView)
+    textLayoutManager.ensureLayout(for: visibleRect)
+
+    return textLayoutManager.usageBoundsForTextContainer.maxX >= visibleRect.maxX - 1
+}
+
+@MainActor
+private func iOSEditorTextKit2Diagnostics(_ editorView: SyntaxEditorView) -> String {
+    let visibleRect = iOSEditorVisibleTextContainerRect(editorView)
+    let usageBounds = editorView.textLayoutManager?.usageBoundsForTextContainer ?? .null
+    return "textLayoutManager=\(String(describing: editorView.textLayoutManager)) "
+        + "offset=\(editorView.contentOffset) "
+        + "bounds=\(editorView.bounds) "
+        + "contentSize=\(editorView.contentSize) "
+        + "textContainer.size=\(editorView.textContainer.size) "
+        + "visibleTextContainerRect=\(visibleRect) "
+        + "usageBounds=\(usageBounds)"
 }
 
 @MainActor
@@ -291,7 +341,7 @@ struct SyntaxEditorUITests {
             return editorView.textContainer.widthTracksTextView
                 && editorView.contentSize.width <= editorView.bounds.width + 1
                 && editorView.contentSize.height > editorView.bounds.height + 1
-                && iOSEditorLineBreakMode(editorView) == .byWordWrapping
+                && iOSEditorLineBreakMode(editorView) == .byCharWrapping
         })
 
         model.lineWrappingEnabled = false
@@ -387,9 +437,9 @@ struct SyntaxEditorUITests {
         #expect(editorView.contentOffset.x > 0)
     }
 
-    @Test("SyntaxEditorView expands iOS rendered surface for horizontal scroll")
+    @Test("SyntaxEditorView keeps TextKit 2 layout covering iOS horizontal scroll")
     @MainActor
-    func syntaxEditorViewIOSRenderedSurfaceCoversHorizontalScrollViewport() {
+    func syntaxEditorViewIOSTextKit2LayoutCoversHorizontalScrollViewport() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorMultilineText,
             language: BuiltinSyntaxLanguages.javascript,
@@ -399,6 +449,7 @@ struct SyntaxEditorUITests {
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
+        #expect(editorView.textLayoutManager != nil)
 
         editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
@@ -411,6 +462,59 @@ struct SyntaxEditorUITests {
 
         #expect(renderedContentFrame.width >= editorView.contentSize.width - 1)
         #expect(renderedContentFrame.maxX >= visibleRightEdge - 1)
+        #expect(
+            iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(editorView),
+            Comment(rawValue: iOSEditorTextKit2Diagnostics(editorView))
+        )
+    }
+
+    @Test("SyntaxEditorView keeps TextKit 2 layout covering iOS horizontal scroll after wrapping toggle")
+    @MainActor
+    func syntaxEditorViewIOSTextKit2LayoutCoversHorizontalScrollAfterWrappingToggle() async {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorMultilineText,
+            language: BuiltinSyntaxLanguages.javascript,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 504, height: 1104)
+
+        #expect(await waitUntilIOSEditorCondition {
+            layoutIOSEditorView(editorView, width: 504, height: 1104)
+            return editorView.textContainer.widthTracksTextView
+                && editorView.contentSize.width <= editorView.bounds.width + 1
+                && iOSEditorLineBreakMode(editorView) == .byCharWrapping
+        })
+
+        model.lineWrappingEnabled = false
+
+        #expect(await waitUntilIOSEditorCondition {
+            layoutIOSEditorView(editorView, width: 504, height: 1104)
+            return !editorView.textContainer.widthTracksTextView
+                && editorView.contentSize.width > editorView.bounds.width + 1
+                && editorView.textLayoutManager != nil
+                && iOSEditorLineBreakMode(editorView) == .byClipping
+        })
+
+        let maxOffsetX = max(0, editorView.contentSize.width - editorView.bounds.width)
+        for fraction in [0.25, 0.5, 0.75] {
+            editorView.setContentOffset(CGPoint(x: maxOffsetX * fraction, y: 0), animated: false)
+            layoutIOSEditorView(editorView, width: 504, height: 1104)
+
+            guard let renderedContentFrame = iOSEditorRenderedContentFrame(editorView) else {
+                Issue.record("SyntaxEditorView does not expose a rendered content frame")
+                return
+            }
+            let visibleRightEdge = editorView.contentOffset.x + editorView.bounds.width
+
+            #expect(editorView.contentOffset.x > 0)
+            #expect(renderedContentFrame.width >= editorView.contentSize.width - 1)
+            #expect(renderedContentFrame.maxX >= visibleRightEdge - 1)
+            #expect(
+                iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(editorView),
+                Comment(rawValue: iOSEditorTextKit2Diagnostics(editorView))
+            )
+        }
     }
 
     @Test("SyntaxEditorView keeps long iOS lines unwrapped while horizontally scrollable")
@@ -434,6 +538,37 @@ struct SyntaxEditorUITests {
 
         #expect(editorView.contentOffset.x > 0)
         #expect(editorView.contentSize.height <= 120)
+        #expect(editorView.textLayoutManager != nil)
+        #expect(
+            iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(editorView),
+            Comment(rawValue: iOSEditorTextKit2Diagnostics(editorView))
+        )
+    }
+
+    @Test("SyntaxEditorView does not jump to the iOS line end when a visible long range is selected")
+    @MainActor
+    func syntaxEditorViewIOSVisibleLongRangeSelectionDoesNotJumpToLineEnd() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorMultilineText,
+            language: BuiltinSyntaxLanguages.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let stableOffsetX: CGFloat = 240
+        editorView.setContentOffset(CGPoint(x: stableOffsetX, y: 0), animated: false)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        editorView.scrollRangeToVisible(NSRange(location: 0, length: longIOSSyntaxEditorMultilineText.utf16.count))
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        #expect(abs(editorView.contentOffset.x - stableOffsetX) <= 1)
+        #expect(editorView.textLayoutManager != nil)
+        #expect(
+            iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(editorView),
+            Comment(rawValue: iOSEditorTextKit2Diagnostics(editorView))
+        )
     }
 
     @Test("SyntaxEditorView reports iOS visible content rect after horizontal scroll")
@@ -671,6 +806,10 @@ struct SyntaxEditorUITests {
         }
         #expect(renderedContentFrame.width >= editorView.contentSize.width - 1)
         #expect(renderedContentFrame.maxX >= editorView.contentOffset.x + editorView.bounds.width - 1)
+        #expect(
+            iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(editorView),
+            Comment(rawValue: iOSEditorTextKit2Diagnostics(editorView))
+        )
     }
 
     @Test("SyntaxEditorView supports ranged iOS selection after horizontal scroll")

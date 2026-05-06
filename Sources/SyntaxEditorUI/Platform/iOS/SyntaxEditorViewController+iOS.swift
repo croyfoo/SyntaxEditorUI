@@ -39,6 +39,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     private let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
     private let defaultTextContainerSize = NSTextContainer().size
     private static let estimatedTabColumnWidth = 4
+    private static let defaultEditorFont = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
 
     private let highlighter = SyntaxHighlighterEngine()
     private let commandEngine = EditorCommandEngine()
@@ -52,6 +53,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     private var isApplyingCommandSelection = false
     private var ignoredProgrammaticSelectionRange: NSRange?
     private var isSynchronizingContentSize = false
+    private var lastAppliedLineWrappingEnabled: Bool?
     private var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     private var keyboardAccessoryView: UIView?
     private let modelObservations = ObservationScope()
@@ -244,14 +246,49 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 
     public override func scrollRangeToVisible(_ range: NSRange) {
         let clampedRange = clampedTextRange(range)
-        let targetOffset = clampedRange.location + clampedRange.length
-
-        guard let position = position(
-            from: beginningOfDocument,
-            offset: targetOffset
-        ) else {
+        guard !model.lineWrappingEnabled else {
             super.scrollRangeToVisible(clampedRange)
             return
+        }
+
+        guard let targetRect = contentRectForScrollRange(clampedRange) else {
+            super.scrollRangeToVisible(clampedRange)
+            return
+        }
+
+        let visibleRect = CGRect(origin: contentOffset, size: bounds.size)
+        if targetRect.intersects(visibleRect.insetBy(dx: -textContainer.lineFragmentPadding, dy: -4)) {
+            return
+        }
+
+        scrollContentRectToVisible(targetRect)
+    }
+
+    private func contentRectForScrollRange(_ range: NSRange) -> CGRect? {
+        if range.length > 0,
+           let start = position(from: beginningOfDocument, offset: range.location),
+           let end = position(from: start, offset: range.length),
+           let textRange = textRange(from: start, to: end) {
+            let firstTextRect = firstRect(for: textRange)
+            if firstTextRect.origin.x.isFinite,
+               firstTextRect.origin.y.isFinite,
+               firstTextRect.size.width.isFinite,
+               firstTextRect.size.height.isFinite,
+               !firstTextRect.isNull,
+               !firstTextRect.isEmpty {
+                return firstTextRect
+            }
+        }
+
+        return contentCaretRectForTextLocation(range.location + range.length)
+    }
+
+    private func contentCaretRectForTextLocation(_ location: Int) -> CGRect? {
+        guard let position = position(
+            from: beginningOfDocument,
+            offset: location
+        ) else {
+            return nil
         }
 
         var targetRect = caretRect(for: position)
@@ -259,16 +296,44 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
               targetRect.origin.y.isFinite,
               targetRect.size.width.isFinite,
               targetRect.size.height.isFinite else {
-            super.scrollRangeToVisible(clampedRange)
-            return
+            return nil
         }
 
         if targetRect.width.isZero {
             targetRect = targetRect.insetBy(dx: -textContainer.lineFragmentPadding, dy: 0)
         }
         targetRect.size.width = max(targetRect.size.width, 2)
+        return targetRect
+    }
 
-        scrollRectToVisible(targetRect, animated: false)
+    private func scrollContentRectToVisible(_ rect: CGRect) {
+        let maximumOffset = CGPoint(
+            x: max(-adjustedContentInset.left, contentSize.width - bounds.width + adjustedContentInset.right),
+            y: max(-adjustedContentInset.top, contentSize.height - bounds.height + adjustedContentInset.bottom)
+        )
+        var nextOffset = contentOffset
+        let visibleRect = CGRect(origin: contentOffset, size: bounds.size)
+
+        if rect.minX < visibleRect.minX {
+            nextOffset.x = rect.minX
+        } else if rect.maxX > visibleRect.maxX {
+            nextOffset.x = rect.maxX - bounds.width
+        }
+
+        if rect.minY < visibleRect.minY {
+            nextOffset.y = rect.minY
+        } else if rect.maxY > visibleRect.maxY {
+            nextOffset.y = rect.maxY - bounds.height
+        }
+
+        nextOffset.x = min(max(nextOffset.x, -adjustedContentInset.left), maximumOffset.x)
+        nextOffset.y = min(max(nextOffset.y, -adjustedContentInset.top), maximumOffset.y)
+        guard !nextOffset.x.isNearlyEqual(to: contentOffset.x)
+                || !nextOffset.y.isNearlyEqual(to: contentOffset.y) else {
+            return
+        }
+
+        setContentOffset(nextOffset, animated: false)
     }
 
     public func textViewDidChange(_ textView: UITextView) {
@@ -542,6 +607,9 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
+        let lineWrappingChanged = lastAppliedLineWrappingEnabled.map { $0 != lineWrappingEnabled } ?? false
+        lastAppliedLineWrappingEnabled = lineWrappingEnabled
+
         if self.isEditable != isEditable {
             self.isEditable = isEditable
         }
@@ -550,6 +618,9 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         applyParagraphStyleToExistingText()
         updateTextContainerForCurrentWrappingMode()
         updateScrollableContentSizeForCurrentWrappingMode()
+        if lineWrappingChanged && lineWrappingEnabled {
+            resetHorizontalContentOffset()
+        }
 
         let languageChanged = forceLanguageRefresh || lastAppliedLanguageIdentifier != language.syntaxHighlightCacheKey
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
@@ -923,7 +994,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 
     private func baseParagraphStyle() -> NSParagraphStyle {
         let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineBreakMode = model.lineWrappingEnabled ? .byWordWrapping : .byClipping
+        paragraphStyle.lineBreakMode = model.lineWrappingEnabled ? .byCharWrapping : .byClipping
         return paragraphStyle
     }
 
@@ -931,7 +1002,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         let textRange = NSRange(location: 0, length: textStorage.length)
         guard textRange.length > 0 else { return }
 
-        let targetLineBreakMode: NSLineBreakMode = model.lineWrappingEnabled ? .byWordWrapping : .byClipping
+        let targetLineBreakMode: NSLineBreakMode = model.lineWrappingEnabled ? .byCharWrapping : .byClipping
         var updates: [(range: NSRange, style: NSParagraphStyle)] = []
 
         unsafe textStorage.enumerateAttribute(.paragraphStyle, in: textRange) { value, range, _ in
@@ -950,8 +1021,6 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
             textStorage.addAttribute(.paragraphStyle, value: update.style, range: update.range)
         }
         textStorage.endEditing()
-        unsafe layoutManager.invalidateLayout(forCharacterRange: textRange, actualCharacterRange: nil)
-        layoutManager.invalidateDisplay(forCharacterRange: textRange)
     }
 
     private func styleAttributes(for captureName: String) -> [NSAttributedString.Key: Any] {
@@ -963,13 +1032,9 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 
     private func applyLineWrappingConfiguration(lineWrappingEnabled: Bool) {
         if lineWrappingEnabled {
-            textContainer.widthTracksTextView = true
-            textContainer.lineBreakMode = .byWordWrapping
             alwaysBounceHorizontal = false
             showsHorizontalScrollIndicator = false
         } else {
-            textContainer.widthTracksTextView = false
-            textContainer.lineBreakMode = .byClipping
             alwaysBounceHorizontal = true
             showsHorizontalScrollIndicator = true
         }
@@ -980,7 +1045,8 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 
     private func updateTextContainerForCurrentWrappingMode() {
         let lineWrappingEnabled = model.lineWrappingEnabled
-        let lineBreakMode: NSLineBreakMode = lineWrappingEnabled ? .byWordWrapping : .byClipping
+        let lineBreakMode: NSLineBreakMode = lineWrappingEnabled ? .byCharWrapping : .byClipping
+
         if textContainer.widthTracksTextView != lineWrappingEnabled {
             textContainer.widthTracksTextView = lineWrappingEnabled
         }
@@ -1001,9 +1067,9 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
             return
         }
 
-        let measuredWidth = max(bounds.width, estimatedHorizontalDocumentLayoutWidth())
-        let containerWidth = max(0, measuredWidth - textContainerInset.left - textContainerInset.right)
-        let nextSize = CGSize(width: containerWidth, height: defaultTextContainerSize.height)
+        let documentWidth = max(bounds.width, measuredHorizontalDocumentLayoutWidth())
+        let textContainerWidth = max(0, documentWidth - textContainerInset.left - textContainerInset.right)
+        let nextSize = CGSize(width: textContainerWidth, height: defaultTextContainerSize.height)
         if !textContainer.size.isNearlyEqual(to: nextSize) {
             textContainer.size = nextSize
         }
@@ -1014,21 +1080,22 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 
         let targetWidth = model.lineWrappingEnabled
             ? bounds.width
-            : max(bounds.width, estimatedHorizontalDocumentLayoutWidth())
-        guard !contentSize.width.isNearlyEqual(to: targetWidth) else { return }
+            : max(bounds.width, measuredHorizontalDocumentLayoutWidth())
+        if !contentSize.width.isNearlyEqual(to: targetWidth) {
+            let nextSize = CGSize(width: targetWidth, height: contentSize.height)
+            isSynchronizingContentSize = true
+            contentSize = nextSize
+            isSynchronizingContentSize = false
+        }
 
-        let nextSize = CGSize(width: targetWidth, height: contentSize.height)
-        isSynchronizingContentSize = true
-        contentSize = nextSize
-        isSynchronizingContentSize = false
     }
 
-    private func estimatedHorizontalDocumentLayoutWidth() -> CGFloat {
+    private func measuredHorizontalDocumentLayoutWidth() -> CGFloat {
         guard let source = super.text, !source.isEmpty else {
             return bounds.width
         }
 
-        let textFont = font ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        let textFont = font ?? Self.defaultEditorFont
         let columnWidth = Self.estimatedMonospacedColumnWidth(for: textFont)
         let maxColumns = Self.maximumDisplayColumnCount(
             in: source,
@@ -1044,8 +1111,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     private static func estimatedMonospacedColumnWidth(for font: UIFont) -> CGFloat {
-        let width = ("m" as NSString).size(withAttributes: [.font: font]).width
-        return width.isFinite && width > 0 ? width : font.pointSize
+        font.pointSize * 0.65
     }
 
     private static func maximumDisplayColumnCount(in source: String, tabWidth: Int) -> Int {
@@ -1117,6 +1183,13 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         default:
             return false
         }
+    }
+
+    private func resetHorizontalContentOffset() {
+        let targetX = -adjustedContentInset.left
+        guard !contentOffset.x.isNearlyEqual(to: targetX) else { return }
+
+        setContentOffset(CGPoint(x: targetX, y: contentOffset.y), animated: false)
     }
 
     private func clampedTextRange(_ range: NSRange) -> NSRange {
