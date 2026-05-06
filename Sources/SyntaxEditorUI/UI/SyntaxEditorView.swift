@@ -1,4 +1,5 @@
 import SwiftUI
+import SyntaxEditorCore
 
 #if canImport(UIKit)
 private struct SyntaxEditorContainer: UIViewRepresentable {

@@ -28,7 +28,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "SyntaxEditorUI",
+            name: "SyntaxEditorCore",
             dependencies: [
                 .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
                 .product(name: "SwiftTreeSitterLayer", package: "SwiftTreeSitter"),
@@ -40,7 +40,6 @@ let package = Package(
                 .product(name: "TreeSitterSwift", package: "tree-sitter-swift"),
                 .product(name: "TreeSitterTOML", package: "tree-sitter-toml"),
                 .product(name: "TreeSitterXML", package: "tree-sitter-xml"),
-                .product(name: "ObservationBridge", package: "observationbridge"),
             ],
             resources: [
                 .copy("Resources/ObjectiveCQueries"),
@@ -50,6 +49,22 @@ let package = Package(
                 .defaultIsolation(nil),
                 .strictMemorySafety(),
             ]
+        ),
+        .target(
+            name: "SyntaxEditorUI",
+            dependencies: [
+                "SyntaxEditorCore",
+                .product(name: "ObservationBridge", package: "observationbridge"),
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+            ]
+        ),
+        .testTarget(
+            name: "SyntaxEditorCoreTests",
+            dependencies: ["SyntaxEditorCore"]
         ),
         .testTarget(
             name: "SyntaxEditorUITests",

@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import Observation
 import ObservationBridge
+import SyntaxEditorCore
 import UIKit
 
 @MainActor

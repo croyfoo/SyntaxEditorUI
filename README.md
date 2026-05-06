@@ -1,6 +1,7 @@
 # SyntaxEditorUI
 
 `SyntaxEditorUI` is a lightweight cross-platform code editor package for iOS/macOS.
+Its internal `SyntaxEditorCore` target keeps the non-UI editor model, language definitions, editing logic, and highlighting engine separated from platform UI code.
 
 ## Features
 
@@ -41,6 +42,8 @@
 ## Usage
 
 ```swift
+import SyntaxEditorUI
+
 let model = SyntaxEditorModel(
     text: "const answer = 42;",
     language: BuiltinSyntaxLanguages.javascript
@@ -118,5 +121,7 @@ xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme MiniUITests -desti
 
 ## Breaking API Notes
 
+- Non-UI implementation moved into the internal `SyntaxEditorCore` target. `SyntaxEditorCore` is not a public package product; clients should keep importing `SyntaxEditorUI` only.
+- `SyntaxEditorModel`, `BuiltinSyntaxLanguages`, `SyntaxLanguage`, and related non-UI APIs remain available from `SyntaxEditorUI` via module re-export.
 - On iOS, `SyntaxEditorView` is a `UIScrollView`-based editor container, not a `UITextView` subclass. Code that needs UIKit text APIs should use `editorView.textView`.
 - On iOS, horizontal and vertical scrolling are owned by `SyntaxEditorView`; the embedded `textView` is kept at a zero internal `contentOffset`.
