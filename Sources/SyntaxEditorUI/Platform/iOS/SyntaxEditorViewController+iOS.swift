@@ -32,148 +32,41 @@ private final class SyntaxEditorReadOnlyGuardedUndoManager: UndoManager {
     }
 }
 
-private enum SyntaxEditorVisibleRectRequestSource {
-    case scrollRect
-    case scrollRange
-}
-
 @MainActor
-private final class SyntaxEditorNativeTextView: UITextView {
-    var guardedUndoManager: UndoManager?
-    var keyCommandsProvider: (() -> [UIKeyCommand]?)?
-    var actionAvailabilityOverride: ((Selector, Any?) -> Bool?)?
-    var visibleRectRequestHandler: ((CGRect, SyntaxEditorVisibleRectRequestSource) -> Void)?
-
-    override var contentOffset: CGPoint {
-        get { super.contentOffset }
-        set {
-            super.contentOffset = .zero
-        }
-    }
-
-    override var undoManager: UndoManager? {
-        guardedUndoManager ?? super.undoManager
-    }
-
-    override var keyCommands: [UIKeyCommand]? {
-        let providedCommands = keyCommandsProvider?() ?? []
-        return (super.keyCommands ?? []) + providedCommands
-    }
-
-    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if let result = actionAvailabilityOverride?(action, sender) {
-            return result
-        }
-
-        return super.canPerformAction(action, withSender: sender)
-    }
-
-    override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) {
-        resetInternalScrollPosition()
-    }
-
-    override func scrollRectToVisible(_ rect: CGRect, animated: Bool) {
-        visibleRectRequestHandler?(rect, .scrollRect)
-        resetInternalScrollPosition()
-    }
-
-    override func scrollRangeToVisible(_ range: NSRange) {
-        let caretLocation = range.location + range.length
-        guard let position = position(from: beginningOfDocument, offset: caretLocation) else {
-            resetInternalScrollPosition()
-            return
-        }
-
-        visibleRectRequestHandler?(caretRect(for: position), .scrollRange)
-        resetInternalScrollPosition()
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        resetInternalScrollPosition()
-    }
-
-    func resetInternalScrollPosition() {
-        guard !super.contentOffset.isAlmostEqual(to: .zero) else { return }
-        UIView.performWithoutAnimation {
-            super.setContentOffset(.zero, animated: false)
-            super.layer.removeAllAnimations()
-        }
-    }
-}
-
-@MainActor
-@Observable
-public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
-    private static let horizontalLayoutDebugEnvironmentKey = "SYNTAXEDITORUI_HORIZONTAL_LAYOUT_LOGS"
-
+public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     public private(set) var model: SyntaxEditorModel
-    public let textView: UITextView
-    @ObservationIgnored
-    private let fallbackUndoManager = UndoManager()
-    @ObservationIgnored
-    private let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
 
-    @ObservationIgnored
+    private let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
+    private let defaultTextContainerSize = NSTextContainer().size
+    private static let estimatedTabColumnWidth = 4
+
     private let highlighter = SyntaxHighlighterEngine()
-    @ObservationIgnored
     private let commandEngine = EditorCommandEngine()
-    @ObservationIgnored
     private var highlightTask: Task<Void, Never>?
-    @ObservationIgnored
     private var isApplyingModel = false
-    @ObservationIgnored
     private var isApplyingHighlight = false
-    @ObservationIgnored
     private var lastAppliedLanguageIdentifier: String?
-    @ObservationIgnored
     private var pendingEditStartUTF16: Int?
-    @ObservationIgnored
     private var matchedBracketRanges: [NSRange] = []
-    @ObservationIgnored
     private var isApplyingUndoRedo = false
-    @ObservationIgnored
     private var isApplyingCommandSelection = false
-    @ObservationIgnored
+    private var ignoredProgrammaticSelectionRange: NSRange?
+    private var isSynchronizingContentSize = false
     private var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
-    @ObservationIgnored
+    private var keyboardAccessoryView: UIView?
     private let modelObservations = ObservationScope()
-    @ObservationIgnored
-    private var needsTextLayoutMetricsUpdate = true
-    @ObservationIgnored
-    private var lastLayoutBoundsSize = CGSize.zero
-    @ObservationIgnored
-    private var measuredNonWrappingTextViewWidth = CGFloat.zero
 
     public init(model: SyntaxEditorModel) {
         self.model = model
 
-        let textStorage = NSTextStorage()
-        let layoutManager = NSLayoutManager()
-        textStorage.addLayoutManager(layoutManager)
+        super.init(frame: .zero, textContainer: nil)
 
-        let textContainer = NSTextContainer(size: .zero)
-        layoutManager.addTextContainer(textContainer)
-
-        let nativeTextView = SyntaxEditorNativeTextView(frame: .zero, textContainer: textContainer)
-        self.textView = nativeTextView
-
-        super.init(frame: .zero)
-        nativeTextView.guardedUndoManager = guardedUndoManager
-        nativeTextView.keyCommandsProvider = { [weak self] in
-            self?.editorKeyCommands()
-        }
-        nativeTextView.actionAvailabilityOverride = { [weak self] action, sender in
-            self?.editorActionAvailabilityOverride(action, withSender: sender)
-        }
-        nativeTextView.visibleRectRequestHandler = { [weak self] rect, source in
-            self?.handleTextViewVisibleRectRequest(rect, source: source)
-        }
         guardedUndoManager.allowsMutation = { [weak self] in
             self?.model.isEditable ?? true
         }
-        configureScrollView()
+
         configureTextView()
+        configureUndoObservation()
         configureTraitChangeObservation()
         applyObservedEditorState(
             language: model.language,
@@ -190,56 +83,72 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     deinit {
         highlightTask?.cancel()
+        NotificationCenter.default.removeObserver(self)
     }
 
     public override var undoManager: UndoManager? {
-        textView.undoManager ?? guardedUndoManager
+        guardedUndoManager
+    }
+
+    public override var canBecomeFirstResponder: Bool {
+        isEditable || isSelectable
     }
 
     public override var keyCommands: [UIKeyCommand]? {
         (super.keyCommands ?? []) + (editorKeyCommands() ?? [])
     }
 
-    public override var canBecomeFirstResponder: Bool {
-        textView.canBecomeFirstResponder
+    public override var bounds: CGRect {
+        didSet {
+            guard bounds.size != oldValue.size else { return }
+            updateTextContainerForCurrentWrappingMode()
+            updateScrollableContentSizeForCurrentWrappingMode()
+        }
     }
 
-    public override var isFirstResponder: Bool {
-        textView.isFirstResponder
+    public override var frame: CGRect {
+        didSet {
+            guard frame.size != oldValue.size else { return }
+            updateTextContainerForCurrentWrappingMode()
+            updateScrollableContentSizeForCurrentWrappingMode()
+        }
     }
 
-    @discardableResult
-    public override func becomeFirstResponder() -> Bool {
-        textView.becomeFirstResponder()
+    public override var contentSize: CGSize {
+        didSet {
+            guard !isSynchronizingContentSize else { return }
+            updateScrollableContentSizeForCurrentWrappingMode()
+        }
     }
 
-    @discardableResult
-    public override func resignFirstResponder() -> Bool {
-        textView.resignFirstResponder()
-    }
-
-    public var text: String! {
-        get { textView.text }
+    public override var text: String! {
+        get {
+            super.text
+        }
         set {
             let nextText = newValue ?? ""
-            let textNeedsUpdate = textView.text != nextText
+            let currentText = super.text ?? ""
+            let textNeedsUpdate = currentText != nextText
             let modelNeedsUpdate = model.text != nextText
             guard textNeedsUpdate || modelNeedsUpdate else { return }
 
             if textNeedsUpdate {
                 commandEngine.invalidateTransientState()
+                let previousSelection = selectedRange
                 isApplyingModel = true
-                textView.text = nextText
-                textView.typingAttributes = baseAttributes()
+                super.text = nextText
+                selectedRange = clampedTextRange(previousSelection, in: nextText)
+                typingAttributes = baseAttributes()
+                updateTextContainerForCurrentWrappingMode()
+                updateScrollableContentSizeForCurrentWrappingMode()
                 isApplyingModel = false
 
-                markTextLayoutMetricsNeedsUpdate()
                 scheduleHighlight(
                     source: nextText,
                     language: model.language,
@@ -250,75 +159,132 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
             if modelNeedsUpdate {
                 model.text = nextText
             }
+
             refreshKeyboardAccessoryState()
             if textNeedsUpdate {
-                layoutIfNeeded()
-                scrollSelectionToVisibleIfNeeded()
+                setNeedsLayout()
             }
         }
     }
 
-    public var selectedRange: NSRange {
-        get { textView.selectedRange }
-        set { textView.selectedRange = newValue }
-    }
-
-    public var isEditable: Bool {
-        get { textView.isEditable }
-        set { textView.isEditable = newValue }
-    }
-
-    public var isSelectable: Bool {
-        get { textView.isSelectable }
-        set { textView.isSelectable = newValue }
-    }
-
-    public var textContainer: NSTextContainer {
-        textView.textContainer
-    }
-
-    public override func layoutSubviews() {
-        logHorizontalLayout("layout.begin")
-        if bounds.size != lastLayoutBoundsSize {
-            lastLayoutBoundsSize = bounds.size
-            needsTextLayoutMetricsUpdate = true
+    public override func insertText(_ text: String) {
+        guard model.isEditable else {
+            pendingEditStartUTF16 = nil
+            return
         }
 
-        super.layoutSubviews()
-        logHorizontalLayout("layout.afterSuper")
-        updateTextViewFrameForCurrentWrappingMode()
-        logHorizontalLayout("layout.end")
+        let range = selectedRange
+        pendingEditStartUTF16 = range.location
+
+        if !isApplyingModel,
+           !isApplyingHighlight,
+           let result = commandEngine.transformInput(
+               source: super.text ?? "",
+               range: range,
+               replacementText: text,
+               language: model.language,
+               deletionIntent: .unspecified
+           ) {
+            applyCommandResult(result)
+            return
+        }
+
+        super.insertText(text)
     }
 
-    public override func scrollRectToVisible(_ rect: CGRect, animated: Bool) {
-        scrollContentRectToVisible(rect)
+    public override func deleteBackward() {
+        guard model.isEditable else {
+            pendingEditStartUTF16 = nil
+            return
+        }
+
+        let currentSelection = selectedRange
+        let deletionRange: NSRange
+        let deletionIntent: EditorCommandEngine.DeletionIntent
+        if currentSelection.length > 0 {
+            deletionRange = currentSelection
+            deletionIntent = .unspecified
+        } else {
+            guard currentSelection.location > 0 else { return }
+            deletionRange = NSRange(location: currentSelection.location - 1, length: 1)
+            deletionIntent = .backward
+        }
+
+        pendingEditStartUTF16 = deletionRange.location
+
+        if !isApplyingModel,
+           !isApplyingHighlight,
+           let result = commandEngine.transformInput(
+               source: super.text ?? "",
+               range: deletionRange,
+               replacementText: "",
+               language: model.language,
+               deletionIntent: deletionIntent
+           ) {
+            applyCommandResult(result)
+            return
+        }
+
+        super.deleteBackward()
     }
 
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if let result = editorActionAvailabilityOverride(action, withSender: sender) {
-            return result
+        if !model.isEditable,
+           isUndoRedoAction(action) {
+            return false
         }
 
         if isEditorCommandAction(action) {
             return model.isEditable
         }
 
-        return textView.canPerformAction(action, withSender: sender)
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    public override func scrollRangeToVisible(_ range: NSRange) {
+        let clampedRange = clampedTextRange(range)
+        let targetOffset = clampedRange.location + clampedRange.length
+
+        guard let position = position(
+            from: beginningOfDocument,
+            offset: targetOffset
+        ) else {
+            super.scrollRangeToVisible(clampedRange)
+            return
+        }
+
+        var targetRect = caretRect(for: position)
+        guard targetRect.origin.x.isFinite,
+              targetRect.origin.y.isFinite,
+              targetRect.size.width.isFinite,
+              targetRect.size.height.isFinite else {
+            super.scrollRangeToVisible(clampedRange)
+            return
+        }
+
+        if targetRect.width.isZero {
+            targetRect = targetRect.insetBy(dx: -textContainer.lineFragmentPadding, dy: 0)
+        }
+        targetRect.size.width = max(targetRect.size.width, 2)
+
+        scrollRectToVisible(targetRect, animated: false)
     }
 
     public func textViewDidChange(_ textView: UITextView) {
+        guard textView === self else { return }
         guard !isApplyingModel, !isApplyingHighlight else {
             pendingEditStartUTF16 = nil
             return
         }
 
-        let nextText = textView.text ?? ""
+        let nextText = super.text ?? ""
         if model.text != nextText {
             model.text = nextText
+            updateTextContainerForCurrentWrappingMode()
+            updateScrollableContentSizeForCurrentWrappingMode()
         }
-        markTextLayoutMetricsNeedsUpdate()
 
-        let editStartUTF16 = pendingEditStartUTF16 ?? textView.selectedRange.location
+        let editStartUTF16 = pendingEditStartUTF16 ?? selectedRange.location
         pendingEditStartUTF16 = nil
         let refreshStartUTF16 = SyntaxEditorRangeUtilities.lineStartUTF16Offset(
             in: nextText,
@@ -330,16 +296,19 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
             refreshStartUTF16: refreshStartUTF16
         )
         refreshKeyboardAccessoryState()
-        layoutIfNeeded()
-        scrollSelectionToVisibleIfNeeded()
     }
 
     public func textViewDidChangeSelection(_ textView: UITextView) {
-        if !isApplyingCommandSelection {
+        guard textView === self else { return }
+        let currentSelection = selectedRange
+        let preservesCommandState = isApplyingCommandSelection
+            || ignoredProgrammaticSelectionRange == currentSelection
+
+        if !preservesCommandState {
+            ignoredProgrammaticSelectionRange = nil
             commandEngine.invalidateTransientState()
         }
         applyMatchingBracketHighlight()
-        scrollSelectionToVisibleIfNeeded()
     }
 
     public func textView(
@@ -347,6 +316,7 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         shouldChangeTextIn range: NSRange,
         replacementText text: String
     ) -> Bool {
+        guard textView === self else { return true }
         guard !isApplyingModel, !isApplyingHighlight else {
             return true
         }
@@ -358,13 +328,14 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
 
         pendingEditStartUTF16 = range.location
 
-        let currentSource = textView.text ?? ""
+        let currentSelection = selectedRange
         let isBackwardDelete = text.isEmpty
             && range.length == 1
-            && textView.selectedRange.length == 0
-            && textView.selectedRange.location == range.location + range.length
+            && currentSelection.length == 0
+            && currentSelection.location == range.location + range.length
+
         if let result = commandEngine.transformInput(
-            source: currentSource,
+            source: super.text ?? "",
             range: range,
             replacementText: text,
             language: model.language,
@@ -377,34 +348,53 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         return true
     }
 
-    private func configureScrollView() {
+    private func configureTextView() {
         backgroundColor = .clear
+        isScrollEnabled = true
         alwaysBounceVertical = true
         keyboardDismissMode = .interactive
-        addSubview(textView)
-    }
+        delegate = self
+        isEditable = model.isEditable
+        isSelectable = true
 
-    private func configureTextView() {
-        textView.backgroundColor = .clear
-        textView.isScrollEnabled = false
-        textView.contentInset = .zero
-        textView.scrollIndicatorInsets = .zero
-        textView.contentInsetAdjustmentBehavior = .never
-        textView.showsVerticalScrollIndicator = false
-        textView.showsHorizontalScrollIndicator = false
-        textView.delegate = self
-        textView.isEditable = model.isEditable
-
-        textView.autocapitalizationType = .none
-        textView.autocorrectionType = .no
-        textView.smartDashesType = .no
-        textView.smartQuotesType = .no
-        textView.smartInsertDeleteType = .no
-        textView.spellCheckingType = .no
+        autocapitalizationType = .none
+        autocorrectionType = .no
+        smartDashesType = .no
+        smartQuotesType = .no
+        smartInsertDeleteType = .no
+        spellCheckingType = .no
 
         applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
         applyBaseTextViewAppearance()
-        textView.inputAccessoryView = makeInputAccessoryView()
+        keyboardAccessoryView = makeInputAccessoryView()
+        inputAccessoryView = keyboardAccessoryView
+        refreshKeyboardAccessoryState()
+    }
+
+    private func configureUndoObservation() {
+        let center = NotificationCenter.default
+        center.addObserver(
+            self,
+            selector: #selector(handleUndoManagerStateDidChange),
+            name: .NSUndoManagerDidCloseUndoGroup,
+            object: guardedUndoManager
+        )
+        center.addObserver(
+            self,
+            selector: #selector(handleUndoManagerStateDidChange),
+            name: .NSUndoManagerDidUndoChange,
+            object: guardedUndoManager
+        )
+        center.addObserver(
+            self,
+            selector: #selector(handleUndoManagerStateDidChange),
+            name: .NSUndoManagerDidRedoChange,
+            object: guardedUndoManager
+        )
+    }
+
+    @objc
+    private func handleUndoManagerStateDidChange(_ notification: Notification) {
         refreshKeyboardAccessoryState()
     }
 
@@ -420,7 +410,7 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
     private func refreshForColorAppearanceChange() {
         applyBaseTextViewAppearance()
         scheduleHighlight(
-            source: textView.text ?? "",
+            source: super.text ?? "",
             language: model.language,
             refreshStartUTF16: 0
         )
@@ -440,22 +430,15 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         ]
     }
 
-    private func editorActionAvailabilityOverride(
-        _ action: Selector,
-        withSender sender: Any?
-    ) -> Bool? {
-        if !model.isEditable,
-           action == Selector(("undo:")) || action == Selector(("redo:")) {
-            return false
-        }
-
-        return nil
-    }
-
     private func isEditorCommandAction(_ action: Selector) -> Bool {
         action == #selector(handleIndentCommand)
             || action == #selector(handleOutdentCommand)
             || action == #selector(handleToggleCommentCommand)
+    }
+
+    private func isUndoRedoAction(_ action: Selector) -> Bool {
+        let actionName = NSStringFromSelector(action)
+        return actionName == "undo:" || actionName == "redo:"
     }
 
     private func makeKeyCommand(
@@ -486,7 +469,7 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
     }
 
     private var activeUndoManager: UndoManager? {
-        textView.undoManager ?? fallbackUndoManager
+        undoManager
     }
 
     private func refreshKeyboardAccessoryState() {
@@ -497,9 +480,9 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
 
     private func applyBaseTextViewAppearance() {
         let base = baseAttributes()
-        textView.font = base[.font] as? UIFont
-        textView.textColor = base[.foregroundColor] as? UIColor
-        textView.typingAttributes = base
+        font = base[.font] as? UIFont ?? font
+        textColor = base[.foregroundColor] as? UIColor ?? textColor
+        typingAttributes = base
     }
 
     private func startModelObservation() {
@@ -526,14 +509,18 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         isApplyingModel = true
         defer { isApplyingModel = false }
 
-        let textNeedsUpdate = forceTextUpdate || textView.text != text
+        let textNeedsUpdate = forceTextUpdate || (super.text ?? "") != text
         if textNeedsUpdate {
             commandEngine.invalidateTransientState()
-            textView.text = text
-            markTextLayoutMetricsNeedsUpdate()
+            let previousSelection = selectedRange
+            super.text = text
+            selectedRange = clampedTextRange(previousSelection, in: text)
+            updateTextContainerForCurrentWrappingMode()
+            updateScrollableContentSizeForCurrentWrappingMode()
+            setNeedsLayout()
         }
 
-        textView.typingAttributes = baseAttributes()
+        typingAttributes = baseAttributes()
         if textNeedsUpdate {
             scheduleHighlight(
                 source: text,
@@ -551,8 +538,8 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
-        if textView.isEditable != isEditable {
-            textView.isEditable = isEditable
+        if self.isEditable != isEditable {
+            self.isEditable = isEditable
         }
 
         applyLineWrappingConfiguration(lineWrappingEnabled: lineWrappingEnabled)
@@ -560,10 +547,10 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         let languageChanged = forceLanguageRefresh || lastAppliedLanguageIdentifier != language.syntaxHighlightCacheKey
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
 
-        textView.typingAttributes = baseAttributes()
+        typingAttributes = baseAttributes()
         if languageChanged && schedulesHighlight {
             scheduleHighlight(
-                source: textView.text ?? "",
+                source: super.text ?? "",
                 language: language,
                 refreshStartUTF16: 0
             )
@@ -577,8 +564,8 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
             return
         }
 
-        let previousText = textView.text ?? ""
-        let previousSelection = textView.selectedRange
+        let previousText = super.text ?? ""
+        let previousSelection = selectedRange
         let textChanged = previousText != result.text
         var appliedMutation: TextMutation?
 
@@ -599,18 +586,20 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
 
         isApplyingModel = true
         if textChanged {
-            appliedMutation = applyTextMutation(
-                previousText: previousText,
-                nextText: result.text
-            )
-            if appliedMutation == nil {
-                textView.text = result.text
+            performWithoutUndoRegistration {
+                appliedMutation = applyTextMutation(
+                    previousText: previousText,
+                    nextText: result.text
+                )
+                if appliedMutation == nil {
+                    super.text = result.text
+                }
+                updateTextContainerForCurrentWrappingMode()
+                updateScrollableContentSizeForCurrentWrappingMode()
             }
         }
-        isApplyingCommandSelection = true
-        textView.selectedRange = result.selectedRange
-        isApplyingCommandSelection = false
-        textView.typingAttributes = baseAttributes()
+        setTextSelectionPreservingCommandState(clampedTextRange(result.selectedRange, in: result.text))
+        typingAttributes = baseAttributes()
         isApplyingModel = false
 
         pendingEditStartUTF16 = nil
@@ -620,8 +609,7 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         }
 
         if textChanged {
-            markTextLayoutMetricsNeedsUpdate()
-
+            setNeedsLayout()
             let refreshStartUTF16: Int
             if let appliedMutation {
                 let mutationLineStart = SyntaxEditorRangeUtilities.lineStartUTF16Offset(
@@ -642,13 +630,11 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
             applyMatchingBracketHighlight()
         }
         refreshKeyboardAccessoryState()
-        layoutIfNeeded()
-        scrollSelectionToVisibleIfNeeded()
     }
 
     private func registerUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
         guard restore != counterpart else { return }
-        guard let activeUndoManager = activeUndoManager else { return }
+        guard let activeUndoManager else { return }
 
         registerUndoAction(restore: restore, counterpart: counterpart, in: activeUndoManager)
     }
@@ -671,7 +657,6 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
 
     private func applyUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
         guard model.isEditable else {
-            refreshKeyboardAccessoryState()
             return
         }
 
@@ -688,6 +673,28 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         isApplyingUndoRedo = false
     }
 
+    private func setTextSelectionPreservingCommandState(_ range: NSRange) {
+        ignoredProgrammaticSelectionRange = range
+        isApplyingCommandSelection = true
+        selectedRange = range
+        isApplyingCommandSelection = false
+    }
+
+    private func performWithoutUndoRegistration(_ work: () -> Void) {
+        let undoManager = activeUndoManager
+        let wasUndoRegistrationEnabled = undoManager?.isUndoRegistrationEnabled ?? false
+        if wasUndoRegistrationEnabled {
+            undoManager?.disableUndoRegistration()
+        }
+        defer {
+            if wasUndoRegistrationEnabled {
+                undoManager?.enableUndoRegistration()
+            }
+        }
+
+        work()
+    }
+
     private func applyTextMutation(
         previousText: String,
         nextText: String
@@ -696,25 +703,26 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
             return nil
         }
 
-        let textLength = (textView.text as NSString?)?.length ?? 0
-        guard mutation.range.location + mutation.range.length <= textLength else {
+        let textLength = previousText.utf16.count
+        guard mutation.range.location >= 0,
+              mutation.range.location + mutation.range.length <= textLength else {
             return nil
         }
 
-        guard let start = textView.position(
-            from: textView.beginningOfDocument,
+        guard let start = position(
+            from: beginningOfDocument,
             offset: mutation.range.location
         ),
-            let end = textView.position(
+            let end = position(
                 from: start,
                 offset: mutation.range.length
             ),
-            let textRange = textView.textRange(from: start, to: end)
+            let textRange = textRange(from: start, to: end)
         else {
             return nil
         }
 
-        textView.replace(textRange, withText: mutation.replacement)
+        replace(textRange, withText: mutation.replacement)
 
         return mutation
     }
@@ -722,10 +730,10 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
     @objc private func handleIndentCommand() {
         guard model.isEditable else { return }
 
-        let source = textView.text ?? ""
+        let source = super.text ?? ""
         guard let result = commandEngine.indentSelection(
             source: source,
-            selection: textView.selectedRange
+            selection: selectedRange
         ) else {
             return
         }
@@ -735,10 +743,10 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
     @objc private func handleOutdentCommand() {
         guard model.isEditable else { return }
 
-        let source = textView.text ?? ""
+        let source = super.text ?? ""
         guard let result = commandEngine.outdentSelection(
             source: source,
-            selection: textView.selectedRange
+            selection: selectedRange
         ) else {
             return
         }
@@ -748,10 +756,10 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
     @objc private func handleToggleCommentCommand() {
         guard model.isEditable else { return }
 
-        let source = textView.text ?? ""
+        let source = super.text ?? ""
         guard let result = commandEngine.toggleComment(
             source: source,
-            selection: textView.selectedRange,
+            selection: selectedRange,
             language: model.language
         ) else {
             return
@@ -765,15 +773,7 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
             return
         }
 
-        let handled = UIApplication.shared.sendAction(
-            Selector(("undo:")),
-            to: nil,
-            from: self,
-            for: nil
-        )
-        if !handled {
-            activeUndoManager?.undo()
-        }
+        activeUndoManager?.undo()
         refreshKeyboardAccessoryState()
     }
 
@@ -783,15 +783,7 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
             return
         }
 
-        let handled = UIApplication.shared.sendAction(
-            Selector(("redo:")),
-            to: nil,
-            from: self,
-            for: nil
-        )
-        if !handled {
-            activeUndoManager?.redo()
-        }
+        activeUndoManager?.redo()
         refreshKeyboardAccessoryState()
     }
 
@@ -832,13 +824,12 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         expectedSource: String,
         refreshRange: NSRange
     ) {
-        guard textView.text == expectedSource else { return }
+        guard super.text == expectedSource else { return }
 
-        let textStorage = textView.textStorage
-        let textLength = textStorage.length
+        let textLength = expectedSource.utf16.count
         let targetRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
         guard targetRange.length > 0 else {
-            applyMatchingBracketHighlight()
+            applyMatchingBracketHighlight(force: true)
             return
         }
         let base = baseAttributes()
@@ -862,16 +853,28 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
         }
 
         textStorage.endEditing()
-        textView.typingAttributes = base
-        applyMatchingBracketHighlight()
+        typingAttributes = base
+        applyMatchingBracketHighlight(force: true)
     }
 
-    private func applyMatchingBracketHighlight() {
-        let source = textView.text ?? ""
-        let textStorage = textView.textStorage
-        let textLength = textStorage.length
+    private func applyMatchingBracketHighlight(force: Bool = false) {
+        let source = super.text ?? ""
+        let textLength = source.utf16.count
+        let selection = selectedRange
 
-        textStorage.beginEditing()
+        guard selection.length == 0 else {
+            clearMatchingBracketHighlight(textLength: textLength)
+            return
+        }
+
+        let newRanges = BracketMatcher.matchedRanges(
+            in: source,
+            caretUTF16Offset: selection.location
+        )
+
+        guard force || newRanges != matchedBracketRanges else {
+            return
+        }
 
         for range in matchedBracketRanges {
             let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
@@ -879,30 +882,39 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
             textStorage.removeAttribute(.backgroundColor, range: clamped)
         }
 
-        let newRanges = BracketMatcher.matchedRanges(
-            in: source,
-            caretUTF16Offset: textView.selectedRange.location
-        )
-
         for range in newRanges {
             let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
             guard clamped.length > 0 else { continue }
-            textStorage.addAttribute(
-                .backgroundColor,
-                value: UIColor.syntaxEditor(dynamic: SyntaxEditorHighlightTheme.bracketBackground).withAlphaComponent(0.24),
+            textStorage.addAttributes(
+                [.backgroundColor: UIColor.syntaxEditor(dynamic: SyntaxEditorHighlightTheme.bracketBackground).withAlphaComponent(0.24)],
                 range: clamped
             )
         }
 
-        textStorage.endEditing()
         matchedBracketRanges = newRanges
     }
 
+    private func clearMatchingBracketHighlight(textLength: Int) {
+        guard !matchedBracketRanges.isEmpty else { return }
+
+        for range in matchedBracketRanges {
+            let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
+            guard clamped.length > 0 else { continue }
+            textStorage.removeAttribute(.backgroundColor, range: clamped)
+        }
+        matchedBracketRanges = []
+    }
+
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
-        [
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = model.lineWrappingEnabled ? .byWordWrapping : .byClipping
+
+        let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.monospacedSystemFont(ofSize: 14, weight: .regular),
             .foregroundColor: UIColor.syntaxEditor(dynamic: SyntaxEditorHighlightTheme.baseForeground),
+            .paragraphStyle: paragraphStyle,
         ]
+        return attributes
     }
 
     private func styleAttributes(for captureName: String) -> [NSAttributedString.Key: Any] {
@@ -913,336 +925,170 @@ public final class SyntaxEditorView: UIScrollView, UITextViewDelegate {
     }
 
     private func applyLineWrappingConfiguration(lineWrappingEnabled: Bool) {
-        logHorizontalLayout("applyLineWrapping.begin", extra: "requested=\(lineWrappingEnabled)")
         if lineWrappingEnabled {
-            textView.textContainer.widthTracksTextView = true
-            textView.textContainer.lineBreakMode = .byWordWrapping
-            showsHorizontalScrollIndicator = false
+            textContainer.widthTracksTextView = true
+            textContainer.lineBreakMode = .byWordWrapping
             alwaysBounceHorizontal = false
-            if contentOffset.x != 0 {
-                contentOffset.x = 0
-            }
+            showsHorizontalScrollIndicator = false
         } else {
-            textView.textContainer.widthTracksTextView = false
-            textView.textContainer.lineBreakMode = .byClipping
-            showsHorizontalScrollIndicator = true
+            textContainer.widthTracksTextView = false
+            textContainer.lineBreakMode = .byClipping
             alwaysBounceHorizontal = true
+            showsHorizontalScrollIndicator = true
         }
-        markTextLayoutMetricsNeedsUpdate()
-        logHorizontalLayout("applyLineWrapping.end", extra: "requested=\(lineWrappingEnabled)")
-    }
-
-    private func markTextLayoutMetricsNeedsUpdate() {
-        needsTextLayoutMetricsUpdate = true
-        measuredNonWrappingTextViewWidth = 0
+        updateTextContainerForCurrentWrappingMode()
+        updateScrollableContentSizeForCurrentWrappingMode()
         setNeedsLayout()
     }
 
-    private func updateTextViewFrameForCurrentWrappingMode() {
+    private func updateTextContainerForCurrentWrappingMode() {
         guard bounds.width > 0, bounds.height > 0 else { return }
 
-        let textViewWidth: CGFloat
         if model.lineWrappingEnabled {
-            textViewWidth = bounds.width
-        } else {
-            textViewWidth = measuredTextViewWidthForNonWrappingText()
-        }
-
-        updateTextContainerSize(forTextViewWidth: textViewWidth)
-
-        let fittingSize = textView.sizeThatFits(
-            CGSize(
-                width: textViewWidth,
-                height: CGFloat.greatestFiniteMagnitude
-            )
-        )
-        let textViewHeight = max(bounds.height, ceil(fittingSize.height))
-        let nextFrame = CGRect(
-            origin: .zero,
-            size: CGSize(width: textViewWidth, height: textViewHeight)
-        )
-
-        if !textView.frame.isAlmostEqual(to: nextFrame) {
-            logHorizontalLayout("textView.frame.update", extra: "from=\(textView.frame) to=\(nextFrame)")
-            textView.frame = nextFrame
-        }
-
-        if !contentSize.isAlmostEqual(to: nextFrame.size) {
-            logHorizontalLayout("contentSize.update", extra: "from=\(contentSize) to=\(nextFrame.size)")
-            contentSize = nextFrame.size
-        }
-
-        resetInternalTextViewScrollPosition()
-        clampContentOffsetToCurrentContentSize()
-        needsTextLayoutMetricsUpdate = false
-    }
-
-    private func updateTextContainerSize(forTextViewWidth textViewWidth: CGFloat) {
-        let containerSize = CGSize(
-            width: max(0, textViewWidth - horizontalTextInsets),
-            height: CGFloat.greatestFiniteMagnitude
-        )
-        guard !textView.textContainer.size.isAlmostEqual(to: containerSize) else { return }
-
-        logHorizontalLayout(
-            "container.update",
-            extra: "from=\(textView.textContainer.size) to=\(containerSize)"
-        )
-        textView.textContainer.size = containerSize
-        invalidateTextLayout()
-    }
-
-    private var horizontalTextInsets: CGFloat {
-        textView.textContainerInset.left + textView.textContainerInset.right
-    }
-
-    private func invalidateTextLayout() {
-        let textRange = NSRange(location: 0, length: textView.textStorage.length)
-        textView.layoutManager.invalidateLayout(forCharacterRange: textRange, actualCharacterRange: nil)
-        textView.layoutManager.invalidateDisplay(forCharacterRange: textRange)
-    }
-
-    private func measuredTextViewWidthForNonWrappingText() -> CGFloat {
-        if !needsTextLayoutMetricsUpdate,
-           measuredNonWrappingTextViewWidth > 0 {
-            return max(bounds.width, measuredNonWrappingTextViewWidth)
-        }
-
-        let source = (textView.text ?? "") as NSString
-        let attributes = baseAttributes()
-        var widestLineWidth = CGFloat.zero
-
-        source.enumerateSubstrings(
-            in: NSRange(location: 0, length: source.length),
-            options: [.byLines, .substringNotRequired]
-        ) { _, lineRange, _, _ in
-            let line = source.substring(with: lineRange) as NSString
-            widestLineWidth = max(
-                widestLineWidth,
-                ceil(line.size(withAttributes: attributes).width)
-            )
-        }
-
-        let measuredContentWidth = max(
-            max(0, bounds.width - horizontalTextInsets),
-            widestLineWidth + textView.textContainer.lineFragmentPadding * 2
-        )
-        let measuredWidth = max(bounds.width, ceil(measuredContentWidth + horizontalTextInsets))
-        measuredNonWrappingTextViewWidth = measuredWidth
-        logHorizontalLayout(
-            "measureNonWrappingWidth",
-            extra: "widestLineWidth=\(widestLineWidth) measuredWidth=\(measuredWidth) textLength=\(source.length)"
-        )
-        return measuredWidth
-    }
-
-    private func clampContentOffsetToCurrentContentSize() {
-        let clampedOffset = clampedContentOffset(contentOffset)
-
-        guard !contentOffset.isAlmostEqual(to: clampedOffset) else { return }
-        logHorizontalLayout("contentOffset.clamp", extra: "from=\(contentOffset) to=\(clampedOffset)")
-        contentOffset = clampedOffset
-    }
-
-    private func clampedContentOffset(_ proposedOffset: CGPoint) -> CGPoint {
-        let maximumOffsetX = max(0, contentSize.width - bounds.width + adjustedContentInset.right)
-        let maximumOffsetY = max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
-        let minimumOffset = CGPoint(x: -adjustedContentInset.left, y: -adjustedContentInset.top)
-        return CGPoint(
-            x: min(max(proposedOffset.x, minimumOffset.x), maximumOffsetX),
-            y: min(max(proposedOffset.y, minimumOffset.y), maximumOffsetY)
-        )
-    }
-
-    private func scrollSelectionToVisibleIfNeeded() {
-        guard let selectedTextRange = textView.selectedTextRange else { return }
-
-        resetInternalTextViewScrollPosition()
-        scrollTextViewRectToVisible(textView.caretRect(for: selectedTextRange.end))
-    }
-
-    private func handleTextViewVisibleRectRequest(
-        _ rect: CGRect,
-        source: SyntaxEditorVisibleRectRequestSource
-    ) {
-        switch source {
-        case .scrollRange:
-            scrollTextViewRectToVisible(rect)
-        case .scrollRect:
-            guard shouldHonorNativeScrollRectRequest(rect) else {
-                logHorizontalLayout("nativeScrollRect.ignored", extra: "rect=\(rect)")
-                return
+            let wrappedWidth = max(0, bounds.width - textContainerInset.left - textContainerInset.right)
+            let nextSize = CGSize(width: wrappedWidth, height: defaultTextContainerSize.height)
+            if !textContainer.size.isNearlyEqual(to: nextSize) {
+                textContainer.size = nextSize
             }
-            scrollTextViewRectToVisible(rect)
+            return
+        }
+
+        let measuredWidth = max(bounds.width, estimatedHorizontalDocumentLayoutWidth())
+        let containerWidth = max(0, measuredWidth - textContainerInset.left - textContainerInset.right)
+        let nextSize = CGSize(width: containerWidth, height: defaultTextContainerSize.height)
+        if !textContainer.size.isNearlyEqual(to: nextSize) {
+            textContainer.size = nextSize
         }
     }
 
-    private func shouldHonorNativeScrollRectRequest(_ rect: CGRect) -> Bool {
-        let targetRect = rect.standardized
-        guard targetRect.isFinite else { return false }
-        guard let selectedTextRange = textView.selectedTextRange else { return true }
+    private func updateScrollableContentSizeForCurrentWrappingMode() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
 
-        let caretRect = textView.caretRect(for: selectedTextRange.end)
-        guard caretRect.isFinite else { return false }
+        let targetWidth = model.lineWrappingEnabled
+            ? bounds.width
+            : max(bounds.width, estimatedHorizontalDocumentLayoutWidth())
+        guard !contentSize.width.isNearlyEqual(to: targetWidth) else { return }
 
-        let allowedRect = caretRect.insetBy(
-            dx: -max(bounds.width, textView.textContainer.lineFragmentPadding * 2),
-            dy: -max(bounds.height, 24)
+        let nextSize = CGSize(width: targetWidth, height: contentSize.height)
+        isSynchronizingContentSize = true
+        contentSize = nextSize
+        isSynchronizingContentSize = false
+    }
+
+    private func estimatedHorizontalDocumentLayoutWidth() -> CGFloat {
+        guard let source = super.text, !source.isEmpty else {
+            return bounds.width
+        }
+
+        let textFont = font ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        let columnWidth = Self.estimatedMonospacedColumnWidth(for: textFont)
+        let maxColumns = Self.maximumDisplayColumnCount(
+            in: source,
+            tabWidth: Self.estimatedTabColumnWidth
         )
-        return allowedRect.intersects(targetRect) || allowedRect.contains(targetRect.origin)
-    }
-
-    private func scrollTextViewRectToVisible(_ rect: CGRect) {
-        var contentRect = rect.insetBy(dx: -textView.textContainer.lineFragmentPadding, dy: -4)
-        contentRect = contentRect.offsetBy(dx: textView.frame.minX, dy: textView.frame.minY)
-        scrollContentRectToVisible(contentRect)
-    }
-
-    private func scrollContentRectToVisible(_ rect: CGRect) {
-        let targetRect = rect.standardized
-        let visibleRect = visibleContentRect
-        guard !visibleRect.contains(targetRect) else { return }
-
-        var targetOffset = contentOffset
-        if targetRect.width < visibleRect.width {
-            if targetRect.minX < visibleRect.minX {
-                targetOffset.x = targetRect.minX - adjustedContentInset.left
-            } else if targetRect.maxX > visibleRect.maxX {
-                targetOffset.x = targetRect.maxX - bounds.width + adjustedContentInset.right
-            }
-        } else if targetRect.maxX < visibleRect.minX {
-            targetOffset.x = targetRect.maxX - bounds.width + adjustedContentInset.right
-        } else if targetRect.minX > visibleRect.maxX {
-            targetOffset.x = targetRect.minX - adjustedContentInset.left
-        }
-
-        if targetRect.height < visibleRect.height {
-            if targetRect.minY < visibleRect.minY {
-                targetOffset.y = targetRect.minY - adjustedContentInset.top
-            } else if targetRect.maxY > visibleRect.maxY {
-                targetOffset.y = targetRect.maxY - bounds.height + adjustedContentInset.bottom
-            }
-        } else if targetRect.maxY < visibleRect.minY {
-            targetOffset.y = targetRect.maxY - bounds.height + adjustedContentInset.bottom
-        } else if targetRect.minY > visibleRect.maxY {
-            targetOffset.y = targetRect.minY - adjustedContentInset.top
-        }
-
-        let clampedOffset = clampedContentOffset(targetOffset)
-        guard !contentOffset.isAlmostEqual(to: clampedOffset) else { return }
-        logHorizontalLayout("contentRect.scroll", extra: "rect=\(targetRect) from=\(contentOffset) to=\(clampedOffset)")
-        setContentOffsetWithoutAnimation(clampedOffset)
-    }
-
-    private func setContentOffsetWithoutAnimation(_ offset: CGPoint) {
-        UIView.performWithoutAnimation {
-            setContentOffset(offset, animated: false)
-            layer.removeAllAnimations()
-        }
-    }
-
-    private func resetInternalTextViewScrollPosition() {
-        if let nativeTextView = textView as? SyntaxEditorNativeTextView {
-            nativeTextView.resetInternalScrollPosition()
-        } else if !textView.contentOffset.isAlmostEqual(to: .zero) {
-            textView.contentOffset = .zero
-        }
-    }
-
-    private var visibleContentRect: CGRect {
-        CGRect(
-            x: contentOffset.x + adjustedContentInset.left,
-            y: contentOffset.y + adjustedContentInset.top,
-            width: max(0, bounds.width - adjustedContentInset.left - adjustedContentInset.right),
-            height: max(0, bounds.height - adjustedContentInset.top - adjustedContentInset.bottom)
+        let textWidth = CGFloat(maxColumns) * columnWidth
+        return ceil(
+            textWidth
+                + textContainer.lineFragmentPadding * 2
+                + textContainerInset.left
+                + textContainerInset.right
         )
     }
 
-    private func logHorizontalLayout(_ event: String, extra: String = "") {
-        guard Self.isHorizontalLayoutDebugLoggingEnabled else { return }
-
-        let subviews = horizontalLayoutSubviewSummary(in: self, depth: 0, maxDepth: 2)
-        let message = """
-        SyntaxEditorUI.horizontalLayout event=\(event) wrap=\(model.lineWrappingEnabled) tracks=\(textView.textContainer.widthTracksTextView) break=\(textView.textContainer.lineBreakMode.rawValue) bounds=\(bounds) contentSize=\(contentSize) contentOffset=\(contentOffset) adjustedInset=\(adjustedContentInset) textViewFrame=\(textView.frame) textContainer=\(textView.textContainer.size) needsMetrics=\(needsTextLayoutMetricsUpdate) measuredWidth=\(measuredNonWrappingTextViewWidth) \(extra)
-        \(subviews)
-        """
-        NSLog("%@", message)
+    private static func estimatedMonospacedColumnWidth(for font: UIFont) -> CGFloat {
+        let width = ("m" as NSString).size(withAttributes: [.font: font]).width
+        return width.isFinite && width > 0 ? width : font.pointSize
     }
 
-    private static var isHorizontalLayoutDebugLoggingEnabled: Bool {
-        switch ProcessInfo.processInfo.environment[horizontalLayoutDebugEnvironmentKey] {
-        case "1":
+    private static func maximumDisplayColumnCount(in source: String, tabWidth: Int) -> Int {
+        var maxColumns = 0
+        var currentColumns = 0
+
+        for scalar in source.unicodeScalars {
+            switch scalar.value {
+            case 9:
+                let tabColumns = max(1, tabWidth - (currentColumns % tabWidth))
+                currentColumns += tabColumns
+            case 10, 13:
+                maxColumns = max(maxColumns, currentColumns)
+                currentColumns = 0
+            default:
+                currentColumns += displayColumnWidth(for: scalar)
+            }
+        }
+
+        return max(maxColumns, currentColumns)
+    }
+
+    private static func displayColumnWidth(for scalar: Unicode.Scalar) -> Int {
+        let value = scalar.value
+
+        if isZeroWidthScalar(value) {
+            return 0
+        }
+
+        if isWideScalar(value) {
+            return 2
+        }
+
+        return 1
+    }
+
+    private static func isZeroWidthScalar(_ value: UInt32) -> Bool {
+        switch value {
+        case 0x0300...0x036F,
+             0x1AB0...0x1AFF,
+             0x1DC0...0x1DFF,
+             0x200B...0x200F,
+             0x202A...0x202E,
+             0x2060...0x206F,
+             0x20D0...0x20FF,
+             0xFE00...0xFE0F,
+             0xFE20...0xFE2F:
             return true
         default:
             return false
         }
     }
 
-    private func horizontalLayoutSubviewSummary(
-        in view: UIView,
-        depth: Int,
-        maxDepth: Int
-    ) -> String {
-        guard depth <= maxDepth else { return "" }
-
-        let indent = String(repeating: "  ", count: depth)
-        return view.subviews.map { subview in
-            let line = "\(indent)- \(NSStringFromClass(type(of: subview))) frame=\(subview.frame) bounds=\(subview.bounds) hidden=\(subview.isHidden) clips=\(subview.clipsToBounds) subviews=\(subview.subviews.count)"
-            let children = horizontalLayoutSubviewSummary(
-                in: subview,
-                depth: depth + 1,
-                maxDepth: maxDepth
-            )
-            return children.isEmpty ? line : line + "\n" + children
+    private static func isWideScalar(_ value: UInt32) -> Bool {
+        switch value {
+        case 0x1100...0x115F,
+             0x2329...0x232A,
+             0x2600...0x27BF,
+             0x2E80...0xA4CF,
+             0xAC00...0xD7A3,
+             0xF900...0xFAFF,
+             0xFE10...0xFE19,
+             0xFE30...0xFE6F,
+             0xFF00...0xFF60,
+             0xFFE0...0xFFE6,
+             0x1F300...0x1FAFF,
+             0x20000...0x3FFFD:
+            return true
+        default:
+            return false
         }
-        .joined(separator: "\n")
-    }
-}
-
-private extension CGFloat {
-    func isAlmostEqual(to value: CGFloat, tolerance: CGFloat = 0.5) -> Bool {
-        abs(self - value) <= tolerance
-    }
-}
-
-private extension CGPoint {
-    func isAlmostEqual(to point: CGPoint, tolerance: CGFloat = 0.5) -> Bool {
-        x.isAlmostEqual(to: point.x, tolerance: tolerance)
-            && y.isAlmostEqual(to: point.y, tolerance: tolerance)
-    }
-}
-
-private extension CGSize {
-    func isAlmostEqual(to size: CGSize, tolerance: CGFloat = 0.5) -> Bool {
-        width.isAlmostEqual(to: size.width, tolerance: tolerance)
-            && height.isAlmostEqual(to: size.height, tolerance: tolerance)
-    }
-}
-
-private extension CGRect {
-    var isFinite: Bool {
-        origin.x.isFinite
-            && origin.y.isFinite
-            && size.width.isFinite
-            && size.height.isFinite
     }
 
-    func isAlmostEqual(to rect: CGRect, tolerance: CGFloat = 0.5) -> Bool {
-        origin.isAlmostEqual(to: rect.origin, tolerance: tolerance)
-            && size.isAlmostEqual(to: rect.size, tolerance: tolerance)
+    private func clampedTextRange(_ range: NSRange) -> NSRange {
+        clampedTextRange(range, in: super.text ?? "")
+    }
+
+    private func clampedTextRange(_ range: NSRange, in source: String) -> NSRange {
+        let textLength = source.utf16.count
+        let location = min(max(0, range.location), textLength)
+        let length = min(max(0, range.length), textLength - location)
+        return NSRange(location: location, length: length)
     }
 }
 
 @MainActor
 @Observable
-public final class SyntaxEditorViewController: UIViewController, UITextViewDelegate {
+public final class SyntaxEditorViewController: UIViewController {
     public private(set) var model: SyntaxEditorModel
     @ObservationIgnored
     public let editorView: SyntaxEditorView
-
-    public var textView: UITextView {
-        editorView.textView
-    }
 
     public init(model: SyntaxEditorModel) {
         self.model = model
@@ -1258,26 +1104,6 @@ public final class SyntaxEditorViewController: UIViewController, UITextViewDeleg
 
     public override func loadView() {
         view = editorView
-    }
-
-    public func textViewDidChange(_ textView: UITextView) {
-        editorView.textViewDidChange(textView)
-    }
-
-    public func textViewDidChangeSelection(_ textView: UITextView) {
-        editorView.textViewDidChangeSelection(textView)
-    }
-
-    public func textView(
-        _ textView: UITextView,
-        shouldChangeTextIn range: NSRange,
-        replacementText text: String
-    ) -> Bool {
-        editorView.textView(
-            textView,
-            shouldChangeTextIn: range,
-            replacementText: text
-        )
     }
 }
 
@@ -1296,6 +1122,19 @@ private extension UIColor {
         let green = CGFloat((hex >> 8) & 0xFF) / 255.0
         let blue = CGFloat(hex & 0xFF) / 255.0
         return UIColor(red: red, green: green, blue: blue, alpha: 1.0)
+    }
+}
+
+private extension CGFloat {
+    func isNearlyEqual(to other: CGFloat, tolerance: CGFloat = 0.5) -> Bool {
+        abs(self - other) <= tolerance
+    }
+}
+
+private extension CGSize {
+    func isNearlyEqual(to other: CGSize, tolerance: CGFloat = 0.5) -> Bool {
+        width.isNearlyEqual(to: other.width, tolerance: tolerance)
+            && height.isNearlyEqual(to: other.height, tolerance: tolerance)
     }
 }
 #endif

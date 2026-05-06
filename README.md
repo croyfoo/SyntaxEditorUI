@@ -123,5 +123,5 @@ xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITest
 
 - Non-UI implementation moved into the internal `SyntaxEditorCore` target. `SyntaxEditorCore` is not a public package product; clients should keep importing `SyntaxEditorUI` only.
 - `SyntaxEditorModel`, `BuiltinSyntaxLanguages`, `SyntaxLanguage`, and related non-UI APIs remain available from `SyntaxEditorUI` via module re-export.
-- On iOS, `SyntaxEditorView` is a `UIScrollView`-based editor container, not a `UITextView` subclass. Code that needs UIKit text APIs should use `editorView.textView`.
-- On iOS, horizontal and vertical scrolling are owned by `SyntaxEditorView`; the embedded `textView` is kept at a zero internal `contentOffset`.
+- On iOS, `SyntaxEditorView` is now the single native text input and scroll view. The previous embedded `UITextView` API has been removed.
+- On iOS, use `SyntaxEditorView` / `SyntaxEditorViewController.editorView` directly for text, selection, editability, wrapping, and scrolling. `SyntaxEditorView.textView` and `SyntaxEditorViewController.textView` are no longer available.
