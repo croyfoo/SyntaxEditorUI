@@ -744,6 +744,39 @@ struct SyntaxEditorUITests {
         #expect(editorView.contentOffset.x > stableOffsetX)
     }
 
+    @Test("SyntaxEditorView scrolls iOS ranges outside adjusted right inset")
+    @MainActor
+    func syntaxEditorViewIOSScrollsRangesOutsideAdjustedRightInset() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: BuiltinSyntaxLanguages.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        editorView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 44)
+        layoutIOSEditorView(editorView)
+
+        let targetLocation = max(0, longIOSSyntaxEditorLine.utf16.count - 1)
+        guard let position = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: targetLocation
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve the inset scroll target")
+            return
+        }
+
+        let targetRect = editorView.caretRect(for: position)
+        editorView.scrollRangeToVisible(NSRange(location: targetLocation, length: 0))
+        layoutIOSEditorView(editorView)
+
+        let insets = editorView.adjustedContentInset
+        let visibleWidth = editorView.bounds.width - insets.left - insets.right
+        let visibleMaxX = editorView.contentOffset.x + insets.left + visibleWidth
+        #expect(insets.right >= 44)
+        #expect(editorView.contentOffset.x > 0)
+        #expect(targetRect.maxX <= visibleMaxX + 1)
+    }
+
     @Test("SyntaxEditorView keeps iOS horizontal offset after visible cursor click")
     @MainActor
     func syntaxEditorViewIOSKeepsHorizontalOffsetAfterVisibleCursorClick() {

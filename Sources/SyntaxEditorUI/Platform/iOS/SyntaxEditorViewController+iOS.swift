@@ -256,7 +256,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
             return
         }
 
-        let visibleRect = CGRect(origin: contentOffset, size: bounds.size)
+        let visibleRect = adjustedVisibleContentRect
         if targetRect.intersects(visibleRect.insetBy(dx: -textContainer.lineFragmentPadding, dy: -4)) {
             return
         }
@@ -306,28 +306,39 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         return targetRect
     }
 
+    private var adjustedVisibleContentRect: CGRect {
+        let insets = adjustedContentInset
+        return CGRect(
+            x: contentOffset.x + insets.left,
+            y: contentOffset.y + insets.top,
+            width: max(0, bounds.width - insets.left - insets.right),
+            height: max(0, bounds.height - insets.top - insets.bottom)
+        )
+    }
+
     private func scrollContentRectToVisible(_ rect: CGRect) {
+        let insets = adjustedContentInset
         let maximumOffset = CGPoint(
-            x: max(-adjustedContentInset.left, contentSize.width - bounds.width + adjustedContentInset.right),
-            y: max(-adjustedContentInset.top, contentSize.height - bounds.height + adjustedContentInset.bottom)
+            x: max(-insets.left, contentSize.width - bounds.width + insets.right),
+            y: max(-insets.top, contentSize.height - bounds.height + insets.bottom)
         )
         var nextOffset = contentOffset
-        let visibleRect = CGRect(origin: contentOffset, size: bounds.size)
+        let visibleRect = adjustedVisibleContentRect
 
         if rect.minX < visibleRect.minX {
-            nextOffset.x = rect.minX
+            nextOffset.x = rect.minX - insets.left
         } else if rect.maxX > visibleRect.maxX {
-            nextOffset.x = rect.maxX - bounds.width
+            nextOffset.x = rect.maxX - visibleRect.width - insets.left
         }
 
         if rect.minY < visibleRect.minY {
-            nextOffset.y = rect.minY
+            nextOffset.y = rect.minY - insets.top
         } else if rect.maxY > visibleRect.maxY {
-            nextOffset.y = rect.maxY - bounds.height
+            nextOffset.y = rect.maxY - visibleRect.height - insets.top
         }
 
-        nextOffset.x = min(max(nextOffset.x, -adjustedContentInset.left), maximumOffset.x)
-        nextOffset.y = min(max(nextOffset.y, -adjustedContentInset.top), maximumOffset.y)
+        nextOffset.x = min(max(nextOffset.x, -insets.left), maximumOffset.x)
+        nextOffset.y = min(max(nextOffset.y, -insets.top), maximumOffset.y)
         guard !nextOffset.x.isNearlyEqual(to: contentOffset.x)
                 || !nextOffset.y.isNearlyEqual(to: contentOffset.y) else {
             return
