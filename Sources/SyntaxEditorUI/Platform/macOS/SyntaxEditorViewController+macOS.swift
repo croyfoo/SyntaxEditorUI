@@ -819,7 +819,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         let width = contentSize.width > 0 ? contentSize.width : bounds.width
         let height = contentSize.height > 0 ? contentSize.height : bounds.height
         return NSSize(
-            width: max(0, width - max(0, contentInsets.left)),
+            width: max(0, width - max(0, contentInsets.left) - max(0, contentInsets.right)),
             height: max(0, height - max(0, contentInsets.bottom))
         )
     }

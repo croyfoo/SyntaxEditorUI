@@ -1269,7 +1269,7 @@ struct SyntaxEditorUITests {
             }
 
             let contentInsets = editorView.contentView.contentInsets
-            let expectedWidth = editorView.contentSize.width - contentInsets.left
+            let expectedWidth = editorView.contentSize.width - contentInsets.left - contentInsets.right
             let expectedHeight = editorView.contentSize.height - contentInsets.bottom
             let expectedClipOriginX = -contentInsets.left
             return editorView.hasHorizontalScroller == false
@@ -1323,7 +1323,7 @@ struct SyntaxEditorUITests {
             lineWrappingEnabled: true
         )
         let editorView = SyntaxEditorView(model: model)
-        editorView.contentInsets = NSEdgeInsets(top: 0, left: 96, bottom: 0, right: 0)
+        editorView.contentInsets = NSEdgeInsets(top: 0, left: 96, bottom: 0, right: 44)
         layoutMacEditorView(editorView, width: 560, height: 180)
 
         #expect(await waitUntilEditorCondition {
@@ -1332,7 +1332,7 @@ struct SyntaxEditorUITests {
             }
 
             let contentInsets = editorView.contentView.contentInsets
-            let expectedWidth = editorView.contentSize.width - contentInsets.left
+            let expectedWidth = editorView.contentSize.width - contentInsets.left - contentInsets.right
             let expectedClipOriginX = -contentInsets.left
             return approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX)
                 && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
@@ -1347,7 +1347,7 @@ struct SyntaxEditorUITests {
             }
 
             let contentInsets = editorView.contentView.contentInsets
-            let expectedWidth = editorView.contentSize.width - contentInsets.left
+            let expectedWidth = editorView.contentSize.width - contentInsets.left - contentInsets.right
             let expectedClipOriginX = -contentInsets.left
             return approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX)
                 && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
