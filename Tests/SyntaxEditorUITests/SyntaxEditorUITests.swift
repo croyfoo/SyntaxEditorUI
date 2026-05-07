@@ -1351,9 +1351,9 @@ struct SyntaxEditorUITests {
         #expect(constrainedOffset <= constrainedEnd)
     }
 
-    @Test("SyntaxEditorView resolves iOS collapsed drag constraints from the touched point")
+    @Test("SyntaxEditorView keeps collapsed iOS drag constraints at anchor")
     @MainActor
-    func syntaxEditorViewIOSResolvesCollapsedDragConstraintsFromTouchedPoint() {
+    func syntaxEditorViewIOSKeepsCollapsedDragConstraintsAtAnchor() {
         let line = "const answer = 42;"
         let source = [
             "<script>",
@@ -1398,7 +1398,7 @@ struct SyntaxEditorUITests {
         }
 
         let resolvedOffset = editorView.offset(from: editorView.beginningOfDocument, to: resolvedPosition)
-        #expect(abs(resolvedOffset - targetOffset) <= 1)
+        #expect(resolvedOffset == lineEnd)
     }
 
     @Test("SyntaxEditorView resolves iOS clicks to the touched whitespace column")
@@ -2569,6 +2569,47 @@ struct SyntaxEditorUITests {
             to: viewportStartPosition
         )
         #expect(abs(characterRangeStartOffset - viewportStartOffset) <= 1)
+    }
+
+    @Test("SyntaxEditorView keeps iOS closest position inside collapsed constrained range")
+    @MainActor
+    func syntaxEditorViewIOSKeepsClosestPositionInsideCollapsedConstrainedRange() {
+        let source = "abcdef\nuvwxyz"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        guard let constrainedPosition = editorView.position(from: editorView.beginningOfDocument, offset: 2),
+              let constrainedRange = editorView.textRange(from: constrainedPosition, to: constrainedPosition),
+              let closestPosition = editorView.closestPosition(to: CGPoint(x: 250, y: 80), within: constrainedRange)
+        else {
+            Issue.record("SyntaxEditorView could not resolve a collapsed constrained closest position")
+            return
+        }
+
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: closestPosition) == 2)
+    }
+
+    @Test("SyntaxEditorView clamps iOS character-offset positions to supplied range")
+    @MainActor
+    func syntaxEditorViewIOSClampsCharacterOffsetPositionsToSuppliedRange() {
+        let source = "abcdef"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        guard let rangeStart = editorView.position(from: editorView.beginningOfDocument, offset: 1),
+              let rangeEnd = editorView.position(from: editorView.beginningOfDocument, offset: 4),
+              let range = editorView.textRange(from: rangeStart, to: rangeEnd),
+              let beforeRange = editorView.position(within: range, atCharacterOffset: -3),
+              let afterRange = editorView.position(within: range, atCharacterOffset: 10)
+        else {
+            Issue.record("SyntaxEditorView could not resolve range-constrained character offsets")
+            return
+        }
+
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: beforeRange) == 1)
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: afterRange) == 4)
     }
 
     @Test("SyntaxEditorView clears stale horizontal content size after iOS wrapping toggles")

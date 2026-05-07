@@ -708,10 +708,6 @@ extension SyntaxEditorView {
         let length = offset(from: range.start, to: range.end)
         guard location >= 0, length >= 0 else { return nil }
 
-        guard length > 0 else {
-            return closestTextPosition(to: point, constrainedTo: nil)
-        }
-
         return closestTextPosition(
             to: point,
             constrainedTo: NSRange(location: location, length: length)
@@ -733,8 +729,11 @@ extension SyntaxEditorView {
 
     public func position(within range: UITextRange, atCharacterOffset offset: Int) -> UITextPosition? {
         let startOffset = self.offset(from: beginningOfDocument, to: range.start)
-        guard startOffset >= 0 else { return nil }
-        return SyntaxEditorTextPosition(offset: min(max(0, startOffset + offset), text.utf16.count))
+        let length = self.offset(from: range.start, to: range.end)
+        guard startOffset >= 0, length >= 0 else { return nil }
+        let endOffset = min(startOffset + length, text.utf16.count)
+        let targetOffset = min(max(startOffset + offset, startOffset), endOffset)
+        return SyntaxEditorTextPosition(offset: targetOffset)
     }
 
     public func characterOffset(of position: UITextPosition, within range: UITextRange) -> Int {
