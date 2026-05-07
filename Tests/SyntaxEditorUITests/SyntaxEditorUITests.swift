@@ -2612,6 +2612,31 @@ struct SyntaxEditorUITests {
         #expect(editorView.offset(from: editorView.beginningOfDocument, to: afterRange) == 4)
     }
 
+    @Test("SyntaxEditorView resolves iOS character-offset positions by composed characters")
+    @MainActor
+    func syntaxEditorViewIOSResolvesCharacterOffsetPositionsByComposedCharacters() {
+        let source = "🙂a"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        guard let range = editorView.textRange(
+            from: editorView.beginningOfDocument,
+            to: editorView.endOfDocument
+        ),
+              let afterEmoji = editorView.position(within: range, atCharacterOffset: 1),
+              let afterEnd = editorView.position(within: range, atCharacterOffset: 10)
+        else {
+            Issue.record("SyntaxEditorView could not resolve composed character offsets")
+            return
+        }
+
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: afterEmoji) == ("🙂" as NSString).length)
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: afterEnd) == source.utf16.count)
+        #expect(editorView.characterOffset(of: afterEmoji, within: range) == 1)
+        #expect(editorView.characterOffset(of: afterEnd, within: range) == 2)
+    }
+
     @Test("SyntaxEditorView clears stale horizontal content size after iOS wrapping toggles")
     @MainActor
     func syntaxEditorViewIOSWrappingToggleClearsStaleHorizontalContentSize() async {

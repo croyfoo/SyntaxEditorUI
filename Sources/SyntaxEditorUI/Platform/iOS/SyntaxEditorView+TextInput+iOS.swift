@@ -732,18 +732,61 @@ extension SyntaxEditorView {
         let length = self.offset(from: range.start, to: range.end)
         guard startOffset >= 0, length >= 0 else { return nil }
         let endOffset = min(startOffset + length, text.utf16.count)
-        let targetOffset = min(max(startOffset + offset, startOffset), endOffset)
+        let targetOffset = utf16Offset(
+            from: startOffset,
+            byComposedCharacterOffset: offset,
+            limitedTo: endOffset
+        )
         return SyntaxEditorTextPosition(offset: targetOffset)
     }
 
     public func characterOffset(of position: UITextPosition, within range: UITextRange) -> Int {
         let rangeStart = offset(from: beginningOfDocument, to: range.start)
+        let rangeLength = offset(from: range.start, to: range.end)
         guard let positionOffset = offset(for: position),
-              rangeStart >= 0
+              rangeStart >= 0,
+              rangeLength >= 0
         else {
             return 0
         }
-        return positionOffset - rangeStart
+        let rangeEnd = min(rangeStart + rangeLength, text.utf16.count)
+        return composedCharacterOffset(
+            from: rangeStart,
+            to: min(max(positionOffset, rangeStart), rangeEnd)
+        )
+    }
+
+    func utf16Offset(from startOffset: Int, byComposedCharacterOffset offset: Int, limitedTo endOffset: Int) -> Int {
+        let source = text as NSString
+        let textLength = source.length
+        let lowerBound = min(max(0, startOffset), textLength)
+        let upperBound = min(max(lowerBound, endOffset), textLength)
+        guard offset > 0 else { return lowerBound }
+
+        var currentOffset = lowerBound
+        for _ in 0..<offset {
+            guard currentOffset < upperBound else { return upperBound }
+            let characterRange = source.rangeOfComposedCharacterSequence(at: currentOffset)
+            currentOffset = min(characterRange.location + characterRange.length, upperBound)
+        }
+        return currentOffset
+    }
+
+    func composedCharacterOffset(from startOffset: Int, to targetOffset: Int) -> Int {
+        let source = text as NSString
+        let textLength = source.length
+        let lowerBound = min(max(0, startOffset), textLength)
+        let upperBound = min(max(lowerBound, targetOffset), textLength)
+        var currentOffset = lowerBound
+        var characterOffset = 0
+
+        while currentOffset < upperBound {
+            let characterRange = source.rangeOfComposedCharacterSequence(at: currentOffset)
+            currentOffset = min(characterRange.location + characterRange.length, upperBound)
+            characterOffset += 1
+        }
+
+        return characterOffset
     }
 
     func closestTextPosition(to point: CGPoint, constrainedTo range: NSRange?) -> UITextPosition? {
