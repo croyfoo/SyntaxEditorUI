@@ -179,6 +179,32 @@ function greet(name) {
 
 private let visibleMidIOSSyntaxEditorLocation = 20
 
+private final class SyntaxEditorUITestInputDelegate: NSObject, UITextInputDelegate {
+    var textWillChangeCount = 0
+    var textDidChangeCount = 0
+    var selectionWillChangeCount = 0
+    var selectionDidChangeCount = 0
+
+    func textWillChange(_ textInput: (any UITextInput)?) {
+        textWillChangeCount += 1
+    }
+
+    func textDidChange(_ textInput: (any UITextInput)?) {
+        textDidChangeCount += 1
+    }
+
+    func selectionWillChange(_ textInput: (any UITextInput)?) {
+        selectionWillChangeCount += 1
+    }
+
+    func selectionDidChange(_ textInput: (any UITextInput)?) {
+        selectionDidChangeCount += 1
+    }
+
+    @available(iOS 18.4, *)
+    func conversationContext(_ context: UIConversationContext?, didChange textInput: (any UITextInput)?) {}
+}
+
 private let offscreenWideIOSSyntaxEditorText: String = {
     let leadingShortLines = (0..<20).map { "let short\($0) = true;" }
     let wideLine = [String(repeating: "let offscreenHorizontalScrollRange = value; ", count: 24)]
@@ -398,6 +424,39 @@ struct SyntaxEditorUITests {
         #expect(editorView.selectedRange == NSRange(location: 6, length: 0))
     }
 
+    @Test("SyntaxEditorView notifies the iOS input delegate for transformed text input")
+    @MainActor
+    func syntaxEditorViewIOSNotifiesInputDelegateForTransformedTextInput() {
+        let model = SyntaxEditorModel(text: "", language: SyntaxLanguage.javascript)
+        let editorView = SyntaxEditorView(model: model)
+        let inputDelegate = SyntaxEditorUITestInputDelegate()
+        editorView.inputDelegate = inputDelegate
+        layoutIOSEditorView(editorView)
+
+        editorView.insertText("{")
+
+        #expect(inputDelegate.textWillChangeCount == 1)
+        #expect(inputDelegate.textDidChangeCount == 1)
+        #expect(inputDelegate.selectionWillChangeCount == 1)
+        #expect(inputDelegate.selectionDidChangeCount == 1)
+    }
+
+    @Test("SyntaxEditorView deletes a complete iOS composed character backward")
+    @MainActor
+    func syntaxEditorViewIOSDeletesCompleteComposedCharacterBackward() {
+        let source = "a🙂b"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: ("a🙂" as NSString).length, length: 0)
+
+        editorView.deleteBackward()
+
+        #expect(editorView.text == "ab")
+        #expect(model.text == "ab")
+        #expect(editorView.selectedRange == NSRange(location: 1, length: 0))
+    }
+
     @Test("SyntaxEditorView preserves iOS command state through delayed selection callbacks")
     @MainActor
     func syntaxEditorViewIOSPreservesCommandStateThroughDelayedSelectionCallbacks() {
@@ -506,6 +565,39 @@ struct SyntaxEditorUITests {
         #expect(await highlighter.callCount() == initialCallCount)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
+    }
+
+    @Test("SyntaxEditorView preserves cached iOS syntax colors after font changes")
+    @MainActor
+    func syntaxEditorViewIOSFontChangePreservesCachedHighlightTokens() async {
+        let source = "let value = \"text\""
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    captureName: "keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(model: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
+
+        editorView.font = UIFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+
+        #expect(await highlighter.callCount() == initialCallCount)
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
 
     @Test("SyntaxEditorView reflects editable and wrapping changes on iOS")
@@ -910,6 +1002,56 @@ struct SyntaxEditorUITests {
         )
         #expect(constrainedOffset >= constrainedStart)
         #expect(constrainedOffset <= constrainedEnd)
+    }
+
+    @Test("SyntaxEditorView resolves iOS collapsed drag constraints from the touched point")
+    @MainActor
+    func syntaxEditorViewIOSResolvesCollapsedDragConstraintsFromTouchedPoint() {
+        let line = "const answer = 42;"
+        let source = [
+            "<script>",
+            line,
+            "</script>",
+            "<script>",
+            line,
+            "</script>",
+        ].joined(separator: "\n")
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.html,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let lineStart = (source as NSString).range(of: line).location
+        let lineEnd = lineStart + line.utf16.count
+        let targetOffset = lineStart + "const ".utf16.count
+        guard let lineEndPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: lineEnd
+        ),
+              let targetPosition = editorView.position(
+                from: editorView.beginningOfDocument,
+                offset: targetOffset
+              ),
+              let collapsedRange = editorView.textRange(from: lineEndPosition, to: lineEndPosition)
+        else {
+            Issue.record("SyntaxEditorView could not resolve collapsed drag positions")
+            return
+        }
+
+        let targetRect = editorView.caretRect(for: targetPosition)
+        guard let resolvedPosition = editorView.closestPosition(
+            to: CGPoint(x: targetRect.midX, y: targetRect.midY),
+            within: collapsedRange
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve collapsed constrained drag point")
+            return
+        }
+
+        let resolvedOffset = editorView.offset(from: editorView.beginningOfDocument, to: resolvedPosition)
+        #expect(abs(resolvedOffset - targetOffset) <= 1)
     }
 
     @Test("SyntaxEditorView does not let iOS gesture selection changes own horizontal scrolling")

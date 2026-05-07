@@ -92,6 +92,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             invalidateHorizontalMeasurement()
             updateTypingAttributes()
             applyBaseAttributesToExistingText()
+            reapplyCachedHighlight()
             updateTextContainerForCurrentWrappingMode()
             invalidateTextLayout()
         }
@@ -372,7 +373,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         textContentStorage.addTextLayoutManager(layoutManager)
         textContentStorage.primaryTextLayoutManager = layoutManager
 
-        textContentView.editorView = self
         addSubview(textContentView)
 
         editableTextInteraction.textInput = self
@@ -847,6 +847,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         isApplyingModel = true
         if textChanged {
+            inputDelegate?.textWillChange(self)
             performWithoutUndoRegistration {
                 appliedMutation = applyTextMutation(
                     previousText: previousText,
@@ -865,6 +866,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         if textChanged, model.text != result.text {
             model.text = result.text
+        }
+        if textChanged {
+            inputDelegate?.textDidChange(self)
         }
 
         if textChanged {
@@ -1356,7 +1360,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         guard !textContentView.frame.isNearlyEqual(to: contentViewFrame) else { return }
         textContentView.frame = contentViewFrame
-        textContentView.setNeedsDisplay()
     }
 
     func estimatedDocumentLayoutSize() -> CGSize {
@@ -1513,7 +1516,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func invalidateTextLayout() {
         invalidateLayoutManagerLayout()
         setNeedsDisplayForVisibleTextFragments()
-        textContentView.setNeedsDisplay()
         setNeedsLayout()
     }
 
@@ -1550,9 +1552,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         if invalidatedRect.isNull {
-            textContentView.setNeedsDisplay()
+            setNeedsDisplayForVisibleTextFragments()
         } else {
-            textContentView.setNeedsDisplay(invalidatedRect.insetBy(dx: -2, dy: -2))
+            invalidateTextFragmentViews(intersecting: invalidatedRect.insetBy(dx: -2, dy: -2))
+        }
+    }
+
+    func invalidateTextFragmentViews(intersecting rect: CGRect) {
+        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            guard fragmentView.frame.intersects(rect) else { continue }
+            fragmentView.setNeedsDisplay(rect.offsetBy(dx: -fragmentView.frame.minX, dy: -fragmentView.frame.minY))
         }
     }
 
@@ -1784,6 +1793,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             )
             fragmentViewMap.setObject(fragmentView, forKey: textLayoutFragment)
         }
+        fragmentView.editorView = self
 
         if !fragmentView.frame.isNearlyEqual(to: layoutFragmentFrame) {
             fragmentView.frame = layoutFragmentFrame

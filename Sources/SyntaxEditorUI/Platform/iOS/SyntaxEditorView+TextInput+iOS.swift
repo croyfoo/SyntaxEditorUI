@@ -25,7 +25,9 @@ extension SyntaxEditorView {
             deletionIntent = .unspecified
         } else {
             guard selectedRange.location > 0 else { return }
-            deletionRange = NSRange(location: selectedRange.location - 1, length: 1)
+            deletionRange = (text as NSString).rangeOfComposedCharacterSequence(
+                at: selectedRange.location - 1
+            )
             deletionIntent = .backward
         }
 
@@ -331,6 +333,11 @@ extension SyntaxEditorView {
         let location = offset(from: beginningOfDocument, to: range.start)
         let length = offset(from: range.start, to: range.end)
         guard location >= 0, length >= 0 else { return nil }
+
+        guard length > 0 else {
+            return closestTextPosition(to: point, constrainedTo: nil)
+        }
+
         return closestTextPosition(
             to: point,
             constrainedTo: NSRange(location: location, length: length)
@@ -370,9 +377,7 @@ extension SyntaxEditorView {
             x: point.x - textContentView.frame.minX,
             y: point.y - textContentView.frame.minY
         )
-        let containerLocation = range
-            .flatMap { textLocation(forUTF16Offset: $0.location) }
-            ?? textContentStorage.documentRange.location
+        let containerLocation = textContentStorage.documentRange.location
 
         if let location = caretTextLocation(
             interactingAt: pointInTextContainer,

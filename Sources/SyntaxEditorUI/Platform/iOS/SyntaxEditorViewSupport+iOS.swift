@@ -109,12 +109,6 @@ final class SyntaxEditorSelectionRect: UITextSelectionRect {
 }
 
 final class SyntaxEditorTextContentView: UIView {
-    weak var editorView: SyntaxEditorView?
-
-    override class var layerClass: AnyClass {
-        CATiledLayer.self
-    }
-
     override init(frame: CGRect) {
         super.init(frame: frame)
         isOpaque = false
@@ -126,20 +120,11 @@ final class SyntaxEditorTextContentView: UIView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-
-    override func draw(_ rect: CGRect) {
-        guard let editorView,
-              let context = UIGraphicsGetCurrentContext()
-        else {
-            return
-        }
-
-        editorView.drawBracketHighlights(in: rect, context: context)
-    }
 }
 
 final class SyntaxEditorTextLayoutFragmentView: UIView {
     let layoutFragment: NSTextLayoutFragment
+    weak var editorView: SyntaxEditorView?
 
     init(layoutFragment: NSTextLayoutFragment, frame: CGRect) {
         self.layoutFragment = layoutFragment
@@ -159,6 +144,15 @@ final class SyntaxEditorTextLayoutFragmentView: UIView {
             return
         }
 
+        if let editorView {
+            context.saveGState()
+            context.translateBy(x: -frame.minX, y: -frame.minY)
+            editorView.drawBracketHighlights(
+                in: rect.offsetBy(dx: frame.minX, dy: frame.minY),
+                context: context
+            )
+            context.restoreGState()
+        }
         layoutFragment.draw(at: .zero, in: context)
     }
 }
