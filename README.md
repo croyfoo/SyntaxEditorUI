@@ -119,9 +119,13 @@ xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITest
 
 `Mini` is a lightweight manual verification app for iOS/macOS. It is not a public product and does not own package regression tests.
 
-## Breaking API Notes
+## Migration
 
-- Non-UI implementation moved into the internal `SyntaxEditorCore` target. `SyntaxEditorCore` is not a public package product; clients should keep importing `SyntaxEditorUI` only.
+### v0.5.0
+
+These notes apply when upgrading from `v0.4.x` or earlier to `v0.5.0`.
+
+- Starting with `v0.5.0`, non-UI implementation has moved into the internal `SyntaxEditorCore` target. `SyntaxEditorCore` is not a public package product; clients should keep importing `SyntaxEditorUI` only.
 - `SyntaxEditorModel`, `BuiltinSyntaxLanguages`, `SyntaxLanguage`, and related non-UI APIs remain available from `SyntaxEditorUI` via module re-export.
-- On iOS, `SyntaxEditorView` is now the single native text input and scroll view. The previous embedded `UITextView` API has been removed.
-- On iOS, use `SyntaxEditorView` / `SyntaxEditorViewController.editorView` directly for text, selection, editability, wrapping, and scrolling. `SyntaxEditorView.textView` and `SyntaxEditorViewController.textView` are no longer available.
+- Up to `v0.4.x` on iOS, `SyntaxEditorView` embedded a `UITextView` that was exposed through `SyntaxEditorView.textView` and `SyntaxEditorViewController.textView`.
+- Starting with `v0.5.0` on iOS, `SyntaxEditorView` is the single native text input and scroll view. Use `SyntaxEditorView` / `SyntaxEditorViewController.editorView` directly for text, selection, editability, wrapping, and scrolling.
