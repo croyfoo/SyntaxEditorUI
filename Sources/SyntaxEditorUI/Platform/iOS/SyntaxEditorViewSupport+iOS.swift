@@ -1,0 +1,188 @@
+#if canImport(UIKit)
+import UIKit
+
+@MainActor
+final class SyntaxEditorReadOnlyGuardedUndoManager: UndoManager {
+    var allowsMutation: () -> Bool = { true }
+
+    override var canUndo: Bool {
+        guard allowsMutation() else { return false }
+        return super.canUndo
+    }
+
+    override var canRedo: Bool {
+        guard allowsMutation() else { return false }
+        return super.canRedo
+    }
+
+    override func undo() {
+        guard allowsMutation() else { return }
+        super.undo()
+    }
+
+    override func redo() {
+        guard allowsMutation() else { return }
+        super.redo()
+    }
+
+    override func undoNestedGroup() {
+        guard allowsMutation() else { return }
+        super.undoNestedGroup()
+    }
+}
+
+final class SyntaxEditorTextPosition: UITextPosition {
+    let offset: Int
+
+    init(offset: Int) {
+        self.offset = offset
+        super.init()
+    }
+}
+
+final class SyntaxEditorTextRange: UITextRange {
+    let nsRange: NSRange
+
+    let startPosition: SyntaxEditorTextPosition
+    let endPosition: SyntaxEditorTextPosition
+
+    init(nsRange: NSRange) {
+        let location = max(0, nsRange.location)
+        let length = max(0, nsRange.length)
+        self.nsRange = NSRange(location: location, length: length)
+        self.startPosition = SyntaxEditorTextPosition(offset: location)
+        self.endPosition = SyntaxEditorTextPosition(offset: location + length)
+        super.init()
+    }
+
+    override var start: UITextPosition {
+        startPosition
+    }
+
+    override var end: UITextPosition {
+        endPosition
+    }
+
+    override var isEmpty: Bool {
+        nsRange.length == 0
+    }
+}
+
+final class SyntaxEditorSelectionRect: UITextSelectionRect {
+    let selectionRect: CGRect
+    let selectionWritingDirection: NSWritingDirection
+    let selectionContainsStart: Bool
+    let selectionContainsEnd: Bool
+
+    init(
+        rect: CGRect,
+        writingDirection: NSWritingDirection = .leftToRight,
+        containsStart: Bool,
+        containsEnd: Bool
+    ) {
+        self.selectionRect = rect
+        self.selectionWritingDirection = writingDirection
+        self.selectionContainsStart = containsStart
+        self.selectionContainsEnd = containsEnd
+        super.init()
+    }
+
+    override var rect: CGRect {
+        selectionRect
+    }
+
+    override var writingDirection: NSWritingDirection {
+        selectionWritingDirection
+    }
+
+    override var containsStart: Bool {
+        selectionContainsStart
+    }
+
+    override var containsEnd: Bool {
+        selectionContainsEnd
+    }
+
+    override var isVertical: Bool {
+        false
+    }
+}
+
+final class SyntaxEditorTextContentView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+final class SyntaxEditorTextLayoutFragmentView: UIView {
+    let layoutFragment: NSTextLayoutFragment
+    var bracketHighlightRects: [CGRect] = []
+    var bracketHighlightColor: CGColor?
+
+    init(layoutFragment: NSTextLayoutFragment, frame: CGRect) {
+        self.layoutFragment = layoutFragment
+        super.init(frame: frame)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else {
+            return
+        }
+
+        if let bracketHighlightColor, !bracketHighlightRects.isEmpty {
+            context.saveGState()
+            context.setFillColor(bracketHighlightColor)
+            for bracketRect in bracketHighlightRects where bracketRect.intersects(rect) {
+                context.fill(bracketRect)
+            }
+            context.restoreGState()
+        }
+        layoutFragment.draw(at: .zero, in: context)
+    }
+}
+
+extension UIColor {
+    static func syntaxEditorAlpha(_ color: UIColor, alpha: CGFloat) -> UIColor {
+        UIColor { traitCollection in
+            color.resolvedColor(with: traitCollection).withAlphaComponent(alpha)
+        }
+    }
+}
+
+extension CGFloat {
+    func isNearlyEqual(to other: CGFloat, tolerance: CGFloat = 0.5) -> Bool {
+        abs(self - other) <= tolerance
+    }
+}
+
+extension CGSize {
+    func isNearlyEqual(to other: CGSize, tolerance: CGFloat = 0.5) -> Bool {
+        width.isNearlyEqual(to: other.width, tolerance: tolerance)
+            && height.isNearlyEqual(to: other.height, tolerance: tolerance)
+    }
+}
+
+extension CGRect {
+    func isNearlyEqual(to other: CGRect, tolerance: CGFloat = 0.5) -> Bool {
+        origin.x.isNearlyEqual(to: other.origin.x, tolerance: tolerance)
+            && origin.y.isNearlyEqual(to: other.origin.y, tolerance: tolerance)
+            && size.isNearlyEqual(to: other.size, tolerance: tolerance)
+    }
+}
+#endif
