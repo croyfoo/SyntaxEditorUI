@@ -14,13 +14,13 @@ private enum CachedLanguageConfiguration {
 
 package actor SyntaxHighlighterEngine {
     private let parser = Parser()
-    private var configurations: [String: CachedLanguageConfiguration] = [:]
-    private var layeredHighlightingSupport: [String: Bool] = [:]
-    private var htmlPreprocessingSupport: [String: Bool] = [:]
+    private var configurations: [SyntaxLanguage: CachedLanguageConfiguration] = [:]
+    private var layeredHighlightingSupport: [SyntaxLanguage: Bool] = [:]
+    private var htmlPreprocessingSupport: [SyntaxLanguage: Bool] = [:]
 
     package init() {}
 
-    package func render(source: String, language: any SyntaxLanguage) -> [SyntaxHighlightToken] {
+    package func render(source: String, language: SyntaxLanguage) -> [SyntaxHighlightToken] {
         guard !source.isEmpty else { return [] }
         guard let configuration = configuration(for: language) else { return [] }
 
@@ -45,34 +45,32 @@ package actor SyntaxHighlighterEngine {
 
 private extension SyntaxHighlighterEngine {
     func usesLayeredHighlighting(
-        for language: any SyntaxLanguage,
+        for language: SyntaxLanguage,
         configuration: LanguageConfiguration
     ) -> Bool {
         guard configuration.queries[.injections] != nil else {
             return false
         }
 
-        let cacheKey = language.treeSitterSupport.cacheKey
-        if let cached = layeredHighlightingSupport[cacheKey] {
+        if let cached = layeredHighlightingSupport[language] {
             return cached
         }
 
         let resolved = canResolveLayeredInjections(for: language.treeSitterSupport)
-        layeredHighlightingSupport[cacheKey] = resolved
+        layeredHighlightingSupport[language] = resolved
         return resolved
     }
 
     func usesHTMLPreprocessing(
-        for language: any SyntaxLanguage,
+        for language: SyntaxLanguage,
         configuration: LanguageConfiguration
     ) -> Bool {
-        let cacheKey = language.treeSitterSupport.cacheKey
-        if let cached = htmlPreprocessingSupport[cacheKey] {
+        if let cached = htmlPreprocessingSupport[language] {
             return cached
         }
 
         let resolved = supportsHTMLRawTextPreprocessing(for: configuration.language)
-        htmlPreprocessingSupport[cacheKey] = resolved
+        htmlPreprocessingSupport[language] = resolved
         return resolved
     }
 
@@ -274,7 +272,7 @@ private extension SyntaxHighlighterEngine {
         var resolved: [String: LanguageConfiguration] = [:]
 
         for alias in aliases {
-            guard let language = BuiltinSyntaxLanguages.named(alias),
+            guard let language = SyntaxLanguage.named(alias),
                   let configuration = configuration(for: language)
             else {
                 continue
@@ -285,8 +283,8 @@ private extension SyntaxHighlighterEngine {
         return resolved
     }
 
-    func configuration(for language: any SyntaxLanguage) -> LanguageConfiguration? {
-        switch configurations[language.syntaxHighlightCacheKey] {
+    func configuration(for language: SyntaxLanguage) -> LanguageConfiguration? {
+        switch configurations[language] {
         case .resolved(let configuration):
             return configuration
         case .missing:
@@ -298,11 +296,11 @@ private extension SyntaxHighlighterEngine {
         let support = language.treeSitterSupport
         let configuration = Self.makeConfiguration(from: support)
         if let configuration {
-            configurations[language.syntaxHighlightCacheKey] = .resolved(configuration)
+            configurations[language] = .resolved(configuration)
             return configuration
         }
 
-        configurations[language.syntaxHighlightCacheKey] = .missing
+        configurations[language] = .missing
         return nil
     }
 

@@ -2,12 +2,12 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterHTML
 
-public struct HTMLLanguage: SyntaxLanguage {
-    public init() {}
+struct HTMLLanguage {
+    init() {}
 
-    public var identifier: String { "html" }
-    public var displayName: String { "HTML" }
-    public var treeSitterSupport: SyntaxTreeSitterSupport {
+    var identifier: String { "html" }
+    var displayName: String { "HTML" }
+    var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "HTML",
             bundleName: "TreeSitterHTML_TreeSitterHTML",
@@ -15,7 +15,7 @@ public struct HTMLLanguage: SyntaxLanguage {
         )
     }
 
-    public func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let selectionEnd = safeSelection.location + safeSelection.length
@@ -75,7 +75,7 @@ public struct HTMLLanguage: SyntaxLanguage {
         )
     }
 
-    public func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
+    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
         let nsSource = source as NSString
         let clampedLocation = max(0, min(location, nsSource.length))
 
@@ -112,7 +112,7 @@ public struct HTMLLanguage: SyntaxLanguage {
 private extension HTMLLanguage {
     struct EmbeddedRawTextContext {
         let range: NSRange
-        let language: any SyntaxLanguage
+        let language: SyntaxLanguage
     }
 
     enum RawTextLocationState {
@@ -584,7 +584,7 @@ private extension HTMLLanguage {
         let startTagText = source.substring(
             with: NSRange(location: tagStart, length: tagEnd - tagStart + 1)
         )
-        let embeddedLanguage: (any SyntaxLanguage)?
+        let embeddedLanguage: SyntaxLanguage?
         switch rawTextElementName {
         case "script":
             embeddedLanguage = scriptEmbeddedLanguage(forStartTagText: startTagText)
@@ -604,7 +604,7 @@ private extension HTMLLanguage {
 
     static func supportedRawTextState(
         rawTextElementName: String,
-        embeddedLanguage: (any SyntaxLanguage)?,
+        embeddedLanguage: SyntaxLanguage?,
         in source: NSString,
         contentStart: Int
     ) -> SupportedEmbeddedRawTextState? {
@@ -612,15 +612,15 @@ private extension HTMLLanguage {
             return nil
         }
 
-        switch embeddedLanguage.identifier {
-        case BuiltinSyntaxLanguages.javascript.identifier where rawTextElementName == "script":
+        switch embeddedLanguage {
+        case .javascript where rawTextElementName == "script":
             return SupportedEmbeddedRawTextState(
                 rawTextElementName: rawTextElementName,
                 source: source,
                 contentStart: contentStart,
                 literalState: .javascript(JavaScriptLanguage.PrefixAnalysis())
             )
-        case BuiltinSyntaxLanguages.css.identifier where rawTextElementName == "style":
+        case .css where rawTextElementName == "style":
             return SupportedEmbeddedRawTextState(
                 rawTextElementName: rawTextElementName,
                 source: source,
@@ -669,7 +669,7 @@ private extension HTMLLanguage {
     static func isInsideRawTextClosingTagPrefix(
         _ rawTextPrefix: String,
         rawTextElementName: String,
-        embeddedLanguage: any SyntaxLanguage
+        embeddedLanguage: SyntaxLanguage
     ) -> Bool {
         let nsPrefix = rawTextPrefix as NSString
         let closingTagStart = nsPrefix.range(
@@ -756,7 +756,7 @@ private extension HTMLLanguage {
             let linePrefix = nsPrefix.substring(
                 with: NSRange(location: contentCursor, length: max(0, lineEnd - contentCursor))
             )
-            let isInsideEmbeddedLiteralOrComment = BuiltinSyntaxLanguages.javascript.isInsideLiteralOrComment(
+            let isInsideEmbeddedLiteralOrComment = SyntaxLanguage.javascript.isInsideLiteralOrComment(
                 source: rawTextPrefix,
                 location: contentCursor
             )
@@ -879,7 +879,7 @@ private extension HTMLLanguage {
         while let startTag = nextRawTextStartTag(in: source, from: cursor) {
             let contentStart = NSMaxRange(startTag.range)
             let startTagText = source.substring(with: startTag.range)
-            let embeddedLanguage: (any SyntaxLanguage)?
+            let embeddedLanguage: SyntaxLanguage?
             switch startTag.name {
             case "script":
                 embeddedLanguage = scriptEmbeddedLanguage(forStartTagText: startTagText)
@@ -941,7 +941,7 @@ private extension HTMLLanguage {
         while let startTag = nextRawTextStartTag(in: source, from: cursor) {
             let contentStart = NSMaxRange(startTag.range)
             let startTagText = source.substring(with: startTag.range)
-            let embeddedLanguage: (any SyntaxLanguage)?
+            let embeddedLanguage: SyntaxLanguage?
             switch startTag.name {
             case "script":
                 embeddedLanguage = scriptEmbeddedLanguage(forStartTagText: startTagText)
@@ -1129,7 +1129,7 @@ private extension HTMLLanguage {
         in source: NSString,
         rawTextElementName: String,
         searchFrom: Int,
-        embeddedLanguage: any SyntaxLanguage,
+        embeddedLanguage: SyntaxLanguage,
         mutableSource: NSMutableString? = nil
     ) -> Int? {
         let clampedSearchFrom = max(0, min(searchFrom, source.length))
@@ -1258,7 +1258,7 @@ private extension HTMLLanguage {
         in source: NSString,
         rawTextElementName: String,
         rawTextContentStart: Int
-    ) -> (any SyntaxLanguage)? {
+    ) -> SyntaxLanguage? {
         guard let startTagText = rawTextStartTagText(
             in: source,
             rawTextContentStart: rawTextContentStart
@@ -1276,12 +1276,12 @@ private extension HTMLLanguage {
         }
     }
 
-    static func embeddedLanguage(named name: String) -> (any SyntaxLanguage)? {
+    static func embeddedLanguage(named name: String) -> SyntaxLanguage? {
         switch name {
         case "script", "script_element":
-            return BuiltinSyntaxLanguages.javascript
+            return SyntaxLanguage.javascript
         case "style", "style_element":
-            return BuiltinSyntaxLanguages.css
+            return SyntaxLanguage.css
         default:
             return nil
         }
@@ -1342,22 +1342,22 @@ private extension HTMLLanguage {
             .lowercased() ?? type.lowercased()
     }
 
-    static func scriptEmbeddedLanguage(forStartTagText startTagText: String) -> (any SyntaxLanguage)? {
+    static func scriptEmbeddedLanguage(forStartTagText startTagText: String) -> SyntaxLanguage? {
         guard let type = startTagTypeAttribute(in: startTagText) else {
-            return BuiltinSyntaxLanguages.javascript
+            return SyntaxLanguage.javascript
         }
 
         let essence = normalizedTypeAttributeEssence(type)
-        return supportedScriptTypeEssences.contains(essence) ? BuiltinSyntaxLanguages.javascript : nil
+        return supportedScriptTypeEssences.contains(essence) ? SyntaxLanguage.javascript : nil
     }
 
-    static func styleEmbeddedLanguage(forStartTagText startTagText: String) -> (any SyntaxLanguage)? {
+    static func styleEmbeddedLanguage(forStartTagText startTagText: String) -> SyntaxLanguage? {
         guard let type = startTagTypeAttribute(in: startTagText) else {
-            return BuiltinSyntaxLanguages.css
+            return SyntaxLanguage.css
         }
 
         let essence = normalizedTypeAttributeEssence(type)
-        return supportedStyleTypeEssences.contains(essence) ? BuiltinSyntaxLanguages.css : nil
+        return supportedStyleTypeEssences.contains(essence) ? SyntaxLanguage.css : nil
     }
 
     static func startTagTypeAttribute(in startTagText: String) -> String? {
@@ -1575,7 +1575,7 @@ extension HTMLLanguage {
 
         while let startTag = nextRawTextStartTag(in: source, from: cursor) {
             let startTagText = source.substring(with: startTag.range)
-            let embeddedLanguage: (any SyntaxLanguage)?
+            let embeddedLanguage: SyntaxLanguage?
             switch startTag.name {
             case "script":
                 embeddedLanguage = scriptEmbeddedLanguage(forStartTagText: startTagText)
@@ -1753,7 +1753,7 @@ extension HTMLLanguage {
         while let startTag = nextRawTextStartTag(in: nsSource, from: cursor) {
             let contentStart = NSMaxRange(startTag.range)
             let startTagText = nsSource.substring(with: startTag.range)
-            let embeddedLanguage: (any SyntaxLanguage)?
+            let embeddedLanguage: SyntaxLanguage?
             switch startTag.name {
             case "script":
                 embeddedLanguage = scriptEmbeddedLanguage(forStartTagText: startTagText)

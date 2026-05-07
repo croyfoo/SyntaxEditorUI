@@ -36,7 +36,7 @@ package final class EditorCommandEngine {
         source: String,
         range: NSRange,
         replacementText: String,
-        language: any SyntaxLanguage,
+        language: SyntaxLanguage,
         deletionIntent: DeletionIntent = .unspecified
     ) -> EditorCommandResult? {
         let nsSource = source as NSString
@@ -119,7 +119,7 @@ package final class EditorCommandEngine {
     package func toggleComment(
         source: String,
         selection: NSRange,
-        language: any SyntaxLanguage
+        language: SyntaxLanguage
     ) -> EditorCommandResult? {
         invalidateTransientState()
         let nsSource = source as NSString
@@ -146,7 +146,7 @@ private extension EditorCommandEngine {
         source: String,
         range: NSRange,
         input: Character,
-        language: any SyntaxLanguage
+        language: SyntaxLanguage
     ) -> EditorCommandResult? {
         let nsSource = source as NSString
         let openingPairs: [Character: Character] = [
@@ -370,9 +370,9 @@ private extension EditorCommandEngine {
     func shouldInsertPendingTOMLMultilineDelimiter(
         range: NSRange,
         input: Character,
-        language: any SyntaxLanguage
+        language: SyntaxLanguage
     ) -> Bool {
-        guard language.identifier == BuiltinSyntaxLanguages.toml.identifier,
+        guard language == .toml,
               let pendingTOMLMultilineDelimiter,
               range.length == 0,
               pendingTOMLMultilineDelimiter.cursorLocation == range.location,
@@ -388,9 +388,9 @@ private extension EditorCommandEngine {
         source: NSString,
         range: NSRange,
         input: Character,
-        language: any SyntaxLanguage
+        language: SyntaxLanguage
     ) -> Bool {
-        guard language.identifier == BuiltinSyntaxLanguages.toml.identifier,
+        guard language == .toml,
               range.length == 0,
               input == "\"" || input == "'",
               range.location > 0,

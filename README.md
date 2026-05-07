@@ -9,7 +9,7 @@ Its internal `SyntaxEditorCore` target keeps the non-UI editor model, language d
 - SwiftUI entry point (`SyntaxEditor`)
 - UIKit/AppKit native view API (`SyntaxEditorView`)
 - UIKit/AppKit controller wrapper API (`SyntaxEditorViewController`)
-- protocol-based language definitions (`SyntaxLanguage`)
+- concrete language selection (`SyntaxLanguage`)
 - tree-sitter based syntax highlighting for:
   - CSS
   - HTML (including embedded JavaScript and CSS highlighting)
@@ -46,68 +46,14 @@ import SyntaxEditorUI
 
 let model = SyntaxEditorModel(
     text: "const answer = 42;",
-    language: BuiltinSyntaxLanguages.javascript
+    language: .javascript
 )
 
 let editor = SyntaxEditor(model: model)
 let editorView = SyntaxEditorView(model: model)
 ```
 
-HTML is also available as a builtin language:
-
-```swift
-let htmlModel = SyntaxEditorModel(
-    text: "<div class=\"message\">Hello</div>",
-    language: BuiltinSyntaxLanguages.html
-)
-```
-
-XML is also available as a builtin language:
-
-```swift
-let xmlModel = SyntaxEditorModel(
-    text: "<?xml version=\"1.0\"?><note priority=\"high\">Hello</note>",
-    language: BuiltinSyntaxLanguages.xml
-)
-```
-
-Objective-C is also available as a builtin language:
-
-```swift
-let objectiveCModel = SyntaxEditorModel(
-    text: "#import <Foundation/Foundation.h>\n@interface Example : NSObject\n@end",
-    language: BuiltinSyntaxLanguages.objectiveC
-)
-```
-
-TOML is also available as a builtin language:
-
-```swift
-let tomlModel = SyntaxEditorModel(
-    text: "[package]\nname = \"SyntaxEditorUI\"\nenabled = true",
-    language: BuiltinSyntaxLanguages.toml
-)
-```
-
-Custom languages can provide both editor rules and highlighting by conforming to `SyntaxLanguage`.
-
-```swift
-struct CustomJSONLanguage: SyntaxLanguage {
-    var identifier: String { "custom-json" }
-    var displayName: String { "Custom JSON" }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
-        BuiltinSyntaxLanguages.json.treeSitterSupport
-    }
-
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        nil
-    }
-
-    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
-        false
-    }
-}
-```
+Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
 
 ## Testing
 
@@ -126,6 +72,10 @@ xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITest
 These notes apply when upgrading from `v0.4.x` or earlier to `v0.5.0`.
 
 - Starting with `v0.5.0`, non-UI implementation has moved into the internal `SyntaxEditorCore` target. `SyntaxEditorCore` is not a public package product; clients should keep importing `SyntaxEditorUI` only.
-- `SyntaxEditorModel`, `BuiltinSyntaxLanguages`, `SyntaxLanguage`, and related non-UI APIs remain available from `SyntaxEditorUI` via module re-export.
+- `SyntaxEditorModel`, `SyntaxLanguage`, and related non-UI APIs remain available from `SyntaxEditorUI` via module re-export.
+- `SyntaxLanguage` is now a concrete enum of supported languages. Use `SyntaxLanguage.javascript` or shorthand `.javascript` instead of `BuiltinSyntaxLanguages.javascript`.
+- `BuiltinSyntaxLanguages` has been removed without a compatibility shim.
+- Custom `SyntaxLanguage` conformers are no longer supported. `SyntaxTreeSitterSupport`, custom query directories, and custom highlight cache keys are no longer public API.
+- HTML embedded JavaScript/CSS highlighting remains supported through `SyntaxLanguage.html`.
 - Up to `v0.4.x` on iOS, `SyntaxEditorView` embedded a `UITextView` that was exposed through `SyntaxEditorView.textView` and `SyntaxEditorViewController.textView`.
 - Starting with `v0.5.0` on iOS, `SyntaxEditorView` is the single native text input and scroll view. Use `SyntaxEditorView` / `SyntaxEditorViewController.editorView` directly for text, selection, editability, wrapping, and scrolling.

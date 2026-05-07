@@ -2,12 +2,12 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterCSS
 
-public struct CSSLanguage: SyntaxLanguage {
-    public init() {}
+struct CSSLanguage {
+    init() {}
 
-    public var identifier: String { "css" }
-    public var displayName: String { "CSS" }
-    public var treeSitterSupport: SyntaxTreeSitterSupport {
+    var identifier: String { "css" }
+    var displayName: String { "CSS" }
+    var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "CSS",
             bundleName: "TreeSitterCSS_TreeSitterCSS",
@@ -15,7 +15,7 @@ public struct CSSLanguage: SyntaxLanguage {
         )
     }
 
-    public func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
         SyntaxLanguageTextUtilities.toggleWrappedComment(
             source: source,
             selection: selection,
@@ -24,7 +24,7 @@ public struct CSSLanguage: SyntaxLanguage {
         )
     }
 
-    public func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
+    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
         let nsSource = source as NSString
         let clampedLocation = max(0, min(location, nsSource.length))
         let prefix = nsSource.substring(to: clampedLocation)

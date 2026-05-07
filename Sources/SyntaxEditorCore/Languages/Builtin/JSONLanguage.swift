@@ -2,12 +2,12 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterJSON
 
-public struct JSONLanguage: SyntaxLanguage {
-    public init() {}
+struct JSONLanguage {
+    init() {}
 
-    public var identifier: String { "json" }
-    public var displayName: String { "JSON" }
-    public var treeSitterSupport: SyntaxTreeSitterSupport {
+    var identifier: String { "json" }
+    var displayName: String { "JSON" }
+    var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "JSON",
             bundleName: "TreeSitterJSON_TreeSitterJSON",
@@ -15,11 +15,11 @@ public struct JSONLanguage: SyntaxLanguage {
         )
     }
 
-    public func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
         nil
     }
 
-    public func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
+    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
         let nsSource = source as NSString
         let clampedLocation = max(0, min(location, nsSource.length))
         let lineRange = nsSource.lineRange(for: NSRange(location: clampedLocation, length: 0))

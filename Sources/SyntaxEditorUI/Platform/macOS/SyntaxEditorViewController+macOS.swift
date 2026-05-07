@@ -400,7 +400,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func applyObservedEditorState(
-        language: any SyntaxLanguage,
+        language: SyntaxLanguage,
         isEditable: Bool,
         lineWrappingEnabled: Bool,
         colorTheme: SyntaxEditorColorTheme,
@@ -658,7 +658,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
     private func scheduleHighlight(
         source: String,
-        language: any SyntaxLanguage,
+        language: SyntaxLanguage,
         refreshStartUTF16: Int = 0
     ) {
         let expectedSource = source

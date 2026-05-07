@@ -357,7 +357,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorViewController preserves Observable conformance on iOS")
     @MainActor
     func syntaxEditorViewControllerIOSObservableCompatibility() {
-        let model = SyntaxEditorModel(text: "{}", language: BuiltinSyntaxLanguages.javascript)
+        let model = SyntaxEditorModel(text: "{}", language: SyntaxLanguage.javascript)
         let controller = SyntaxEditorViewController(model: model)
 
         requireObservable(controller)
@@ -377,7 +377,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorView applies transformed iOS text input to the model")
     @MainActor
     func syntaxEditorViewIOSAppliesTransformedTextInputToModel() {
-        let model = SyntaxEditorModel(text: "", language: BuiltinSyntaxLanguages.javascript)
+        let model = SyntaxEditorModel(text: "", language: SyntaxLanguage.javascript)
         let editorView = SyntaxEditorView(model: model)
         layoutIOSEditorView(editorView)
 
@@ -396,7 +396,7 @@ struct SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewIOSPreservesCommandStateThroughDelayedSelectionCallbacks() {
         let source = "description = "
-        let model = SyntaxEditorModel(text: source, language: BuiltinSyntaxLanguages.toml)
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.toml)
         let editorView = SyntaxEditorView(model: model)
         layoutIOSEditorView(editorView)
         editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
@@ -420,7 +420,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorView reflects model text mutations on iOS")
     @MainActor
     func syntaxEditorViewIOSTextObservation() async {
-        let model = SyntaxEditorModel(text: "const answer = 42;", language: BuiltinSyntaxLanguages.javascript)
+        let model = SyntaxEditorModel(text: "const answer = 42;", language: SyntaxLanguage.javascript)
         let editorView = SyntaxEditorView(model: model)
 
         model.text = "{\"enabled\":true}"
@@ -442,7 +442,7 @@ struct SyntaxEditorUITests {
         )
         let model = SyntaxEditorModel(
             text: source,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             colorTheme: initialTheme
         )
         let editorView = SyntaxEditorView(model: model)
@@ -461,7 +461,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorView reflects editable and wrapping changes on iOS")
     @MainActor
     func syntaxEditorViewIOSEditorStateObservation() async {
-        let model = SyntaxEditorModel(text: longIOSSyntaxEditorLine, language: BuiltinSyntaxLanguages.swift)
+        let model = SyntaxEditorModel(text: longIOSSyntaxEditorLine, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(model: model)
         layoutIOSEditorView(editorView)
 
@@ -510,7 +510,7 @@ struct SyntaxEditorUITests {
         )
         let model = SyntaxEditorModel(
             text: source,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             colorTheme: theme
         )
         let editorView = SyntaxEditorView(model: model)
@@ -544,7 +544,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSInitialLongLineScrollsHorizontally() async {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorLine,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -565,7 +565,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSInitialOffscreenLongLineSetsHorizontalScrollRange() async {
         let model = SyntaxEditorModel(
             text: offscreenWideIOSSyntaxEditorText,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -588,7 +588,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSInitialOffscreenWideUnicodeLineSetsHorizontalScrollRange() async {
         let model = SyntaxEditorModel(
             text: offscreenWideUnicodeIOSSyntaxEditorText,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -616,7 +616,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSTextKit2LayoutCoversHorizontalScrollViewport() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorMultilineText,
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -647,7 +647,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSTextKit2LayoutCoversHorizontalScrollAfterWrappingToggle() async {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorMultilineText,
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             lineWrappingEnabled: true
         )
         let editorView = SyntaxEditorView(model: model)
@@ -696,7 +696,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSNoWrapKeepsLongLinesUnwrapped() async {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorMultilineText,
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -724,7 +724,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSVisibleLongRangeSelectionDoesNotJumpToLineEnd() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorMultilineText,
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -750,7 +750,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSVisibleContentRectTracksHorizontalScroll() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorMultilineText,
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -781,7 +781,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSObservedLongTextUpdateGrowsHorizontalContentSize() async {
         let model = SyntaxEditorModel(
             text: "let short = true",
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -801,7 +801,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSDirectTextAssignmentGrowsHorizontalContentSize() async {
         let model = SyntaxEditorModel(
             text: "let short = true",
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -822,7 +822,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSKeepsScrollPositionWhileEditing() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorLine,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -853,7 +853,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSKeepsScrollPositionWhileMovingCursor() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorLine,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -880,7 +880,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSKeepsNativeBounceEnabled() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorLine,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -895,7 +895,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSScrollsRangesThroughSingleTextView() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorLine,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -923,7 +923,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSScrollsRangesOutsideAdjustedRightInset() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorLine,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -956,7 +956,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSKeepsHorizontalOffsetAfterVisibleCursorClick() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorLine,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -983,7 +983,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSKeepsHorizontalOffsetAfterNativeContentSpaceTapSelection() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorMultilineText,
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1024,7 +1024,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSSupportsRangedSelectionAfterHorizontalScroll() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorMultilineText,
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1064,7 +1064,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSUpdatesRangedSelectionAfterHorizontalScroll() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorMultilineText,
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1129,7 +1129,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSWrappingToggleClearsStaleHorizontalContentSize() async {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorLine,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: true
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1165,7 +1165,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSReadOnlyOmitsEditingKeyCommands() {
         let model = SyntaxEditorModel(
             text: "let answer = 42",
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             isEditable: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1199,7 +1199,7 @@ struct SyntaxEditorUITests {
         let source = "let answer = 42"
         let model = SyntaxEditorModel(
             text: source,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             isEditable: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1218,7 +1218,7 @@ struct SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewIOSReadOnlyUndoRedoDoNotMutateText() {
         let source = "let answer = 42"
-        let model = SyntaxEditorModel(text: source, language: BuiltinSyntaxLanguages.swift)
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(model: model)
         editorView.selectedRange = NSRange(location: 0, length: 0)
 
@@ -1263,7 +1263,7 @@ struct SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewIOSCommandUndoRedoRestoresSelection() {
         let source = "let answer = 42"
-        let model = SyntaxEditorModel(text: source, language: BuiltinSyntaxLanguages.swift)
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(model: model)
         editorView.selectedRange = NSRange(location: 4, length: 0)
 
@@ -1296,7 +1296,7 @@ struct SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewIOSReappliesBracketHighlightAfterSyntaxRefresh() async {
         let source = "let pair = ()"
-        let model = SyntaxEditorModel(text: source, language: BuiltinSyntaxLanguages.swift)
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(model: model)
         layoutIOSEditorView(editorView)
 
@@ -1321,7 +1321,7 @@ struct SyntaxEditorUITests {
         let source = "copy me"
         let model = SyntaxEditorModel(
             text: source,
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             isEditable: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1391,7 +1391,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorView reflects model text mutations on macOS")
     @MainActor
     func syntaxEditorViewMacTextObservation() async {
-        let model = SyntaxEditorModel(text: "const answer = 42;", language: BuiltinSyntaxLanguages.javascript)
+        let model = SyntaxEditorModel(text: "const answer = 42;", language: SyntaxLanguage.javascript)
         let editorView = SyntaxEditorView(model: model)
 
         model.text = "{\"enabled\":true}"
@@ -1413,7 +1413,7 @@ struct SyntaxEditorUITests {
         )
         let model = SyntaxEditorModel(
             text: source,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             colorTheme: initialTheme
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1439,7 +1439,7 @@ struct SyntaxEditorUITests {
         )
         let model = SyntaxEditorModel(
             text: source,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             colorTheme: theme
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1469,7 +1469,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorView reflects editable and wrapping changes on macOS")
     @MainActor
     func syntaxEditorViewMacEditorStateObservation() async {
-        let model = SyntaxEditorModel(text: "body {}", language: BuiltinSyntaxLanguages.css)
+        let model = SyntaxEditorModel(text: "body {}", language: SyntaxLanguage.css)
         let editorView = SyntaxEditorView(model: model)
 
         model.isEditable = false
@@ -1494,7 +1494,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewMacWrappingResetsHorizontalClipOrigin() async {
         let model = SyntaxEditorModel(
             text: String(repeating: "let horizontalScrollNeedsWrapping = true; ", count: 32),
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1528,7 +1528,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewMacWrappingAccountsForContentInsets() async {
         let model = SyntaxEditorModel(
             text: String(repeating: "let insetAwareWrappingWidth = true; ", count: 16),
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: true
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1558,7 +1558,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewMacWrappingTracksResizedContentWidth() async {
         let model = SyntaxEditorModel(
             text: String(repeating: "let resizedWrappingWidth = true; ", count: 16),
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: true
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1591,7 +1591,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewMacWrappingTracksInsetContentWidthAfterResize() async {
         let model = SyntaxEditorModel(
             text: String(repeating: "let insetResizeWrappingWidth = true; ", count: 16),
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             lineWrappingEnabled: true
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1630,10 +1630,10 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorView keeps synchronizing after language changes on macOS")
     @MainActor
     func syntaxEditorViewMacLanguageChangeKeepsObservationAlive() async {
-        let model = SyntaxEditorModel(text: "let answer = 42", language: BuiltinSyntaxLanguages.swift)
+        let model = SyntaxEditorModel(text: "let answer = 42", language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(model: model)
 
-        model.language = BuiltinSyntaxLanguages.json
+        model.language = SyntaxLanguage.json
         model.isEditable = false
 
         #expect(await waitUntilEditorCondition {
@@ -1653,7 +1653,7 @@ struct SyntaxEditorUITests {
         let source = "let answer = 42"
         let model = SyntaxEditorModel(
             text: source,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             isEditable: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1685,7 +1685,7 @@ struct SyntaxEditorUITests {
         let source = "let answer = 42"
         let model = SyntaxEditorModel(
             text: source,
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             isEditable: false
         )
         let editorView = SyntaxEditorView(model: model)
@@ -1709,7 +1709,7 @@ struct SyntaxEditorUITests {
         let source = "let answer = 42"
         let onceIndentedSource = "    \(source)"
         let twiceIndentedSource = "        \(source)"
-        let model = SyntaxEditorModel(text: source, language: BuiltinSyntaxLanguages.swift)
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(model: model)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
@@ -1795,7 +1795,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorViewController enables undo support on macOS")
     @MainActor
     func syntaxEditorViewControllerMacUndo() {
-        let model = SyntaxEditorModel(text: "{}", language: BuiltinSyntaxLanguages.javascript)
+        let model = SyntaxEditorModel(text: "{}", language: SyntaxLanguage.javascript)
         let controller = SyntaxEditorViewController(model: model)
         controller.loadViewIfNeeded()
 
@@ -1806,7 +1806,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorViewController preserves Observable conformance on macOS")
     @MainActor
     func syntaxEditorViewControllerMacObservableCompatibility() {
-        let model = SyntaxEditorModel(text: "{}", language: BuiltinSyntaxLanguages.javascript)
+        let model = SyntaxEditorModel(text: "{}", language: SyntaxLanguage.javascript)
         let controller = SyntaxEditorViewController(model: model)
 
         requireObservable(controller)
@@ -1824,7 +1824,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorViewController reflects model text mutations on macOS")
     @MainActor
     func syntaxEditorViewControllerMacTextObservation() async {
-        let model = SyntaxEditorModel(text: "const answer = 42;", language: BuiltinSyntaxLanguages.javascript)
+        let model = SyntaxEditorModel(text: "const answer = 42;", language: SyntaxLanguage.javascript)
         let controller = SyntaxEditorViewController(model: model)
         controller.loadViewIfNeeded()
 
@@ -1838,7 +1838,7 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorViewController reflects editable and wrapping changes on macOS")
     @MainActor
     func syntaxEditorViewControllerMacEditorStateObservation() async {
-        let model = SyntaxEditorModel(text: "body {}", language: BuiltinSyntaxLanguages.css)
+        let model = SyntaxEditorModel(text: "body {}", language: SyntaxLanguage.css)
         let controller = SyntaxEditorViewController(model: model)
         controller.loadViewIfNeeded()
 
@@ -1862,11 +1862,11 @@ struct SyntaxEditorUITests {
     @Test("SyntaxEditorViewController keeps synchronizing after language changes on macOS")
     @MainActor
     func syntaxEditorViewControllerMacLanguageChangeKeepsObservationAlive() async {
-        let model = SyntaxEditorModel(text: "let answer = 42", language: BuiltinSyntaxLanguages.swift)
+        let model = SyntaxEditorModel(text: "let answer = 42", language: SyntaxLanguage.swift)
         let controller = SyntaxEditorViewController(model: model)
         controller.loadViewIfNeeded()
 
-        model.language = BuiltinSyntaxLanguages.json
+        model.language = SyntaxLanguage.json
         model.isEditable = false
 
         #expect(await waitUntilEditorCondition {
