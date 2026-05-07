@@ -151,15 +151,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     private var lastAppliedColorTheme: SyntaxEditorColorTheme?
     @ObservationIgnored
     private let modelObservations = ObservationScope()
-    @ObservationIgnored
-    private var modelRenderingWaiters: [ModelRenderingWaiter] = []
 
     private var scrollView: NSScrollView { self }
-
-    private struct ModelRenderingWaiter {
-        let condition: @MainActor () -> Bool
-        let continuation: CheckedContinuation<Bool, Never>
-    }
 
     public convenience init(model: SyntaxEditorModel) {
         self.init(model: model, highlighter: SyntaxHighlighterEngine())
@@ -215,19 +208,14 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         startModelObservation()
     }
 
-    internal func waitForModelRenderingForTesting(
-        until condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        guard !condition() else { return true }
-
-        return await withCheckedContinuation { continuation in
-            modelRenderingWaiters.append(
-                ModelRenderingWaiter(
-                    condition: condition,
-                    continuation: continuation
-                )
-            )
-        }
+    internal func synchronizeModelForTesting() {
+        applyObservedEditorState(
+            language: model.language,
+            isEditable: model.isEditable,
+            lineWrappingEnabled: model.lineWrappingEnabled,
+            colorTheme: model.colorTheme
+        )
+        applyObservedText(model.text)
     }
 
     internal func waitForPendingHighlightForTesting() async {
@@ -452,29 +440,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         }
     }
 
-    private func recordModelRenderingForTesting() {
-        guard !modelRenderingWaiters.isEmpty else { return }
-
-        var pendingWaiters: [ModelRenderingWaiter] = []
-        pendingWaiters.reserveCapacity(modelRenderingWaiters.count)
-
-        for waiter in modelRenderingWaiters {
-            if waiter.condition() {
-                waiter.continuation.resume(returning: true)
-                continue
-            }
-
-            pendingWaiters.append(waiter)
-        }
-
-        modelRenderingWaiters = pendingWaiters
-    }
-
     private func applyObservedText(_ text: String, forceTextUpdate: Bool = false) {
         isApplyingModel = true
         defer {
             isApplyingModel = false
-            recordModelRenderingForTesting()
         }
 
         let previousText = textView.string
@@ -504,8 +473,6 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
-        defer { recordModelRenderingForTesting() }
-
         let previousColorTheme = lastAppliedColorTheme
         let colorThemeChanged = previousColorTheme.map { $0 != colorTheme } ?? true
         if colorThemeChanged {
@@ -1085,10 +1052,8 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
         view = editorView
     }
 
-    internal func waitForModelRenderingForTesting(
-        until condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        await editorView.waitForModelRenderingForTesting(until: condition)
+    internal func synchronizeModelForTesting() {
+        editorView.synchronizeModelForTesting()
     }
 
     public func textDidChange(_ notification: Notification) {

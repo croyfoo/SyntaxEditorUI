@@ -87,12 +87,6 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     private var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     private var keyboardAccessoryView: UIView?
     private let modelObservations = ObservationScope()
-    private var modelRenderingWaiters: [ModelRenderingWaiter] = []
-
-    private struct ModelRenderingWaiter {
-        let condition: @MainActor () -> Bool
-        let continuation: CheckedContinuation<Bool, Never>
-    }
 
     public convenience init(model: SyntaxEditorModel) {
         self.init(model: model, highlighter: SyntaxHighlighterEngine())
@@ -147,19 +141,14 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         super.undoManager
     }
 
-    internal func waitForModelRenderingForTesting(
-        until condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        guard !condition() else { return true }
-
-        return await withCheckedContinuation { continuation in
-            modelRenderingWaiters.append(
-                ModelRenderingWaiter(
-                    condition: condition,
-                    continuation: continuation
-                )
-            )
-        }
+    internal func synchronizeModelForTesting() {
+        applyObservedEditorState(
+            language: model.language,
+            isEditable: model.isEditable,
+            lineWrappingEnabled: model.lineWrappingEnabled,
+            colorTheme: model.colorTheme
+        )
+        applyObservedText(model.text)
     }
 
     internal func waitForPendingHighlightForTesting() async {
@@ -699,29 +688,10 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         }
     }
 
-    private func recordModelRenderingForTesting() {
-        guard !modelRenderingWaiters.isEmpty else { return }
-
-        var pendingWaiters: [ModelRenderingWaiter] = []
-        pendingWaiters.reserveCapacity(modelRenderingWaiters.count)
-
-        for waiter in modelRenderingWaiters {
-            if waiter.condition() {
-                waiter.continuation.resume(returning: true)
-                continue
-            }
-
-            pendingWaiters.append(waiter)
-        }
-
-        modelRenderingWaiters = pendingWaiters
-    }
-
     private func applyObservedText(_ text: String, forceTextUpdate: Bool = false) {
         isApplyingModel = true
         defer {
             isApplyingModel = false
-            recordModelRenderingForTesting()
         }
 
         let previousText = super.text ?? ""
@@ -760,8 +730,6 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
-        defer { recordModelRenderingForTesting() }
-
         let lineWrappingChanged = lastAppliedLineWrappingEnabled.map { $0 != lineWrappingEnabled } ?? false
         lastAppliedLineWrappingEnabled = lineWrappingEnabled
         let previousColorTheme = lastAppliedColorTheme

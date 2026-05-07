@@ -425,9 +425,8 @@ struct SyntaxEditorUITests {
 
         model.text = "{\"enabled\":true}"
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.text == "{\"enabled\":true}"
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.text == "{\"enabled\":true}")
     }
 
     @Test("SyntaxEditorView reflects custom iOS color theme")
@@ -453,9 +452,8 @@ struct SyntaxEditorUITests {
 
         model.colorTheme = updatedTheme
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
@@ -494,10 +492,11 @@ struct SyntaxEditorUITests {
 
         model.colorTheme = updatedTheme
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword) &&
-                syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(
+            syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword)
+                && syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
+        )
         await editorView.waitForPendingHighlightForTesting()
         #expect(await highlighter.callCount() == initialCallCount)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
@@ -514,10 +513,11 @@ struct SyntaxEditorUITests {
         model.isEditable = false
         model.lineWrappingEnabled = true
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
+        editorView.synchronizeModelForTesting()
+        #expect(
             editorView.isEditable == false
                 && editorView.textContainer.widthTracksTextView
-        }))
+        )
         layoutIOSEditorView(editorView)
         #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
         #expect(editorView.contentSize.height > editorView.bounds.height + 1)
@@ -525,9 +525,8 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = false
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            !editorView.textContainer.widthTracksTextView
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(!editorView.textContainer.widthTracksTextView)
         layoutIOSEditorView(editorView)
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
         #expect(editorView.textContainer.size.width > editorView.bounds.width)
@@ -538,9 +537,8 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = true
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textContainer.widthTracksTextView
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textContainer.widthTracksTextView)
         layoutIOSEditorView(editorView)
         #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
     }
@@ -571,17 +569,15 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = true
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textContainer.widthTracksTextView
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textContainer.widthTracksTextView)
         layoutIOSEditorView(editorView)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         model.isEditable = false
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.isEditable == false
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.isEditable == false)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
@@ -698,9 +694,8 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = false
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            !editorView.textContainer.widthTracksTextView
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(!editorView.textContainer.widthTracksTextView)
         layoutIOSEditorView(editorView, width: 504, height: 1104)
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
         #expect(editorView.textLayoutManager != nil)
@@ -825,9 +820,8 @@ struct SyntaxEditorUITests {
 
         model.text = longIOSSyntaxEditorLine
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.text == longIOSSyntaxEditorLine
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.text == longIOSSyntaxEditorLine)
         layoutIOSEditorView(editorView)
         #expect(iOSEditorHasHorizontalOverflow(editorView))
     }
@@ -1168,9 +1162,8 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = false
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            !editorView.textContainer.widthTracksTextView
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(!editorView.textContainer.widthTracksTextView)
         layoutIOSEditorView(editorView)
         let restoredHorizontalOverflow = iOSEditorHasHorizontalOverflow(editorView)
         if !restoredHorizontalOverflow {
@@ -1183,9 +1176,8 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = true
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textContainer.widthTracksTextView
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textContainer.widthTracksTextView)
         layoutIOSEditorView(editorView)
         #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
     }
@@ -1255,7 +1247,7 @@ struct SyntaxEditorUITests {
         editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
 
         editorView.insertText("!")
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        editorView.textViewDidChange(editorView)
 
         #expect(model.text == editedSource)
         #expect(editorView.text == editedSource)
@@ -1373,9 +1365,8 @@ struct SyntaxEditorUITests {
 
         model.text = "\(source) "
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.text == model.text
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.text == model.text)
         await editorView.waitForPendingHighlightForTesting()
         #expect(iOSEditorHasBackgroundAttribute(editorView, at: bracketLocation))
     }
@@ -1443,9 +1434,8 @@ struct SyntaxEditorUITests {
 
         model.text = "{\"enabled\":true}"
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textView.string == "{\"enabled\":true}"
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textView.string == "{\"enabled\":true}")
     }
 
     @Test("SyntaxEditorView reflects custom macOS color theme")
@@ -1471,9 +1461,8 @@ struct SyntaxEditorUITests {
 
         model.colorTheme = updatedTheme
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
@@ -1512,10 +1501,11 @@ struct SyntaxEditorUITests {
 
         model.colorTheme = updatedTheme
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword) &&
-                syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(
+            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword)
+                && syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
+        )
         await editorView.waitForPendingHighlightForTesting()
         #expect(await highlighter.callCount() == initialCallCount)
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
@@ -1546,16 +1536,14 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = true
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.hasHorizontalScroller == false
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.hasHorizontalScroller == false)
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         model.isEditable = false
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textView.isEditable == false
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textView.isEditable == false)
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
@@ -1568,16 +1556,16 @@ struct SyntaxEditorUITests {
         model.isEditable = false
         model.lineWrappingEnabled = true
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textView.isEditable == false &&
-                editorView.hasHorizontalScroller == false
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(
+            editorView.textView.isEditable == false
+                && editorView.hasHorizontalScroller == false
+        )
 
         model.lineWrappingEnabled = false
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.hasHorizontalScroller == true
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.hasHorizontalScroller == true)
     }
 
     @Test("SyntaxEditorView redraws macOS text after enabling wrapping from a horizontal scroll")
@@ -1598,7 +1586,8 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = true
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
+        editorView.synchronizeModelForTesting()
+        #expect({
             guard let textContainer = editorView.textView.textContainer else {
                 return false
             }
@@ -1611,7 +1600,7 @@ struct SyntaxEditorUITests {
                 && textContainer.lineBreakMode == .byWordWrapping
                 && approximatelyEqual(textContainer.containerSize.width, editorView.contentSize.width)
                 && approximatelyEqual(editorView.textView.frame.width, editorView.contentSize.width)
-        }))
+        }())
     }
 
     @Test("SyntaxEditorView wraps to unobscured macOS content width")
@@ -1727,15 +1716,13 @@ struct SyntaxEditorUITests {
         model.language = SyntaxLanguage.json
         model.isEditable = false
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textView.isEditable == false
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textView.isEditable == false)
 
         model.text = "{\"answer\":42}"
 
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textView.string == "{\"answer\":42}"
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textView.string == "{\"answer\":42}")
     }
 
     @Test("SyntaxEditorView read-only delegate commands do not mutate text on macOS")
@@ -1834,9 +1821,8 @@ struct SyntaxEditorUITests {
         #expect(editorView.textView.validateUserInterfaceItem(undoItem))
 
         model.isEditable = false
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textView.isEditable == false
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textView.isEditable == false)
         #expect(!undoManager.canUndo)
         #expect(!editorView.textView.validateUserInterfaceItem(undoItem))
 
@@ -1845,9 +1831,8 @@ struct SyntaxEditorUITests {
         #expect(editorView.textView.string == editedSource)
 
         model.isEditable = true
-        #expect(await editorView.waitForModelRenderingForTesting(until: {
-            editorView.textView.isEditable == true
-        }))
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textView.isEditable == true)
 
         #expect(undoManager.canUndo)
         #expect(NSApplication.shared.sendAction(undoSelector, to: editorView.textView, from: undoItem))
@@ -1989,9 +1974,8 @@ struct SyntaxEditorUITests {
 
         model.text = "{\"enabled\":true}"
 
-        #expect(await controller.waitForModelRenderingForTesting(until: {
-            controller.textView.string == "{\"enabled\":true}"
-        }))
+        controller.synchronizeModelForTesting()
+        #expect(controller.textView.string == "{\"enabled\":true}")
     }
 
     @Test("SyntaxEditorViewController reflects editable and wrapping changes on macOS")
@@ -2004,16 +1988,16 @@ struct SyntaxEditorUITests {
         model.isEditable = false
         model.lineWrappingEnabled = true
 
-        #expect(await controller.waitForModelRenderingForTesting(until: {
-            controller.textView.isEditable == false &&
-                controller.scrollView.hasHorizontalScroller == false
-        }))
+        controller.synchronizeModelForTesting()
+        #expect(
+            controller.textView.isEditable == false
+                && controller.scrollView.hasHorizontalScroller == false
+        )
 
         model.lineWrappingEnabled = false
 
-        #expect(await controller.waitForModelRenderingForTesting(until: {
-            controller.scrollView.hasHorizontalScroller == true
-        }))
+        controller.synchronizeModelForTesting()
+        #expect(controller.scrollView.hasHorizontalScroller == true)
     }
 
     @Test("SyntaxEditorViewController keeps synchronizing after language changes on macOS")
@@ -2026,15 +2010,13 @@ struct SyntaxEditorUITests {
         model.language = SyntaxLanguage.json
         model.isEditable = false
 
-        #expect(await controller.waitForModelRenderingForTesting(until: {
-            controller.textView.isEditable == false
-        }))
+        controller.synchronizeModelForTesting()
+        #expect(controller.textView.isEditable == false)
 
         model.text = "{\"answer\":42}"
 
-        #expect(await controller.waitForModelRenderingForTesting(until: {
-            controller.textView.string == "{\"answer\":42}"
-        }))
+        controller.synchronizeModelForTesting()
+        #expect(controller.textView.string == "{\"answer\":42}")
     }
 #endif
 }
