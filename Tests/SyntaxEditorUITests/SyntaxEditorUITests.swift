@@ -1013,6 +1013,23 @@ struct SyntaxEditorUITests {
         #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
     }
 
+    @Test("SyntaxEditorView keeps empty no-wrap iOS content width tied to bounds")
+    @MainActor
+    func syntaxEditorViewIOSEmptyNoWrapContentWidthTracksBounds() {
+        let model = SyntaxEditorModel(
+            text: "",
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+
+        layoutIOSEditorView(editorView, width: 600, height: 240)
+        #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
+
+        layoutIOSEditorView(editorView, width: 240, height: 240)
+        #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
+    }
+
     @Test("SyntaxEditorView preserves iOS syntax colors after editor state changes")
     @MainActor
     func syntaxEditorViewIOSEditorStateDoesNotResetSyntaxColors() async {

@@ -1524,7 +1524,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         guard !text.isEmpty else {
-            cachedHorizontalDocumentLayoutWidth = bounds.width
             return bounds.width
         }
 
