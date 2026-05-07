@@ -2439,6 +2439,46 @@ struct SyntaxEditorUITests {
         #expect(targetRect.maxX <= visibleMaxX + 1)
     }
 
+    @Test("SyntaxEditorView includes iOS horizontal insets in TextKit viewport bounds")
+    @MainActor
+    func syntaxEditorViewIOSIncludesHorizontalInsetsInViewportBounds() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        editorView.contentInset = UIEdgeInsets(top: 3, left: 5, bottom: 7, right: 11)
+        editorView.textContainerInset = UIEdgeInsets(top: 13, left: 17, bottom: 19, right: 23)
+        layoutIOSEditorView(editorView)
+
+        guard let textLayoutManager = editorView.textLayoutManager else {
+            Issue.record("SyntaxEditorView has no TextKit layout manager")
+            return
+        }
+
+        let viewportBounds = editorView.viewportBounds(
+            for: textLayoutManager.textViewportLayoutController
+        )
+        let insets = editorView.adjustedContentInset
+        let expectedBounds = CGRect(
+            x: editorView.bounds.origin.x - insets.left - editorView.textContainerInset.left,
+            y: editorView.bounds.origin.y - insets.top - editorView.textContainerInset.top,
+            width: editorView.bounds.width
+                + insets.left
+                + insets.right
+                + editorView.textContainerInset.left
+                + editorView.textContainerInset.right,
+            height: editorView.bounds.height
+                + insets.top
+                + insets.bottom
+                + editorView.textContainerInset.top
+                + editorView.textContainerInset.bottom
+        )
+
+        #expect(viewportBounds == expectedBounds)
+    }
+
     @Test("SyntaxEditorView keeps iOS horizontal offset after visible cursor click")
     @MainActor
     func syntaxEditorViewIOSKeepsHorizontalOffsetAfterVisibleCursorClick() {

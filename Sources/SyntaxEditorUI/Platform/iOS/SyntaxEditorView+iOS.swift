@@ -1876,9 +1876,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     public func viewportBounds(for textViewportLayoutController: NSTextViewportLayoutController) -> CGRect {
         let scrollInsets = adjustedContentInset
         return CGRect(
-            x: bounds.origin.x,
+            x: bounds.origin.x - scrollInsets.left - textContainerInset.left,
             y: bounds.origin.y - scrollInsets.top - textContainerInset.top,
-            width: bounds.width,
+            width: bounds.width
+                + scrollInsets.left
+                + scrollInsets.right
+                + textContainerInset.left
+                + textContainerInset.right,
             height: bounds.height
                 + scrollInsets.top
                 + scrollInsets.bottom
