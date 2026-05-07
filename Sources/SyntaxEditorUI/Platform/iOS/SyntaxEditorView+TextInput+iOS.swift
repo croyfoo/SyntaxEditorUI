@@ -251,33 +251,40 @@ extension SyntaxEditorView {
         return SyntaxEditorTextRange(nsRange: NSRange(location: lower, length: upper - lower))
     }
 
-    func composedCharacterOffset(from offset: Int, offset distance: Int) -> Int? {
+    func isValidTextPositionOffset(_ offset: Int, in source: NSString) -> Bool {
+        let textLength = source.length
+        guard offset >= 0, offset <= textLength else { return false }
+        guard offset > 0, offset < textLength else { return true }
+        return source.rangeOfComposedCharacterSequence(at: offset).location == offset
+    }
+
+    func composedCharacterRange(extendingFrom offset: Int, in direction: UITextLayoutDirection) -> NSRange? {
         let source = text as NSString
         let textLength = source.length
-        guard offset >= 0, offset <= textLength else { return nil }
-        guard distance != 0 else { return offset }
 
-        var currentOffset = offset
-        if distance > 0 {
-            for _ in 0..<distance {
-                guard currentOffset < textLength else { return nil }
-                let characterRange = source.rangeOfComposedCharacterSequence(at: currentOffset)
-                currentOffset = characterRange.location + characterRange.length
-            }
-        } else {
-            for _ in 0..<abs(distance) {
-                guard currentOffset > 0 else { return nil }
-                let characterRange = source.rangeOfComposedCharacterSequence(at: currentOffset - 1)
-                currentOffset = characterRange.location
-            }
+        switch direction {
+        case .left, .up:
+            guard offset > 0, offset <= textLength else { return nil }
+            return source.rangeOfComposedCharacterSequence(at: offset - 1)
+        case .right, .down:
+            guard offset >= 0, offset < textLength else { return nil }
+            return source.rangeOfComposedCharacterSequence(at: offset)
+        @unknown default:
+            return nil
         }
-
-        return currentOffset
     }
 
     public func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
         guard let currentOffset = self.offset(for: position) else { return nil }
-        guard let nextOffset = composedCharacterOffset(from: currentOffset, offset: offset) else { return nil }
+        let source = text as NSString
+        let nextOffsetResult = currentOffset.addingReportingOverflow(offset)
+        guard !nextOffsetResult.overflow else { return nil }
+        let nextOffset = nextOffsetResult.partialValue
+        guard isValidTextPositionOffset(currentOffset, in: source),
+              isValidTextPositionOffset(nextOffset, in: source)
+        else {
+            return nil
+        }
         return SyntaxEditorTextPosition(offset: nextOffset)
     }
 
@@ -352,16 +359,8 @@ extension SyntaxEditorView {
     public func characterRange(byExtending position: UITextPosition, in direction: UITextLayoutDirection) -> UITextRange? {
         guard let currentOffset = offset(for: position) else { return nil }
 
-        switch direction {
-        case .left, .up:
-            guard currentOffset > 0 else { return nil }
-            return SyntaxEditorTextRange(nsRange: NSRange(location: currentOffset - 1, length: 1))
-        case .right, .down:
-            guard currentOffset < text.utf16.count else { return nil }
-            return SyntaxEditorTextRange(nsRange: NSRange(location: currentOffset, length: 1))
-        @unknown default:
-            return nil
-        }
+        guard let characterRange = composedCharacterRange(extendingFrom: currentOffset, in: direction) else { return nil }
+        return SyntaxEditorTextRange(nsRange: characterRange)
     }
 
     public func baseWritingDirection(for position: UITextPosition, in direction: UITextStorageDirection) -> NSWritingDirection {
@@ -726,8 +725,10 @@ extension SyntaxEditorView {
             return nil
         }
 
-        let length = start < text.utf16.count ? 1 : 0
-        return SyntaxEditorTextRange(nsRange: NSRange(location: start, length: length))
+        guard let characterRange = composedCharacterRange(extendingFrom: start, in: .right) else {
+            return SyntaxEditorTextRange(nsRange: NSRange(location: start, length: 0))
+        }
+        return SyntaxEditorTextRange(nsRange: characterRange)
     }
 
     public func position(within range: UITextRange, atCharacterOffset offset: Int) -> UITextPosition? {

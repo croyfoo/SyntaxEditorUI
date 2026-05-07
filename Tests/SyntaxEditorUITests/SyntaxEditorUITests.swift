@@ -735,25 +735,54 @@ struct SyntaxEditorUITests {
         #expect(editorView.selectedRange == NSRange(location: 1, length: 0))
     }
 
-    @Test("SyntaxEditorView moves iOS storage positions by composed characters")
+    @Test("SyntaxEditorView preserves iOS UTF-16 position round trips")
     @MainActor
-    func syntaxEditorViewIOSMovesStoragePositionsByComposedCharacters() {
-        let source = "a🙂b"
+    func syntaxEditorViewIOSPreservesUTF16PositionRoundTrips() {
+        let source = "🙂"
         let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(model: model)
         layoutIOSEditorView(editorView)
 
-        guard let afterA = editorView.position(from: editorView.beginningOfDocument, offset: 1),
-              let afterEmoji = editorView.position(from: afterA, offset: 1),
-              let backToAfterA = editorView.position(from: afterEmoji, offset: -1)
+        guard let endPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: source.utf16.count
+        )
         else {
-            Issue.record("SyntaxEditorView could not move positions by composed characters")
+            Issue.record("SyntaxEditorView could not move to the UTF-16 end offset")
             return
         }
 
-        #expect(editorView.offset(from: editorView.beginningOfDocument, to: afterA) == 1)
-        #expect(editorView.offset(from: editorView.beginningOfDocument, to: afterEmoji) == ("a🙂" as NSString).length)
-        #expect(editorView.offset(from: editorView.beginningOfDocument, to: backToAfterA) == 1)
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: endPosition) == source.utf16.count)
+        #expect(editorView.position(from: editorView.beginningOfDocument, offset: 1) == nil)
+    }
+
+    @Test("SyntaxEditorView returns iOS composed character ranges")
+    @MainActor
+    func syntaxEditorViewIOSReturnsComposedCharacterRanges() {
+        let source = "a🙂e\u{301}b"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        let afterAOffset = ("a" as NSString).length
+        let afterEmojiOffset = ("a🙂" as NSString).length
+        let beforeCombiningCharacterOffset = afterEmojiOffset
+        guard let afterA = editorView.position(from: editorView.beginningOfDocument, offset: afterAOffset),
+              let afterEmoji = editorView.position(from: editorView.beginningOfDocument, offset: afterEmojiOffset),
+              let emojiRange = editorView.characterRange(byExtending: afterA, in: .right),
+              let previousEmojiRange = editorView.characterRange(byExtending: afterEmoji, in: .left),
+              let combiningRange = editorView.characterRange(
+                  byExtending: SyntaxEditorTextPosition(offset: beforeCombiningCharacterOffset),
+                  in: .right
+              )
+        else {
+            Issue.record("SyntaxEditorView could not build composed character ranges")
+            return
+        }
+
+        #expect(editorView.text(in: emojiRange) == "🙂")
+        #expect(editorView.text(in: previousEmojiRange) == "🙂")
+        #expect(editorView.text(in: combiningRange) == "e\u{301}")
     }
 
     @Test("SyntaxEditorView preserves iOS command state through delayed selection callbacks")
