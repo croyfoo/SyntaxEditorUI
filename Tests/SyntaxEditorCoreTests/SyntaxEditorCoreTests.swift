@@ -3148,6 +3148,38 @@ struct SyntaxHighlighterEngineTests {
         })
     }
 
+    @Test("SyntaxHighlighterEngine converts invalidated byte offsets before refreshing")
+    func highlighterConvertsInvalidatedByteOffsetsForRefreshRange() {
+        #expect(
+            SyntaxHighlightInvalidation.refreshStartUTF16(
+                mutationLocation: 180,
+                invalidatedStartByteOffset: 120 * 2,
+                sourceUTF16Length: 240
+            ) == 120
+        )
+        #expect(
+            SyntaxHighlightInvalidation.refreshStartUTF16(
+                mutationLocation: 80,
+                invalidatedStartByteOffset: 120 * 2,
+                sourceUTF16Length: 240
+            ) == 80
+        )
+        #expect(
+            SyntaxHighlightInvalidation.refreshStartUTF16(
+                mutationLocation: 180,
+                invalidatedStartByteOffset: nil,
+                sourceUTF16Length: 240
+            ) == 180
+        )
+        #expect(
+            SyntaxHighlightInvalidation.refreshStartUTF16(
+                mutationLocation: 180,
+                invalidatedStartByteOffset: 241,
+                sourceUTF16Length: 240
+            ) == 0
+        )
+    }
+
     @Test("SyntaxHighlighterEngine falls back to full reset on stale updates and language changes")
     func highlighterFallsBackToFullResetWhenIncrementalStateDoesNotMatch() async throws {
         let source = "const value = 42;"

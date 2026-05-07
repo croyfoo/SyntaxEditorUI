@@ -51,6 +51,40 @@ package struct SyntaxHighlightResult: Sendable {
     }
 }
 
+package enum SyntaxHighlightInvalidation {
+    package static func refreshStartUTF16(
+        mutationLocation: Int,
+        invalidatedStartByteOffset: Int?,
+        sourceUTF16Length: Int
+    ) -> Int {
+        guard let invalidatedStartByteOffset else {
+            return mutationLocation
+        }
+
+        return min(
+            mutationLocation,
+            utf16Offset(
+                fromByteOffset: invalidatedStartByteOffset,
+                sourceUTF16Length: sourceUTF16Length
+            ) ?? 0
+        )
+    }
+
+    // SwiftTreeSitter parses String input as UTF-16 by default, so byte offsets map
+    // to UTF-16 offsets by dividing by 2.
+    package static func utf16Offset(fromByteOffset byteOffset: Int, sourceUTF16Length: Int) -> Int? {
+        guard byteOffset >= 0, byteOffset % 2 == 0 else {
+            return nil
+        }
+
+        let offset = byteOffset / 2
+        guard offset <= sourceUTF16Length else {
+            return nil
+        }
+        return offset
+    }
+}
+
 package protocol SyntaxHighlighting: Sendable {
     func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult
     func update(
@@ -226,9 +260,10 @@ private final class SyntaxHighlightSession {
             language: language,
             refreshRange: refreshRange(
                 in: nextSource,
-                from: min(
-                    originalMutation.location,
-                    invalidatedSet.rangeView.first?.lowerBound ?? originalMutation.location
+                from: SyntaxHighlightInvalidation.refreshStartUTF16(
+                    mutationLocation: originalMutation.location,
+                    invalidatedStartByteOffset: invalidatedSet.rangeView.first?.lowerBound,
+                    sourceUTF16Length: nextLayeredSource.utf16.count
                 )
             )
         )
@@ -399,8 +434,6 @@ private extension SyntaxHighlightSession {
         return Point(row: row, column: (clampedOffset - lineStart) * 2)
     }
 
-    // SwiftTreeSitter parses String input as UTF-16 by default, so byte offsets map
-    // to UTF-16 offsets by dividing by 2.
     static func utf16Range(
         fromByteRange byteRange: Range<UInt32>,
         sourceUTF16Length: Int
