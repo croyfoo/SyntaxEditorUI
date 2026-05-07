@@ -824,7 +824,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func performRawReplacement(
         in range: NSRange,
         replacement: String,
-        preservesMarkedTextSession: Bool = false
+        preservesMarkedTextUndoAnchor: Bool = false
     ) {
         invalidateHorizontalMeasurement()
         textContentStorage.performEditingTransaction {
@@ -837,7 +837,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 )
             }
         }
-        if !preservesMarkedTextSession {
+        if !preservesMarkedTextUndoAnchor {
             markedTextUndoAnchor = nil
         }
         markedRange = nil

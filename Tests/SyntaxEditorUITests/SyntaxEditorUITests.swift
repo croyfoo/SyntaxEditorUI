@@ -626,6 +626,26 @@ struct SyntaxEditorUITests {
         #expect(model.text == source)
     }
 
+    @Test("SyntaxEditorView clears iOS marked text before normal insertion after IME commit")
+    @MainActor
+    func syntaxEditorViewIOSClearsMarkedTextBeforeNormalInsertionAfterIMECommit() {
+        let source = "let value = "
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+
+        editorView.setMarkedText("あいうえお", selectedRange: NSRange(location: 5, length: 0))
+        editorView.insertText("作成")
+        editorView.insertText("!")
+
+        let expectedSource = source + "作成!"
+        #expect(editorView.markedTextRange == nil)
+        #expect(editorView.text == expectedSource)
+        #expect(model.text == expectedSource)
+        #expect(editorView.selectedRange == NSRange(location: expectedSource.utf16.count, length: 0))
+    }
+
     @Test("SyntaxEditorView preserves iOS marked text when nil unmarks composition")
     @MainActor
     func syntaxEditorViewIOSPreservesMarkedTextWhenNilUnmarksComposition() {

@@ -118,7 +118,7 @@ extension SyntaxEditorView {
         inputDelegate?.textWillChange(self)
         inputDelegate?.selectionWillChange(self)
 
-        performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextSession: true)
+        performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextUndoAnchor: true)
         markedRange = nextMarkedRange
         applyMarkedTextAttributes()
         currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
@@ -175,7 +175,7 @@ extension SyntaxEditorView {
         inputDelegate?.textWillChange(self)
         inputDelegate?.selectionWillChange(self)
 
-        performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextSession: true)
+        performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextUndoAnchor: true)
         currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
         syncTextLayoutSelection()
         handleTextDidChange(
