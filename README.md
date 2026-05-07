@@ -1,33 +1,23 @@
 # SyntaxEditorUI
 
-`SyntaxEditorUI` is a lightweight cross-platform code editor package for iOS/macOS.
-Its internal `SyntaxEditorCore` target keeps the non-UI editor model, language definitions, editing logic, and highlighting engine separated from platform UI code.
+`SyntaxEditorUI` is a Swift package for building editable, syntax-highlighted code views on iOS and macOS.
+It provides SwiftUI, UIKit, and AppKit entry points with built-in language support, editor shortcuts, and common code-editing behavior.
 
 ## Features
 
-- `@Observable` state model (`SyntaxEditorModel`)
-- SwiftUI entry point (`SyntaxEditor`)
-- UIKit/AppKit native view API (`SyntaxEditorView`)
-- UIKit/AppKit controller wrapper API (`SyntaxEditorViewController`)
-- concrete language selection (`SyntaxLanguage`)
-- tree-sitter based syntax highlighting for:
-  - CSS
-  - HTML (including embedded JavaScript and CSS highlighting)
-  - JavaScript
-  - JSON
-  - Objective-C
-  - Swift
-  - TOML
-  - XML
-- Core editing capabilities:
-  - Auto-pair insertion: `() [] {} "" '' ```
-  - Smart newline indentation (4 spaces)
-  - Line indent / outdent (`Tab`, `Shift-Tab`, `Cmd+]`, `Cmd+[`)
-  - Comment toggle (`Cmd+/`) for HTML, JavaScript, CSS, Objective-C, Swift, TOML, and XML
-  - JSON comment toggle is intentionally no-op
-  - Pair-aware backspace deletion
-  - Matching bracket highlight
-- iOS input accessory actions: `Undo`, `Redo`, `Dismiss Keyboard`
+- Editable code views for SwiftUI, UIKit, and AppKit apps.
+- Syntax highlighting for CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
+- Embedded JavaScript and CSS highlighting inside HTML.
+- Code-aware editing behavior:
+  - bracket and quote auto-pairing
+  - smart newline indentation
+  - line indent and outdent
+  - comment toggling for supported languages
+  - pair-aware backspace deletion
+  - matching bracket highlight
+- Keyboard shortcuts for common editor actions.
+- iOS accessory controls for undo, redo, and keyboard dismissal.
+- Programmatic control over text, language, editability, line wrapping, and color theme.
 
 ## Shortcuts
 
