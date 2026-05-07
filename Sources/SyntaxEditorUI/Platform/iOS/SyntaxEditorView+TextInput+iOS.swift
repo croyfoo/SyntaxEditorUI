@@ -63,8 +63,10 @@ extension SyntaxEditorView {
             let location = offset(from: beginningOfDocument, to: newValue.start)
             let length = offset(from: newValue.start, to: newValue.end)
             guard location >= 0, length >= 0 else { return }
+            let nextRange = NSRange(location: location, length: length)
+            clearMarkedTextIfSelectionLeavesComposition(nextRange)
             setSelectedRange(
-                NSRange(location: location, length: length),
+                nextRange,
                 preservesCommandState: false,
                 schedulesSelectionScroll: false
             )
@@ -144,6 +146,16 @@ extension SyntaxEditorView {
 
         inputDelegate?.selectionDidChange(self)
         inputDelegate?.textDidChange(self)
+    }
+
+    func clearMarkedTextIfSelectionLeavesComposition(_ selection: NSRange) {
+        guard let markedRange else { return }
+
+        let markedEnd = markedRange.location + markedRange.length
+        let selectionEnd = selection.location + selection.length
+        guard selection.location < markedRange.location || selectionEnd > markedEnd else { return }
+
+        unmarkText()
     }
 
     func replaceCommittedMarkedText(with replacement: String) {
@@ -239,10 +251,33 @@ extension SyntaxEditorView {
         return SyntaxEditorTextRange(nsRange: NSRange(location: lower, length: upper - lower))
     }
 
+    func composedCharacterOffset(from offset: Int, offset distance: Int) -> Int? {
+        let source = text as NSString
+        let textLength = source.length
+        guard offset >= 0, offset <= textLength else { return nil }
+        guard distance != 0 else { return offset }
+
+        var currentOffset = offset
+        if distance > 0 {
+            for _ in 0..<distance {
+                guard currentOffset < textLength else { return nil }
+                let characterRange = source.rangeOfComposedCharacterSequence(at: currentOffset)
+                currentOffset = characterRange.location + characterRange.length
+            }
+        } else {
+            for _ in 0..<abs(distance) {
+                guard currentOffset > 0 else { return nil }
+                let characterRange = source.rangeOfComposedCharacterSequence(at: currentOffset - 1)
+                currentOffset = characterRange.location
+            }
+        }
+
+        return currentOffset
+    }
+
     public func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
         guard let currentOffset = self.offset(for: position) else { return nil }
-        let nextOffset = currentOffset + offset
-        guard nextOffset >= 0, nextOffset <= text.utf16.count else { return nil }
+        guard let nextOffset = composedCharacterOffset(from: currentOffset, offset: offset) else { return nil }
         return SyntaxEditorTextPosition(offset: nextOffset)
     }
 

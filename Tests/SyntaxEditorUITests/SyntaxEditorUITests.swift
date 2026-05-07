@@ -619,6 +619,28 @@ struct SyntaxEditorUITests {
         #expect(editorView.selectedRange == NSRange(location: expectedText.utf16.count, length: 0))
     }
 
+    @Test("SyntaxEditorView clears iOS marked text when selection leaves composition")
+    @MainActor
+    func syntaxEditorViewIOSClearsMarkedTextWhenSelectionLeavesComposition() {
+        let source = "let value = "
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+
+        editorView.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 0))
+        editorView.selectedTextRange = editorView.textRange(
+            from: editorView.beginningOfDocument,
+            to: editorView.beginningOfDocument
+        )
+        editorView.insertText("X")
+
+        #expect(editorView.markedTextRange == nil)
+        #expect(editorView.text == "X" + source + "かな")
+        #expect(model.text == "X" + source + "かな")
+        #expect(editorView.selectedRange == NSRange(location: 1, length: 0))
+    }
+
     @Test("SyntaxEditorView does not commit iOS marked text while read-only")
     @MainActor
     func syntaxEditorViewIOSDoesNotCommitMarkedTextWhileReadOnly() {
@@ -711,6 +733,27 @@ struct SyntaxEditorUITests {
         #expect(editorView.text == "ab")
         #expect(model.text == "ab")
         #expect(editorView.selectedRange == NSRange(location: 1, length: 0))
+    }
+
+    @Test("SyntaxEditorView moves iOS storage positions by composed characters")
+    @MainActor
+    func syntaxEditorViewIOSMovesStoragePositionsByComposedCharacters() {
+        let source = "a🙂b"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        guard let afterA = editorView.position(from: editorView.beginningOfDocument, offset: 1),
+              let afterEmoji = editorView.position(from: afterA, offset: 1),
+              let backToAfterA = editorView.position(from: afterEmoji, offset: -1)
+        else {
+            Issue.record("SyntaxEditorView could not move positions by composed characters")
+            return
+        }
+
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: afterA) == 1)
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: afterEmoji) == ("a🙂" as NSString).length)
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: backToAfterA) == 1)
     }
 
     @Test("SyntaxEditorView preserves iOS command state through delayed selection callbacks")
