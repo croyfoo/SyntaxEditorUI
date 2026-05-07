@@ -397,10 +397,12 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSColorThemeObservation() async {
         let source = "let value = \"text\""
         let initialTheme = syntaxEditorUITestColorTheme(
-            baseForeground: syntaxEditorUITestColor(hex: 0x123456)
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
         let updatedTheme = syntaxEditorUITestColorTheme(
-            baseForeground: syntaxEditorUITestColor(hex: 0x654321)
+            baseForeground: syntaxEditorUITestColor(hex: 0x654321),
+            keyword: syntaxEditorUITestColor(hex: 0x876543)
         )
         let model = SyntaxEditorModel(
             text: source,
@@ -410,14 +412,17 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(model: model)
 
         await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground))
 
         model.colorTheme = updatedTheme
 
         #expect(await editorView.waitForModelRenderingForTesting(until: {
-            syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
+            syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword) &&
+                syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
         }))
         await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
 
@@ -1388,10 +1393,12 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewMacColorThemeObservation() async {
         let source = "let value = \"text\""
         let initialTheme = syntaxEditorUITestColorTheme(
-            baseForeground: syntaxEditorUITestColor(hex: 0x123456)
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
         let updatedTheme = syntaxEditorUITestColorTheme(
-            baseForeground: syntaxEditorUITestColor(hex: 0x654321)
+            baseForeground: syntaxEditorUITestColor(hex: 0x654321),
+            keyword: syntaxEditorUITestColor(hex: 0x876543)
         )
         let model = SyntaxEditorModel(
             text: source,
@@ -1401,13 +1408,15 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(model: model)
 
         #expect(await waitUntilEditorCondition {
-            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground)
+            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), initialTheme.keyword) &&
+                syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground)
         })
 
         model.colorTheme = updatedTheme
 
         #expect(await waitUntilEditorCondition {
-            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
+            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword) &&
+                syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
         })
     }
 

@@ -122,6 +122,12 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     @ObservationIgnored
     private var highlightTask: Task<Void, Never>?
     @ObservationIgnored
+    private var lastHighlightTokens: [SyntaxHighlightToken] = []
+    @ObservationIgnored
+    private var lastHighlightSource: String?
+    @ObservationIgnored
+    private var lastHighlightLanguage: SyntaxLanguage?
+    @ObservationIgnored
     private var isApplyingModel = false
     @ObservationIgnored
     private var isApplyingHighlight = false
@@ -129,6 +135,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     private var lastAppliedLanguageIdentifier: String?
     @ObservationIgnored
     private var pendingEditStartUTF16: Int?
+    @ObservationIgnored
+    private var pendingHighlightMutation: SyntaxHighlightMutation?
     @ObservationIgnored
     private var matchedBracketRanges: [NSRange] = []
     @ObservationIgnored
@@ -219,23 +227,30 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     public func textDidChange(_ notification: Notification) {
         guard !isApplyingModel, !isApplyingHighlight else {
             pendingEditStartUTF16 = nil
+            pendingHighlightMutation = nil
             return
         }
 
+        let previousText = model.text
         let nextText = textView.string
+        let mutation = pendingHighlightMutation ??
+            TextMutation.diff(from: previousText, to: nextText).map(SyntaxHighlightMutation.init)
         if model.text != nextText {
             model.text = nextText
         }
 
         let editStartUTF16 = pendingEditStartUTF16 ?? textView.selectedRange().location
         pendingEditStartUTF16 = nil
+        pendingHighlightMutation = nil
         let refreshStartUTF16 = SyntaxEditorRangeUtilities.lineStartUTF16Offset(
             in: nextText,
             around: editStartUTF16
         )
         scheduleHighlight(
+            previousSource: previousText,
             source: nextText,
             language: model.language,
+            mutation: mutation,
             refreshStartUTF16: refreshStartUTF16
         )
     }
@@ -258,14 +273,21 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         guard model.isEditable else {
             pendingEditStartUTF16 = nil
+            pendingHighlightMutation = nil
             return false
         }
 
         pendingEditStartUTF16 = affectedCharRange.location
-
         guard let replacementString else {
+            pendingHighlightMutation = nil
             return true
         }
+
+        pendingHighlightMutation = SyntaxHighlightMutation(
+            location: affectedCharRange.location,
+            length: affectedCharRange.length,
+            replacement: replacementString
+        )
 
         let source = textView.string
         if let result = commandEngine.transformInput(
@@ -403,6 +425,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         isApplyingModel = true
         defer { isApplyingModel = false }
 
+        let previousText = textView.string
         let textNeedsUpdate = forceTextUpdate || textView.string != text
         if textNeedsUpdate {
             commandEngine.invalidateTransientState()
@@ -412,8 +435,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         updateTypingAttributes()
         if textNeedsUpdate {
             scheduleHighlight(
+                previousSource: previousText,
                 source: text,
                 language: model.language,
+                mutation: TextMutation.diff(from: previousText, to: text).map(SyntaxHighlightMutation.init),
                 refreshStartUTF16: 0
             )
         }
@@ -444,12 +469,14 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
 
         updateTypingAttributes()
-        if (languageChanged || colorThemeChanged) && schedulesHighlight {
+        if languageChanged && schedulesHighlight {
             scheduleHighlight(
                 source: textView.string,
                 language: language,
                 refreshStartUTF16: 0
             )
+        } else if colorThemeChanged && schedulesHighlight {
+            reapplyCachedHighlight()
         }
     }
 
@@ -523,6 +550,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         isApplyingModel = false
 
         pendingEditStartUTF16 = nil
+        pendingHighlightMutation = nil
 
         if textChanged, model.text != result.text {
             model.text = result.text
@@ -530,19 +558,27 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         if textChanged {
             let refreshStartUTF16: Int
+            let highlightMutation: SyntaxHighlightMutation?
             if let appliedMutation {
                 let mutationLineStart = SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                     in: result.text,
                     around: appliedMutation.range.location
                 )
                 refreshStartUTF16 = min(result.refreshStartUTF16, mutationLineStart)
+                highlightMutation = SyntaxHighlightMutation(appliedMutation)
             } else {
                 refreshStartUTF16 = 0
+                highlightMutation = TextMutation.diff(
+                    from: previousText,
+                    to: result.text
+                ).map(SyntaxHighlightMutation.init)
             }
 
             scheduleHighlight(
+                previousSource: previousText,
                 source: result.text,
                 language: model.language,
+                mutation: highlightMutation,
                 refreshStartUTF16: refreshStartUTF16
             )
         } else {
@@ -677,14 +713,16 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func scheduleHighlight(
+        previousSource: String? = nil,
         source: String,
         language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation? = nil,
         refreshStartUTF16: Int = 0
     ) {
         let expectedSource = source
         let utf16Length = expectedSource.utf16.count
         let clampedRefreshStart = min(max(0, refreshStartUTF16), utf16Length)
-        let refreshRange = NSRange(
+        let fallbackRefreshRange = NSRange(
             location: clampedRefreshStart,
             length: utf16Length - clampedRefreshStart
         )
@@ -693,15 +731,58 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         let highlighter = self.highlighter
         highlightTask = Task { [weak self] in
-            let tokens = await highlighter.render(source: expectedSource, language: language)
+            let result: SyntaxHighlightResult
+            if let previousSource, let mutation {
+                result = await highlighter.update(
+                    previousSource: previousSource,
+                    source: expectedSource,
+                    language: language,
+                    mutation: mutation
+                )
+            } else {
+                result = await highlighter.reset(source: expectedSource, language: language)
+            }
             guard !Task.isCancelled else { return }
             guard let self else { return }
+            guard self.textView.string == result.source else { return }
+            self.lastHighlightTokens = result.tokens
+            self.lastHighlightSource = result.source
+            self.lastHighlightLanguage = result.language
             self.applyHighlight(
-                tokens,
-                expectedSource: expectedSource,
-                refreshRange: refreshRange
+                result.tokens,
+                expectedSource: result.source,
+                refreshRange: Self.combinedRefreshRange(
+                    result.refreshRange,
+                    fallbackRefreshRange,
+                    sourceUTF16Length: result.source.utf16.count
+                )
             )
         }
+    }
+
+    private func reapplyCachedHighlight() {
+        let source = textView.string
+        guard lastHighlightSource == source, lastHighlightLanguage == model.language else {
+            scheduleHighlight(source: source, language: model.language)
+            return
+        }
+
+        applyHighlight(
+            lastHighlightTokens,
+            expectedSource: source,
+            refreshRange: NSRange(location: 0, length: source.utf16.count)
+        )
+    }
+
+    private static func combinedRefreshRange(
+        _ lhs: NSRange,
+        _ rhs: NSRange,
+        sourceUTF16Length: Int
+    ) -> NSRange {
+        let lhs = SyntaxEditorRangeUtilities.clampedRange(lhs, utf16Length: sourceUTF16Length)
+        let rhs = SyntaxEditorRangeUtilities.clampedRange(rhs, utf16Length: sourceUTF16Length)
+        let location = min(lhs.location, rhs.location)
+        return NSRange(location: location, length: sourceUTF16Length - location)
     }
 
     private func applyHighlight(
