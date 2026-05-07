@@ -641,6 +641,25 @@ struct SyntaxEditorUITests {
         #expect(editorView.selectedRange == NSRange(location: 1, length: 0))
     }
 
+    @Test("SyntaxEditorView clears iOS marked text when selectedRange leaves composition")
+    @MainActor
+    func syntaxEditorViewIOSClearsMarkedTextWhenSelectedRangeLeavesComposition() {
+        let source = "let value = "
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+
+        editorView.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 0))
+        editorView.selectedRange = NSRange(location: 0, length: 0)
+        editorView.insertText("X")
+
+        #expect(editorView.markedTextRange == nil)
+        #expect(editorView.text == "X" + source + "かな")
+        #expect(model.text == "X" + source + "かな")
+        #expect(editorView.selectedRange == NSRange(location: 1, length: 0))
+    }
+
     @Test("SyntaxEditorView does not commit iOS marked text while read-only")
     @MainActor
     func syntaxEditorViewIOSDoesNotCommitMarkedTextWhileReadOnly() {
@@ -2104,9 +2123,32 @@ struct SyntaxEditorUITests {
         #expect(offset == firstLineEnd)
     }
 
-    @Test("SyntaxEditorView preserves horizontal offset for implicit iOS scrollRectToVisible")
+    @Test("SyntaxEditorView allows explicit iOS scrollRectToVisible to move horizontally")
     @MainActor
-    func syntaxEditorViewIOSPreservesHorizontalOffsetForImplicitScrollRectToVisible() {
+    func syntaxEditorViewIOSAllowsExplicitScrollRectToVisibleToMoveHorizontally() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let initialOffsetX = editorView.contentOffset.x
+        let explicitTargetRect = CGRect(
+            x: editorView.contentSize.width - 4,
+            y: editorView.textContainerInset.top,
+            width: 2,
+            height: editorView.font.lineHeight
+        )
+        editorView.scrollRectToVisible(explicitTargetRect, animated: false)
+
+        #expect(editorView.contentOffset.x > initialOffsetX)
+    }
+
+    @Test("SyntaxEditorView preserves horizontal offset for text interaction iOS scrollRectToVisible")
+    @MainActor
+    func syntaxEditorViewIOSPreservesHorizontalOffsetForTextInteractionScrollRectToVisible() {
         let model = SyntaxEditorModel(
             text: longIOSSyntaxEditorLine,
             language: SyntaxLanguage.javascript,
@@ -2119,13 +2161,15 @@ struct SyntaxEditorUITests {
         let stableOffsetX = editorView.contentOffset.x
         #expect(stableOffsetX > 0)
 
-        let implicitTargetRect = CGRect(
+        let textInteractionCaretRect = editorView.caretRect(for: editorView.beginningOfDocument)
+        #expect(!textInteractionCaretRect.isEmpty)
+        let textInteractionTargetRect = CGRect(
             x: editorView.contentSize.width - 4,
             y: editorView.textContainerInset.top,
             width: 2,
             height: editorView.font.lineHeight
         )
-        editorView.scrollRectToVisible(implicitTargetRect, animated: false)
+        editorView.scrollRectToVisible(textInteractionTargetRect, animated: false)
 
         #expect(abs(editorView.contentOffset.x - stableOffsetX) <= 1)
     }

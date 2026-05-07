@@ -128,8 +128,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             currentSelectedRange
         }
         set {
+            let nextRange = clampedTextRange(newValue)
+            clearMarkedTextIfSelectionLeavesComposition(nextRange)
             setSelectedRange(
-                newValue,
+                nextRange,
                 preservesCommandState: false,
                 schedulesSelectionScroll: true
             )
@@ -276,12 +278,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     public override func scrollRectToVisible(_ rect: CGRect, animated: Bool) {
-        guard shouldPreserveHorizontalOffsetForImplicitTextInteractionScroll else {
+        guard shouldPreserveHorizontalOffsetForImplicitTextInteractionScroll,
+              let preservedX = preservedTextInteractionHorizontalOffset else {
             super.scrollRectToVisible(rect, animated: animated)
             return
         }
 
-        let preservedX = contentOffset.x
         super.scrollRectToVisible(rect, animated: animated)
         guard !contentOffset.x.isNearlyEqual(to: preservedX) else { return }
         super.setContentOffset(CGPoint(x: preservedX, y: contentOffset.y), animated: false)
@@ -1862,6 +1864,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             && !isTracking
             && !isDragging
             && !isDecelerating
+            && preservedTextInteractionHorizontalOffset != nil
     }
 
     public func viewportBounds(for textViewportLayoutController: NSTextViewportLayoutController) -> CGRect {
