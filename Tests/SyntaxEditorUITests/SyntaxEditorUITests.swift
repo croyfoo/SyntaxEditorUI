@@ -94,6 +94,44 @@ private func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: Syn
         && abs(lhsAlpha - rhsAlpha) < 0.002
 }
 
+private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
+    private let tokens: [SyntaxHighlightToken]
+    private var resetCount = 0
+    private var updateCount = 0
+
+    init(tokens: [SyntaxHighlightToken] = []) {
+        self.tokens = tokens
+    }
+
+    func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult {
+        resetCount += 1
+        return result(source: source, language: language)
+    }
+
+    func update(
+        previousSource: String,
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation
+    ) async -> SyntaxHighlightResult {
+        updateCount += 1
+        return result(source: source, language: language)
+    }
+
+    func callCount() -> Int {
+        resetCount + updateCount
+    }
+
+    private func result(source: String, language: SyntaxLanguage) -> SyntaxHighlightResult {
+        SyntaxHighlightResult(
+            tokens: tokens,
+            source: source,
+            language: language,
+            refreshRange: NSRange(location: 0, length: source.utf16.count)
+        )
+    }
+}
+
 #if canImport(UIKit)
 private let syntaxEditorKeyCommandModifierMask: UIKeyModifierFlags = [
     .command,
@@ -397,6 +435,36 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSColorThemeObservation() async {
         let source = "let value = \"text\""
         let initialTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456)
+        )
+        let updatedTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter()
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: initialTheme
+        )
+        let editorView = SyntaxEditorView(model: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground))
+
+        model.colorTheme = updatedTheme
+
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
+            syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
+        }))
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
+    }
+
+    @Test("SyntaxEditorView reapplies cached iOS syntax colors without highlighting")
+    @MainActor
+    func syntaxEditorViewIOSColorThemeReusesCachedHighlightTokens() async {
+        let source = "let value = \"text\""
+        let initialTheme = syntaxEditorUITestColorTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
@@ -404,14 +472,23 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x654321),
             keyword: syntaxEditorUITestColor(hex: 0x876543)
         )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    captureName: "keyword"
+                ),
+            ]
+        )
         let model = SyntaxEditorModel(
             text: source,
             language: SyntaxLanguage.swift,
             colorTheme: initialTheme
         )
-        let editorView = SyntaxEditorView(model: model)
+        let editorView = SyntaxEditorView(model: model, highlighter: highlighter)
 
         await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground))
 
@@ -422,6 +499,7 @@ struct SyntaxEditorUITests {
                 syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
         }))
         await editorView.waitForPendingHighlightForTesting()
+        #expect(await highlighter.callCount() == initialCallCount)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
@@ -1343,24 +1421,6 @@ struct SyntaxEditorUITests {
 
 #if canImport(AppKit)
     @MainActor
-    private func waitUntilEditorCondition(
-        nanoseconds: UInt64 = 5_000_000_000,
-        _ condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .nanoseconds(Int64(nanoseconds)))
-
-        while !condition() {
-            guard clock.now < deadline else {
-                return false
-            }
-            await Task.yield()
-        }
-
-        return true
-    }
-
-    @MainActor
     private func layoutMacEditorView(
         _ editorView: SyntaxEditorView,
         width: CGFloat = 220,
@@ -1383,14 +1443,44 @@ struct SyntaxEditorUITests {
 
         model.text = "{\"enabled\":true}"
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             editorView.textView.string == "{\"enabled\":true}"
-        })
+        }))
     }
 
     @Test("SyntaxEditorView reflects custom macOS color theme")
     @MainActor
     func syntaxEditorViewMacColorThemeObservation() async {
+        let source = "let value = \"text\""
+        let initialTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456)
+        )
+        let updatedTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter()
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: initialTheme
+        )
+        let editorView = SyntaxEditorView(model: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground))
+
+        model.colorTheme = updatedTheme
+
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
+            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
+        }))
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
+    }
+
+    @Test("SyntaxEditorView reapplies cached macOS syntax colors without highlighting")
+    @MainActor
+    func syntaxEditorViewMacColorThemeReusesCachedHighlightTokens() async {
         let source = "let value = \"text\""
         let initialTheme = syntaxEditorUITestColorTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
@@ -1400,24 +1490,36 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x654321),
             keyword: syntaxEditorUITestColor(hex: 0x876543)
         )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    captureName: "keyword"
+                ),
+            ]
+        )
         let model = SyntaxEditorModel(
             text: source,
             language: SyntaxLanguage.swift,
             colorTheme: initialTheme
         )
-        let editorView = SyntaxEditorView(model: model)
+        let editorView = SyntaxEditorView(model: model, highlighter: highlighter)
 
-        #expect(await waitUntilEditorCondition {
-            syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), initialTheme.keyword) &&
-                syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground)
-        })
+        await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground))
 
         model.colorTheme = updatedTheme
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword) &&
                 syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground)
-        })
+        }))
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(await highlighter.callCount() == initialCallCount)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
 
     @Test("SyntaxEditorView preserves macOS syntax colors after editor state changes")
@@ -1444,16 +1546,16 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = true
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             editorView.hasHorizontalScroller == false
-        })
+        }))
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         model.isEditable = false
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             editorView.textView.isEditable == false
-        })
+        }))
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
@@ -1466,18 +1568,16 @@ struct SyntaxEditorUITests {
         model.isEditable = false
         model.lineWrappingEnabled = true
 
-        #expect(await waitUntilEditorCondition {
-            editorView.textView.isEditable == false
-        })
-        #expect(await waitUntilEditorCondition {
-            editorView.hasHorizontalScroller == false
-        })
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
+            editorView.textView.isEditable == false &&
+                editorView.hasHorizontalScroller == false
+        }))
 
         model.lineWrappingEnabled = false
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             editorView.hasHorizontalScroller == true
-        })
+        }))
     }
 
     @Test("SyntaxEditorView redraws macOS text after enabling wrapping from a horizontal scroll")
@@ -1498,7 +1598,7 @@ struct SyntaxEditorUITests {
 
         model.lineWrappingEnabled = true
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             guard let textContainer = editorView.textView.textContainer else {
                 return false
             }
@@ -1511,7 +1611,7 @@ struct SyntaxEditorUITests {
                 && textContainer.lineBreakMode == .byWordWrapping
                 && approximatelyEqual(textContainer.containerSize.width, editorView.contentSize.width)
                 && approximatelyEqual(editorView.textView.frame.width, editorView.contentSize.width)
-        })
+        }))
     }
 
     @Test("SyntaxEditorView wraps to unobscured macOS content width")
@@ -1526,7 +1626,7 @@ struct SyntaxEditorUITests {
         editorView.contentInsets = NSEdgeInsets(top: 12, left: 80, bottom: 0, right: 24)
         layoutMacEditorView(editorView, width: 360, height: 160)
 
-        #expect(await waitUntilEditorCondition {
+        #expect({
             guard let textContainer = editorView.textView.textContainer else {
                 return false
             }
@@ -1541,7 +1641,7 @@ struct SyntaxEditorUITests {
                 && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
                 && approximatelyEqual(editorView.textView.frame.width, expectedWidth)
                 && approximatelyEqual(editorView.textView.minSize.height, expectedHeight)
-        })
+        }())
     }
 
     @Test("SyntaxEditorView updates macOS wrapping geometry after resize")
@@ -1555,18 +1655,18 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(model: model)
         layoutMacEditorView(editorView, width: 520, height: 180)
 
-        #expect(await waitUntilEditorCondition {
+        #expect({
             guard let textContainer = editorView.textView.textContainer else {
                 return false
             }
 
             return approximatelyEqual(textContainer.containerSize.width, editorView.contentSize.width)
                 && approximatelyEqual(editorView.textView.frame.width, editorView.contentSize.width)
-        })
+        }())
 
         layoutMacEditorView(editorView, width: 240, height: 180)
 
-        #expect(await waitUntilEditorCondition {
+        #expect({
             guard let textContainer = editorView.textView.textContainer else {
                 return false
             }
@@ -1574,7 +1674,7 @@ struct SyntaxEditorUITests {
             return editorView.contentView.bounds.origin.x <= 0.5
                 && approximatelyEqual(textContainer.containerSize.width, editorView.contentSize.width)
                 && approximatelyEqual(editorView.textView.frame.width, editorView.contentSize.width)
-        })
+        }())
     }
 
     @Test("SyntaxEditorView keeps inset macOS wrapping geometry after resize")
@@ -1589,7 +1689,7 @@ struct SyntaxEditorUITests {
         editorView.contentInsets = NSEdgeInsets(top: 0, left: 96, bottom: 0, right: 44)
         layoutMacEditorView(editorView, width: 560, height: 180)
 
-        #expect(await waitUntilEditorCondition {
+        #expect({
             guard let textContainer = editorView.textView.textContainer else {
                 return false
             }
@@ -1600,11 +1700,11 @@ struct SyntaxEditorUITests {
             return approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX)
                 && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
                 && approximatelyEqual(editorView.textView.frame.width, expectedWidth)
-        })
+        }())
 
         layoutMacEditorView(editorView, width: 320, height: 180)
 
-        #expect(await waitUntilEditorCondition {
+        #expect({
             guard let textContainer = editorView.textView.textContainer else {
                 return false
             }
@@ -1615,7 +1715,7 @@ struct SyntaxEditorUITests {
             return approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX)
                 && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
                 && approximatelyEqual(editorView.textView.frame.width, expectedWidth)
-        })
+        }())
     }
 
     @Test("SyntaxEditorView keeps synchronizing after language changes on macOS")
@@ -1627,15 +1727,15 @@ struct SyntaxEditorUITests {
         model.language = SyntaxLanguage.json
         model.isEditable = false
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             editorView.textView.isEditable == false
-        })
+        }))
 
         model.text = "{\"answer\":42}"
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             editorView.textView.string == "{\"answer\":42}"
-        })
+        }))
     }
 
     @Test("SyntaxEditorView read-only delegate commands do not mutate text on macOS")
@@ -1721,7 +1821,6 @@ struct SyntaxEditorUITests {
         editorView.textView.setSelectedRange(editRange)
         editorView.textView.insertText("!", replacementRange: editRange)
         editorView.textView.breakUndoCoalescing()
-        try? await Task.sleep(for: .milliseconds(50))
 
         #expect(model.text == editedSource)
         #expect(editorView.textView.string == editedSource)
@@ -1735,9 +1834,9 @@ struct SyntaxEditorUITests {
         #expect(editorView.textView.validateUserInterfaceItem(undoItem))
 
         model.isEditable = false
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             editorView.textView.isEditable == false
-        })
+        }))
         #expect(!undoManager.canUndo)
         #expect(!editorView.textView.validateUserInterfaceItem(undoItem))
 
@@ -1746,23 +1845,21 @@ struct SyntaxEditorUITests {
         #expect(editorView.textView.string == editedSource)
 
         model.isEditable = true
-        #expect(await waitUntilEditorCondition {
+        #expect(await editorView.waitForModelRenderingForTesting(until: {
             editorView.textView.isEditable == true
-        })
+        }))
 
         #expect(undoManager.canUndo)
         #expect(NSApplication.shared.sendAction(undoSelector, to: editorView.textView, from: undoItem))
 
-        #expect(await waitUntilEditorCondition {
-            model.text == source && editorView.textView.string == source
-        })
+        #expect(model.text == source)
+        #expect(editorView.textView.string == source)
         #expect(undoManager.canRedo)
         #expect(editorView.textView.validateUserInterfaceItem(redoItem))
         #expect(NSApplication.shared.sendAction(redoSelector, to: editorView.textView, from: redoItem))
 
-        #expect(await waitUntilEditorCondition {
-            model.text == editedSource && editorView.textView.string == editedSource
-        })
+        #expect(model.text == editedSource)
+        #expect(editorView.textView.string == editedSource)
     }
 
     @Test("SyntaxEditorView preserves undo history when undo manager runs while read-only on macOS")
@@ -1892,9 +1989,9 @@ struct SyntaxEditorUITests {
 
         model.text = "{\"enabled\":true}"
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await controller.waitForModelRenderingForTesting(until: {
             controller.textView.string == "{\"enabled\":true}"
-        })
+        }))
     }
 
     @Test("SyntaxEditorViewController reflects editable and wrapping changes on macOS")
@@ -1907,18 +2004,16 @@ struct SyntaxEditorUITests {
         model.isEditable = false
         model.lineWrappingEnabled = true
 
-        #expect(await waitUntilEditorCondition {
-            controller.textView.isEditable == false
-        })
-        #expect(await waitUntilEditorCondition {
-            controller.scrollView.hasHorizontalScroller == false
-        })
+        #expect(await controller.waitForModelRenderingForTesting(until: {
+            controller.textView.isEditable == false &&
+                controller.scrollView.hasHorizontalScroller == false
+        }))
 
         model.lineWrappingEnabled = false
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await controller.waitForModelRenderingForTesting(until: {
             controller.scrollView.hasHorizontalScroller == true
-        })
+        }))
     }
 
     @Test("SyntaxEditorViewController keeps synchronizing after language changes on macOS")
@@ -1931,15 +2026,15 @@ struct SyntaxEditorUITests {
         model.language = SyntaxLanguage.json
         model.isEditable = false
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await controller.waitForModelRenderingForTesting(until: {
             controller.textView.isEditable == false
-        })
+        }))
 
         model.text = "{\"answer\":42}"
 
-        #expect(await waitUntilEditorCondition {
+        #expect(await controller.waitForModelRenderingForTesting(until: {
             controller.textView.string == "{\"answer\":42}"
-        })
+        }))
     }
 #endif
 }

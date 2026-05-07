@@ -5,6 +5,11 @@ import SwiftTreeSitterLayer
 package struct SyntaxHighlightToken: Equatable, Sendable {
     package let range: NSRange
     package let captureName: String
+
+    package init(range: NSRange, captureName: String) {
+        self.range = range
+        self.captureName = captureName
+    }
 }
 
 package struct SyntaxHighlightMutation: Equatable, Sendable {
@@ -32,9 +37,31 @@ package struct SyntaxHighlightResult: Sendable {
     package let source: String
     package let language: SyntaxLanguage
     package let refreshRange: NSRange
+
+    package init(
+        tokens: [SyntaxHighlightToken],
+        source: String,
+        language: SyntaxLanguage,
+        refreshRange: NSRange
+    ) {
+        self.tokens = tokens
+        self.source = source
+        self.language = language
+        self.refreshRange = refreshRange
+    }
 }
 
-package actor SyntaxHighlighterEngine {
+package protocol SyntaxHighlighting: Sendable {
+    func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult
+    func update(
+        previousSource: String,
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation
+    ) async -> SyntaxHighlightResult
+}
+
+package actor SyntaxHighlighterEngine: SyntaxHighlighting {
     private var session: SyntaxHighlightSession?
     private let registry: LanguageConfigurationRegistry
 
