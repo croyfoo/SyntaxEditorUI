@@ -7,28 +7,53 @@ import UIKit
 @MainActor
 private final class SyntaxEditorReadOnlyGuardedUndoManager: UndoManager {
     var allowsMutation: () -> Bool = { true }
+    var undoManagerProvider: () -> UndoManager? = { nil }
+
+    private var targetUndoManager: UndoManager? {
+        guard let undoManager = undoManagerProvider(),
+              undoManager !== self
+        else {
+            return nil
+        }
+
+        return undoManager
+    }
 
     override var canUndo: Bool {
-        allowsMutation() && super.canUndo
+        guard allowsMutation() else { return false }
+        return (targetUndoManager?.canUndo ?? false) || super.canUndo
     }
 
     override var canRedo: Bool {
-        allowsMutation() && super.canRedo
+        guard allowsMutation() else { return false }
+        return (targetUndoManager?.canRedo ?? false) || super.canRedo
     }
 
     override func undo() {
         guard allowsMutation() else { return }
-        super.undo()
+        if let targetUndoManager, targetUndoManager.canUndo {
+            targetUndoManager.undo()
+        } else {
+            super.undo()
+        }
     }
 
     override func redo() {
         guard allowsMutation() else { return }
-        super.redo()
+        if let targetUndoManager, targetUndoManager.canRedo {
+            targetUndoManager.redo()
+        } else {
+            super.redo()
+        }
     }
 
     override func undoNestedGroup() {
         guard allowsMutation() else { return }
-        super.undoNestedGroup()
+        if let targetUndoManager, targetUndoManager.canUndo {
+            targetUndoManager.undoNestedGroup()
+        } else {
+            super.undoNestedGroup()
+        }
     }
 }
 
@@ -88,6 +113,9 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         guardedUndoManager.allowsMutation = { [weak self] in
             self?.model.isEditable ?? true
         }
+        guardedUndoManager.undoManagerProvider = { [weak self] in
+            self?.nativeUndoManager
+        }
 
         configureTextView()
         configureUndoObservation()
@@ -119,6 +147,10 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 
     public override var undoManager: UndoManager? {
         guardedUndoManager
+    }
+
+    private var nativeUndoManager: UndoManager? {
+        super.undoManager
     }
 
     internal func waitForModelRenderingForTesting(
@@ -185,6 +217,18 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 
     public override var canBecomeFirstResponder: Bool {
         isEditable || isSelectable
+    }
+
+    @discardableResult
+    public override func becomeFirstResponder() -> Bool {
+        let didBecomeFirstResponder = super.becomeFirstResponder()
+        refreshKeyboardAccessoryState()
+        return didBecomeFirstResponder
+    }
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        refreshKeyboardAccessoryState()
     }
 
     public override var keyCommands: [UIKeyCommand]? {
@@ -539,25 +583,31 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
             self,
             selector: #selector(handleUndoManagerStateDidChange),
             name: .NSUndoManagerDidCloseUndoGroup,
-            object: guardedUndoManager
+            object: nil
         )
         center.addObserver(
             self,
             selector: #selector(handleUndoManagerStateDidChange),
             name: .NSUndoManagerDidUndoChange,
-            object: guardedUndoManager
+            object: nil
         )
         center.addObserver(
             self,
             selector: #selector(handleUndoManagerStateDidChange),
             name: .NSUndoManagerDidRedoChange,
-            object: guardedUndoManager
+            object: nil
         )
     }
 
     @objc
     private func handleUndoManagerStateDidChange(_ notification: Notification) {
+        guard observesUndoManagerNotification(from: notification.object) else { return }
         refreshKeyboardAccessoryState()
+    }
+
+    private func observesUndoManagerNotification(from object: Any?) -> Bool {
+        guard let undoManager = object as? UndoManager else { return false }
+        return undoManager === guardedUndoManager || undoManager === nativeUndoManager
     }
 
     private func configureTraitChangeObservation() {
@@ -632,7 +682,7 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     }
 
     private var activeUndoManager: UndoManager? {
-        undoManager
+        nativeUndoManager ?? guardedUndoManager
     }
 
     private func refreshKeyboardAccessoryState() {

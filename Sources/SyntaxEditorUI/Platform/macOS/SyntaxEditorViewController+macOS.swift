@@ -46,6 +46,26 @@ private final class SyntaxEditorNativeTextView: NSTextView {
         guardedUndoManager ?? super.undoManager
     }
 
+    @objc func undo(_ sender: Any?) {
+        undoManager?.undo()
+    }
+
+    @objc func redo(_ sender: Any?) {
+        undoManager?.redo()
+    }
+
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(undo(_:)) {
+            return undoManager?.canUndo ?? false
+        }
+
+        if item.action == #selector(redo(_:)) {
+            return undoManager?.canRedo ?? false
+        }
+
+        return super.validateUserInterfaceItem(item)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard modifiers.contains(.command),
