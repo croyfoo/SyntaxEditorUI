@@ -1161,6 +1161,40 @@ struct SyntaxEditorUITests {
         #expect(editorView.text == source)
     }
 
+    @Test("SyntaxEditorView uses native iOS undo stack for text input")
+    @MainActor
+    func syntaxEditorViewIOSNativeTextInputUndoRedo() {
+        let source = "let answer = 42"
+        let editedSource = "\(source)!"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+
+        editorView.insertText("!")
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        #expect(model.text == editedSource)
+        #expect(editorView.text == editedSource)
+
+        guard let undoManager = editorView.undoManager else {
+            Issue.record("SyntaxEditorView has no undo manager")
+            return
+        }
+
+        #expect(undoManager.canUndo)
+        #expect(performSyntaxEditorSelector("handleUndoCommand", on: editorView))
+
+        #expect(model.text == source)
+        #expect(editorView.text == source)
+        #expect(undoManager.canRedo)
+
+        #expect(performSyntaxEditorSelector("handleRedoCommand", on: editorView))
+
+        #expect(model.text == editedSource)
+        #expect(editorView.text == editedSource)
+    }
+
     @Test("SyntaxEditorView read-only undo and redo do not mutate text on iOS")
     @MainActor
     func syntaxEditorViewIOSReadOnlyUndoRedoDoNotMutateText() {
@@ -1649,6 +1683,77 @@ struct SyntaxEditorUITests {
             #expect(model.text == source)
             #expect(editorView.textView.string == source)
         }
+    }
+
+    @Test("SyntaxEditorView uses native macOS undo stack for text input")
+    @MainActor
+    func syntaxEditorViewMacNativeTextInputUndoRedo() async {
+        let source = "let answer = 42"
+        let editedSource = "\(source)!"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = editorView
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(editorView.textView)
+        defer { window.orderOut(nil) }
+
+        guard let undoManager = editorView.textView.undoManager else {
+            Issue.record("SyntaxEditorView text view has no undo manager")
+            return
+        }
+
+        let editRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.textView.setSelectedRange(editRange)
+        editorView.textView.insertText("!", replacementRange: editRange)
+        editorView.textView.breakUndoCoalescing()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(model.text == editedSource)
+        #expect(editorView.textView.string == editedSource)
+
+        let undoSelector = NSSelectorFromString("undo:")
+        let redoSelector = NSSelectorFromString("redo:")
+        let undoItem = NSMenuItem(title: "Undo", action: undoSelector, keyEquivalent: "z")
+        let redoItem = NSMenuItem(title: "Redo", action: redoSelector, keyEquivalent: "Z")
+
+        #expect(undoManager.canUndo)
+        #expect(editorView.textView.validateUserInterfaceItem(undoItem))
+
+        model.isEditable = false
+        #expect(await waitUntilEditorCondition {
+            editorView.textView.isEditable == false
+        })
+        #expect(!undoManager.canUndo)
+        #expect(!editorView.textView.validateUserInterfaceItem(undoItem))
+
+        #expect(NSApplication.shared.sendAction(undoSelector, to: editorView.textView, from: undoItem))
+        #expect(model.text == editedSource)
+        #expect(editorView.textView.string == editedSource)
+
+        model.isEditable = true
+        #expect(await waitUntilEditorCondition {
+            editorView.textView.isEditable == true
+        })
+
+        #expect(undoManager.canUndo)
+        #expect(NSApplication.shared.sendAction(undoSelector, to: editorView.textView, from: undoItem))
+
+        #expect(await waitUntilEditorCondition {
+            model.text == source && editorView.textView.string == source
+        })
+        #expect(undoManager.canRedo)
+        #expect(editorView.textView.validateUserInterfaceItem(redoItem))
+        #expect(NSApplication.shared.sendAction(redoSelector, to: editorView.textView, from: redoItem))
+
+        #expect(await waitUntilEditorCondition {
+            model.text == editedSource && editorView.textView.string == editedSource
+        })
     }
 
     @Test("SyntaxEditorView preserves undo history when undo manager runs while read-only on macOS")
