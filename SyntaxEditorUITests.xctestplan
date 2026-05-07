@@ -24,6 +24,14 @@
       "parallelizable" : false,
       "target" : {
         "containerPath" : "container:",
+        "identifier" : "SyntaxEditorCorePlatformTests",
+        "name" : "SyntaxEditorCorePlatformTests"
+      }
+    },
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:",
         "identifier" : "SyntaxEditorUITests",
         "name" : "SyntaxEditorUITests"
       }

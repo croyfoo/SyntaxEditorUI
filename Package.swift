@@ -67,6 +67,10 @@ let package = Package(
             dependencies: ["SyntaxEditorCore"]
         ),
         .testTarget(
+            name: "SyntaxEditorCorePlatformTests",
+            dependencies: ["SyntaxEditorCore"]
+        ),
+        .testTarget(
             name: "SyntaxEditorUITests",
             dependencies: ["SyntaxEditorUI"]
         ),

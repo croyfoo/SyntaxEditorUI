@@ -59,9 +59,12 @@ Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScrip
 
 ```bash
 swift test
-xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITests -destination 'platform=macOS'
-xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITests -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest'
+xcrun simctl list devices available
+DESTINATION='platform=iOS Simulator,id=<simulator-udid>'
+xcodebuild test -workspace SyntaxEditorUI.xcworkspace -scheme SyntaxEditorUITests -testPlan SyntaxEditorUITests -only-testing:SyntaxEditorCorePlatformTests -only-testing:SyntaxEditorUITests -destination "$DESTINATION" -enableCodeCoverage NO -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
 ```
+
+GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `SyntaxEditorCorePlatformTests` and `SyntaxEditorUITests` on the latest available iOS simulator for UIKit-specific coverage.
 
 `Mini` is a lightweight manual verification app for iOS/macOS. It is not a public product and does not own package regression tests.
 
