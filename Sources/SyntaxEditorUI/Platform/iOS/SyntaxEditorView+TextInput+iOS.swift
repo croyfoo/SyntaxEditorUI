@@ -107,7 +107,7 @@ extension SyntaxEditorView {
             length: selectedRangeInMarkedText.length
         )
 
-        if nextMarkedRange != nil {
+        if nextMarkedRange != nil || clampedRange.length > 0 {
             beginMarkedTextUndoSessionIfNeeded(
                 source: source,
                 selectedRange: self.selectedRange,

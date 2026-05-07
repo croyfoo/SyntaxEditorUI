@@ -571,6 +571,32 @@ struct SyntaxEditorUITests {
         #expect(editorView.selectedRange == NSRange(location: source.utf16.count, length: 0))
     }
 
+    @Test("SyntaxEditorView registers iOS undo for empty marked text replacement")
+    @MainActor
+    func syntaxEditorViewIOSRegistersUndoForEmptyMarkedTextReplacement() {
+        let source = "let value = 42"
+        let selectedRange = (source as NSString).range(of: "value")
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = selectedRange
+
+        editorView.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
+
+        guard let undoManager = editorView.undoManager else {
+            Issue.record("SyntaxEditorView has no undo manager")
+            return
+        }
+
+        #expect(editorView.text == "let  = 42")
+        #expect(undoManager.canUndo)
+        undoManager.undo()
+
+        #expect(editorView.text == source)
+        #expect(model.text == source)
+        #expect(editorView.selectedRange == selectedRange)
+    }
+
     @Test("SyntaxEditorView replaces iOS marked text when IME commits through insertText")
     @MainActor
     func syntaxEditorViewIOSReplacesMarkedTextWhenIMECommitsThroughInsertText() {
@@ -2736,6 +2762,9 @@ struct SyntaxEditorUITests {
         layoutIOSEditorView(editorView)
         editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
 
+        #expect(!editorView.canPerformAction(NSSelectorFromString("undo:"), withSender: nil))
+        #expect(!editorView.canPerformAction(NSSelectorFromString("redo:"), withSender: nil))
+
         editorView.insertText("!")
 
         #expect(model.text == editedSource)
@@ -2747,16 +2776,22 @@ struct SyntaxEditorUITests {
         }
 
         #expect(undoManager.canUndo)
+        #expect(editorView.canPerformAction(NSSelectorFromString("undo:"), withSender: nil))
+        #expect(!editorView.canPerformAction(NSSelectorFromString("redo:"), withSender: nil))
         #expect(performSyntaxEditorSelector("handleUndoCommand", on: editorView))
 
         #expect(model.text == source)
         #expect(editorView.text == source)
         #expect(undoManager.canRedo)
+        #expect(!editorView.canPerformAction(NSSelectorFromString("undo:"), withSender: nil))
+        #expect(editorView.canPerformAction(NSSelectorFromString("redo:"), withSender: nil))
 
         #expect(performSyntaxEditorSelector("handleRedoCommand", on: editorView))
 
         #expect(model.text == editedSource)
         #expect(editorView.text == editedSource)
+        #expect(editorView.canPerformAction(NSSelectorFromString("undo:"), withSender: nil))
+        #expect(!editorView.canPerformAction(NSSelectorFromString("redo:"), withSender: nil))
     }
 
     @Test("SyntaxEditorView read-only undo and redo do not mutate text on iOS")

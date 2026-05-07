@@ -301,9 +301,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if !model.isEditable,
-           isUndoRedoAction(action) {
-            return false
+        if isUndoAction(action) {
+            return model.isEditable && (activeUndoManager?.canUndo ?? false)
+        }
+
+        if isRedoAction(action) {
+            return model.isEditable && (activeUndoManager?.canRedo ?? false)
         }
 
         if isEditorCommandAction(action) {
@@ -510,9 +513,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             || action == #selector(handleToggleCommentCommand)
     }
 
-    func isUndoRedoAction(_ action: Selector) -> Bool {
+    func isUndoAction(_ action: Selector) -> Bool {
+        NSStringFromSelector(action) == "undo:"
+    }
+
+    func isRedoAction(_ action: Selector) -> Bool {
         let actionName = NSStringFromSelector(action)
-        return actionName == "undo:" || actionName == "redo:"
+        return actionName == "redo:"
     }
 
     func makeKeyCommand(
