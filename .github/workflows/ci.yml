@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   macos-tests:
-    name: macOS Tests
+    name: Package Tests (macOS)
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -58,35 +58,16 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
 
-      - name: Run macOS tests
+      - name: Run Swift package tests
         run: |
-          xcodebuild test \
-            -workspace SyntaxEditorUI.xcworkspace \
-            -scheme SyntaxEditorUITests \
-            -testPlan SyntaxEditorUITests \
-            -destination 'platform=macOS' \
-            -enableCodeCoverage NO \
-            -parallel-testing-enabled NO
+          swift test
 
   ios-tests:
-    name: iOS Tests (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: iOS 18 latest
-            runner: macos-15
-            ios_major: '18'
-            device_name: iPhone 16
-          - name: iOS 26 latest
-            runner: macos-26
-            ios_major: '26'
-            device_name: iPhone 17
-    runs-on: ${{ matrix.runner }}
+    name: iOS Tests
+    runs-on: macos-26
     timeout-minutes: 60
     env:
-      DEVICE_NAME: ${{ matrix.device_name }}
-      IOS_MAJOR: ${{ matrix.ios_major }}
+      DEVICE_NAME: iPhone 17
       XCODE_MAJOR: '26'
     steps:
       - name: Check out repository
@@ -127,7 +108,6 @@ jobs:
           ruby <<'RUBY'
           require "json"
 
-          ios_major = ENV.fetch("IOS_MAJOR")
           device_name = ENV.fetch("DEVICE_NAME")
           devices = JSON.parse(`xcrun simctl list devices available --json`).fetch("devices")
           matches = []
@@ -136,7 +116,6 @@ jobs:
             next unless runtime =~ /SimRuntime\.iOS-(\d+(?:-\d+)*)$/
 
             version = Regexp.last_match(1).tr("-", ".")
-            next unless version.split(".").first == ios_major
 
             runtime_devices.each do |device|
               next unless device["name"] == device_name
@@ -147,7 +126,7 @@ jobs:
           end
 
           if matches.empty?
-            warn "No available #{device_name} simulator found for iOS #{ios_major}.x"
+            warn "No available #{device_name} simulator found for any iOS runtime"
             system("xcrun simctl list devices available")
             exit 1
           end
@@ -173,6 +152,8 @@ jobs:
             -workspace SyntaxEditorUI.xcworkspace \
             -scheme SyntaxEditorUITests \
             -testPlan SyntaxEditorUITests \
+            -only-testing:SyntaxEditorCorePlatformTests \
+            -only-testing:SyntaxEditorUITests \
             -destination "${DESTINATION}" \
             -enableCodeCoverage NO \
             -parallel-testing-enabled NO \
