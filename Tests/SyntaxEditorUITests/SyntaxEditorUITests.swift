@@ -226,17 +226,17 @@ private func iOSEditorHorizontalOverflowDiagnostics(_ editorView: SyntaxEditorVi
 
 @MainActor
 private func iOSEditorRenderedContentFrame(_ editorView: SyntaxEditorView) -> CGRect? {
-    let width = editorView.textContainer.size.width
-        + editorView.textContainerInset.left
-        + editorView.textContainerInset.right
-    guard width > 0 else { return nil }
+    let frame = editorView.renderedTextContentFrameForTesting
+    guard frame.width > 0 else { return nil }
 
-    return CGRect(
-        x: 0,
-        y: 0,
-        width: width,
-        height: max(editorView.contentSize.height, editorView.bounds.height)
-    )
+    return frame
+}
+
+@MainActor
+private func iOSEditorTextUsageHeight(_ editorView: SyntaxEditorView) -> CGFloat {
+    (editorView.textLayoutManager?.usageBoundsForTextContainer.maxY ?? 0)
+        + editorView.textContainerInset.top
+        + editorView.textContainerInset.bottom
 }
 
 @MainActor
@@ -281,14 +281,7 @@ private func iOSEditorTextKit2Diagnostics(_ editorView: SyntaxEditorView) -> Str
 
 @MainActor
 private func iOSEditorHasBackgroundAttribute(_ editorView: SyntaxEditorView, at location: Int) -> Bool {
-    guard let attributedText = editorView.attributedText,
-          location >= 0,
-          location < attributedText.length
-    else {
-        return false
-    }
-
-    return attributedText.attribute(.backgroundColor, at: location, effectiveRange: nil) != nil
+    editorView.bracketHighlightRangesForTesting.contains { NSLocationInRange(location, $0) }
 }
 
 @MainActor
@@ -365,13 +358,26 @@ struct SyntaxEditorUITests {
         #expect(controller.editorView.model === model)
     }
 
-    @Test("SyntaxEditorView is the iOS single UITextView surface")
+    @Test("SyntaxEditorView is the iOS custom scroll text input surface")
     @MainActor
-    func syntaxEditorViewIOSUsesUITextViewAsNativeSurface() {
+    func syntaxEditorViewIOSUsesCustomScrollTextInputSurface() {
         let editorView = SyntaxEditorView(model: SyntaxEditorModel(text: "let value = 1"))
-        let nativeSurface: UITextView = editorView
+        let scrollSurface: UIScrollView = editorView
+        let textInputSurface: any UITextInput = editorView
 
-        #expect(nativeSurface === editorView)
+        #expect(scrollSurface === editorView)
+        #expect(textInputSurface.textInputView === editorView)
+    }
+
+    @Test("SyntaxEditorView receives iOS text interaction hit tests through the rendering view")
+    @MainActor
+    func syntaxEditorViewIOSReceivesTextInteractionHitTestsThroughRenderingView() {
+        let editorView = SyntaxEditorView(model: SyntaxEditorModel(text: "let value = 1"))
+        layoutIOSEditorView(editorView)
+
+        let hitView = editorView.hitTest(CGPoint(x: 24, y: 24), with: nil)
+
+        #expect(hitView === editorView)
     }
 
     @Test("SyntaxEditorView applies transformed iOS text input to the model")
@@ -409,7 +415,6 @@ struct SyntaxEditorUITests {
         #expect(editorView.text == source + "\"\"")
         #expect(editorView.selectedRange == NSRange(location: source.utf16.count + 2, length: 0))
 
-        editorView.textViewDidChangeSelection(editorView)
         editorView.insertText("\"")
 
         #expect(editorView.text == source + "\"\"\"")
@@ -634,7 +639,7 @@ struct SyntaxEditorUITests {
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
 
         let measuredLineWidth = (offscreenWideUnicodeIOSSyntaxEditorLine as NSString).size(
-            withAttributes: [.font: editorView.font ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)]
+            withAttributes: [.font: editorView.font]
         ).width
         #expect(editorView.contentSize.width >= measuredLineWidth)
 
@@ -734,13 +739,13 @@ struct SyntaxEditorUITests {
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
-        #expect(editorView.contentSize.height <= 120)
+        #expect(iOSEditorTextUsageHeight(editorView) <= 120)
 
         editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         #expect(editorView.contentOffset.x > 0)
-        #expect(editorView.contentSize.height <= 120)
+        #expect(iOSEditorTextUsageHeight(editorView) <= 120)
         #expect(editorView.textLayoutManager != nil)
         #expect(
             iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(editorView),
@@ -763,7 +768,12 @@ struct SyntaxEditorUITests {
         editorView.setContentOffset(CGPoint(x: stableOffsetX, y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        editorView.scrollRangeToVisible(NSRange(location: 0, length: longIOSSyntaxEditorMultilineText.utf16.count))
+        guard let position = editorView.closestPosition(to: CGPoint(x: editorView.bounds.midX, y: 54)) else {
+            Issue.record("SyntaxEditorView could not resolve a visible iOS text-input point")
+            return
+        }
+        let location = editorView.offset(from: editorView.beginningOfDocument, to: position)
+        editorView.selectedRange = NSRange(location: location, length: 0)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         #expect(abs(editorView.contentOffset.x - stableOffsetX) <= 1)
@@ -772,6 +782,242 @@ struct SyntaxEditorUITests {
             iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(editorView),
             Comment(rawValue: iOSEditorTextKit2Diagnostics(editorView))
         )
+    }
+
+    @Test("SyntaxEditorView snaps iOS trailing line whitespace taps to that line end")
+    @MainActor
+    func syntaxEditorViewIOSSnapsTrailingLineWhitespaceTapToLineEnd() {
+        let source = "const answer = 42;\nfunction greet(name) {}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let firstLineEnd = (source as NSString).range(of: "\n").location
+        guard let lineEndPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: firstLineEnd
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve the first line end")
+            return
+        }
+
+        let lineEndRect = editorView.caretRect(for: lineEndPosition)
+        guard let snappedPosition = editorView.closestPosition(
+            to: CGPoint(x: lineEndRect.maxX + 96, y: lineEndRect.midY)
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve trailing line whitespace")
+            return
+        }
+
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: snappedPosition) == firstLineEnd)
+    }
+
+    @Test("SyntaxEditorView keeps iOS drag hit testing on the touched visual line")
+    @MainActor
+    func syntaxEditorViewIOSKeepsDragHitTestingOnTouchedVisualLine() {
+        let longLine = "    return "
+            + String(repeating: "\"Hello, ${name}! \", ", count: 36)
+        let source = [
+            "const answer = 42;",
+            "function greet(name) {",
+            longLine,
+            "}",
+            "const again = 42;",
+        ].joined(separator: "\n")
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let touchedLineStart = (source as NSString).range(of: longLine).location
+        let touchedLineEnd = touchedLineStart + longLine.utf16.count
+        guard let lineStartPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: touchedLineStart
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve touched line start")
+            return
+        }
+
+        let lineStartRect = editorView.caretRect(for: lineStartPosition)
+        guard let hitPosition = editorView.closestPosition(
+            to: CGPoint(x: lineStartRect.minX + 260, y: lineStartRect.midY)
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve touched line point")
+            return
+        }
+
+        let hitOffset = editorView.offset(from: editorView.beginningOfDocument, to: hitPosition)
+        #expect(hitOffset >= touchedLineStart)
+        #expect(hitOffset <= touchedLineEnd)
+        #expect(hitOffset < source.utf16.count - 1)
+    }
+
+    @Test("SyntaxEditorView constrains iOS drag hit testing to the requested text range")
+    @MainActor
+    func syntaxEditorViewIOSConstrainsDragHitTestingToRequestedRange() {
+        let source = [
+            "const answer = 42;",
+            "function greet(name) {",
+            "    return " + String(repeating: "\"Hello\", ", count: 28),
+            "}",
+            "const finalAnswer = 42;",
+        ].joined(separator: "\n")
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let constrainedLine = "function greet(name) {"
+        let constrainedStart = (source as NSString).range(of: constrainedLine).location
+        let constrainedEnd = constrainedStart + constrainedLine.utf16.count
+        guard let startPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: constrainedStart
+        ),
+              let endPosition = editorView.position(
+                from: editorView.beginningOfDocument,
+                offset: constrainedEnd
+              ),
+              let constrainedRange = editorView.textRange(from: startPosition, to: endPosition)
+        else {
+            Issue.record("SyntaxEditorView could not resolve constrained drag range")
+            return
+        }
+
+        let farDocumentEndPoint = CGPoint(x: editorView.bounds.maxX - 12, y: editorView.bounds.maxY - 12)
+        guard let constrainedPosition = editorView.closestPosition(
+            to: farDocumentEndPoint,
+            within: constrainedRange
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve constrained drag point")
+            return
+        }
+
+        let constrainedOffset = editorView.offset(
+            from: editorView.beginningOfDocument,
+            to: constrainedPosition
+        )
+        #expect(constrainedOffset >= constrainedStart)
+        #expect(constrainedOffset <= constrainedEnd)
+    }
+
+    @Test("SyntaxEditorView does not let iOS gesture selection changes own horizontal scrolling")
+    @MainActor
+    func syntaxEditorViewIOSGestureSelectionDoesNotOwnHorizontalScrolling() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        guard let offscreenStartRange = editorView.textRange(
+            from: editorView.beginningOfDocument,
+            to: editorView.beginningOfDocument
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve the document start range")
+            return
+        }
+
+        let stableOffsetX = editorView.contentOffset.x
+        editorView.selectedTextRange = offscreenStartRange
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        #expect(abs(editorView.contentOffset.x - stableOffsetX) <= 1)
+    }
+
+    @Test("SyntaxEditorView blocks iOS text interaction auto-scroll during gesture selection")
+    @MainActor
+    func syntaxEditorViewIOSBlocksTextInteractionAutoScrollDuringGestureSelection() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        guard let visiblePosition = editorView.closestPosition(to: CGPoint(x: 240, y: 54)),
+              let visibleRange = editorView.textRange(from: visiblePosition, to: visiblePosition)
+        else {
+            Issue.record("SyntaxEditorView could not resolve a visible gesture selection range")
+            return
+        }
+
+        let stableOffsetX = editorView.contentOffset.x
+        editorView.selectedTextRange = visibleRange
+        editorView.setContentOffset(CGPoint(x: editorView.contentSize.width - editorView.bounds.width, y: 0), animated: false)
+
+        #expect(abs(editorView.contentOffset.x - stableOffsetX) <= 1)
+    }
+
+    @Test("SyntaxEditorView maps trailing first-line iOS tap to first line end")
+    @MainActor
+    func syntaxEditorViewIOSTrailingFirstLineTapMapsToFirstLineEnd() {
+        let source = "const answer = 42;\nfunction greet(name) {\n    return name\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let firstLineEnd = (source as NSString).range(of: "\n").location
+        let pointPastFirstLineText = CGPoint(
+            x: editorView.bounds.minX + 260,
+            y: editorView.textContainerInset.top + editorView.font.lineHeight * 0.5
+        )
+
+        guard let position = editorView.closestPosition(to: pointPastFirstLineText) else {
+            Issue.record("SyntaxEditorView could not resolve a first-line trailing tap")
+            return
+        }
+
+        let offset = editorView.offset(from: editorView.beginningOfDocument, to: position)
+        #expect(offset == firstLineEnd)
+    }
+
+    @Test("SyntaxEditorView preserves horizontal offset for implicit iOS scrollRectToVisible")
+    @MainActor
+    func syntaxEditorViewIOSPreservesHorizontalOffsetForImplicitScrollRectToVisible() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        let stableOffsetX = editorView.contentOffset.x
+        #expect(stableOffsetX > 0)
+
+        let implicitTargetRect = CGRect(
+            x: editorView.contentSize.width - 4,
+            y: editorView.textContainerInset.top,
+            width: 2,
+            height: editorView.font.lineHeight
+        )
+        editorView.scrollRectToVisible(implicitTargetRect, animated: false)
+
+        #expect(abs(editorView.contentOffset.x - stableOffsetX) <= 1)
     }
 
     @Test("SyntaxEditorView reports iOS visible content rect after horizontal scroll")
@@ -995,6 +1241,30 @@ struct SyntaxEditorUITests {
         layoutIOSEditorView(editorView)
 
         let stableOffsetX = editorView.contentOffset.x
+        editorView.selectedRange = NSRange(location: targetLocation, length: 0)
+        layoutIOSEditorView(editorView)
+
+        #expect(abs(editorView.contentOffset.x - stableOffsetX) <= 1)
+    }
+
+    @Test("SyntaxEditorView does not horizontally scroll after repeated visible iOS selection updates")
+    @MainActor
+    func syntaxEditorViewIOSDoesNotScrollHorizontallyAfterRepeatedVisibleSelectionUpdates() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        editorView.setContentOffset(CGPoint(x: 80, y: 0), animated: false)
+        let stableOffsetX = editorView.contentOffset.x
+        #expect(stableOffsetX > 0)
+
+        let targetLocation = visibleMidIOSSyntaxEditorLocation
+        editorView.selectedRange = NSRange(location: targetLocation, length: 0)
+        layoutIOSEditorView(editorView)
         editorView.selectedRange = NSRange(location: targetLocation, length: 0)
         layoutIOSEditorView(editorView)
 
@@ -1247,7 +1517,6 @@ struct SyntaxEditorUITests {
         editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
 
         editorView.insertText("!")
-        editorView.textViewDidChange(editorView)
 
         #expect(model.text == editedSource)
         #expect(editorView.text == editedSource)
@@ -1358,7 +1627,6 @@ struct SyntaxEditorUITests {
 
         let bracketLocation = (source as NSString).range(of: "(").location
         editorView.selectedRange = NSRange(location: bracketLocation + 1, length: 0)
-        editorView.textViewDidChangeSelection(editorView)
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(iOSEditorHasBackgroundAttribute(editorView, at: bracketLocation))
