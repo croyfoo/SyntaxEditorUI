@@ -886,6 +886,29 @@ struct SyntaxEditorUITests {
         #expect(editorView.text == "{\"enabled\":true}")
     }
 
+    @Test("SyntaxEditorView clamps iOS horizontal offset after observed text replacement")
+    @MainActor
+    func syntaxEditorViewIOSClampsHorizontalOffsetAfterObservedTextReplacement() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+        editorView.scrollRangeToVisible(NSRange(location: longIOSSyntaxEditorLine.utf16.count - 1, length: 0))
+        layoutIOSEditorView(editorView)
+        #expect(editorView.contentOffset.x > 0)
+
+        model.text = "let value = 42"
+        editorView.synchronizeModelForTesting()
+        layoutIOSEditorView(editorView)
+
+        #expect(editorView.text == "let value = 42")
+        #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
+        #expect(editorView.contentOffset.x <= 1)
+    }
+
     @Test("SyntaxEditorView reflects custom iOS color theme")
     @MainActor
     func syntaxEditorViewIOSColorThemeObservation() async {

@@ -607,7 +607,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             setSelectedRange(
                 clampedTextRange(previousSelection, in: nextText),
                 preservesCommandState: true,
-                schedulesSelectionScroll: false
+                schedulesSelectionScroll: true
             )
             updateTypingAttributes()
             updateTextContainerForCurrentWrappingMode()
