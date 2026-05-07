@@ -58,6 +58,27 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
     private var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     private var keyboardAccessoryView: UIView?
     private let modelObservations = ObservationScope()
+    private var modelRenderingWaiters: [ModelRenderingWaiter] = []
+    private var nextModelRenderingWaiterID = 0
+    private var highlightGeneration = 0
+    private var completedHighlightGeneration = 0
+    private var highlightCompletionWaiters: [HighlightCompletionWaiter] = []
+    private var nextHighlightCompletionWaiterID = 0
+
+    private struct ModelRenderingWaiter {
+        let id: Int
+        var remainingRenderedEvents: Int
+        let condition: @MainActor () -> Bool
+        let continuation: CheckedContinuation<Bool, Never>
+        let timeoutTask: Task<Void, Never>
+    }
+
+    private struct HighlightCompletionWaiter {
+        let id: Int
+        let generation: Int
+        let continuation: CheckedContinuation<Void, Never>
+        let timeoutTask: Task<Void, Never>
+    }
 
     public init(model: SyntaxEditorModel) {
         self.model = model
@@ -98,6 +119,68 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
 
     public override var undoManager: UndoManager? {
         guardedUndoManager
+    }
+
+    internal func waitForModelRenderingForTesting(
+        until condition: @escaping @MainActor () -> Bool,
+        maximumRenderedEvents: Int = 4,
+        timeout: Duration = .seconds(5)
+    ) async -> Bool {
+        guard !condition() else { return true }
+
+        return await withCheckedContinuation { continuation in
+            let id = nextModelRenderingWaiterID
+            nextModelRenderingWaiterID += 1
+            let timeoutTask = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(for: timeout)
+                } catch {
+                    return
+                }
+                self?.resolveModelRenderingWaiter(id: id, returning: false)
+            }
+            modelRenderingWaiters.append(
+                ModelRenderingWaiter(
+                    id: id,
+                    remainingRenderedEvents: max(1, maximumRenderedEvents),
+                    condition: condition,
+                    continuation: continuation,
+                    timeoutTask: timeoutTask
+                )
+            )
+        }
+    }
+
+    internal func waitForPendingHighlightForTesting(
+        timeout: Duration = .seconds(5)
+    ) async {
+        let targetGeneration = highlightGeneration
+        guard completedHighlightGeneration < targetGeneration else { return }
+
+        await withCheckedContinuation { continuation in
+            guard completedHighlightGeneration < targetGeneration else {
+                continuation.resume()
+                return
+            }
+            let id = nextHighlightCompletionWaiterID
+            nextHighlightCompletionWaiterID += 1
+            let timeoutTask = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(for: timeout)
+                } catch {
+                    return
+                }
+                self?.resolveHighlightCompletionWaiter(id: id)
+            }
+            highlightCompletionWaiters.append(
+                HighlightCompletionWaiter(
+                    id: id,
+                    generation: targetGeneration,
+                    continuation: continuation,
+                    timeoutTask: timeoutTask
+                )
+            )
+        }
     }
 
     public override var canBecomeFirstResponder: Bool {
@@ -590,9 +673,76 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         }
     }
 
+    private func recordModelRenderingForTesting() {
+        guard !modelRenderingWaiters.isEmpty else { return }
+
+        var pendingWaiters: [ModelRenderingWaiter] = []
+        pendingWaiters.reserveCapacity(modelRenderingWaiters.count)
+
+        for var waiter in modelRenderingWaiters {
+            if waiter.condition() {
+                waiter.timeoutTask.cancel()
+                waiter.continuation.resume(returning: true)
+                continue
+            }
+
+            waiter.remainingRenderedEvents -= 1
+            if waiter.remainingRenderedEvents <= 0 {
+                waiter.timeoutTask.cancel()
+                waiter.continuation.resume(returning: false)
+            } else {
+                pendingWaiters.append(waiter)
+            }
+        }
+
+        modelRenderingWaiters = pendingWaiters
+    }
+
+    private func resolveModelRenderingWaiter(id: Int, returning result: Bool) {
+        guard let waiterIndex = modelRenderingWaiters.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        let waiter = modelRenderingWaiters.remove(at: waiterIndex)
+        waiter.timeoutTask.cancel()
+        waiter.continuation.resume(returning: result)
+    }
+
+    private func recordHighlightCompletionForTesting(generation: Int) {
+        completedHighlightGeneration = max(completedHighlightGeneration, generation)
+        guard !highlightCompletionWaiters.isEmpty else { return }
+
+        var pendingWaiters: [HighlightCompletionWaiter] = []
+        pendingWaiters.reserveCapacity(highlightCompletionWaiters.count)
+
+        for waiter in highlightCompletionWaiters {
+            if waiter.generation <= completedHighlightGeneration {
+                waiter.timeoutTask.cancel()
+                waiter.continuation.resume()
+            } else {
+                pendingWaiters.append(waiter)
+            }
+        }
+
+        highlightCompletionWaiters = pendingWaiters
+    }
+
+    private func resolveHighlightCompletionWaiter(id: Int) {
+        guard let waiterIndex = highlightCompletionWaiters.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        let waiter = highlightCompletionWaiters.remove(at: waiterIndex)
+        waiter.timeoutTask.cancel()
+        waiter.continuation.resume()
+    }
+
     private func applyObservedText(_ text: String, forceTextUpdate: Bool = false) {
         isApplyingModel = true
-        defer { isApplyingModel = false }
+        defer {
+            isApplyingModel = false
+            recordModelRenderingForTesting()
+        }
 
         let textNeedsUpdate = forceTextUpdate || (super.text ?? "") != text
         if textNeedsUpdate {
@@ -627,6 +777,8 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
+        defer { recordModelRenderingForTesting() }
+
         let lineWrappingChanged = lastAppliedLineWrappingEnabled.map { $0 != lineWrappingEnabled } ?? false
         lastAppliedLineWrappingEnabled = lineWrappingEnabled
         let previousColorTheme = lastAppliedColorTheme
@@ -936,18 +1088,24 @@ public final class SyntaxEditorView: UITextView, UITextViewDelegate {
             length: utf16Length - clampedRefreshStart
         )
 
+        highlightGeneration += 1
+        let generation = highlightGeneration
         highlightTask?.cancel()
 
         let highlighter = self.highlighter
         highlightTask = Task { [weak self] in
             let tokens = await highlighter.render(source: expectedSource, language: language)
-            guard !Task.isCancelled else { return }
             guard let self else { return }
+            guard !Task.isCancelled else {
+                self.recordHighlightCompletionForTesting(generation: generation)
+                return
+            }
             self.applyHighlight(
                 tokens,
                 expectedSource: expectedSource,
                 refreshRange: refreshRange
             )
+            self.recordHighlightCompletionForTesting(generation: generation)
         }
     }
 
