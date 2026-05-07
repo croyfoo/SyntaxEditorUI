@@ -2,12 +2,12 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterXML
 
-public struct XMLLanguage: SyntaxLanguage {
-    public init() {}
+struct XMLLanguage {
+    init() {}
 
-    public var identifier: String { "xml" }
-    public var displayName: String { "XML" }
-    public var treeSitterSupport: SyntaxTreeSitterSupport {
+    var identifier: String { "xml" }
+    var displayName: String { "XML" }
+    var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "XML",
             bundleName: "TreeSitterXML_TreeSitterXML",
@@ -15,7 +15,7 @@ public struct XMLLanguage: SyntaxLanguage {
         )
     }
 
-    public func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let targetLinesRange = SyntaxLanguageTextUtilities.selectedLineEnvelope(
@@ -50,7 +50,7 @@ public struct XMLLanguage: SyntaxLanguage {
         )
     }
 
-    public func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
+    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
         let nsSource = source as NSString
         let clampedLocation = max(0, min(location, nsSource.length))
         let prefix = nsSource.substring(to: clampedLocation)

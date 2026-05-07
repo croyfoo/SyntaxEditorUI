@@ -9,11 +9,6 @@ import UIKit
 import AppKit
 #endif
 
-private final class CustomLanguageRecorder: @unchecked Sendable {
-    var toggleCommentCallCount = 0
-    var literalCheckLocations: [Int] = []
-}
-
 private func syntaxEditorTestColor(hex: UInt32) -> SyntaxEditorColor {
     let red = CGFloat((hex >> 16) & 0xFF) / 255.0
     let green = CGFloat((hex >> 8) & 0xFF) / 255.0
@@ -112,178 +107,51 @@ private func syntaxEditorComponents(
         && abs(alpha - 1.0) < 0.002
 }
 
-private struct RecordingLanguage: SyntaxLanguage {
-    let recorder: CustomLanguageRecorder
-    let shouldTreatLocationAsLiteral: Bool
-
-    var identifier: String { "recording-language" }
-    var displayName: String { "Recording" }
-    var treeSitterSupport: SyntaxTreeSitterSupport { BuiltinSyntaxLanguages.json.treeSitterSupport }
-
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        recorder.toggleCommentCallCount += 1
-        return SyntaxLanguageEdit(
-            text: "// " + source,
-            selectedRange: NSRange(location: selection.location + 3, length: selection.length)
-        )
-    }
-
-    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
-        recorder.literalCheckLocations.append(location)
-        return shouldTreatLocationAsLiteral
-    }
-}
-
-private struct WrappedJSONLanguage: SyntaxLanguage {
-    var identifier: String { "wrapped-json" }
-    var displayName: String { "Wrapped JSON" }
-    var treeSitterSupport: SyntaxTreeSitterSupport { BuiltinSyntaxLanguages.json.treeSitterSupport }
-
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        nil
-    }
-
-    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
-        BuiltinSyntaxLanguages.json.isInsideLiteralOrComment(source: source, location: location)
-    }
-}
-
-private struct WrappedHTMLLanguage: SyntaxLanguage {
-    var identifier: String { "wrapped-html" }
-    var displayName: String { "Wrapped HTML" }
-    var treeSitterSupport: SyntaxTreeSitterSupport { BuiltinSyntaxLanguages.html.treeSitterSupport }
-
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        BuiltinSyntaxLanguages.html.toggleComment(source: source, selection: selection)
-    }
-
-    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
-        BuiltinSyntaxLanguages.html.isInsideLiteralOrComment(source: source, location: location)
-    }
-}
-
 private func requireObservable<T: Observable>(_ value: T) {}
-
-private struct CustomCachedHTMLLanguage: SyntaxLanguage {
-    var identifier: String { "custom-cached-html" }
-    var displayName: String { "Custom Cached HTML" }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
-        let support = BuiltinSyntaxLanguages.html.treeSitterSupport
-        return SyntaxTreeSitterSupport(
-            name: support.name,
-            bundleName: "CustomTreeSitterHTML",
-            queryDirectories: [Self.htmlQueriesURL],
-            cacheKey: "custom-cached-html-with-query-directory",
-            makeLanguage: support.makeLanguage
-        )
-    }
-
-    private static var htmlQueriesURL: URL {
-        let fileManager = FileManager.default
-        let bundleName = "\(BuiltinSyntaxLanguages.html.treeSitterSupport.bundleName).bundle"
-
-        let bundleURLs =
-            [Bundle.main.bundleURL] +
-            Bundle.allBundles.map(\.bundleURL) +
-            Bundle.allFrameworks.map(\.bundleURL)
-        for bundleURL in bundleURLs where bundleURL.lastPathComponent == bundleName {
-            let candidates = [
-                bundleURL.appendingPathComponent("queries", isDirectory: true),
-                bundleURL.appendingPathComponent("Contents/Resources/queries", isDirectory: true),
-            ]
-            if let queriesURL = candidates.first(where: { fileManager.fileExists(atPath: $0.path) }) {
-                return queriesURL
-            }
-        }
-
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let buildRoot = repoRoot.appendingPathComponent(".build", isDirectory: true)
-        if let enumerator = fileManager.enumerator(
-            at: buildRoot,
-            includingPropertiesForKeys: nil
-        ) {
-            for case let candidate as URL in enumerator {
-                guard candidate.lastPathComponent == "queries",
-                      candidate.deletingLastPathComponent().lastPathComponent == bundleName
-                else {
-                    continue
-                }
-                return candidate
-            }
-        }
-
-        return buildRoot
-    }
-
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        BuiltinSyntaxLanguages.html.toggleComment(source: source, selection: selection)
-    }
-
-    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
-        BuiltinSyntaxLanguages.html.isInsideLiteralOrComment(source: source, location: location)
-    }
-}
-
-private struct SharedIdentifierLanguage: SyntaxLanguage {
-    let identifier: String
-    let displayName: String
-    let treeSitterSupport: SyntaxTreeSitterSupport
-
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        nil
-    }
-
-    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
-        false
-    }
-}
 
 @Suite("SyntaxEditorCore")
 struct SyntaxEditorCoreTests {
-    @Test("BuiltinSyntaxLanguages.named maps supported values")
+    @Test("SyntaxLanguage.named maps supported values")
     func builtinSyntaxLanguagesNamed() {
-        #expect(BuiltinSyntaxLanguages.named("css")?.identifier == BuiltinSyntaxLanguages.css.identifier)
-        #expect(BuiltinSyntaxLanguages.named("html")?.identifier == BuiltinSyntaxLanguages.html.identifier)
-        #expect(BuiltinSyntaxLanguages.named("HTM")?.identifier == BuiltinSyntaxLanguages.html.identifier)
-        #expect(BuiltinSyntaxLanguages.named(" javascript ")?.identifier == BuiltinSyntaxLanguages.javascript.identifier)
-        #expect(BuiltinSyntaxLanguages.named("JS")?.identifier == BuiltinSyntaxLanguages.javascript.identifier)
-        #expect(BuiltinSyntaxLanguages.named("JSON")?.identifier == BuiltinSyntaxLanguages.json.identifier)
-        #expect(BuiltinSyntaxLanguages.named("objective-c")?.identifier == BuiltinSyntaxLanguages.objectiveC.identifier)
-        #expect(BuiltinSyntaxLanguages.named("objectivec")?.identifier == BuiltinSyntaxLanguages.objectiveC.identifier)
-        #expect(BuiltinSyntaxLanguages.named("objc")?.identifier == BuiltinSyntaxLanguages.objectiveC.identifier)
-        #expect(BuiltinSyntaxLanguages.named("Swift")?.identifier == BuiltinSyntaxLanguages.swift.identifier)
-        #expect(BuiltinSyntaxLanguages.named("toml")?.identifier == BuiltinSyntaxLanguages.toml.identifier)
-        #expect(BuiltinSyntaxLanguages.named("xml")?.identifier == BuiltinSyntaxLanguages.xml.identifier)
+        #expect(SyntaxLanguage.named("css")?.identifier == SyntaxLanguage.css.identifier)
+        #expect(SyntaxLanguage.named("html")?.identifier == SyntaxLanguage.html.identifier)
+        #expect(SyntaxLanguage.named("HTM")?.identifier == SyntaxLanguage.html.identifier)
+        #expect(SyntaxLanguage.named(" javascript ")?.identifier == SyntaxLanguage.javascript.identifier)
+        #expect(SyntaxLanguage.named("JS")?.identifier == SyntaxLanguage.javascript.identifier)
+        #expect(SyntaxLanguage.named("JSON")?.identifier == SyntaxLanguage.json.identifier)
+        #expect(SyntaxLanguage.named("objective-c")?.identifier == SyntaxLanguage.objectiveC.identifier)
+        #expect(SyntaxLanguage.named("objectivec")?.identifier == SyntaxLanguage.objectiveC.identifier)
+        #expect(SyntaxLanguage.named("objc")?.identifier == SyntaxLanguage.objectiveC.identifier)
+        #expect(SyntaxLanguage.named("Swift")?.identifier == SyntaxLanguage.swift.identifier)
+        #expect(SyntaxLanguage.named("toml")?.identifier == SyntaxLanguage.toml.identifier)
+        #expect(SyntaxLanguage.named("xml")?.identifier == SyntaxLanguage.xml.identifier)
     }
 
-    @Test("BuiltinSyntaxLanguages.named rejects unsupported values")
+    @Test("SyntaxLanguage.named rejects unsupported values")
     func builtinSyntaxLanguagesRejectUnsupportedValue() {
-        #expect(BuiltinSyntaxLanguages.named("yaml") == nil)
+        #expect(SyntaxLanguage.named("yaml") == nil)
     }
 
     @Test("SyntaxEditorModel stores and mutates state on MainActor")
     @MainActor
     func syntaxEditorModelState() {
-        let model = SyntaxEditorModel(text: "{}", language: BuiltinSyntaxLanguages.json)
+        let model = SyntaxEditorModel(text: "{}", language: SyntaxLanguage.json)
 
         #expect(model.text == "{}")
-        #expect(model.language.identifier == BuiltinSyntaxLanguages.json.identifier)
+        #expect(model.language.identifier == SyntaxLanguage.json.identifier)
         #expect(model.isEditable == true)
         #expect(model.lineWrappingEnabled == false)
         #expect(model.colorTheme == .xcode)
 
         model.text = "body { color: red; }"
-        model.language = BuiltinSyntaxLanguages.css
+        model.language = SyntaxLanguage.css
         model.isEditable = false
         model.lineWrappingEnabled = true
         let colorTheme = customColorTheme()
         model.colorTheme = colorTheme
 
         #expect(model.text == "body { color: red; }")
-        #expect(model.language.identifier == BuiltinSyntaxLanguages.css.identifier)
+        #expect(model.language.identifier == SyntaxLanguage.css.identifier)
         #expect(model.isEditable == false)
         #expect(model.lineWrappingEnabled == true)
         #expect(model.colorTheme == colorTheme)
@@ -295,7 +163,7 @@ struct SyntaxEditorCoreTests {
         let theme = customColorTheme()
         let model = SyntaxEditorModel(
             text: "let value = 1",
-            language: BuiltinSyntaxLanguages.swift,
+            language: SyntaxLanguage.swift,
             colorTheme: theme
         )
 
@@ -394,7 +262,7 @@ struct SyntaxEditorCoreTests {
             source: "",
             range: NSRange(location: 0, length: 0),
             replacementText: "{",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == "{}")
@@ -408,7 +276,7 @@ struct SyntaxEditorCoreTests {
             source: "value",
             range: NSRange(location: 0, length: 5),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == "\"value\"")
@@ -424,7 +292,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: selection,
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result == nil)
@@ -437,7 +305,7 @@ struct SyntaxEditorCoreTests {
             source: "{}",
             range: NSRange(location: 1, length: 0),
             replacementText: "}",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == "{}")
@@ -452,7 +320,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: 6, length: 0),
             replacementText: "}",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source)
@@ -466,7 +334,7 @@ struct SyntaxEditorCoreTests {
             source: "{}",
             range: NSRange(location: 1, length: 0),
             replacementText: "\n",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == "{\n    \n}")
@@ -484,7 +352,7 @@ struct SyntaxEditorCoreTests {
                 source: source,
                 range: selection,
                 replacementText: "\n",
-                language: BuiltinSyntaxLanguages.javascript
+                language: SyntaxLanguage.javascript
             ) else {
                 Issue.record("Smart newline unexpectedly returned nil")
                 return
@@ -503,7 +371,7 @@ struct SyntaxEditorCoreTests {
             source: "    ",
             range: NSRange(location: 4, length: 0),
             replacementText: "}",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == "}")
@@ -517,7 +385,7 @@ struct SyntaxEditorCoreTests {
             source: "\t\t",
             range: NSRange(location: 2, length: 0),
             replacementText: "}",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == "\t}")
@@ -531,7 +399,7 @@ struct SyntaxEditorCoreTests {
             source: "()",
             range: NSRange(location: 0, length: 1),
             replacementText: "",
-            language: BuiltinSyntaxLanguages.javascript,
+            language: SyntaxLanguage.javascript,
             deletionIntent: .backward
         )
 
@@ -546,7 +414,7 @@ struct SyntaxEditorCoreTests {
             source: "{}",
             range: NSRange(location: 0, length: 1),
             replacementText: "",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result == nil)
@@ -607,7 +475,7 @@ struct SyntaxEditorCoreTests {
         let first = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(first?.text == "// let a = 1;\n// let b = 2;\n")
@@ -615,7 +483,7 @@ struct SyntaxEditorCoreTests {
         let second = engine.toggleComment(
             source: first?.text ?? "",
             selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(second?.text == source)
@@ -629,7 +497,7 @@ struct SyntaxEditorCoreTests {
         let first = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.swift
+            language: SyntaxLanguage.swift
         )
 
         #expect(first?.text == "// let a = 1\n// let b = 2\n")
@@ -637,7 +505,7 @@ struct SyntaxEditorCoreTests {
         let second = engine.toggleComment(
             source: first?.text ?? "",
             selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
-            language: BuiltinSyntaxLanguages.swift
+            language: SyntaxLanguage.swift
         )
 
         #expect(second?.text == source)
@@ -651,7 +519,7 @@ struct SyntaxEditorCoreTests {
         let first = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.objectiveC
+            language: SyntaxLanguage.objectiveC
         )
 
         #expect(first?.text == "// NSString *name = @\"Editor\";\n// return name;\n")
@@ -659,7 +527,7 @@ struct SyntaxEditorCoreTests {
         let second = engine.toggleComment(
             source: first?.text ?? "",
             selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
-            language: BuiltinSyntaxLanguages.objectiveC
+            language: SyntaxLanguage.objectiveC
         )
 
         #expect(second?.text == source)
@@ -673,7 +541,7 @@ struct SyntaxEditorCoreTests {
         let first = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(first?.text == "# title = \"SyntaxEditorUI\"\n# enabled = true\n")
@@ -681,7 +549,7 @@ struct SyntaxEditorCoreTests {
         let second = engine.toggleComment(
             source: first?.text ?? "",
             selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(second?.text == source)
@@ -695,7 +563,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result?.text == "# title = \"SyntaxEditorUI\"\n\n# enabled = true\n")
@@ -710,7 +578,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: caret, length: 0),
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result?.text == "title = \"SyntaxEditorUI\"\n# enabled = true\n")
@@ -724,7 +592,7 @@ struct SyntaxEditorCoreTests {
         let first = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.css
+            language: SyntaxLanguage.css
         )
 
         #expect(first?.text.contains("/*") == true)
@@ -733,7 +601,7 @@ struct SyntaxEditorCoreTests {
         let second = engine.toggleComment(
             source: first?.text ?? "",
             selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
-            language: BuiltinSyntaxLanguages.css
+            language: SyntaxLanguage.css
         )
 
         #expect(second?.text == source)
@@ -746,7 +614,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.css
+            language: SyntaxLanguage.css
         )
 
         #expect(result == nil)
@@ -759,7 +627,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.css
+            language: SyntaxLanguage.css
         )
 
         #expect(result == nil)
@@ -773,7 +641,7 @@ struct SyntaxEditorCoreTests {
         let first = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(first?.text == "<!-- <div>hello</div>\n -->")
@@ -781,7 +649,7 @@ struct SyntaxEditorCoreTests {
         let second = engine.toggleComment(
             source: first?.text ?? "",
             selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(second?.text == source)
@@ -795,7 +663,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -809,7 +677,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -823,7 +691,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -837,7 +705,7 @@ struct SyntaxEditorCoreTests {
         let first = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(first?.text == "<!-- <note>hello</note>\n -->")
@@ -845,7 +713,7 @@ struct SyntaxEditorCoreTests {
         let second = engine.toggleComment(
             source: first?.text ?? "",
             selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(second?.text == source)
@@ -860,7 +728,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: caret, length: 0),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<!-- <note priority=\"high\">hello</note>\n -->")
@@ -874,7 +742,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -888,7 +756,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -910,7 +778,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -933,7 +801,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -955,7 +823,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -977,7 +845,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == """
@@ -1000,7 +868,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: caret, length: 0),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == """
@@ -1026,7 +894,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == """
@@ -1048,7 +916,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: 0),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -1062,7 +930,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<!-- <!DOCTYPE note>\n -->")
@@ -1076,7 +944,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<!-- <!DOCTYPE note SYSTEM \"foo[bar].dtd\">\n -->")
@@ -1090,7 +958,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<!-- <!DOCTYPE note SYSTEM \"foo\n[bar].dtd\">\n -->")
@@ -1109,7 +977,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: closingLineLocation, length: 0),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -1130,7 +998,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: start, length: end - start),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -1151,7 +1019,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: end),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -1177,7 +1045,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -1191,7 +1059,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: source.utf16.count),
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -1214,7 +1082,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == """
@@ -1235,7 +1103,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == "\(startTag)// const answer = 42;\n</script>")
@@ -1253,7 +1121,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == "<script/>// const answer = 42;\n</script>")
@@ -1269,7 +1137,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == "\(startTag)// const answer = 42;\n</script>")
@@ -1285,7 +1153,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == "\(startTag)// const answer = 42;\n</script>")
@@ -1306,7 +1174,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1320,7 +1188,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: source.utf16.count, length: 0),
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1341,7 +1209,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1362,7 +1230,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text.contains("<!-- <span>Hello</span>") == true)
@@ -1383,7 +1251,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1403,7 +1271,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: (source as NSString).length),
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1421,7 +1289,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1439,7 +1307,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1457,7 +1325,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1477,7 +1345,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1492,7 +1360,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == "<style>/* body { color: red; }\n */</style>")
@@ -1514,7 +1382,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1540,7 +1408,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1567,7 +1435,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1587,7 +1455,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1602,7 +1470,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1624,7 +1492,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1650,7 +1518,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1677,7 +1545,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1706,7 +1574,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1735,7 +1603,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1758,7 +1626,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1782,7 +1650,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: NSRange(location: 0, length: (source as NSString).length),
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -1806,7 +1674,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1835,7 +1703,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1860,7 +1728,7 @@ struct SyntaxEditorCoreTests {
                 location: (source as NSString).range(of: "<div>").location,
                 length: "<div>hello</div>\n".utf16.count
             ),
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1885,7 +1753,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: source,
             selection: selection,
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == """
@@ -1907,7 +1775,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == source + "\"\"")
@@ -1920,7 +1788,7 @@ struct SyntaxEditorCoreTests {
         let result = engine.toggleComment(
             source: "{\"a\":1}",
             selection: NSRange(location: 0, length: 7),
-            language: BuiltinSyntaxLanguages.json
+            language: SyntaxLanguage.json
         )
 
         #expect(result == nil)
@@ -1934,7 +1802,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -1949,7 +1817,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.swift
+            language: SyntaxLanguage.swift
         )
 
         #expect(result == nil)
@@ -1963,7 +1831,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.objectiveC
+            language: SyntaxLanguage.objectiveC
         )
 
         #expect(result?.text == source + "\"\"")
@@ -1978,7 +1846,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.objectiveC
+            language: SyntaxLanguage.objectiveC
         )
 
         #expect(result == nil)
@@ -1992,7 +1860,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.objectiveC
+            language: SyntaxLanguage.objectiveC
         )
 
         #expect(result == nil)
@@ -2006,7 +1874,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.objectiveC
+            language: SyntaxLanguage.objectiveC
         )
 
         #expect(result == nil)
@@ -2020,7 +1888,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.objectiveC
+            language: SyntaxLanguage.objectiveC
         )
 
         #expect(result == nil)
@@ -2034,7 +1902,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2049,7 +1917,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result == nil)
@@ -2063,7 +1931,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result == nil)
@@ -2077,7 +1945,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "'",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result == nil)
@@ -2091,7 +1959,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result == nil)
@@ -2105,7 +1973,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "'",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result == nil)
@@ -2119,7 +1987,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2134,7 +2002,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2149,7 +2017,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "'",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result?.text == source + "''")
@@ -2165,19 +2033,19 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
         let second = engine.transformInput(
             source: first?.text ?? "",
             range: first?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
         let third = engine.transformInput(
             source: second?.text ?? "",
             range: second?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(first?.text == source + "\"\"")
@@ -2195,19 +2063,19 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "'",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
         let second = engine.transformInput(
             source: first?.text ?? "",
             range: first?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "'",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
         let third = engine.transformInput(
             source: second?.text ?? "",
             range: second?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "'",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(first?.text == source + "''")
@@ -2225,13 +2093,13 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
         let second = engine.transformInput(
             source: first?.text ?? "",
             range: first?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         _ = engine.indentSelection(
@@ -2243,7 +2111,7 @@ struct SyntaxEditorCoreTests {
             source: second?.text ?? "",
             range: second?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(third?.text == source + "\"\"\"\"")
@@ -2259,13 +2127,13 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
         let second = engine.transformInput(
             source: first?.text ?? "",
             range: first?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         engine.invalidateTransientState()
@@ -2274,7 +2142,7 @@ struct SyntaxEditorCoreTests {
             source: second?.text ?? "",
             range: second?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(third?.text == source + "\"\"\"\"")
@@ -2289,7 +2157,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2304,7 +2172,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2319,7 +2187,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "'",
-            language: BuiltinSyntaxLanguages.toml
+            language: SyntaxLanguage.toml
         )
 
         #expect(result?.text == source + "''")
@@ -2334,7 +2202,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == "<div class=\"\"")
@@ -2349,7 +2217,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -2363,7 +2231,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -2377,7 +2245,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -2391,7 +2259,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -2406,7 +2274,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: prefix.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == prefix + "\"\"" + "</script>")
@@ -2422,7 +2290,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: prefix.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -2437,7 +2305,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: prefix.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result?.text == prefix + "\"\"" + "</style>")
@@ -2453,7 +2321,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: prefix.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.html
+            language: SyntaxLanguage.html
         )
 
         #expect(result == nil)
@@ -2474,7 +2342,7 @@ struct SyntaxEditorCoreTests {
                 source: source,
                 range: NSRange(location: closingTagRange.location + closingTagRange.length, length: 0),
                 replacementText: "\"",
-                language: BuiltinSyntaxLanguages.html
+                language: SyntaxLanguage.html
             )
 
             #expect(result == nil)
@@ -2489,7 +2357,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<node attr=\"\"")
@@ -2504,7 +2372,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<?xml-stylesheet href=\"\"")
@@ -2525,7 +2393,7 @@ struct SyntaxEditorCoreTests {
                 source: source,
                 range: NSRange(location: source.utf16.count, length: 0),
                 replacementText: "\"",
-                language: BuiltinSyntaxLanguages.xml
+                language: SyntaxLanguage.xml
             )
 
             #expect(result?.text == source + "\"\"")
@@ -2541,7 +2409,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -2555,7 +2423,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<élement attr=\"\"")
@@ -2570,7 +2438,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<a·b attr=\"\"")
@@ -2585,7 +2453,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<𐐷node attr=\"\"")
@@ -2600,7 +2468,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2615,7 +2483,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result?.text == "<!ENTITY 𐐷foo \"\"")
@@ -2630,7 +2498,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -2644,7 +2512,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -2658,7 +2526,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -2672,7 +2540,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.xml
+            language: SyntaxLanguage.xml
         )
 
         #expect(result == nil)
@@ -2686,7 +2554,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.swift
+            language: SyntaxLanguage.swift
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2701,7 +2569,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.swift
+            language: SyntaxLanguage.swift
         )
 
         #expect(result == nil)
@@ -2715,7 +2583,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.swift
+            language: SyntaxLanguage.swift
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2730,7 +2598,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.swift
+            language: SyntaxLanguage.swift
         )
 
         #expect(result == nil)
@@ -2744,7 +2612,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.swift
+            language: SyntaxLanguage.swift
         )
 
         #expect(result == nil)
@@ -2758,7 +2626,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.css
+            language: SyntaxLanguage.css
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2773,7 +2641,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2788,7 +2656,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2803,7 +2671,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2818,7 +2686,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2833,7 +2701,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2848,7 +2716,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2863,7 +2731,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2878,7 +2746,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2893,7 +2761,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2908,7 +2776,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2923,7 +2791,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result == nil)
@@ -2937,7 +2805,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result == nil)
@@ -2951,7 +2819,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2966,7 +2834,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2981,7 +2849,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -2996,7 +2864,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3011,7 +2879,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3026,7 +2894,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3041,7 +2909,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3056,7 +2924,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3071,7 +2939,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3086,7 +2954,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3101,7 +2969,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3116,7 +2984,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3131,7 +2999,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3146,7 +3014,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3161,7 +3029,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3176,7 +3044,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3191,7 +3059,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3206,7 +3074,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3221,7 +3089,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result == nil)
@@ -3235,7 +3103,7 @@ struct SyntaxEditorCoreTests {
             source: source,
             range: NSRange(location: source.utf16.count, length: 0),
             replacementText: "\"",
-            language: BuiltinSyntaxLanguages.javascript
+            language: SyntaxLanguage.javascript
         )
 
         #expect(result?.text == source + "\"\"")
@@ -3258,41 +3126,6 @@ struct SyntaxEditorCoreTests {
         #expect(ranges[1].length == 1)
     }
 
-    @Test("EditorCommandEngine delegates toggle comment to custom language")
-    func editorCommandEngineDelegatesToggleCommentToCustomLanguage() {
-        let engine = EditorCommandEngine()
-        let recorder = CustomLanguageRecorder()
-        let language = RecordingLanguage(recorder: recorder, shouldTreatLocationAsLiteral: false)
-
-        let result = engine.toggleComment(
-            source: "value = 1",
-            selection: NSRange(location: 0, length: 5),
-            language: language
-        )
-
-        #expect(recorder.toggleCommentCallCount == 1)
-        #expect(result?.text == "// value = 1")
-        #expect(result?.selectedRange == NSRange(location: 3, length: 5))
-    }
-
-    @Test("EditorCommandEngine delegates quote suppression to custom language")
-    func editorCommandEngineDelegatesLiteralDetectionToCustomLanguage() {
-        let engine = EditorCommandEngine()
-        let recorder = CustomLanguageRecorder()
-        let source = "value = "
-        let language = RecordingLanguage(recorder: recorder, shouldTreatLocationAsLiteral: true)
-
-        let result = engine.transformInput(
-            source: source,
-            range: NSRange(location: source.utf16.count, length: 0),
-            replacementText: "\"",
-            language: language
-        )
-
-        #expect(result == nil)
-        #expect(recorder.literalCheckLocations == [source.utf16.count])
-    }
-
 }
 
 private let sharedSyntaxHighlighterEngine = SyntaxHighlighterEngine()
@@ -3302,18 +3135,18 @@ struct SyntaxHighlighterEngineTests {
     @Test("SyntaxHighlighterEngine returns no tokens for empty source")
     func highlighterReturnsNoTokensForEmptySource() async {
         let engine = sharedSyntaxHighlighterEngine
-        let tokens = await engine.render(source: "", language: BuiltinSyntaxLanguages.javascript)
+        let tokens = await engine.render(source: "", language: SyntaxLanguage.javascript)
         #expect(tokens.isEmpty)
     }
 
     @Test("SyntaxHighlighterEngine produces highlight tokens for lightweight direct languages")
     func highlighterProducesTokensForLightweightDirectLanguages() async {
         let engine = sharedSyntaxHighlighterEngine
-        let cases: [(language: any SyntaxLanguage, source: String)] = [
-            (BuiltinSyntaxLanguages.css, "body { color: red; }"),
-            (BuiltinSyntaxLanguages.javascript, "const answer = 42;"),
-            (BuiltinSyntaxLanguages.json, "{\"enabled\": true, \"count\": 1}"),
-            (BuiltinSyntaxLanguages.swift, "let answer = 42"),
+        let cases: [(language: SyntaxLanguage, source: String)] = [
+            (SyntaxLanguage.css, "body { color: red; }"),
+            (SyntaxLanguage.javascript, "const answer = 42;"),
+            (SyntaxLanguage.json, "{\"enabled\": true, \"count\": 1}"),
+            (SyntaxLanguage.swift, "let answer = 42"),
         ]
 
         for testCase in cases {
@@ -3328,8 +3161,8 @@ struct SyntaxHighlighterEngineTests {
         let engine = sharedSyntaxHighlighterEngine
         let source = "const value = 42; const message = 'ok';"
 
-        let first = await engine.render(source: source, language: BuiltinSyntaxLanguages.javascript)
-        let second = await engine.render(source: source, language: BuiltinSyntaxLanguages.javascript)
+        let first = await engine.render(source: source, language: SyntaxLanguage.javascript)
+        let second = await engine.render(source: source, language: SyntaxLanguage.javascript)
 
         #expect(first.isEmpty == false)
         #expect(first.count == second.count)
@@ -3339,7 +3172,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterHandlesNonASCIIRanges() async {
         let engine = sharedSyntaxHighlighterEngine
         let source = "const label = \"こんにちは😀\";"
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.javascript)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.javascript)
         let sourceLength = source.utf16.count
 
         #expect(tokens.isEmpty == false)
@@ -3368,7 +3201,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
 
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.objectiveC)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.objectiveC)
         let nsSource = source as NSString
         let importRange = nsSource.range(of: "#import")
         let interfaceRange = nsSource.range(of: "@interface")
@@ -3410,7 +3243,7 @@ struct SyntaxHighlighterEngineTests {
         <div class="hero">Hello</div>
         """
 
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let nsSource = source as NSString
         let stylePropertyRange = nsSource.range(of: "color")
         let scriptKeywordRange = nsSource.range(of: "const")
@@ -3440,7 +3273,7 @@ struct SyntaxHighlighterEngineTests {
         <note priority="high"><!-- reminder --><![CDATA[<escaped/>]]></note>
         """
 
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.xml)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.xml)
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains { $0.captureName.hasPrefix("keyword") })
@@ -3460,7 +3293,7 @@ struct SyntaxHighlighterEngineTests {
         count = 1
         """
 
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.toml)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.toml)
         let nsSource = source as NSString
         let commentRange = nsSource.range(of: "# comment")
         let propertyRange = nsSource.range(of: "name")
@@ -3491,37 +3324,11 @@ struct SyntaxHighlighterEngineTests {
         })
     }
 
-    @Test("SyntaxHighlighterEngine highlights embedded languages for wrapped HTML")
-    func highlighterSupportsWrappedHTMLInjections() async {
-        let engine = sharedSyntaxHighlighterEngine
-        let language = WrappedHTMLLanguage()
-        let source = """
-        <style>body { color: red; }</style>
-        <script>const answer = 42;</script>
-        <section class="hero">Hello</section>
-        """
-
-        let tokens = await engine.render(source: source, language: language)
-        let nsSource = source as NSString
-        let stylePropertyRange = nsSource.range(of: "color")
-        let scriptKeywordRange = nsSource.range(of: "const")
-
-        #expect(tokens.isEmpty == false)
-        #expect(tokens.contains {
-            $0.captureName.hasPrefix("property") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
-        })
-        #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
-        })
-    }
-
     @Test("SyntaxHighlighterEngine does not inject unsupported script types")
     func highlighterSkipsUnsupportedScriptTypeInjections() async {
         let engine = sharedSyntaxHighlighterEngine
         let source = #"<script type="application/json">{"enabled": true}</script>"#
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let trueRange = (source as NSString).range(of: "true")
 
         #expect(tokens.isEmpty == false)
@@ -3538,7 +3345,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterSkipsNonJavaScriptScriptTypeInjections() async {
         let engine = sharedSyntaxHighlighterEngine
         let source = #"<script type="text/plain">const answer = true;</script>"#
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let constRange = (source as NSString).range(of: "const")
         let trueRange = (source as NSString).range(of: "true")
 
@@ -3557,7 +3364,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterMasksUnsupportedScriptTypesThroughEOFWithoutClosingTag() async {
         let engine = sharedSyntaxHighlighterEngine
         let source = #"<script type="application/json">{"enabled": true}"#
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let trueRange = (source as NSString).range(of: "true")
 
         #expect(tokens.isEmpty == false)
@@ -3571,7 +3378,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterKeepsHighlightingSupportedScriptContentPastLiteralClosingTagText() async {
         let engine = sharedSyntaxHighlighterEngine
         let source = #"<script>const marker = "</script>"; const answer = 42;</script>"#
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let answerConstRange = (source as NSString).range(of: "const answer")
 
         #expect(tokens.contains {
@@ -3584,7 +3391,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterKeepsHighlightingSupportedScriptContentPastRepeatedLiteralClosingTagText() async {
         let engine = sharedSyntaxHighlighterEngine
         let source = #"<script>const markers = ["</script>", "</script>"]; const answer = 42;</script>"#
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let answerConstRange = (source as NSString).range(of: "const answer")
 
         #expect(tokens.contains {
@@ -3600,7 +3407,7 @@ struct SyntaxHighlighterEngineTests {
         <!-- <script type="text/plain"> -->
         <div class="hero">Hello</div>
         """
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let divRange = (source as NSString).range(of: "<div")
 
         #expect(tokens.contains {
@@ -3613,7 +3420,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterKeepsMaskingUnsupportedScriptContentPastLongerClosingPrefixes() async {
         let engine = sharedSyntaxHighlighterEngine
         let source = #"<script type="application/json">{"marker":"</scripted>","enabled":true}</script>"#
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let trueRange = (source as NSString).range(of: "true")
 
         #expect(tokens.isEmpty == false)
@@ -3627,7 +3434,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterSkipsUnsupportedScriptTypeInjectionsWithQuotedAngleBracketInStartTag() async {
         let engine = sharedSyntaxHighlighterEngine
         let source = #"<script data="a>b" type="application/json">{"enabled": true}</script>"#
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let trueRange = (source as NSString).range(of: "true")
 
         #expect(tokens.isEmpty == false)
@@ -3644,27 +3451,13 @@ struct SyntaxHighlighterEngineTests {
         <div data='<script type="application/json">'>Container</div>
         <span class="hero">Hello</span>
         """
-        let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
         let spanRange = (source as NSString).range(of: "<span")
 
         #expect(tokens.contains {
             $0.captureName.hasPrefix("tag") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: spanRange).length > 0
         })
-    }
-
-    @Test("SyntaxHighlighterEngine masks unsupported script types for custom HTML support")
-    func highlighterMasksUnsupportedScriptTypesForCustomHTMLSupport() async {
-        let engine = sharedSyntaxHighlighterEngine
-        let source = #"<script type="application/json">{"enabled": true}</script>"#
-        let tokens = await engine.render(source: source, language: CustomCachedHTMLLanguage())
-        let trueRange = (source as NSString).range(of: "true")
-
-        #expect(tokens.isEmpty == false)
-        #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
-        } == false)
     }
 
     @Test("SyntaxHighlighterEngine skips malformed attribute tokens in unsupported script tags")
@@ -3681,7 +3474,7 @@ struct SyntaxHighlighterEngineTests {
         ]
 
         for source in cases {
-            let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+            let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
             let trueRange = (source as NSString).range(of: "true")
 
             #expect(tokens.isEmpty == false)
@@ -3702,7 +3495,7 @@ struct SyntaxHighlighterEngineTests {
         ]
 
         for source in cases {
-            let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+            let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
             let constRange = (source as NSString).range(of: "const")
 
             #expect(tokens.contains {
@@ -3721,7 +3514,7 @@ struct SyntaxHighlighterEngineTests {
         ]
 
         for source in cases {
-            let tokens = await engine.render(source: source, language: BuiltinSyntaxLanguages.html)
+            let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
             let constRange = (source as NSString).range(of: "const")
 
             #expect(tokens.contains {
@@ -3731,53 +3524,4 @@ struct SyntaxHighlighterEngineTests {
         }
     }
 
-    @Test("SyntaxHighlighterEngine supports custom language wrappers")
-    func highlighterSupportsCustomLanguageWrappers() async {
-        let engine = sharedSyntaxHighlighterEngine
-        let language = WrappedJSONLanguage()
-        let tokens = await engine.render(
-            source: "{\"enabled\": true, \"count\": 1}",
-            language: language
-        )
-
-        #expect(tokens.isEmpty == false)
-        #expect(tokens.allSatisfy { $0.range.length > 0 })
-    }
-
-    @Test("SyntaxLanguage highlight cache key changes when support changes")
-    func syntaxLanguageHighlightCacheKeyReflectsSupport() {
-        let json = SharedIdentifierLanguage(
-            identifier: "shared-language",
-            displayName: "Shared JSON",
-            treeSitterSupport: BuiltinSyntaxLanguages.json.treeSitterSupport
-        )
-        let css = SharedIdentifierLanguage(
-            identifier: "shared-language",
-            displayName: "Shared CSS",
-            treeSitterSupport: BuiltinSyntaxLanguages.css.treeSitterSupport
-        )
-
-        #expect(json.syntaxHighlightCacheKey != css.syntaxHighlightCacheKey)
-    }
-
-    @Test("SyntaxHighlighterEngine separates shared identifiers by support")
-    func highlighterSeparatesSharedIdentifiersBySupport() async {
-        let engine = sharedSyntaxHighlighterEngine
-        let json = SharedIdentifierLanguage(
-            identifier: "shared-language",
-            displayName: "Shared JSON",
-            treeSitterSupport: BuiltinSyntaxLanguages.json.treeSitterSupport
-        )
-        let css = SharedIdentifierLanguage(
-            identifier: "shared-language",
-            displayName: "Shared CSS",
-            treeSitterSupport: BuiltinSyntaxLanguages.css.treeSitterSupport
-        )
-
-        let jsonTokens = await engine.render(source: "{\"enabled\": true}", language: json)
-        let cssTokens = await engine.render(source: "body { color: red; }", language: css)
-
-        #expect(jsonTokens.isEmpty == false)
-        #expect(cssTokens.isEmpty == false)
-    }
 }

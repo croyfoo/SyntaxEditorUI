@@ -23,7 +23,7 @@ struct MiniPreviewPreset {
 
     let id: ID
     let sampleText: String
-    let language: any SyntaxLanguage
+    let language: SyntaxLanguage
 
     var title: String {
         language.displayName
@@ -36,7 +36,7 @@ struct MiniPreviewPreset {
     static let css = MiniPreviewPreset(
         id: .css,
         sampleText: "body {\n    color: red;\n    background: white;\n}\n",
-        language: BuiltinSyntaxLanguages.css
+        language: SyntaxLanguage.css
     )
 
     static let html = MiniPreviewPreset(
@@ -58,7 +58,7 @@ struct MiniPreviewPreset {
         </body>
         </html>
         """,
-        language: BuiltinSyntaxLanguages.html
+        language: SyntaxLanguage.html
     )
 
     static let javascript = MiniPreviewPreset(
@@ -69,7 +69,7 @@ struct MiniPreviewPreset {
             return `Hello, ${name}! ` + "\(String(repeating: "Hello, ", count: 120))";
         }
         """,
-        language: BuiltinSyntaxLanguages.javascript
+        language: SyntaxLanguage.javascript
     )
 
     static let json = MiniPreviewPreset(
@@ -80,7 +80,7 @@ struct MiniPreviewPreset {
           \"count\": 1
         }
         """,
-        language: BuiltinSyntaxLanguages.json
+        language: SyntaxLanguage.json
     )
 
     static let objectiveC = MiniPreviewPreset(
@@ -90,7 +90,7 @@ struct MiniPreviewPreset {
         @interface Sample : NSObject
         @end
         """,
-        language: BuiltinSyntaxLanguages.objectiveC
+        language: SyntaxLanguage.objectiveC
     )
 
     static let swift = MiniPreviewPreset(
@@ -100,7 +100,7 @@ struct MiniPreviewPreset {
             let message = \"Hello\"
         }
         """,
-        language: BuiltinSyntaxLanguages.swift
+        language: SyntaxLanguage.swift
     )
 
     static let toml = MiniPreviewPreset(
@@ -110,7 +110,7 @@ struct MiniPreviewPreset {
         name = \"SyntaxEditorUI\"
         enabled = true
         """,
-        language: BuiltinSyntaxLanguages.toml
+        language: SyntaxLanguage.toml
     )
 
     static let xml = MiniPreviewPreset(
@@ -119,7 +119,7 @@ struct MiniPreviewPreset {
         <?xml version=\"1.0\"?>
         <note priority=\"high\">Hello</note>
         """,
-        language: BuiltinSyntaxLanguages.xml
+        language: SyntaxLanguage.xml
     )
 
     static let all: [MiniPreviewPreset] = [

@@ -4,14 +4,14 @@ import Observation
 @Observable
 public final class SyntaxEditorModel {
     public var text: String
-    public var language: any SyntaxLanguage
+    public var language: SyntaxLanguage
     public var isEditable: Bool
     public var lineWrappingEnabled: Bool
     public var colorTheme: SyntaxEditorColorTheme
 
     public init(
         text: String = "",
-        language: any SyntaxLanguage,
+        language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
         colorTheme: SyntaxEditorColorTheme = .xcode
@@ -21,20 +21,5 @@ public final class SyntaxEditorModel {
         self.isEditable = isEditable
         self.lineWrappingEnabled = lineWrappingEnabled
         self.colorTheme = colorTheme
-    }
-
-    public convenience init(
-        text: String = "",
-        isEditable: Bool = true,
-        lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .xcode
-    ) {
-        self.init(
-            text: text,
-            language: BuiltinSyntaxLanguages.javascript,
-            isEditable: isEditable,
-            lineWrappingEnabled: lineWrappingEnabled,
-            colorTheme: colorTheme
-        )
     }
 }

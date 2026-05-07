@@ -2,12 +2,12 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterObjc
 
-public struct ObjectiveCLanguage: SyntaxLanguage {
-    public init() {}
+struct ObjectiveCLanguage {
+    init() {}
 
-    public var identifier: String { "objective-c" }
-    public var displayName: String { "Objective-C" }
-    public var treeSitterSupport: SyntaxTreeSitterSupport {
+    var identifier: String { "objective-c" }
+    var displayName: String { "Objective-C" }
+    var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "Objective-C",
             bundleName: "TreeSitterObjc_TreeSitterObjc",
@@ -16,7 +16,7 @@ public struct ObjectiveCLanguage: SyntaxLanguage {
         )
     }
 
-    public func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
         SyntaxLanguageTextUtilities.toggleLineComment(
             source: source,
             selection: selection,
@@ -24,7 +24,7 @@ public struct ObjectiveCLanguage: SyntaxLanguage {
         )
     }
 
-    public func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
+    func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
         let nsSource = source as NSString
         let clampedLocation = max(0, min(location, nsSource.length))
         let prefix = nsSource.substring(to: clampedLocation)
