@@ -78,11 +78,14 @@ extension SyntaxEditorView {
 
     public func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
         guard model.isEditable else { return }
+        guard let markedText else {
+            unmarkText()
+            return
+        }
 
-        let replacement = markedText ?? ""
         let replacementRange = markedRange ?? self.selectedRange
         let clampedReplacementRange = clampedTextRange(replacementRange)
-        replaceMarkedText(in: clampedReplacementRange, replacement: replacement, selectedRange: selectedRange)
+        replaceMarkedText(in: clampedReplacementRange, replacement: markedText, selectedRange: selectedRange)
     }
 
     func replaceMarkedText(in range: NSRange, replacement: String, selectedRange: NSRange) {

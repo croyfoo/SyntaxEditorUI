@@ -600,6 +600,25 @@ struct SyntaxEditorUITests {
         #expect(model.text == source)
     }
 
+    @Test("SyntaxEditorView preserves iOS marked text when nil unmarks composition")
+    @MainActor
+    func syntaxEditorViewIOSPreservesMarkedTextWhenNilUnmarksComposition() {
+        let source = "let value = "
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+
+        editorView.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 0))
+        editorView.setMarkedText(nil, selectedRange: NSRange(location: 0, length: 0))
+
+        let expectedText = source + "かな"
+        #expect(editorView.markedTextRange == nil)
+        #expect(editorView.text == expectedText)
+        #expect(model.text == expectedText)
+        #expect(editorView.selectedRange == NSRange(location: expectedText.utf16.count, length: 0))
+    }
+
     @Test("SyntaxEditorView does not commit iOS marked text while read-only")
     @MainActor
     func syntaxEditorViewIOSDoesNotCommitMarkedTextWhileReadOnly() {
