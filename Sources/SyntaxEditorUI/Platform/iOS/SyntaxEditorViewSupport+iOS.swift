@@ -124,7 +124,8 @@ final class SyntaxEditorTextContentView: UIView {
 
 final class SyntaxEditorTextLayoutFragmentView: UIView {
     let layoutFragment: NSTextLayoutFragment
-    weak var editorView: SyntaxEditorView?
+    var bracketHighlightRects: [CGRect] = []
+    var bracketHighlightColor: CGColor?
 
     init(layoutFragment: NSTextLayoutFragment, frame: CGRect) {
         self.layoutFragment = layoutFragment
@@ -144,13 +145,12 @@ final class SyntaxEditorTextLayoutFragmentView: UIView {
             return
         }
 
-        if let editorView {
+        if let bracketHighlightColor, !bracketHighlightRects.isEmpty {
             context.saveGState()
-            context.translateBy(x: -frame.minX, y: -frame.minY)
-            editorView.drawBracketHighlights(
-                in: rect.offsetBy(dx: frame.minX, dy: frame.minY),
-                context: context
-            )
+            context.setFillColor(bracketHighlightColor)
+            for bracketRect in bracketHighlightRects where bracketRect.intersects(rect) {
+                context.fill(bracketRect)
+            }
             context.restoreGState()
         }
         layoutFragment.draw(at: .zero, in: context)

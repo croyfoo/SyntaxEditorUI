@@ -12,6 +12,13 @@ extension SyntaxEditorView {
     }
 
     public func insertText(_ text: String) {
+        guard model.isEditable else { return }
+
+        if markedRange != nil {
+            replaceCommittedMarkedText(with: text)
+            return
+        }
+
         applyUserReplacement(in: selectedRange, replacement: text, deletionIntent: .unspecified)
     }
 
@@ -69,32 +76,121 @@ extension SyntaxEditorView {
 
         let replacement = markedText ?? ""
         let replacementRange = markedRange ?? self.selectedRange
-        applyUserReplacement(
-            in: replacementRange,
-            replacement: replacement,
-            deletionIntent: .unspecified,
-            allowsCommandTransform: false
+        let clampedReplacementRange = clampedTextRange(replacementRange)
+        replaceMarkedText(in: clampedReplacementRange, replacement: replacement, selectedRange: selectedRange)
+    }
+
+    func replaceMarkedText(in range: NSRange, replacement: String, selectedRange: NSRange) {
+        let source = text
+        let clampedRange = clampedTextRange(range, in: source)
+        let replacementUTF16Length = replacement.utf16.count
+        let nextText = (source as NSString).replacingCharacters(in: clampedRange, with: replacement)
+        let nextMarkedRange = replacement.isEmpty
+            ? nil
+            : NSRange(location: clampedRange.location, length: replacementUTF16Length)
+        let selectedRangeInMarkedText = SyntaxEditorRangeUtilities.clampedRange(
+            selectedRange,
+            utf16Length: replacementUTF16Length
+        )
+        let nextSelection = NSRange(
+            location: clampedRange.location + selectedRangeInMarkedText.location,
+            length: selectedRangeInMarkedText.length
         )
 
-        guard !replacement.isEmpty else {
-            markedRange = nil
+        if nextMarkedRange != nil {
+            beginMarkedTextUndoSessionIfNeeded(
+                source: source,
+                selectedRange: self.selectedRange,
+                editStartUTF16: clampedRange.location
+            )
+        }
+
+        inputDelegate?.textWillChange(self)
+        inputDelegate?.selectionWillChange(self)
+
+        performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextSession: true)
+        markedRange = nextMarkedRange
+        applyMarkedTextAttributes()
+        currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
+        syncTextLayoutSelection()
+
+        handleTextDidChange(
+            previousText: source,
+            nextText: nextText,
+            mutation: SyntaxHighlightMutation(
+                location: clampedRange.location,
+                length: clampedRange.length,
+                replacement: replacement
+            ),
+            editStartUTF16: clampedRange.location
+        )
+        handleSelectionDidChange(preservesCommandState: false)
+        layoutAndScrollSelectionForTextInputGeometry()
+        if nextMarkedRange == nil {
+            finishMarkedTextUndoSessionIfNeeded(
+                finalText: nextText,
+                selectedRange: currentSelectedRange,
+                editStartUTF16: clampedRange.location
+            )
+        }
+
+        inputDelegate?.selectionDidChange(self)
+        inputDelegate?.textDidChange(self)
+    }
+
+    func replaceCommittedMarkedText(with replacement: String) {
+        guard let markedRange else {
+            applyUserReplacement(in: selectedRange, replacement: replacement, deletionIntent: .unspecified)
             return
         }
 
-        let nextMarkedRange = NSRange(location: replacementRange.location, length: replacement.utf16.count)
-        markedRange = nextMarkedRange
-        setSelectedRange(
-            NSRange(
-                location: nextMarkedRange.location + selectedRange.location,
-                length: selectedRange.length
+        let source = text
+        let clampedRange = clampedTextRange(markedRange, in: source)
+        guard model.isEditable else { return }
+        beginMarkedTextCommitUndoSessionIfNeeded(source: source, markedRange: clampedRange)
+
+        let nextText = (source as NSString).replacingCharacters(in: clampedRange, with: replacement)
+        let nextSelection = NSRange(location: clampedRange.location + replacement.utf16.count, length: 0)
+
+        inputDelegate?.textWillChange(self)
+        inputDelegate?.selectionWillChange(self)
+
+        performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextSession: true)
+        currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
+        syncTextLayoutSelection()
+        handleTextDidChange(
+            previousText: source,
+            nextText: nextText,
+            mutation: SyntaxHighlightMutation(
+                location: clampedRange.location,
+                length: clampedRange.length,
+                replacement: replacement
             ),
-            preservesCommandState: false,
-            schedulesSelectionScroll: false
+            editStartUTF16: clampedRange.location
         )
+        handleSelectionDidChange(preservesCommandState: false)
+        layoutAndScrollSelectionForTextInputGeometry()
+        finishMarkedTextUndoSessionIfNeeded(
+            finalText: nextText,
+            selectedRange: currentSelectedRange,
+            editStartUTF16: clampedRange.location
+        )
+
+        inputDelegate?.selectionDidChange(self)
+        inputDelegate?.textDidChange(self)
     }
 
     public func unmarkText() {
+        let previousMarkedRange = markedRange
         markedRange = nil
+        if let previousMarkedRange {
+            reapplyTextAttributes(in: previousMarkedRange)
+            finishMarkedTextUndoSessionIfNeeded(
+                finalText: text,
+                selectedRange: selectedRange,
+                editStartUTF16: previousMarkedRange.location
+            )
+        }
     }
 
     public var beginningOfDocument: UITextPosition {
@@ -147,14 +243,35 @@ extension SyntaxEditorView {
         in direction: UITextLayoutDirection,
         offset: Int
     ) -> UITextPosition? {
-        switch direction {
-        case .left, .up:
-            return self.position(from: position, offset: -offset)
-        case .right, .down:
-            return self.position(from: position, offset: offset)
-        @unknown default:
+        guard offset != 0 else { return position }
+        guard let currentOffset = self.offset(for: position),
+              let currentLocation = textLocation(forUTF16Offset: currentOffset)
+        else {
             return nil
         }
+
+        layoutTextIfNeeded()
+        let initialSelection = isHardLineBreakCaretLocation(currentOffset)
+            ? NSTextSelection(currentLocation, affinity: .upstream)
+            : NSTextSelection(currentLocation, affinity: .downstream)
+        if let caretRect = textLayoutCaretRect(forUTF16Location: currentOffset) {
+            initialSelection.anchorPositionOffset = caretRect.midX
+        }
+        var destinationSelection: NSTextSelection? = initialSelection
+        let navigationDirection = direction.textSelectionNavigationDirection
+        for _ in 0..<abs(offset) {
+            guard let selection = destinationSelection else { return nil }
+            destinationSelection = layoutManager.textSelectionNavigation.destinationSelection(
+                for: selection,
+                direction: offset > 0 ? navigationDirection : navigationDirection.reversed,
+                destination: .character,
+                extending: false,
+                confined: false
+            )
+        }
+
+        guard let location = destinationSelection?.textRanges.first?.location else { return nil }
+        return SyntaxEditorTextPosition(offset: utf16Offset(for: location))
     }
 
     public func compare(_ position: UITextPosition, to other: UITextPosition) -> ComparisonResult {
@@ -250,30 +367,172 @@ extension SyntaxEditorView {
     }
 
     func caretRect(forUTF16Location location: Int) -> CGRect {
-        guard let textLocation = textLocation(forUTF16Offset: location)
-        else {
-            return defaultCaretRect()
-        }
-        let textRange = NSTextRange(location: textLocation)
-
-        layoutManager.ensureLayout(for: textRange)
-        var caretRect: CGRect?
-        layoutManager.enumerateTextSegments(
-            in: textRange,
-            type: .standard,
-            options: [.upstreamAffinity]
-        ) { _, rect, _, _ in
-            caretRect = rect
-            return false
-        }
-
-        guard let caretRect else { return defaultCaretRect() }
+        guard let caretRect = textLayoutCaretRect(forUTF16Location: location) else { return defaultCaretRect() }
         return CGRect(
             x: caretRect.minX + textContentView.frame.minX - 1,
             y: caretRect.minY + textContentView.frame.minY,
             width: max(2, caretRect.width),
             height: max(font.lineHeight, caretRect.height)
         )
+    }
+
+    func textLayoutCaretRect(forUTF16Location location: Int) -> CGRect? {
+        guard let textLocation = textLocation(forUTF16Offset: location)
+        else {
+            return nil
+        }
+        let textRange = NSTextRange(location: textLocation)
+
+        layoutManager.ensureLayout(for: textRange)
+        let lineLookupLocation = textLineFragmentLookupLocation(
+            forUTF16Location: location,
+            defaultLocation: textLocation
+        )
+        if let caretRect = textLayoutLineCaretRect(
+            forUTF16Location: location,
+            textLocation: lineLookupLocation
+        ) {
+            return caretRect
+        }
+
+        var options: NSTextLayoutManager.SegmentOptions = [.rangeNotRequired]
+        if isHardLineBreakCaretLocation(location) {
+            options.insert(.upstreamAffinity)
+        }
+        var caretRect: CGRect?
+        layoutManager.enumerateTextSegments(
+            in: textRange,
+            type: .standard,
+            options: options
+        ) { _, rect, _, _ in
+            caretRect = rect
+            return false
+        }
+
+        return caretRect
+    }
+
+    func textLineFragmentLookupLocation(
+        forUTF16Location location: Int,
+        defaultLocation: NSTextLocation
+    ) -> NSTextLocation {
+        let textLength = text.utf16.count
+        guard location == textLength,
+              textLength > 0,
+              !isHardLineBreakCaretLocation(textLength - 1),
+              let previousLocation = textLocation(forUTF16Offset: textLength - 1)
+        else {
+            return defaultLocation
+        }
+
+        return previousLocation
+    }
+
+    func textLayoutLineCaretRect(
+        forUTF16Location location: Int,
+        textLocation: NSTextLocation
+    ) -> CGRect? {
+        guard let layoutFragment = layoutManager.textLayoutFragment(for: textLocation),
+              let lineFragment = textLineFragment(
+                containingUTF16Offset: location,
+                in: layoutFragment
+              ),
+              let lineStartLocation = textContentStorage.location(
+                layoutFragment.rangeInElement.location,
+                offsetBy: lineFragment.characterRange.location
+              )
+        else {
+            return nil
+        }
+
+        let clampedLocation = min(max(0, location), text.utf16.count)
+        var lineEndCaretX: CGFloat?
+        var exactCaretX: CGFloat?
+        var resolvedCaretX: CGFloat?
+        var closestDistance = Int.max
+        unsafe layoutManager.enumerateCaretOffsetsInLineFragment(at: lineStartLocation) { caretOffset, caretLocation, _, stop in
+            lineEndCaretX = max(lineEndCaretX ?? caretOffset, caretOffset)
+            let caretUTF16Offset = utf16Offset(for: caretLocation)
+            let distance = abs(caretUTF16Offset - clampedLocation)
+            if distance < closestDistance {
+                closestDistance = distance
+                resolvedCaretX = caretOffset
+            }
+
+            if caretUTF16Offset == clampedLocation {
+                exactCaretX = caretOffset
+                if !usesLineEndCaretX(forUTF16Location: clampedLocation) {
+                    unsafe stop.pointee = true
+                }
+            }
+        }
+
+        let caretX = usesLineEndCaretX(forUTF16Location: clampedLocation)
+            ? lineEndCaretX
+            : exactCaretX ?? resolvedCaretX
+        guard let caretX,
+              caretX.isFinite
+        else {
+            return nil
+        }
+        let lineFrame = lineFragment.typographicBounds.offsetBy(
+            dx: layoutFragment.layoutFragmentFrame.minX,
+            dy: layoutFragment.layoutFragmentFrame.minY
+        )
+        return CGRect(
+            x: caretX,
+            y: lineFrame.minY,
+            width: 2,
+            height: max(font.lineHeight, lineFrame.height)
+        )
+    }
+
+    func usesLineEndCaretX(forUTF16Location location: Int) -> Bool {
+        if isHardLineBreakCaretLocation(location) {
+            return true
+        }
+
+        let textLength = text.utf16.count
+        return location == textLength
+            && textLength > 0
+            && !isHardLineBreakCaretLocation(textLength - 1)
+    }
+
+    func textLineFragment(
+        containingUTF16Offset offset: Int,
+        in layoutFragment: NSTextLayoutFragment
+    ) -> NSTextLineFragment? {
+        let fragmentStart = utf16Offset(for: layoutFragment.rangeInElement.location)
+        let textLength = text.utf16.count
+        let clampedOffset = min(max(0, offset), textLength)
+        var documentEndLineFragment: NSTextLineFragment?
+
+        for lineFragment in layoutFragment.textLineFragments {
+            let lineStart = fragmentStart + lineFragment.characterRange.location
+            let lineEnd = lineStart + lineFragment.characterRange.length
+
+            if lineFragment.characterRange.length == 0 {
+                if clampedOffset == lineStart {
+                    return lineFragment
+                }
+                continue
+            }
+
+            if clampedOffset >= lineStart && clampedOffset < lineEnd {
+                return lineFragment
+            }
+
+            if clampedOffset == lineEnd {
+                if clampedOffset < textLength && isHardLineBreakCaretLocation(clampedOffset) {
+                    return lineFragment
+                }
+                if clampedOffset == textLength {
+                    documentEndLineFragment = lineFragment
+                }
+            }
+        }
+
+        return documentEndLineFragment
     }
 
     func defaultCaretRect() -> CGRect {
@@ -417,22 +676,31 @@ extension SyntaxEditorView {
         }
 
         if let layoutFragmentFrame = layoutManager.textLayoutFragment(for: point)?.layoutFragmentFrame,
-           !layoutFragmentFrame.contains(point) {
+           (point.y < layoutFragmentFrame.minY || point.y > layoutFragmentFrame.maxY) {
             return nil
         }
 
         var closestDistance = CGFloat.greatestFiniteMagnitude
         var closestLocation: NSTextLocation?
+        var maximumCaretOffset = -CGFloat.greatestFiniteMagnitude
         unsafe layoutManager.enumerateCaretOffsetsInLineFragment(at: lineFragmentRange.location) { caretOffset, location, leadingEdge, stop in
-            guard leadingEdge else { return }
-
+            maximumCaretOffset = max(maximumCaretOffset, caretOffset)
             let distance = abs(caretOffset - point.x)
-            if distance < closestDistance {
+            if distance < closestDistance || shouldPreferTrailingCaretLocation(
+                location,
+                over: closestLocation,
+                distance: distance,
+                closestDistance: closestDistance
+            ) {
                 closestDistance = distance
                 closestLocation = location
-            } else if distance > closestDistance {
+            } else if leadingEdge && caretOffset > point.x && distance > closestDistance {
                 unsafe stop.pointee = true
             }
+        }
+
+        if point.x > maximumCaretOffset {
+            return caretLineEndLocation(for: lineFragmentRange)
         }
 
         return closestLocation
@@ -447,6 +715,141 @@ extension SyntaxEditorView {
         let lowerBound = min(max(0, range.location), textLength)
         let upperBound = min(max(lowerBound, range.location + range.length), textLength)
         return min(max(offset, lowerBound), upperBound)
+    }
+
+    func isHardLineBreakCaretLocation(_ location: Int) -> Bool {
+        guard location >= 0, location < text.utf16.count else { return false }
+        let character = (text as NSString).character(at: location)
+        return character == 0x0A || character == 0x0D
+    }
+
+    func caretLineEndLocation(for lineFragmentRange: NSTextRange) -> NSTextLocation {
+        let endOffset = utf16Offset(for: lineFragmentRange.endLocation)
+        if let lineBreakOffset = lineBreakCaretOffset(endingAt: endOffset),
+           let lineBreakLocation = textLocation(forUTF16Offset: lineBreakOffset) {
+            return lineBreakLocation
+        }
+        return lineFragmentRange.endLocation
+    }
+
+    func lineBreakCaretOffset(endingAt endOffset: Int) -> Int? {
+        let lineBreakOffset = endOffset - 1
+        guard isHardLineBreakCaretLocation(lineBreakOffset) else { return nil }
+
+        let character = (text as NSString).character(at: lineBreakOffset)
+        if character == 0x0A, lineBreakOffset > 0 {
+            let previousCharacter = (text as NSString).character(at: lineBreakOffset - 1)
+            if previousCharacter == 0x0D {
+                return lineBreakOffset - 1
+            }
+        }
+
+        return lineBreakOffset
+    }
+
+    func shouldPreferTrailingCaretLocation(
+        _ location: NSTextLocation,
+        over closestLocation: NSTextLocation?,
+        distance: CGFloat,
+        closestDistance: CGFloat
+    ) -> Bool {
+        guard distance.isNearlyEqual(to: closestDistance),
+              let closestLocation else {
+            return false
+        }
+
+        return utf16Offset(for: location) > utf16Offset(for: closestLocation)
+    }
+
+    func beginMarkedTextCommitUndoSessionIfNeeded(source: String, markedRange: NSRange) {
+        guard markedTextUndoAnchor == nil else { return }
+
+        let restoreText = (source as NSString).replacingCharacters(in: markedRange, with: "")
+        let restoreLocation = min(markedRange.location, restoreText.utf16.count)
+        markedTextUndoAnchor = EditorUndoState(
+            text: restoreText,
+            selectedRange: NSRange(location: restoreLocation, length: 0),
+            refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
+                in: restoreText,
+                around: restoreLocation
+            )
+        )
+    }
+
+    func beginMarkedTextUndoSessionIfNeeded(
+        source: String,
+        selectedRange: NSRange,
+        editStartUTF16: Int
+    ) {
+        guard markedTextUndoAnchor == nil else { return }
+        markedTextUndoAnchor = EditorUndoState(
+            text: source,
+            selectedRange: selectedRange,
+            refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
+                in: source,
+                around: editStartUTF16
+            )
+        )
+    }
+
+    func finishMarkedTextUndoSessionIfNeeded(
+        finalText: String,
+        selectedRange: NSRange,
+        editStartUTF16: Int
+    ) {
+        guard let restore = markedTextUndoAnchor else { return }
+        markedTextUndoAnchor = nil
+        guard !isApplyingUndoRedo else { return }
+
+        registerUndoAction(
+            restore: restore,
+            counterpart: EditorUndoState(
+                text: finalText,
+                selectedRange: selectedRange,
+                refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
+                    in: finalText,
+                    around: editStartUTF16
+                )
+            )
+        )
+    }
+}
+
+private extension UITextLayoutDirection {
+    var textSelectionNavigationDirection: NSTextSelectionNavigation.Direction {
+        switch self {
+        case .up:
+            .up
+        case .down:
+            .down
+        case .left:
+            .left
+        case .right:
+            .right
+        @unknown default:
+            NSTextSelectionNavigation.Direction(rawValue: rawValue)!
+        }
+    }
+}
+
+private extension NSTextSelectionNavigation.Direction {
+    var reversed: NSTextSelectionNavigation.Direction {
+        switch self {
+        case .forward:
+            .backward
+        case .backward:
+            .forward
+        case .right:
+            .left
+        case .left:
+            .right
+        case .up:
+            .down
+        case .down:
+            .up
+        @unknown default:
+            self
+        }
     }
 }
 #endif

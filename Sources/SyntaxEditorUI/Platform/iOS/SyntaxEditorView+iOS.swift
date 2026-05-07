@@ -43,6 +43,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var lastUsedFragmentViews: Set<SyntaxEditorTextLayoutFragmentView> = []
     var postLayoutAction: (() -> Void)?
     var markedRange: NSRange?
+    var markedTextUndoAnchor: EditorUndoState?
     var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     var keyboardAccessoryView: UIView?
     let modelObservations = ObservationScope()
@@ -403,6 +404,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         refreshKeyboardAccessoryState()
     }
 
+    public override func tintColorDidChange() {
+        super.tintColorDidChange()
+        applyMarkedTextAttributes()
+    }
+
     func updateTextInteractions() {
         func addEditableInteraction() {
             removeInteraction(nonEditableTextInteraction)
@@ -472,6 +478,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func refreshForColorAppearanceChange() {
         updateTypingAttributes()
+        updateBracketHighlightFragmentViews()
         scheduleHighlight(
             source: text,
             language: model.language,
@@ -659,6 +666,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             storage.setAttributedString(NSAttributedString(string: nextText, attributes: baseAttributes()))
         }
         markedRange = nil
+        markedTextUndoAnchor = nil
         syncTextLayoutSelection()
     }
 
@@ -759,9 +767,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         performRawReplacement(in: clampedRange, replacement: replacement)
         currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
         syncTextLayoutSelection()
-        inputDelegate?.selectionDidChange(self)
-        inputDelegate?.textDidChange(self)
-
         handleTextDidChange(
             previousText: source,
             nextText: nextText,
@@ -773,7 +778,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             editStartUTF16: clampedRange.location
         )
         handleSelectionDidChange(preservesCommandState: false)
-        scheduleScrollSelectionToVisibleIfNeeded()
+        layoutAndScrollSelectionForTextInputGeometry()
+
+        inputDelegate?.selectionDidChange(self)
+        inputDelegate?.textDidChange(self)
     }
 
     func handleTextDidChange(
@@ -803,7 +811,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         refreshKeyboardAccessoryState()
     }
 
-    func performRawReplacement(in range: NSRange, replacement: String) {
+    func performRawReplacement(
+        in range: NSRange,
+        replacement: String,
+        preservesMarkedTextSession: Bool = false
+    ) {
         invalidateHorizontalMeasurement()
         textContentStorage.performEditingTransaction {
             if replacement.isEmpty {
@@ -814,6 +826,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                     with: NSAttributedString(string: replacement, attributes: typingAttributes)
                 )
             }
+        }
+        if !preservesMarkedTextSession {
+            markedTextUndoAnchor = nil
         }
         markedRange = nil
         invalidateTextLayout()
@@ -862,6 +877,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
         setTextSelectionPreservingCommandState(clampedTextRange(result.selectedRange, in: result.text))
         updateTypingAttributes()
+        layoutAndScrollSelectionForTextInputGeometry()
         isApplyingModel = false
 
         if textChanged, model.text != result.text {
@@ -977,8 +993,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func syncTextLayoutSelection() {
         if let textRange = textRange(forUTF16Range: currentSelectedRange) {
+            let affinity: NSTextSelection.Affinity = currentSelectedRange.length == 0
+                && isHardLineBreakCaretLocation(currentSelectedRange.location)
+                ? .upstream
+                : .downstream
             layoutManager.textSelections = [
-                NSTextSelection(range: textRange, affinity: .downstream, granularity: .character),
+                NSTextSelection(range: textRange, affinity: affinity, granularity: .character),
             ]
         } else {
             layoutManager.textSelections = []
@@ -1198,9 +1218,44 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         storage.endEditing()
+        applyMarkedTextAttributes()
         updateTypingAttributes()
         applyMatchingBracketHighlight(force: true)
         setNeedsDisplayForVisibleTextFragments()
+    }
+
+    func reapplyTextAttributes(in range: NSRange) {
+        let textLength = text.utf16.count
+        let targetRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
+        guard targetRange.length > 0 else { return }
+
+        if lastHighlightSource == text, lastHighlightLanguage == model.language {
+            applyHighlight(lastHighlightTokens, expectedSource: text, refreshRange: targetRange)
+        } else {
+            storage.beginEditing()
+            storage.setAttributes(baseAttributes(), range: targetRange)
+            storage.endEditing()
+            setNeedsDisplayForVisibleTextFragments()
+        }
+    }
+
+    func applyMarkedTextAttributes() {
+        let textLength = text.utf16.count
+        guard let markedRange else { return }
+        let targetRange = SyntaxEditorRangeUtilities.clampedRange(markedRange, utf16Length: textLength)
+        guard targetRange.length > 0 else { return }
+
+        storage.beginEditing()
+        storage.addAttributes(markedTextAttributes(), range: targetRange)
+        storage.endEditing()
+        setNeedsDisplayForVisibleTextFragments()
+    }
+
+    func markedTextAttributes() -> [NSAttributedString.Key: Any] {
+        [
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .underlineColor: tintColor ?? UIColor.systemBlue,
+        ]
     }
 
     func applyMatchingBracketHighlight(force: Bool = false) {
@@ -1223,6 +1278,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         let rangesToInvalidate = matchedBracketRanges + newRanges
         matchedBracketRanges = newRanges
+        updateBracketHighlightFragmentViews()
         setNeedsDisplayForBracketHighlightRanges(rangesToInvalidate)
     }
 
@@ -1231,6 +1287,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         let rangesToInvalidate = matchedBracketRanges
         matchedBracketRanges = []
+        updateBracketHighlightFragmentViews()
         setNeedsDisplayForBracketHighlightRanges(rangesToInvalidate)
     }
 
@@ -1388,15 +1445,45 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return estimatedSize
     }
 
-    func drawBracketHighlights(in rect: CGRect, context: CGContext) {
-        guard !matchedBracketRanges.isEmpty else { return }
-
-        context.saveGState()
-        context.setFillColor(UIColor.syntaxEditorAlpha(model.colorTheme.bracketBackground, alpha: 0.24).cgColor)
-        defer {
-            context.restoreGState()
+    func updateBracketHighlightFragmentViews() {
+        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            configureBracketHighlights(for: fragmentView, layoutFragmentFrame: fragmentView.layoutFragment.layoutFragmentFrame)
         }
+    }
 
+    func configureBracketHighlights(
+        for fragmentView: SyntaxEditorTextLayoutFragmentView,
+        layoutFragmentFrame: CGRect
+    ) {
+        let rects = bracketHighlightRects(in: layoutFragmentFrame)
+        let color = rects.isEmpty
+            ? nil
+            : UIColor
+                .syntaxEditorAlpha(model.colorTheme.bracketBackground, alpha: 0.24)
+                .resolvedColor(with: traitCollection)
+                .cgColor
+        let colorChanged = switch (fragmentView.bracketHighlightColor, color) {
+        case (.none, .none):
+            false
+        case let (.some(previousColor), .some(nextColor)):
+            !CFEqual(previousColor, nextColor)
+        default:
+            true
+        }
+        let rectsChanged = fragmentView.bracketHighlightRects != rects
+
+        fragmentView.bracketHighlightRects = rects
+        fragmentView.bracketHighlightColor = color
+        if rectsChanged || colorChanged {
+            fragmentView.setNeedsDisplay()
+        }
+    }
+
+    func bracketHighlightRects(in layoutFragmentFrame: CGRect) -> [CGRect] {
+        guard !matchedBracketRanges.isEmpty else { return [] }
+
+        let fragmentLocalBounds = CGRect(origin: .zero, size: layoutFragmentFrame.size)
+        var rects: [CGRect] = []
         for nsRange in matchedBracketRanges {
             guard let textRange = textRange(forUTF16Range: nsRange) else { continue }
             layoutManager.ensureLayout(for: textRange)
@@ -1405,11 +1492,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 type: .standard,
                 options: [.rangeNotRequired]
             ) { _, segmentRect, _, _ in
-                guard segmentRect.intersects(rect) else { return true }
-                context.fill(segmentRect)
+                let localRect = segmentRect.offsetBy(
+                    dx: -layoutFragmentFrame.minX,
+                    dy: -layoutFragmentFrame.minY
+                )
+                guard localRect.intersects(fragmentLocalBounds) else { return true }
+                rects.append(localRect)
                 return true
             }
         }
+        return rects
     }
 
     func measuredHorizontalDocumentLayoutWidth() -> CGFloat {
@@ -1597,6 +1689,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             self?.scrollSelectionToVisibleIfNeeded()
         }
         setNeedsLayout()
+    }
+
+    func layoutAndScrollSelectionForTextInputGeometry() {
+        guard bounds.width > 0, bounds.height > 0 else {
+            scheduleScrollSelectionToVisibleIfNeeded()
+            return
+        }
+
+        layoutTextIfNeeded()
+        scrollSelectionToVisibleIfNeeded()
     }
 
     func scrollSelectionToVisibleIfNeeded() {
@@ -1793,7 +1895,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             )
             fragmentViewMap.setObject(fragmentView, forKey: textLayoutFragment)
         }
-        fragmentView.editorView = self
+        configureBracketHighlights(for: fragmentView, layoutFragmentFrame: layoutFragmentFrame)
 
         if !fragmentView.frame.isNearlyEqual(to: layoutFragmentFrame) {
             fragmentView.frame = layoutFragmentFrame
