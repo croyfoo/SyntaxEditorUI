@@ -3035,6 +3035,201 @@ struct SyntaxHighlighterEngineTests {
         #expect(first.count == second.count)
     }
 
+    @Test("SyntaxHighlighterEngine incrementally updates JavaScript like a full reset")
+    func highlighterIncrementallyUpdatesJavaScript() async throws {
+        let source = "const value = 42;\nconst message = 'ok';"
+        let updatedSource = "const value = 42;\nlet message = 'ok';"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.location <= mutation.range.location)
+    }
+
+    @Test("SyntaxHighlighterEngine incrementally updates HTML injected languages")
+    func highlighterIncrementallyUpdatesHTMLInjections() async throws {
+        let source = """
+        <style>body { color: red; }</style>
+        <script>const answer = 42;</script>
+        """
+        let updatedSource = """
+        <style>body { color: red; }</style>
+        <script>let answer = 43;</script>
+        """
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.html)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.html,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.html)
+        let nsSource = updatedSource as NSString
+        let stylePropertyRange = nsSource.range(of: "color")
+        let scriptKeywordRange = nsSource.range(of: "let")
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            $0.captureName.hasPrefix("property") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
+        })
+        #expect(incremental.tokens.contains {
+            $0.captureName.hasPrefix("keyword") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine falls back when HTML tag edits can change injections")
+    func highlighterResetsForHTMLInjectionBoundaryEdits() async throws {
+        let source = "<script>const answer = 42;</script>"
+        let updatedSource = "<style>const answer = 42;</script>"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.html)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.html,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.html)
+
+        #expect(mutation.range == NSRange(location: 2, length: 5))
+        #expect(incremental.refreshRange == NSRange(location: 0, length: updatedSource.utf16.count))
+        #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine handles emoji and newline incremental edit ranges")
+    func highlighterIncrementalEditHandlesEmojiAndNewlines() async throws {
+        let source = """
+        const label = "😀";
+        let value = 1;
+        """
+        let updatedSource = """
+        const label = "😀";
+        let newer = 2;
+        const done = true;
+        """
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+        let sourceLength = updatedSource.utf16.count
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.allSatisfy { token in
+            token.range.location >= 0 &&
+                token.range.length > 0 &&
+                token.range.upperBound <= sourceLength
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine converts invalidated byte offsets before refreshing")
+    func highlighterConvertsInvalidatedByteOffsetsForRefreshRange() {
+        #expect(
+            SyntaxHighlightInvalidation.refreshStartUTF16(
+                mutationLocation: 180,
+                invalidatedStartByteOffset: 120 * 2,
+                sourceUTF16Length: 240
+            ) == 120
+        )
+        #expect(
+            SyntaxHighlightInvalidation.refreshStartUTF16(
+                mutationLocation: 80,
+                invalidatedStartByteOffset: 120 * 2,
+                sourceUTF16Length: 240
+            ) == 80
+        )
+        #expect(
+            SyntaxHighlightInvalidation.refreshStartUTF16(
+                mutationLocation: 180,
+                invalidatedStartByteOffset: nil,
+                sourceUTF16Length: 240
+            ) == 180
+        )
+        #expect(
+            SyntaxHighlightInvalidation.refreshStartUTF16(
+                mutationLocation: 180,
+                invalidatedStartByteOffset: 241,
+                sourceUTF16Length: 240
+            ) == 0
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine falls back to full reset on stale updates and language changes")
+    func highlighterFallsBackToFullResetWhenIncrementalStateDoesNotMatch() async throws {
+        let source = "const value = 42;"
+        let updatedSource = "let value = 42;"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let engine = SyntaxHighlighterEngine()
+
+        _ = await engine.reset(source: source, language: SyntaxLanguage.javascript)
+        let staleUpdate = await engine.update(
+            previousSource: "stale",
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let fullJavaScript = await SyntaxHighlighterEngine()
+            .reset(source: updatedSource, language: SyntaxLanguage.javascript)
+
+        #expect(staleUpdate.tokens == fullJavaScript.tokens)
+        #expect(staleUpdate.refreshRange == NSRange(location: 0, length: updatedSource.utf16.count))
+
+        let jsonSource = #"{"enabled": true}"#
+        let languageChange = await engine.update(
+            previousSource: updatedSource,
+            source: jsonSource,
+            language: SyntaxLanguage.json,
+            mutation: SyntaxHighlightMutation(location: 0, length: updatedSource.utf16.count, replacement: jsonSource)
+        )
+        let fullJSON = await SyntaxHighlighterEngine()
+            .reset(source: jsonSource, language: SyntaxLanguage.json)
+
+        #expect(languageChange.language == SyntaxLanguage.json)
+        #expect(languageChange.tokens == fullJSON.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")
+    func highlighterKeepsUnsupportedInjectionsDirect() async {
+        let engine = SyntaxHighlighterEngine()
+        let javascriptTokens = await engine.reset(
+            source: "const expression = /abc/;",
+            language: SyntaxLanguage.javascript
+        ).tokens
+        let swiftTokens = await engine.reset(
+            source: #"let expression = /abc/"#,
+            language: SyntaxLanguage.swift
+        ).tokens
+
+        #expect(javascriptTokens.contains { $0.captureName.hasPrefix("keyword") })
+        #expect(swiftTokens.contains { $0.captureName.hasPrefix("keyword") })
+    }
+
     @Test("SyntaxHighlighterEngine returns UTF-16-safe ranges for non-ASCII source")
     func highlighterHandlesNonASCIIRanges() async {
         let engine = sharedSyntaxHighlighterEngine
@@ -3126,6 +3321,30 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.contains {
             $0.captureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine resolves recursive injected aliases")
+    func highlighterSupportsRecursiveInjectedAliases() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = """
+        <script>
+        const view = html`<span class="hero">Hello</span>`;
+        </script>
+        """
+
+        let tokens = await engine.reset(source: source, language: SyntaxLanguage.html).tokens
+        let nsSource = source as NSString
+        let nestedTagRange = nsSource.range(of: "<span")
+        let nestedAttributeRange = nsSource.range(of: "class")
+
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("tag") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: nestedTagRange).length > 0
+        })
+        #expect(tokens.contains {
+            $0.captureName.hasPrefix("attribute") &&
+                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: nestedAttributeRange).length > 0
         })
     }
 
