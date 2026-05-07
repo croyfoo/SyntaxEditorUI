@@ -22,6 +22,11 @@ extension SyntaxEditorView {
         applyUserReplacement(in: selectedRange, replacement: text, deletionIntent: .unspecified)
     }
 
+    @objc(insertText:alternatives:style:)
+    public func insertText(_ text: String, alternatives: [String], style: UITextAlternativeStyle) {
+        insertText(text)
+    }
+
     public func deleteBackward() {
         guard model.isEditable else { return }
 
@@ -377,19 +382,25 @@ extension SyntaxEditorView {
     }
 
     func textLayoutCaretRect(forUTF16Location location: Int) -> CGRect? {
+        if !isLayingOutText {
+            layoutTextIfNeeded()
+        }
+
         guard let textLocation = textLocation(forUTF16Offset: location)
         else {
             return nil
         }
+        if let trailingWhitespaceCaretRect = trailingWhitespaceLineEndCaretRect(forUTF16Location: location) {
+            return trailingWhitespaceCaretRect
+        }
         let textRange = NSTextRange(location: textLocation)
 
         layoutManager.ensureLayout(for: textRange)
-        let lineLookupLocation = textLineFragmentLookupLocation(
-            forUTF16Location: location,
-            defaultLocation: textLocation
-        )
+        let lineLookupOffset = textLineFragmentLookupUTF16Location(forUTF16Location: location)
+        let lineLookupLocation = self.textLocation(forUTF16Offset: lineLookupOffset) ?? textLocation
         if let caretRect = textLayoutLineCaretRect(
             forUTF16Location: location,
+            lineLookupUTF16Location: lineLookupOffset,
             textLocation: lineLookupLocation
         ) {
             return caretRect
@@ -412,30 +423,63 @@ extension SyntaxEditorView {
         return caretRect
     }
 
-    func textLineFragmentLookupLocation(
-        forUTF16Location location: Int,
-        defaultLocation: NSTextLocation
-    ) -> NSTextLocation {
-        let textLength = text.utf16.count
-        guard location == textLength,
-              textLength > 0,
-              !isHardLineBreakCaretLocation(textLength - 1),
-              let previousLocation = textLocation(forUTF16Offset: textLength - 1)
-        else {
-            return defaultLocation
+    func trailingWhitespaceLineEndCaretRect(forUTF16Location location: Int) -> CGRect? {
+        guard isHardLineBreakCaretLocation(location), location > 0 else { return nil }
+
+        let source = text as NSString
+        var whitespaceStart = location
+        while whitespaceStart > 0 {
+            let previousOffset = whitespaceStart - 1
+            let character = source.character(at: previousOffset)
+            guard character == 0x20 || character == 0x09 else { break }
+            whitespaceStart = previousOffset
         }
 
-        return previousLocation
+        guard whitespaceStart < location,
+              let anchorRect = textLayoutCaretRect(forUTF16Location: whitespaceStart)
+        else {
+            return nil
+        }
+
+        let whitespace = source.substring(
+            with: NSRange(location: whitespaceStart, length: location - whitespaceStart)
+        )
+        let whitespaceWidth = (whitespace as NSString).size(withAttributes: [.font: font]).width
+        return CGRect(
+            x: anchorRect.minX + whitespaceWidth,
+            y: anchorRect.minY,
+            width: anchorRect.width,
+            height: anchorRect.height
+        )
+    }
+
+    func textLineFragmentLookupUTF16Location(forUTF16Location location: Int) -> Int {
+        let textLength = text.utf16.count
+        let clampedLocation = min(max(0, location), textLength)
+
+        if isHardLineBreakCaretLocation(clampedLocation),
+           clampedLocation > 0,
+           !isHardLineBreakCaretLocation(clampedLocation - 1) {
+            return clampedLocation - 1
+        }
+
+        if clampedLocation == textLength,
+           textLength > 0,
+           !isHardLineBreakCaretLocation(textLength - 1) {
+            return textLength - 1
+        }
+
+        return clampedLocation
     }
 
     func textLayoutLineCaretRect(
         forUTF16Location location: Int,
+        lineLookupUTF16Location: Int,
         textLocation: NSTextLocation
     ) -> CGRect? {
-        guard let layoutFragment = layoutManager.textLayoutFragment(for: textLocation),
-              let lineFragment = textLineFragment(
-                containingUTF16Offset: location,
-                in: layoutFragment
+        guard let (layoutFragment, lineFragment) = textLayoutLineFragment(
+                containingUTF16Offset: lineLookupUTF16Location,
+                preferredTextLocation: textLocation
               ),
               let lineStartLocation = textContentStorage.location(
                 layoutFragment.rangeInElement.location,
@@ -485,6 +529,40 @@ extension SyntaxEditorView {
             width: 2,
             height: max(font.lineHeight, lineFrame.height)
         )
+    }
+
+    func textLayoutLineFragment(
+        containingUTF16Offset offset: Int,
+        preferredTextLocation: NSTextLocation
+    ) -> (NSTextLayoutFragment, NSTextLineFragment)? {
+        if let layoutFragment = layoutManager.textLayoutFragment(for: preferredTextLocation),
+           let lineFragment = textLineFragment(containingUTF16Offset: offset, in: layoutFragment) {
+            return (layoutFragment, lineFragment)
+        }
+
+        var result: (NSTextLayoutFragment, NSTextLineFragment)?
+        layoutManager.enumerateTextLayoutFragments(
+            from: textContentStorage.documentRange.location,
+            options: [.ensuresLayout]
+        ) { layoutFragment in
+            let fragmentStart = utf16Offset(for: layoutFragment.rangeInElement.location)
+            guard fragmentStart <= offset else {
+                return false
+            }
+
+            let fragmentEnd = utf16Offset(for: layoutFragment.rangeInElement.endLocation)
+            guard offset <= fragmentEnd else {
+                return true
+            }
+
+            if let lineFragment = textLineFragment(containingUTF16Offset: offset, in: layoutFragment) {
+                result = (layoutFragment, lineFragment)
+                return false
+            }
+            return true
+        }
+
+        return result
     }
 
     func usesLineEndCaretX(forUTF16Location location: Int) -> Bool {

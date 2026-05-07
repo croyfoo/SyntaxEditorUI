@@ -96,15 +96,18 @@ private func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: Syn
 
 private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     private let tokens: [SyntaxHighlightToken]
+    private let delayNanoseconds: UInt64
     private var resetCount = 0
     private var updateCount = 0
 
-    init(tokens: [SyntaxHighlightToken] = []) {
+    init(tokens: [SyntaxHighlightToken] = [], delayNanoseconds: UInt64 = 0) {
         self.tokens = tokens
+        self.delayNanoseconds = delayNanoseconds
     }
 
     func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult {
         resetCount += 1
+        await delayIfNeeded()
         return result(source: source, language: language)
     }
 
@@ -115,11 +118,17 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
         mutation: SyntaxHighlightMutation
     ) async -> SyntaxHighlightResult {
         updateCount += 1
+        await delayIfNeeded()
         return result(source: source, language: language)
     }
 
     func callCount() -> Int {
         resetCount + updateCount
+    }
+
+    private func delayIfNeeded() async {
+        guard delayNanoseconds > 0 else { return }
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
     }
 
     private func result(source: String, language: SyntaxLanguage) -> SyntaxHighlightResult {
@@ -471,6 +480,23 @@ struct SyntaxEditorUITests {
         #expect(inputDelegate.textDidChangeCount == 1)
         #expect(inputDelegate.selectionWillChangeCount == 1)
         #expect(inputDelegate.selectionDidChangeCount == 1)
+    }
+
+    @Test("SyntaxEditorView handles iOS candidate alternative text input")
+    @MainActor
+    func syntaxEditorViewIOSHandlesCandidateAlternativeTextInput() {
+        let source = "let value ="
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+
+        #expect(editorView.responds(to: NSSelectorFromString("insertText:alternatives:style:")))
+        editorView.insertText(" ", alternatives: [], style: .none)
+
+        #expect(editorView.text == source + " ")
+        #expect(model.text == source + " ")
+        #expect(editorView.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
     @Test("SyntaxEditorView underlines active iOS marked text")
@@ -1684,6 +1710,65 @@ struct SyntaxEditorUITests {
 
         #expect(editorView.offset(from: editorView.beginningOfDocument, to: selectedPosition) == source.utf16.count)
         #expect(abs(tappedCaretRect.midY - finalLineRect.midY) <= 1)
+    }
+
+    @Test("SyntaxEditorView keeps iOS caret stable while repeatedly inserting spaces")
+    @MainActor
+    func syntaxEditorViewIOSKeepsCaretStableWhileRepeatedlyInsertingSpaces() async {
+        let sourceLines = [
+            "const answer = 42;",
+            "function greet(name) {",
+            "    return \"Hello\";",
+            "}",
+        ]
+        let source = sourceLines.joined(separator: "\n")
+        let highlighter = SyntaxEditorUITestHighlighter(delayNanoseconds: 1_000_000)
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model, highlighter: highlighter)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+        await editorView.waitForPendingHighlightForTesting()
+
+        let editedLineStart = (source as NSString).range(of: sourceLines[2]).location
+        let insertionOffset = editedLineStart + sourceLines[2].utf16.count
+        guard let editedLinePosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: editedLineStart
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve the edited line start")
+            return
+        }
+        let editedLineRect = editorView.caretRect(for: editedLinePosition)
+        editorView.selectedRange = NSRange(location: insertionOffset, length: 0)
+
+        var previousCaretX = editorView.caretRect(for: SyntaxEditorTextPosition(offset: insertionOffset)).midX
+        for insertedSpaceCount in 1...12 {
+            editorView.insertText(" ")
+            layoutIOSEditorView(editorView, width: 393, height: 658)
+            await Task.yield()
+
+            guard let caretPosition = editorView.selectedTextRange?.start else {
+                Issue.record("SyntaxEditorView did not expose a selected text range after space input")
+                return
+            }
+            let caretRect = editorView.caretRect(for: caretPosition)
+            #expect(editorView.selectedRange == NSRange(location: insertionOffset + insertedSpaceCount, length: 0))
+            #expect(abs(caretRect.midY - editedLineRect.midY) <= 1)
+            #expect(caretRect.midX >= previousCaretX)
+            previousCaretX = caretRect.midX
+        }
+
+        await editorView.waitForPendingHighlightForTesting()
+        guard let finalCaretPosition = editorView.selectedTextRange?.start else {
+            Issue.record("SyntaxEditorView did not expose a selected text range after highlighting")
+            return
+        }
+        let finalCaretRect = editorView.caretRect(for: finalCaretPosition)
+        #expect(abs(finalCaretRect.midY - editedLineRect.midY) <= 1)
+        #expect(editorView.selectedRange == NSRange(location: insertionOffset + 12, length: 0))
     }
 
     @Test("SyntaxEditorView places iOS caret on the immediate next line after newline input")

@@ -30,8 +30,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var isApplyingCommandSelection = false
     var lastAppliedLanguageIdentifier: String?
     var matchedBracketRanges: [NSRange] = []
-    var lastAppliedLineWrappingEnabled: Bool?
-    var lastAppliedColorTheme: SyntaxEditorColorTheme?
+    var lastAppliedLineWrappingEnabled: Bool
+    var lastAppliedColorTheme: SyntaxEditorColorTheme
     var isApplyingEditorOwnedScroll = false
     var isIgnoringTextInteractionHorizontalOffsetPreservation = false
     var preservedTextInteractionHorizontalOffset: CGFloat?
@@ -170,6 +170,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     package init(model: SyntaxEditorModel, highlighter: any SyntaxHighlighting) {
         self.model = model
         self.highlighter = highlighter
+        self.lastAppliedLineWrappingEnabled = model.lineWrappingEnabled
+        self.lastAppliedColorTheme = model.colorTheme
 
         super.init(frame: .zero)
 
@@ -576,6 +578,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func applyObservedText(_ text: String, forceTextUpdate: Bool = false) {
+        guard text == model.text else { return }
         applyExternalText(text, updatesModel: false, forceTextUpdate: forceTextUpdate)
     }
 
@@ -625,11 +628,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
-        let lineWrappingChanged = lastAppliedLineWrappingEnabled.map { $0 != lineWrappingEnabled } ?? false
+        let lineWrappingChanged = lastAppliedLineWrappingEnabled != lineWrappingEnabled
         lastAppliedLineWrappingEnabled = lineWrappingEnabled
 
         let previousColorTheme = lastAppliedColorTheme
-        let colorThemeChanged = previousColorTheme.map { $0 != colorTheme } ?? true
+        let colorThemeChanged = previousColorTheme != colorTheme
         if colorThemeChanged {
             applyBaseForegroundColorChange(from: previousColorTheme, to: colorTheme)
         }
@@ -680,11 +683,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func applyBaseForegroundColorChange(
-        from previousColorTheme: SyntaxEditorColorTheme?,
+        from previousColorTheme: SyntaxEditorColorTheme,
         to colorTheme: SyntaxEditorColorTheme
     ) {
-        guard let previousColorTheme else { return }
-
         let textRange = NSRange(location: 0, length: storage.length)
         guard textRange.length > 0 else { return }
 
@@ -1192,7 +1193,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guard text == expectedSource else { return }
 
         let textLength = expectedSource.utf16.count
-        let targetRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
+        let clampedRefreshRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
+        let targetRange = SyntaxEditorRangeUtilities.clampedRange(
+            (expectedSource as NSString).paragraphRange(for: clampedRefreshRange),
+            utf16Length: textLength
+        )
         guard targetRange.length > 0 else {
             applyMatchingBracketHighlight(force: true)
             return
@@ -1294,14 +1299,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func baseAttributes() -> [NSAttributedString.Key: Any] {
         [
             .font: font,
-            .foregroundColor: model.colorTheme.baseForeground,
+            .foregroundColor: lastAppliedColorTheme.baseForeground,
             .paragraphStyle: baseParagraphStyle(),
         ]
     }
 
     func baseParagraphStyle() -> NSParagraphStyle {
         let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineBreakMode = model.lineWrappingEnabled ? .byCharWrapping : .byClipping
+        paragraphStyle.lineBreakMode = lastAppliedLineWrappingEnabled ? .byCharWrapping : .byClipping
         return paragraphStyle
     }
 
@@ -1309,7 +1314,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let textRange = NSRange(location: 0, length: storage.length)
         guard textRange.length > 0 else { return }
 
-        let targetLineBreakMode: NSLineBreakMode = model.lineWrappingEnabled ? .byCharWrapping : .byClipping
+        let targetLineBreakMode: NSLineBreakMode = lastAppliedLineWrappingEnabled ? .byCharWrapping : .byClipping
         var updates: [(range: NSRange, style: NSParagraphStyle)] = []
 
         unsafe storage.enumerateAttribute(.paragraphStyle, in: textRange) { value, range, _ in
@@ -1331,7 +1336,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func styleAttributes(for captureName: String) -> [NSAttributedString.Key: Any] {
-        guard let color = SyntaxEditorHighlightTheme.color(for: captureName, in: model.colorTheme) else {
+        guard let color = SyntaxEditorHighlightTheme.color(for: captureName, in: lastAppliedColorTheme) else {
             return [:]
         }
         return [.foregroundColor: color]
@@ -1345,7 +1350,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func updateTextContainerForCurrentWrappingMode() {
-        let lineWrappingEnabled = model.lineWrappingEnabled
+        let lineWrappingEnabled = lastAppliedLineWrappingEnabled
         let lineBreakMode: NSLineBreakMode = lineWrappingEnabled ? .byCharWrapping : .byClipping
 
         if container.widthTracksTextView != lineWrappingEnabled {
@@ -1394,7 +1399,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func updateContentSizeIfNeeded() {
         let estimatedLayoutSize = estimatedDocumentLayoutSize()
         let textHeight = max(font.lineHeight, ceil(estimatedLayoutSize.height))
-        let targetWidth = model.lineWrappingEnabled
+        let targetWidth = lastAppliedLineWrappingEnabled
             ? bounds.width
             : max(bounds.width, measuredHorizontalDocumentLayoutWidth(), ceil(estimatedLayoutSize.width + textContainerInset.left + textContainerInset.right))
         let targetHeight = max(bounds.height, ceil(textHeight + textContainerInset.top + textContainerInset.bottom))
@@ -1459,7 +1464,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let color = rects.isEmpty
             ? nil
             : UIColor
-                .syntaxEditorAlpha(model.colorTheme.bracketBackground, alpha: 0.24)
+                .syntaxEditorAlpha(lastAppliedColorTheme.bracketBackground, alpha: 0.24)
                 .resolvedColor(with: traitCollection)
                 .cgColor
         let colorChanged = switch (fragmentView.bracketHighlightColor, color) {
@@ -1820,7 +1825,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func preserveTextInteractionHorizontalOffsetForCurrentTurn() {
-        guard !model.lineWrappingEnabled,
+        guard !lastAppliedLineWrappingEnabled,
               !isIgnoringTextInteractionHorizontalOffsetPreservation else {
             return
         }
@@ -1840,7 +1845,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func contentOffsetConstrainedForTextInteraction(_ proposedOffset: CGPoint) -> CGPoint {
         guard !isApplyingEditorOwnedScroll,
-              !model.lineWrappingEnabled,
+              !lastAppliedLineWrappingEnabled,
               !isTracking,
               !isDragging,
               !isDecelerating,
@@ -1853,7 +1858,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     var shouldPreserveHorizontalOffsetForImplicitTextInteractionScroll: Bool {
         !isApplyingEditorOwnedScroll
-            && !model.lineWrappingEnabled
+            && !lastAppliedLineWrappingEnabled
             && !isTracking
             && !isDragging
             && !isDecelerating
