@@ -8,6 +8,7 @@ private enum MacEditorShortcutAction {
     case indent
     case outdent
     case toggleComment
+    case toggleLineWrapping
 }
 
 @MainActor
@@ -68,14 +69,25 @@ private final class SyntaxEditorNativeTextView: NSTextView {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let key = event.charactersIgnoringModifiers ?? ""
+
+        if key.lowercased() == "l",
+           modifiers.contains(.command),
+           modifiers.contains(.control),
+           modifiers.contains(.shift),
+           !modifiers.contains(.option)
+        {
+            if shortcutHandler?(.toggleLineWrapping) == true {
+                return true
+            }
+        }
+
         guard modifiers.contains(.command),
               !modifiers.contains(.control),
               !modifiers.contains(.option)
         else {
             return super.performKeyEquivalent(with: event)
         }
-
-        let key = event.charactersIgnoringModifiers ?? ""
 
         if key == "/" {
             if shortcutHandler?(.toggleComment) == true {
@@ -681,6 +693,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             return runOutdentCommand()
         case .toggleComment:
             return runToggleCommentCommand()
+        case .toggleLineWrapping:
+            return runToggleLineWrappingCommand()
         }
     }
 
@@ -746,6 +760,11 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             return false
         }
         applyCommandResult(result)
+        return true
+    }
+
+    private func runToggleLineWrappingCommand() -> Bool {
+        model.lineWrappingEnabled.toggle()
         return true
     }
 

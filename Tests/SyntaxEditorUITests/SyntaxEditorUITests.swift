@@ -395,11 +395,14 @@ private func macEditorForegroundColor(_ editorView: SyntaxEditorView, at locatio
     return textStorage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor
 }
 
-private func makeMacCommandKeyEvent(_ character: String) -> NSEvent? {
+private func makeMacCommandKeyEvent(
+    _ character: String,
+    modifierFlags: NSEvent.ModifierFlags = [.command]
+) -> NSEvent? {
     NSEvent.keyEvent(
         with: .keyDown,
         location: .zero,
-        modifierFlags: [.command],
+        modifierFlags: modifierFlags,
         timestamp: 0,
         windowNumber: 0,
         context: nil,
@@ -3334,6 +3337,13 @@ struct SyntaxEditorUITests {
         #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "]", modifierFlags: [.command]))
         #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "[", modifierFlags: [.command]))
         #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "/", modifierFlags: [.command]))
+        #expect(hasSyntaxEditorKeyCommand(readOnlyCommands, input: "l", modifierFlags: [.control, .shift, .command]))
+
+        let readOnlyLineWrappingActionTarget = editorView.target(
+            forAction: NSSelectorFromString("handleToggleLineWrappingCommand"),
+            withSender: nil
+        ) as AnyObject?
+        #expect(readOnlyLineWrappingActionTarget === editorView)
 
         model.isEditable = true
 
@@ -3343,6 +3353,7 @@ struct SyntaxEditorUITests {
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "]", modifierFlags: [.command]))
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "[", modifierFlags: [.command]))
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "/", modifierFlags: [.command]))
+        #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "l", modifierFlags: [.control, .shift, .command]))
 
         let indentActionTarget = editorView.target(
             forAction: NSSelectorFromString("handleIndentCommand"),
@@ -3355,6 +3366,28 @@ struct SyntaxEditorUITests {
             withSender: nil
         ) as AnyObject?
         #expect(insertTabActionTarget === editorView)
+    }
+
+    @Test("SyntaxEditorView toggles iOS line wrapping key command")
+    @MainActor
+    func syntaxEditorViewIOSToggleLineWrappingKeyCommand() {
+        let model = SyntaxEditorModel(
+            text: longIOSSyntaxEditorLine,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView)
+
+        #expect(performSyntaxEditorSelector("handleToggleLineWrappingCommand", on: editorView))
+        #expect(model.lineWrappingEnabled)
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textContainer.widthTracksTextView)
+
+        #expect(performSyntaxEditorSelector("handleToggleLineWrappingCommand", on: editorView))
+        #expect(!model.lineWrappingEnabled)
+        editorView.synchronizeModelForTesting()
+        #expect(!editorView.textContainer.widthTracksTextView)
     }
 
     @Test("SyntaxEditorView read-only handlers do not mutate text on iOS")
@@ -3374,9 +3407,11 @@ struct SyntaxEditorUITests {
         #expect(performSyntaxEditorSelector("handleIndentCommand", on: editorView))
         #expect(performSyntaxEditorSelector("handleOutdentCommand", on: editorView))
         #expect(performSyntaxEditorSelector("handleToggleCommentCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("handleToggleLineWrappingCommand", on: editorView))
 
         #expect(model.text == source)
         #expect(editorView.text == source)
+        #expect(model.lineWrappingEnabled)
     }
 
     @Test("SyntaxEditorView inserts iOS tab spaces at the caret")
@@ -3952,6 +3987,18 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(model: model)
         editorView.textView.setSelectedRange(NSRange(location: 0, length: source.utf16.count))
 
+        guard let lineWrappingEvent = makeMacCommandKeyEvent(
+            "l",
+            modifierFlags: [.control, .shift, .command]
+        ) else {
+            Issue.record("Failed to create line wrapping key event")
+            return
+        }
+
+        #expect(editorView.textView.performKeyEquivalent(with: lineWrappingEvent))
+        #expect(model.lineWrappingEnabled)
+        #expect(editorView.textView.string == source)
+
         for character in ["/", "]", "["] {
             guard let event = makeMacCommandKeyEvent(character) else {
                 Issue.record("Failed to create command key event for \(character)")
@@ -3962,6 +4009,35 @@ struct SyntaxEditorUITests {
             #expect(model.text == source)
             #expect(editorView.textView.string == source)
         }
+    }
+
+    @Test("SyntaxEditorView toggles macOS line wrapping key equivalent")
+    @MainActor
+    func syntaxEditorViewMacToggleLineWrappingKeyEquivalent() {
+        let model = SyntaxEditorModel(
+            text: String(repeating: "let macHorizontalScrollNeedsWrapping = true; ", count: 8),
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+
+        guard let event = makeMacCommandKeyEvent(
+            "l",
+            modifierFlags: [.control, .shift, .command]
+        ) else {
+            Issue.record("Failed to create line wrapping key event")
+            return
+        }
+
+        #expect(editorView.textView.performKeyEquivalent(with: event))
+        #expect(model.lineWrappingEnabled)
+        editorView.synchronizeModelForTesting()
+        #expect(!editorView.hasHorizontalScroller)
+
+        #expect(editorView.textView.performKeyEquivalent(with: event))
+        #expect(!model.lineWrappingEnabled)
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.hasHorizontalScroller)
     }
 
     @Test("SyntaxEditorView uses native macOS undo stack for text input")

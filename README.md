@@ -26,6 +26,7 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 - `Cmd+]`: Indent
 - `Cmd+[` : Outdent
 - `Cmd+/`: Toggle comment (HTML/JavaScript/CSS/Objective-C/Swift/TOML/XML)
+- `Ctrl+Shift+Cmd+L`: Toggle line wrapping
 - `Cmd+Z`: Undo
 - `Shift+Cmd+Z`: Redo
 
