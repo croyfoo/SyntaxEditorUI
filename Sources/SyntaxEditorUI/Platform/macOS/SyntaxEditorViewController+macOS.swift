@@ -329,7 +329,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         switch commandSelector {
         case #selector(NSResponder.insertTab(_:)):
-            return runIndentCommand()
+            return runInsertTabCommand()
         case #selector(NSResponder.insertBacktab(_:)):
             return runOutdentCommand()
         case #selector(NSResponder.insertNewline(_:)),
@@ -682,6 +682,22 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         case .toggleComment:
             return runToggleCommentCommand()
         }
+    }
+
+    private func runInsertTabCommand() -> Bool {
+        guard model.isEditable else {
+            return false
+        }
+
+        let source = textView.string
+        guard let result = commandEngine.insertTab(
+            source: source,
+            selection: textView.selectedRange()
+        ) else {
+            return false
+        }
+        applyCommandResult(result)
+        return true
     }
 
     private func runIndentCommand() -> Bool {

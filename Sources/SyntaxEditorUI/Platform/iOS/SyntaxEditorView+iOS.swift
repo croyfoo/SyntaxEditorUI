@@ -499,7 +499,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         return [
-            makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleIndentCommand), title: "Indent"),
+            makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleInsertTabCommand), title: "Insert Tab"),
             makeKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleOutdentCommand), title: "Outdent"),
             makeKeyCommand(input: "/", modifierFlags: [.command], action: #selector(handleToggleCommentCommand), title: "Toggle Comment"),
             makeKeyCommand(input: "]", modifierFlags: [.command], action: #selector(handleIndentCommand), title: "Indent"),
@@ -508,7 +508,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func isEditorCommandAction(_ action: Selector) -> Bool {
-        action == #selector(handleIndentCommand)
+        action == #selector(handleInsertTabCommand)
+            || action == #selector(handleIndentCommand)
             || action == #selector(handleOutdentCommand)
             || action == #selector(handleToggleCommentCommand)
     }
@@ -1068,6 +1069,18 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         applyCommandResult(result)
     }
 
+    @objc private func handleInsertTabCommand() {
+        guard model.isEditable else { return }
+
+        guard let result = commandEngine.insertTab(
+            source: text,
+            selection: selectedRange
+        ) else {
+            return
+        }
+        applyCommandResult(result)
+    }
+
     @objc private func handleOutdentCommand() {
         guard model.isEditable else { return }
 
@@ -1548,74 +1561,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     static func maximumDisplayColumnCount(in source: String, tabWidth: Int) -> Int {
-        var maxColumns = 0
-        var currentColumns = 0
-
-        for scalar in source.unicodeScalars {
-            switch scalar.value {
-            case 9:
-                let tabColumns = max(1, tabWidth - (currentColumns % tabWidth))
-                currentColumns += tabColumns
-            case 10, 13:
-                maxColumns = max(maxColumns, currentColumns)
-                currentColumns = 0
-            default:
-                currentColumns += displayColumnWidth(for: scalar)
-            }
-        }
-
-        return max(maxColumns, currentColumns)
-    }
-
-    static func displayColumnWidth(for scalar: Unicode.Scalar) -> Int {
-        let value = scalar.value
-
-        if isZeroWidthScalar(value) {
-            return 0
-        }
-
-        if isWideScalar(value) {
-            return 2
-        }
-
-        return 1
-    }
-
-    static func isZeroWidthScalar(_ value: UInt32) -> Bool {
-        switch value {
-        case 0x0300...0x036F,
-             0x1AB0...0x1AFF,
-             0x1DC0...0x1DFF,
-             0x200B...0x200F,
-             0x202A...0x202E,
-             0x2060...0x206F,
-             0x20D0...0x20FF,
-             0xFE00...0xFE0F,
-             0xFE20...0xFE2F:
-            return true
-        default:
-            return false
-        }
-    }
-
-    static func isWideScalar(_ value: UInt32) -> Bool {
-        switch value {
-        case 0x1100...0x115F,
-             0x2329...0x232A,
-             0x2600...0x27BF,
-             0x2E80...0xA4CF,
-             0xAC00...0xD7A3,
-             0xF900...0xFAFF,
-             0xFE10...0xFE19,
-             0xFE30...0xFE6F,
-             0xFF00...0xFF60,
-             0xFFE0...0xFFE6,
-             0x1F300...0x1FAFF,
-             0x20000...0x3FFFD:
-            return true
-        default:
-            return false
-        }
+        SyntaxEditorDisplayColumnUtilities.maximumColumnCount(in: source, tabWidth: tabWidth)
     }
 
     func invalidateTextLayout() {

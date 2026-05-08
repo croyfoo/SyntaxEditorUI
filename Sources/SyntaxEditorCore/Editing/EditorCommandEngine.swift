@@ -51,6 +51,10 @@ package final class EditorCommandEngine {
             return smartNewline(source: source, range: safeRange)
         }
 
+        if replacementText == "\t" {
+            return insertTab(source: source, selection: safeRange)
+        }
+
         if deletionIntent == .backward, replacementText.isEmpty, safeRange.length == 1 {
             if let result = pairAwareBackspace(source: source, range: safeRange) {
                 return result
@@ -69,6 +73,34 @@ package final class EditorCommandEngine {
         }
 
         return nil
+    }
+
+    package func insertTab(source: String, selection: NSRange) -> EditorCommandResult? {
+        invalidateTransientState()
+        let nsSource = source as NSString
+        let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
+
+        guard safeSelection.length == 0 else {
+            return indentSelection(source: source, selection: safeSelection)
+        }
+
+        let lineRange = nsSource.lineRange(for: NSRange(location: safeSelection.location, length: 0))
+        let linePrefixRange = NSRange(
+            location: lineRange.location,
+            length: safeSelection.location - lineRange.location
+        )
+        let linePrefix = nsSource.substring(with: linePrefixRange)
+        let tabWidth = indentUnit.utf16.count
+        let column = SyntaxEditorDisplayColumnUtilities.columnCount(in: linePrefix, tabWidth: tabWidth)
+        let spaces = SyntaxEditorDisplayColumnUtilities.spacesToNextTabStop(from: column, tabWidth: tabWidth)
+        let replacement = String(repeating: " ", count: spaces)
+        let updated = nsSource.replacingCharacters(in: safeSelection, with: replacement)
+
+        return EditorCommandResult(
+            text: updated,
+            selectedRange: NSRange(location: safeSelection.location + replacement.utf16.count, length: 0),
+            refreshStartUTF16: lineRange.location
+        )
     }
 
     package func indentSelection(source: String, selection: NSRange) -> EditorCommandResult? {

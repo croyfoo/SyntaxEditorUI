@@ -298,6 +298,56 @@ struct SyntaxEditorCoreTests {
         #expect(result?.text == "    a\n    b\n")
     }
 
+    @Test("EditorCommandEngine inserts tab spaces at the caret")
+    func editorCommandEngineInsertTabAtCaret() {
+        let engine = EditorCommandEngine()
+        let result = engine.insertTab(
+            source: "abcde",
+            selection: NSRange(location: 2, length: 0)
+        )
+
+        #expect(result?.text == "ab  cde")
+        #expect(result?.selectedRange == NSRange(location: 4, length: 0))
+    }
+
+    @Test("EditorCommandEngine inserts tab spaces after wide Unicode")
+    func editorCommandEngineInsertTabAfterWideUnicode() {
+        let engine = EditorCommandEngine()
+        let source = "あbc"
+        let result = engine.insertTab(
+            source: source,
+            selection: NSRange(location: "あ".utf16.count, length: 0)
+        )
+
+        #expect(result?.text == "あ  bc")
+        #expect(result?.selectedRange == NSRange(location: "あ  ".utf16.count, length: 0))
+    }
+
+    @Test("EditorCommandEngine inserts tab spaces after zero-width Unicode")
+    func editorCommandEngineInsertTabAfterZeroWidthUnicode() {
+        let engine = EditorCommandEngine()
+        let prefix = "e\u{301}"
+        let source = "\(prefix)bc"
+        let result = engine.insertTab(
+            source: source,
+            selection: NSRange(location: prefix.utf16.count, length: 0)
+        )
+
+        #expect(result?.text == "\(prefix)   bc")
+        #expect(result?.selectedRange == NSRange(location: "\(prefix)   ".utf16.count, length: 0))
+    }
+
+    @Test("EditorCommandEngine indents selected lines for tab range input")
+    func editorCommandEngineInsertTabIndentsSelectedLines() {
+        let engine = EditorCommandEngine()
+        let result = engine.insertTab(
+            source: "a\nb\n",
+            selection: NSRange(location: 0, length: 3)
+        )
+
+        #expect(result?.text == "    a\n    b\n")
+    }
+
     @Test("EditorCommandEngine indents trailing empty line at document end")
     func editorCommandEngineIndentTrailingEmptyLine() {
         let engine = EditorCommandEngine()
