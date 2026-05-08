@@ -436,6 +436,18 @@ struct SyntaxEditorUITests {
         #expect(textInputSurface.textInputView === editorView)
     }
 
+    @Test("SyntaxEditorView leaves iOS indirect pointer drags for text selection")
+    @MainActor
+    func syntaxEditorViewIOSLeavesIndirectPointerDragsForTextSelection() {
+        let editorView = SyntaxEditorView(model: SyntaxEditorModel(text: "let value = 1"))
+        let allowedTouchTypes = Set(editorView.panGestureRecognizer.allowedTouchTypes.map { Int($0.intValue) })
+
+        #expect(allowedTouchTypes.contains(UITouch.TouchType.direct.rawValue))
+        #expect(allowedTouchTypes.contains(UITouch.TouchType.pencil.rawValue))
+        #expect(allowedTouchTypes.contains(UITouch.TouchType.indirect.rawValue))
+        #expect(!allowedTouchTypes.contains(UITouch.TouchType.indirectPointer.rawValue))
+    }
+
     @Test("SyntaxEditorView receives iOS text interaction hit tests through the rendering view")
     @MainActor
     func syntaxEditorViewIOSReceivesTextInteractionHitTestsThroughRenderingView() {

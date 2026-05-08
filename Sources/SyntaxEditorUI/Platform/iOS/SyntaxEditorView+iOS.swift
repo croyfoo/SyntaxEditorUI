@@ -399,6 +399,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         alwaysBounceVertical = true
         keyboardDismissMode = .interactive
         delaysContentTouches = false
+        panGestureRecognizer.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue),
+            NSNumber(value: UITouch.TouchType.indirect.rawValue),
+        ]
 
         autocapitalizationType = .none
         autocorrectionType = .no

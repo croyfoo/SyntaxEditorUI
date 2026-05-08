@@ -45,6 +45,10 @@ let editorView = SyntaxEditorView(model: model)
 
 Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
 
+### iPad Pointer Input
+
+Apps that use `SyntaxEditorView` on iPadOS should enable `UIApplicationSupportsIndirectInputEvents` in their `Info.plist`. With this key enabled, mouse and trackpad click-drags are handled by UIKit text selection instead of scroll dragging, while finger drag scrolling and trackpad or mouse wheel scrolling continue to work.
+
 ## Testing
 
 ```bash
