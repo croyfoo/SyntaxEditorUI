@@ -77,6 +77,75 @@ final class SyntaxEditorTextRange: UITextRange {
     }
 }
 
+struct SyntaxEditorTextInteractionCaretOverride {
+    let offset: Int
+    var wordRange: NSRange?
+}
+
+@MainActor
+final class SyntaxEditorTextInputTokenizer: NSObject, UITextInputTokenizer {
+    weak var textInput: SyntaxEditorView?
+    private let baseTokenizer: UITextInputStringTokenizer
+
+    init(textInput: SyntaxEditorView) {
+        self.textInput = textInput
+        self.baseTokenizer = UITextInputStringTokenizer(textInput: textInput)
+        super.init()
+    }
+
+    func rangeEnclosingPosition(
+        _ position: UITextPosition,
+        with granularity: UITextGranularity,
+        inDirection direction: UITextDirection
+    ) -> UITextRange? {
+        let result = baseTokenizer.rangeEnclosingPosition(
+            position,
+            with: granularity,
+            inDirection: direction
+        )
+        if granularity == .word {
+            textInput?.noteTextInteractionTokenizerWordRange(result, enclosing: position)
+        }
+        return result
+    }
+
+    func position(
+        from position: UITextPosition,
+        toBoundary granularity: UITextGranularity,
+        inDirection direction: UITextDirection
+    ) -> UITextPosition? {
+        baseTokenizer.position(
+            from: position,
+            toBoundary: granularity,
+            inDirection: direction
+        )
+    }
+
+    func isPosition(
+        _ position: UITextPosition,
+        atBoundary granularity: UITextGranularity,
+        inDirection direction: UITextDirection
+    ) -> Bool {
+        baseTokenizer.isPosition(
+            position,
+            atBoundary: granularity,
+            inDirection: direction
+        )
+    }
+
+    func isPosition(
+        _ position: UITextPosition,
+        withinTextUnit granularity: UITextGranularity,
+        inDirection direction: UITextDirection
+    ) -> Bool {
+        baseTokenizer.isPosition(
+            position,
+            withinTextUnit: granularity,
+            inDirection: direction
+        )
+    }
+}
+
 final class SyntaxEditorSelectionRect: UITextSelectionRect {
     let selectionRect: CGRect
     let selectionWritingDirection: NSWritingDirection
