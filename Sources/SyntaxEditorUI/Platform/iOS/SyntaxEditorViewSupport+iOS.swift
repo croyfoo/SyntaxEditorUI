@@ -33,9 +33,11 @@ final class SyntaxEditorReadOnlyGuardedUndoManager: UndoManager {
 
 final class SyntaxEditorTextPosition: UITextPosition {
     let offset: Int
+    let anchorsLineEndHit: Bool
 
-    init(offset: Int) {
+    init(offset: Int, anchorsLineEndHit: Bool = false) {
         self.offset = offset
+        self.anchorsLineEndHit = anchorsLineEndHit
         super.init()
     }
 }
@@ -46,12 +48,19 @@ final class SyntaxEditorTextRange: UITextRange {
     let startPosition: SyntaxEditorTextPosition
     let endPosition: SyntaxEditorTextPosition
 
-    init(nsRange: NSRange) {
+    init(nsRange: NSRange, anchorsLineEndHit: Bool = false) {
         let location = max(0, nsRange.location)
         let length = max(0, nsRange.length)
+        let anchorsCollapsedLineEndHit = anchorsLineEndHit && length == 0
         self.nsRange = NSRange(location: location, length: length)
-        self.startPosition = SyntaxEditorTextPosition(offset: location)
-        self.endPosition = SyntaxEditorTextPosition(offset: location + length)
+        self.startPosition = SyntaxEditorTextPosition(
+            offset: location,
+            anchorsLineEndHit: anchorsCollapsedLineEndHit
+        )
+        self.endPosition = SyntaxEditorTextPosition(
+            offset: location + length,
+            anchorsLineEndHit: anchorsCollapsedLineEndHit
+        )
         super.init()
     }
 

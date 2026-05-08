@@ -248,7 +248,13 @@ extension SyntaxEditorView {
 
         let lower = min(fromOffset, toOffset)
         let upper = max(fromOffset, toOffset)
-        return SyntaxEditorTextRange(nsRange: NSRange(location: lower, length: upper - lower))
+        let anchorsLineEndHit = lower == upper
+            && (((fromPosition as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false)
+                || ((toPosition as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false))
+        return SyntaxEditorTextRange(
+            nsRange: NSRange(location: lower, length: upper - lower),
+            anchorsLineEndHit: anchorsLineEndHit
+        )
     }
 
     func isValidTextPositionOffset(_ offset: Int, in source: NSString) -> Bool {
@@ -276,6 +282,12 @@ extension SyntaxEditorView {
 
     public func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
         guard let currentOffset = self.offset(for: position) else { return nil }
+        let anchorsLineEndHit = (position as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false
+        if anchorsLineEndHit,
+           isAnchoredLineEndHitAdjustment(from: currentOffset, by: offset) {
+            return SyntaxEditorTextPosition(offset: currentOffset, anchorsLineEndHit: true)
+        }
+
         let source = text as NSString
         let nextOffsetResult = currentOffset.addingReportingOverflow(offset)
         guard !nextOffsetResult.overflow else { return nil }
@@ -720,6 +732,14 @@ extension SyntaxEditorView {
         else {
             return nil
         }
+        let anchorsLineEndHit = (position as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false
+
+        if isHardLineBreakCaretLocation(start) {
+            return SyntaxEditorTextRange(
+                nsRange: NSRange(location: start, length: 0),
+                anchorsLineEndHit: anchorsLineEndHit
+            )
+        }
 
         guard let characterRange = composedCharacterRange(extendingFrom: start, in: .right) else {
             return SyntaxEditorTextRange(nsRange: NSRange(location: start, length: 0))
@@ -797,12 +817,16 @@ extension SyntaxEditorView {
         )
         let containerLocation = textContentStorage.documentRange.location
 
-        if let location = caretTextLocation(
+        if let hit = caretTextLocation(
             interactingAt: pointInTextContainer,
             inContainerAt: containerLocation
         ) {
+            let location = hit.location
+            let rawOffset = utf16Offset(for: location)
+            let clampedOffset = clampedHitOffset(rawOffset, constrainedTo: range)
             return SyntaxEditorTextPosition(
-                offset: clampedHitOffset(utf16Offset(for: location), constrainedTo: range)
+                offset: clampedOffset,
+                anchorsLineEndHit: hit.anchorsLineEndHit && rawOffset == clampedOffset
             )
         }
 
@@ -815,18 +839,21 @@ extension SyntaxEditorView {
             bounds: layoutManager.usageBoundsForTextContainer
         )
         if let location = fallbackSelections.first?.textRanges.first?.location {
+            let rawOffset = utf16Offset(for: location)
+            let clampedOffset = clampedHitOffset(rawOffset, constrainedTo: range)
             return SyntaxEditorTextPosition(
-                offset: clampedHitOffset(utf16Offset(for: location), constrainedTo: range)
+                offset: clampedOffset
             )
         }
 
-        return SyntaxEditorTextPosition(offset: clampedHitOffset(text.utf16.count, constrainedTo: range))
+        let endOffset = clampedHitOffset(text.utf16.count, constrainedTo: range)
+        return SyntaxEditorTextPosition(offset: endOffset)
     }
 
     func caretTextLocation(
         interactingAt point: CGPoint,
         inContainerAt containerLocation: NSTextLocation
-    ) -> NSTextLocation? {
+    ) -> (location: NSTextLocation, anchorsLineEndHit: Bool)? {
         guard let lineFragmentRange = layoutManager.lineFragmentRange(
             for: point,
             inContainerAt: containerLocation
@@ -834,9 +861,11 @@ extension SyntaxEditorView {
             return nil
         }
 
-        if let layoutFragmentFrame = layoutManager.textLayoutFragment(for: point)?.layoutFragmentFrame,
-           (point.y < layoutFragmentFrame.minY || point.y > layoutFragmentFrame.maxY) {
-            return nil
+        if let layoutFragment = layoutManager.textLayoutFragment(for: point) {
+            let layoutFragmentFrame = layoutFragment.layoutFragmentFrame
+            if point.y < layoutFragmentFrame.minY || point.y > layoutFragmentFrame.maxY {
+                return nil
+            }
         }
 
         var closestDistance = CGFloat.greatestFiniteMagnitude
@@ -859,10 +888,20 @@ extension SyntaxEditorView {
         }
 
         if point.x > maximumCaretOffset {
-            return caretLineEndLocation(for: lineFragmentRange)
+            let result = caretLineEndLocation(for: lineFragmentRange)
+            let resultOffset = utf16Offset(for: result)
+            let anchorsLineEndHit = isHardLineBreakCaretLocation(resultOffset)
+            return (
+                location: result,
+                anchorsLineEndHit: anchorsLineEndHit
+            )
         }
 
-        return closestLocation
+        guard let closestLocation else { return nil }
+        return (
+            location: closestLocation,
+            anchorsLineEndHit: false
+        )
     }
 
     func clampedHitOffset(_ offset: Int, constrainedTo range: NSRange?) -> Int {
@@ -880,6 +919,34 @@ extension SyntaxEditorView {
         guard location >= 0, location < text.utf16.count else { return false }
         let character = (text as NSString).character(at: location)
         return character == 0x0A || character == 0x0D
+    }
+
+    func isAnchoredLineEndHitAdjustment(from currentOffset: Int, by offset: Int) -> Bool {
+        guard isHardLineBreakCaretLocation(currentOffset) else { return false }
+        guard offset >= 0 else { return false }
+        guard offset > 0 else { return true }
+
+        let source = text as NSString
+        let targetOffsetResult = currentOffset.addingReportingOverflow(offset)
+        guard !targetOffsetResult.overflow else { return false }
+        let targetOffset = targetOffsetResult.partialValue
+        guard targetOffset <= source.length else { return false }
+
+        var nextLineOffset = currentOffset + 1
+        if source.character(at: currentOffset) == 0x0D,
+           nextLineOffset < source.length,
+           source.character(at: nextLineOffset) == 0x0A {
+            guard targetOffset != nextLineOffset else { return true }
+            nextLineOffset += 1
+        }
+
+        while nextLineOffset < source.length {
+            let character = source.character(at: nextLineOffset)
+            guard character == 0x20 || character == 0x09 else { break }
+            nextLineOffset += 1
+        }
+
+        return targetOffset == nextLineOffset
     }
 
     func caretLineEndLocation(for lineFragmentRange: NSTextRange) -> NSTextLocation {
