@@ -44,6 +44,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var postLayoutAction: (() -> Void)?
     var markedRange: NSRange?
     var markedTextUndoAnchor: EditorUndoState?
+    var pendingTextInteractionCaretOverride: SyntaxEditorTextInteractionCaretOverride?
+    var isTextInteractionSelectionDrag = false
     var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     var keyboardAccessoryView: UIView?
     let modelObservations = ObservationScope()
@@ -145,7 +147,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         if let tokenizerStorage {
             return tokenizerStorage
         }
-        let tokenizer = UITextInputStringTokenizer(textInput: self)
+        let tokenizer = SyntaxEditorTextInputTokenizer(textInput: self)
         tokenizerStorage = tokenizer
         return tokenizer
     }
@@ -399,6 +401,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         alwaysBounceVertical = true
         keyboardDismissMode = .interactive
         delaysContentTouches = false
+        panGestureRecognizer.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue),
+            NSNumber(value: UITouch.TouchType.indirect.rawValue),
+        ]
 
         autocapitalizationType = .none
         autocorrectionType = .no
@@ -443,6 +450,19 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         } else {
             removeTextInteractions()
         }
+    }
+
+    public func interactionShouldBegin(_ interaction: UITextInteraction, at point: CGPoint) -> Bool {
+        return true
+    }
+
+    public func interactionWillBegin(_ interaction: UITextInteraction) {
+        isTextInteractionSelectionDrag = false
+    }
+
+    public func interactionDidEnd(_ interaction: UITextInteraction) {
+        pendingTextInteractionCaretOverride = nil
+        isTextInteractionSelectionDrag = false
     }
 
     func configureUndoObservation() {

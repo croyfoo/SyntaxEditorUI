@@ -436,6 +436,18 @@ struct SyntaxEditorUITests {
         #expect(textInputSurface.textInputView === editorView)
     }
 
+    @Test("SyntaxEditorView leaves iOS indirect pointer drags for text selection")
+    @MainActor
+    func syntaxEditorViewIOSLeavesIndirectPointerDragsForTextSelection() {
+        let editorView = SyntaxEditorView(model: SyntaxEditorModel(text: "let value = 1"))
+        let allowedTouchTypes = Set(editorView.panGestureRecognizer.allowedTouchTypes.map { Int($0.intValue) })
+
+        #expect(allowedTouchTypes.contains(UITouch.TouchType.direct.rawValue))
+        #expect(allowedTouchTypes.contains(UITouch.TouchType.pencil.rawValue))
+        #expect(allowedTouchTypes.contains(UITouch.TouchType.indirect.rawValue))
+        #expect(!allowedTouchTypes.contains(UITouch.TouchType.indirectPointer.rawValue))
+    }
+
     @Test("SyntaxEditorView receives iOS text interaction hit tests through the rendering view")
     @MainActor
     func syntaxEditorViewIOSReceivesTextInteractionHitTestsThroughRenderingView() {
@@ -1526,6 +1538,214 @@ struct SyntaxEditorUITests {
             editorView.offset(from: editorView.beginningOfDocument, to: resolvedPosition)
                 == whitespaceOffset
         )
+    }
+
+    @Test("SyntaxEditorView resolves iOS clicks to the nearest caret before a character midpoint")
+    @MainActor
+    func syntaxEditorViewIOSResolvesClicksToNearestCaretBeforeCharacterMidpoint() {
+        let source = "struct Greeting {\n    let message = \"hello\"\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let wordStart = (source as NSString).range(of: "Greeting").location
+        let leadingOffset = wordStart + "Gre".utf16.count
+        let trailingOffset = leadingOffset + 1
+        guard let leadingPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: leadingOffset
+        ),
+              let trailingPosition = editorView.position(
+                from: editorView.beginningOfDocument,
+                offset: trailingOffset
+              )
+        else {
+            Issue.record("SyntaxEditorView could not resolve adjacent word caret positions")
+            return
+        }
+
+        let leadingRect = editorView.caretRect(for: leadingPosition)
+        let trailingRect = editorView.caretRect(for: trailingPosition)
+        let tapPoint = CGPoint(
+            x: ((leadingRect.midX + trailingRect.midX) / 2) - 0.2,
+            y: leadingRect.midY
+        )
+        guard let resolvedPosition = editorView.closestPosition(to: tapPoint) else {
+            Issue.record("SyntaxEditorView could not resolve the word tap point")
+            return
+        }
+
+        #expect(
+            editorView.offset(from: editorView.beginningOfDocument, to: resolvedPosition)
+                == leadingOffset
+        )
+    }
+
+    @Test("SyntaxEditorView keeps the iOS tap caret when UIKit collapses an enclosing word")
+    @MainActor
+    func syntaxEditorViewIOSKeepsTapCaretWhenUIKitCollapsesEnclosingWord() {
+        let source = "struct Greeting {\n    let message = \"hello\"\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let wordStart = (source as NSString).range(of: "Greeting").location
+        let tappedOffset = wordStart + "Gre".utf16.count
+        let wordEnd = wordStart + "Greeting".utf16.count
+        guard let tappedPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: tappedOffset
+        ),
+              let wordEndPosition = editorView.position(
+                from: editorView.beginningOfDocument,
+                offset: wordEnd
+              ),
+              let collapsedWordEndRange = editorView.textRange(from: wordEndPosition, to: wordEndPosition)
+        else {
+            Issue.record("SyntaxEditorView could not resolve the tapped word positions")
+            return
+        }
+
+        let tappedRect = editorView.caretRect(for: tappedPosition)
+        guard let resolvedPosition = editorView.closestPosition(
+            to: CGPoint(x: tappedRect.midX, y: tappedRect.midY)
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve the tapped word caret")
+            return
+        }
+        _ = editorView.tokenizer.rangeEnclosingPosition(
+            resolvedPosition,
+            with: .word,
+            inDirection: UITextDirection(rawValue: 0)
+        )
+
+        editorView.selectedTextRange = collapsedWordEndRange
+
+        #expect(editorView.selectedRange == NSRange(location: tappedOffset, length: 0))
+    }
+
+    @Test("SyntaxEditorView resolves an adjacent caret boundary for iOS drag selection")
+    @MainActor
+    func syntaxEditorViewIOSResolvesAdjacentCaretBoundaryForDragSelection() {
+        let source = "struct Greeting {\n    let message = \"hello\"\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let wordStart = (source as NSString).range(of: "Greeting").location
+        let tappedOffset = wordStart + "Gre".utf16.count
+        guard let nextPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: tappedOffset + 1
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve the adjacent word caret position")
+            return
+        }
+
+        editorView.selectedRange = NSRange(location: tappedOffset, length: 0)
+        let adjacentBoundaryRect = editorView.caretRect(for: nextPosition)
+        guard let resolvedPosition = editorView.closestPosition(
+            to: CGPoint(x: adjacentBoundaryRect.midX, y: adjacentBoundaryRect.midY)
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve the adjacent word caret boundary")
+            return
+        }
+
+        #expect(
+            editorView.offset(from: editorView.beginningOfDocument, to: resolvedPosition)
+                == tappedOffset + 1
+        )
+    }
+
+    @Test("SyntaxEditorView keeps iOS drag selections separate from tap word-boundary correction")
+    @MainActor
+    func syntaxEditorViewIOSKeepsDragSelectionsSeparateFromTapWordBoundaryCorrection() {
+        let source = "struct Greeting {\n    let message = \"hello\"\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let wordStart = (source as NSString).range(of: "Greeting").location
+        let tappedOffset = wordStart + "Gre".utf16.count
+        let wordEnd = wordStart + "Greeting".utf16.count
+        guard let tappedPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: tappedOffset
+        ),
+              let wordEndPosition = editorView.position(
+                from: editorView.beginningOfDocument,
+                offset: wordEnd
+              ),
+              let dragRange = editorView.textRange(from: tappedPosition, to: wordEndPosition)
+        else {
+            Issue.record("SyntaxEditorView could not resolve the drag selection positions")
+            return
+        }
+
+        let tappedRect = editorView.caretRect(for: tappedPosition)
+        guard let resolvedPosition = editorView.closestPosition(
+            to: CGPoint(x: tappedRect.midX, y: tappedRect.midY)
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve the tapped word caret")
+            return
+        }
+        _ = editorView.tokenizer.rangeEnclosingPosition(
+            resolvedPosition,
+            with: .word,
+            inDirection: UITextDirection(rawValue: 0)
+        )
+
+        editorView.selectedTextRange = dragRange
+
+        #expect(editorView.selectedRange == NSRange(location: tappedOffset, length: wordEnd - tappedOffset))
+    }
+
+    @Test("SyntaxEditorView resolves iOS clicks at the final line end")
+    @MainActor
+    func syntaxEditorViewIOSResolvesClicksAtFinalLineEnd() {
+        let source = "let value = 123"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let endOffset = source.utf16.count
+        guard let lineEndPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: endOffset
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve final line end position")
+            return
+        }
+
+        let lineEndRect = editorView.caretRect(for: lineEndPosition)
+        guard let resolvedPosition = editorView.closestPosition(
+            to: CGPoint(x: lineEndRect.midX, y: lineEndRect.midY)
+        ) else {
+            Issue.record("SyntaxEditorView could not resolve final line end click")
+            return
+        }
+
+        #expect(editorView.offset(from: editorView.beginningOfDocument, to: resolvedPosition) == endOffset)
     }
 
     @Test("SyntaxEditorView resolves iOS clicks right of short lines to the line end")
@@ -3083,7 +3303,7 @@ struct SyntaxEditorUITests {
         layoutIOSEditorView(editorView)
         let restoredHorizontalOverflow = iOSEditorHasHorizontalOverflow(editorView)
         if !restoredHorizontalOverflow {
-            print(iOSEditorHorizontalOverflowDiagnostics(editorView))
+            Issue.record(Comment(rawValue: iOSEditorHorizontalOverflowDiagnostics(editorView)))
         }
         #expect(restoredHorizontalOverflow)
 
