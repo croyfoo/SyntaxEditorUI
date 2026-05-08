@@ -21,7 +21,7 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 
 ## Shortcuts
 
-- `Tab`: Indent
+- `Tab`: Insert spaces at the caret; indent selected lines
 - `Shift-Tab`: Outdent
 - `Cmd+]`: Indent
 - `Cmd+[` : Outdent

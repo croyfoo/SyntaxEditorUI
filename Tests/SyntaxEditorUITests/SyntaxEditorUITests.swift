@@ -3129,6 +3129,12 @@ struct SyntaxEditorUITests {
             withSender: nil
         ) as AnyObject?
         #expect(indentActionTarget === editorView)
+
+        let insertTabActionTarget = editorView.target(
+            forAction: NSSelectorFromString("handleInsertTabCommand"),
+            withSender: nil
+        ) as AnyObject?
+        #expect(insertTabActionTarget === editorView)
     }
 
     @Test("SyntaxEditorView read-only handlers do not mutate text on iOS")
@@ -3144,12 +3150,28 @@ struct SyntaxEditorUITests {
         editorView.selectedRange = NSRange(location: 0, length: source.utf16.count)
 
         editorView.insertText("\t")
+        #expect(performSyntaxEditorSelector("handleInsertTabCommand", on: editorView))
         #expect(performSyntaxEditorSelector("handleIndentCommand", on: editorView))
         #expect(performSyntaxEditorSelector("handleOutdentCommand", on: editorView))
         #expect(performSyntaxEditorSelector("handleToggleCommentCommand", on: editorView))
 
         #expect(model.text == source)
         #expect(editorView.text == source)
+    }
+
+    @Test("SyntaxEditorView inserts iOS tab spaces at the caret")
+    @MainActor
+    func syntaxEditorViewIOSInsertTabAtCaret() {
+        let source = "abcde"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        editorView.selectedRange = NSRange(location: 2, length: 0)
+
+        #expect(performSyntaxEditorSelector("handleInsertTabCommand", on: editorView))
+
+        #expect(model.text == "ab  cde")
+        #expect(editorView.text == "ab  cde")
+        #expect(editorView.selectedRange == NSRange(location: 4, length: 0))
     }
 
     @Test("SyntaxEditorView uses native iOS undo stack for text input")
@@ -3678,6 +3700,24 @@ struct SyntaxEditorUITests {
             #expect(model.text == source)
             #expect(editorView.textView.string == source)
         }
+    }
+
+    @Test("SyntaxEditorView inserts macOS tab spaces at the caret")
+    @MainActor
+    func syntaxEditorViewMacInsertTabAtCaret() {
+        let source = "abcde"
+        let model = SyntaxEditorModel(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(model: model)
+        editorView.textView.setSelectedRange(NSRange(location: 2, length: 0))
+
+        #expect(editorView.textView(
+            editorView.textView,
+            doCommandBy: #selector(NSResponder.insertTab(_:))
+        ))
+
+        #expect(model.text == "ab  cde")
+        #expect(editorView.textView.string == "ab  cde")
+        #expect(editorView.textView.selectedRange() == NSRange(location: 4, length: 0))
     }
 
     @Test("SyntaxEditorView read-only key equivalents do not mutate text on macOS")
