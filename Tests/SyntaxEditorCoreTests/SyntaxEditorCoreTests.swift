@@ -337,6 +337,20 @@ struct SyntaxEditorCoreTests {
         #expect(result?.selectedRange == NSRange(location: "\(prefix)   ".utf16.count, length: 0))
     }
 
+    @Test("EditorCommandEngine inserts tab spaces after a ZWJ emoji cluster")
+    func editorCommandEngineInsertTabAfterEmojiCluster() {
+        let engine = EditorCommandEngine()
+        let prefix = "👩‍💻"
+        let source = "\(prefix)bc"
+        let result = engine.insertTab(
+            source: source,
+            selection: NSRange(location: prefix.utf16.count, length: 0)
+        )
+
+        #expect(result?.text == "\(prefix)  bc")
+        #expect(result?.selectedRange == NSRange(location: "\(prefix)  ".utf16.count, length: 0))
+    }
+
     @Test("EditorCommandEngine indents selected lines for tab range input")
     func editorCommandEngineInsertTabIndentsSelectedLines() {
         let engine = EditorCommandEngine()

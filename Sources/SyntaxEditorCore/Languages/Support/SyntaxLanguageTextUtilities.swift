@@ -520,8 +520,8 @@ enum SyntaxLanguageTextUtilities {
 package enum SyntaxEditorDisplayColumnUtilities {
     package static func columnCount(in source: String, tabWidth: Int) -> Int {
         var currentColumns = 0
-        for scalar in source.unicodeScalars {
-            currentColumns += columnWidth(for: scalar, currentColumn: currentColumns, tabWidth: tabWidth)
+        for character in source {
+            currentColumns += columnWidth(for: character, currentColumn: currentColumns, tabWidth: tabWidth)
         }
         return currentColumns
     }
@@ -530,13 +530,12 @@ package enum SyntaxEditorDisplayColumnUtilities {
         var maxColumns = 0
         var currentColumns = 0
 
-        for scalar in source.unicodeScalars {
-            switch scalar.value {
-            case 10, 13:
+        for character in source {
+            if isLineBreak(character) {
                 maxColumns = max(maxColumns, currentColumns)
                 currentColumns = 0
-            default:
-                currentColumns += columnWidth(for: scalar, currentColumn: currentColumns, tabWidth: tabWidth)
+            } else {
+                currentColumns += columnWidth(for: character, currentColumn: currentColumns, tabWidth: tabWidth)
             }
         }
 
@@ -551,20 +550,42 @@ package enum SyntaxEditorDisplayColumnUtilities {
 }
 
 private extension SyntaxEditorDisplayColumnUtilities {
-    static func columnWidth(for scalar: Unicode.Scalar, currentColumn: Int, tabWidth: Int) -> Int {
-        if scalar.value == 9 {
+    static func columnWidth(for character: Character, currentColumn: Int, tabWidth: Int) -> Int {
+        if isTab(character) {
             return spacesToNextTabStop(from: currentColumn, tabWidth: tabWidth)
         }
 
-        if isZeroWidthScalar(scalar.value) {
+        if isZeroWidthCharacter(character) {
             return 0
         }
 
-        if isWideScalar(scalar.value) {
+        if isWideCharacter(character) {
             return 2
         }
 
         return 1
+    }
+
+    static func isTab(_ character: Character) -> Bool {
+        character.unicodeScalars.count == 1 && character.unicodeScalars.first?.value == 9
+    }
+
+    static func isLineBreak(_ character: Character) -> Bool {
+        character.unicodeScalars.contains { scalar in
+            scalar.value == 10 || scalar.value == 13
+        }
+    }
+
+    static func isZeroWidthCharacter(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { scalar in
+            isZeroWidthScalar(scalar.value)
+        }
+    }
+
+    static func isWideCharacter(_ character: Character) -> Bool {
+        character.unicodeScalars.contains { scalar in
+            isWideScalar(scalar.value) || isRegionalIndicatorScalar(scalar.value)
+        }
     }
 
     static func isZeroWidthScalar(_ value: UInt32) -> Bool {
@@ -602,5 +623,9 @@ private extension SyntaxEditorDisplayColumnUtilities {
         default:
             return false
         }
+    }
+
+    static func isRegionalIndicatorScalar(_ value: UInt32) -> Bool {
+        (0x1F1E6...0x1F1FF).contains(value)
     }
 }
