@@ -139,7 +139,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     var currentSelectedRange = NSRange(location: 0, length: 0)
-    var selectedRangeAnchoredLineEndHitLocation: Int?
     public weak var inputDelegate: UITextInputDelegate?
     var tokenizerStorage: (any UITextInputTokenizer)?
     public var tokenizer: any UITextInputTokenizer {
@@ -776,7 +775,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         inputDelegate?.textWillChange(self)
         inputDelegate?.selectionWillChange(self)
         performRawReplacement(in: clampedRange, replacement: replacement)
-        selectedRangeAnchoredLineEndHitLocation = nil
         currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
         syncTextLayoutSelection()
         handleTextDidChange(
@@ -984,12 +982,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func setSelectedRange(
         _ range: NSRange,
         preservesCommandState: Bool,
-        schedulesSelectionScroll: Bool,
-        anchorsLineEndHit: Bool = false
+        schedulesSelectionScroll: Bool
     ) {
         let clamped = clampedTextRange(range)
         let changed = currentSelectedRange != clamped
-        updateSelectedRangeLineEndHitAnchor(for: clamped, anchorsLineEndHit: anchorsLineEndHit)
 
         if changed {
             inputDelegate?.selectionWillChange(self)

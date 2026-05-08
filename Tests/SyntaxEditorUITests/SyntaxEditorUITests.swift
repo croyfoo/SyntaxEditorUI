@@ -2253,11 +2253,11 @@ struct SyntaxEditorUITests {
               let storedAdjustedPosition = editorView.position(from: storedRange.end, offset: 1),
               let storedAdjustedRange = editorView.textRange(from: storedAdjustedPosition, to: storedAdjustedPosition)
         else {
-            Issue.record("SyntaxEditorView could not simulate UIKit adjustment from stored selection")
+            Issue.record("SyntaxEditorView could not resolve explicit movement from stored selection")
             return
         }
         editorView.selectedTextRange = storedAdjustedRange
-        #expect(editorView.selectedRange == NSRange(location: firstLineEnd, length: 0))
+        #expect(editorView.selectedRange == NSRange(location: firstLineEnd + 1, length: 0))
     }
 
     @Test("SyntaxEditorView keeps iOS UIKit-adjusted trailing line-end tap before line break")
@@ -2352,6 +2352,16 @@ struct SyntaxEditorUITests {
         editorView.selectedTextRange = adjustedRange
         #expect(editorView.selectedRange == NSRange(location: secondLineEnd, length: 0))
 
+        guard let storedRange = editorView.selectedTextRange,
+              let storedAdjustedPosition = editorView.position(from: storedRange.end, offset: uiKitAdjustedOffset),
+              let storedAdjustedRange = editorView.textRange(from: storedAdjustedPosition, to: storedAdjustedPosition)
+        else {
+            Issue.record("SyntaxEditorView could not resolve explicit second-line movement from stored selection")
+            return
+        }
+        editorView.selectedTextRange = storedAdjustedRange
+        #expect(editorView.selectedRange == NSRange(location: nextLineContentStart, length: 0))
+
         guard let explicitLineEndPosition = editorView.position(
             from: editorView.beginningOfDocument,
             offset: secondLineEnd
@@ -2403,12 +2413,20 @@ struct SyntaxEditorUITests {
         editorView.selectedTextRange = characterRange
         #expect(editorView.selectedRange == NSRange(location: firstLineEnd, length: 0))
 
-        guard let adjustedPosition = editorView.position(from: characterRange.end, offset: 2),
+        guard let oneStepAdjustedPosition = editorView.position(from: characterRange.end, offset: 1),
+              let oneStepAdjustedRange = editorView.textRange(
+                from: oneStepAdjustedPosition,
+                to: oneStepAdjustedPosition
+              ),
+              let adjustedPosition = editorView.position(from: characterRange.end, offset: 2),
               let adjustedRange = editorView.textRange(from: adjustedPosition, to: adjustedPosition)
         else {
             Issue.record("SyntaxEditorView could not simulate UIKit CRLF character-range adjustment")
             return
         }
+        editorView.selectedTextRange = oneStepAdjustedRange
+        #expect(editorView.selectedRange == NSRange(location: firstLineEnd, length: 0))
+
         editorView.selectedTextRange = adjustedRange
         #expect(editorView.selectedRange == NSRange(location: firstLineEnd, length: 0))
     }
