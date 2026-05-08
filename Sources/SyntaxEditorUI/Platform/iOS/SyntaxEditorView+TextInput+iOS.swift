@@ -63,7 +63,12 @@ extension SyntaxEditorView {
             let location = offset(from: beginningOfDocument, to: newValue.start)
             let length = offset(from: newValue.start, to: newValue.end)
             guard location >= 0, length >= 0 else { return }
-            let nextRange = NSRange(location: location, length: length)
+            let requestedRange = NSRange(location: location, length: length)
+            if requestedRange.length > 0 {
+                isTextInteractionSelectionDrag = true
+                pendingTextInteractionCaretOverride = nil
+            }
+            let nextRange = textInteractionAdjustedSelectionRange(requestedRange)
             clearMarkedTextIfSelectionLeavesComposition(nextRange)
             setSelectedRange(
                 nextRange,
@@ -711,7 +716,9 @@ extension SyntaxEditorView {
 
     public func closestPosition(to point: CGPoint) -> UITextPosition? {
         preserveTextInteractionHorizontalOffsetForCurrentTurn()
-        return closestTextPosition(to: point, constrainedTo: nil)
+        let result = closestTextPosition(to: point, constrainedTo: nil)
+        trackTextInteractionCaretOverride(from: result, point: point)
+        return result
     }
 
     public func closestPosition(to point: CGPoint, within range: UITextRange) -> UITextPosition? {
@@ -870,29 +877,33 @@ extension SyntaxEditorView {
 
         var closestDistance = CGFloat.greatestFiniteMagnitude
         var closestLocation: NSTextLocation?
+        var closestAnchorsLineEndHit = false
         var maximumCaretOffset = -CGFloat.greatestFiniteMagnitude
+        let lineEndLocation = caretLineEndLocation(for: lineFragmentRange)
+        let lineEndOffset = utf16Offset(for: lineEndLocation)
         unsafe layoutManager.enumerateCaretOffsetsInLineFragment(at: lineFragmentRange.location) { caretOffset, location, leadingEdge, stop in
             maximumCaretOffset = max(maximumCaretOffset, caretOffset)
             let distance = abs(caretOffset - point.x)
-            if distance < closestDistance || shouldPreferTrailingCaretLocation(
-                location,
-                over: closestLocation,
-                distance: distance,
-                closestDistance: closestDistance
-            ) {
+            let locationOffset = utf16Offset(for: location)
+            let isLineEndTrailingEdge = !leadingEdge && isTrailingCaretOffsetAtLineEnd(
+                locationOffset,
+                lineEndOffset: lineEndOffset
+            )
+            guard leadingEdge || isLineEndTrailingEdge else { return }
+
+            if distance < closestDistance {
                 closestDistance = distance
-                closestLocation = location
-            } else if leadingEdge && caretOffset > point.x && distance > closestDistance {
+                closestLocation = isLineEndTrailingEdge ? lineEndLocation : location
+                closestAnchorsLineEndHit = isLineEndTrailingEdge && isHardLineBreakCaretLocation(lineEndOffset)
+            } else if distance > closestDistance {
                 unsafe stop.pointee = true
             }
         }
 
         if point.x > maximumCaretOffset {
-            let result = caretLineEndLocation(for: lineFragmentRange)
-            let resultOffset = utf16Offset(for: result)
-            let anchorsLineEndHit = isHardLineBreakCaretLocation(resultOffset)
+            let anchorsLineEndHit = isHardLineBreakCaretLocation(lineEndOffset)
             return (
-                location: result,
+                location: lineEndLocation,
                 anchorsLineEndHit: anchorsLineEndHit
             )
         }
@@ -900,8 +911,85 @@ extension SyntaxEditorView {
         guard let closestLocation else { return nil }
         return (
             location: closestLocation,
-            anchorsLineEndHit: false
+            anchorsLineEndHit: closestAnchorsLineEndHit
         )
+    }
+
+    func isTrailingCaretOffsetAtLineEnd(_ locationOffset: Int, lineEndOffset: Int) -> Bool {
+        if locationOffset == lineEndOffset {
+            return true
+        }
+
+        guard locationOffset >= 0,
+              locationOffset < lineEndOffset,
+              lineEndOffset <= text.utf16.count
+        else {
+            return false
+        }
+
+        let characterRange = (text as NSString).rangeOfComposedCharacterSequence(at: locationOffset)
+        return characterRange.location + characterRange.length == lineEndOffset
+    }
+
+    func trackTextInteractionCaretOverride(from position: UITextPosition?, point: CGPoint) {
+        guard !isTextInteractionSelectionDrag,
+              point != .zero,
+              let position,
+              let offset = offset(for: position)
+        else {
+            return
+        }
+
+        pendingTextInteractionCaretOverride = SyntaxEditorTextInteractionCaretOverride(
+            offset: offset,
+            wordRange: nil
+        )
+    }
+
+    func noteTextInteractionTokenizerWordRange(_ range: UITextRange?, enclosing position: UITextPosition) {
+        guard let positionOffset = offset(for: position),
+              var pending = pendingTextInteractionCaretOverride,
+              pending.offset == positionOffset,
+              let range
+        else {
+            return
+        }
+
+        let location = offset(from: beginningOfDocument, to: range.start)
+        let length = offset(from: range.start, to: range.end)
+        guard location >= 0, length > 0 else { return }
+
+        let wordRange = NSRange(location: location, length: length)
+        let wordEnd = wordRange.location + wordRange.length
+        guard pending.offset >= wordRange.location,
+              pending.offset <= wordEnd
+        else {
+            return
+        }
+
+        pending.wordRange = wordRange
+        pendingTextInteractionCaretOverride = pending
+    }
+
+    func textInteractionAdjustedSelectionRange(_ requestedRange: NSRange) -> NSRange {
+        guard requestedRange.length == 0,
+              !isTextInteractionSelectionDrag,
+              let pending = pendingTextInteractionCaretOverride,
+              let wordRange = pending.wordRange,
+              requestedRange.location != pending.offset
+        else {
+            return requestedRange
+        }
+
+        let wordEnd = wordRange.location + wordRange.length
+        guard requestedRange.location == wordRange.location || requestedRange.location == wordEnd,
+              pending.offset >= wordRange.location,
+              pending.offset <= wordEnd
+        else {
+            return requestedRange
+        }
+
+        return NSRange(location: pending.offset, length: 0)
     }
 
     func clampedHitOffset(_ offset: Int, constrainedTo range: NSRange?) -> Int {
@@ -971,20 +1059,6 @@ extension SyntaxEditorView {
         }
 
         return lineBreakOffset
-    }
-
-    func shouldPreferTrailingCaretLocation(
-        _ location: NSTextLocation,
-        over closestLocation: NSTextLocation?,
-        distance: CGFloat,
-        closestDistance: CGFloat
-    ) -> Bool {
-        guard distance.isNearlyEqual(to: closestDistance),
-              let closestLocation else {
-            return false
-        }
-
-        return utf16Offset(for: location) > utf16Offset(for: closestLocation)
     }
 
     func beginMarkedTextCommitUndoSessionIfNeeded(source: String, markedRange: NSRange) {
