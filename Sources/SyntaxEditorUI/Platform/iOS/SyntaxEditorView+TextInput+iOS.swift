@@ -48,7 +48,10 @@ extension SyntaxEditorView {
 
     public var selectedTextRange: UITextRange? {
         get {
-            SyntaxEditorTextRange(nsRange: selectedRange)
+            SyntaxEditorTextRange(
+                nsRange: selectedRange,
+                anchorsLineEndHit: selectedRangeAnchorsLineEndHit(selectedRange)
+            )
         }
         set {
             preserveTextInteractionHorizontalOffsetForCurrentTurn()
@@ -64,11 +67,14 @@ extension SyntaxEditorView {
             let length = offset(from: newValue.start, to: newValue.end)
             guard location >= 0, length >= 0 else { return }
             let nextRange = NSRange(location: location, length: length)
+            let anchorsLineEndHit = ((newValue.start as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false)
+                || ((newValue.end as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false)
             clearMarkedTextIfSelectionLeavesComposition(nextRange)
             setSelectedRange(
                 nextRange,
                 preservesCommandState: false,
-                schedulesSelectionScroll: false
+                schedulesSelectionScroll: false,
+                anchorsLineEndHit: anchorsLineEndHit
             )
         }
     }
@@ -121,6 +127,7 @@ extension SyntaxEditorView {
         performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextUndoAnchor: true)
         markedRange = nextMarkedRange
         applyMarkedTextAttributes()
+        selectedRangeAnchoredLineEndHitLocation = nil
         currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
         syncTextLayoutSelection()
 
@@ -176,6 +183,7 @@ extension SyntaxEditorView {
         inputDelegate?.selectionWillChange(self)
 
         performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextUndoAnchor: true)
+        selectedRangeAnchoredLineEndHitLocation = nil
         currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
         syncTextLayoutSelection()
         handleTextDidChange(
@@ -732,9 +740,13 @@ extension SyntaxEditorView {
         else {
             return nil
         }
+        let anchorsLineEndHit = (position as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false
 
         if isHardLineBreakCaretLocation(start) {
-            return SyntaxEditorTextRange(nsRange: NSRange(location: start, length: 0))
+            return SyntaxEditorTextRange(
+                nsRange: NSRange(location: start, length: 0),
+                anchorsLineEndHit: anchorsLineEndHit
+            )
         }
 
         guard let characterRange = composedCharacterRange(extendingFrom: start, in: .right) else {
@@ -894,7 +906,11 @@ extension SyntaxEditorView {
         }
 
         guard let closestLocation else { return nil }
-        return (location: closestLocation, anchorsLineEndHit: false)
+        let closestOffset = utf16Offset(for: closestLocation)
+        return (
+            location: closestLocation,
+            anchorsLineEndHit: isHardLineBreakCaretLocation(closestOffset)
+        )
     }
 
     func clampedHitOffset(_ offset: Int, constrainedTo range: NSRange?) -> Int {
@@ -912,6 +928,21 @@ extension SyntaxEditorView {
         guard location >= 0, location < text.utf16.count else { return false }
         let character = (text as NSString).character(at: location)
         return character == 0x0A || character == 0x0D
+    }
+
+    func selectedRangeAnchorsLineEndHit(_ range: NSRange) -> Bool {
+        guard let selectedRangeAnchoredLineEndHitLocation else { return false }
+        return range.length == 0
+            && range.location == selectedRangeAnchoredLineEndHitLocation
+            && isHardLineBreakCaretLocation(range.location)
+    }
+
+    func updateSelectedRangeLineEndHitAnchor(for range: NSRange, anchorsLineEndHit: Bool) {
+        selectedRangeAnchoredLineEndHitLocation = anchorsLineEndHit
+            && range.length == 0
+            && isHardLineBreakCaretLocation(range.location)
+            ? range.location
+            : nil
     }
 
     func isAnchoredLineEndHitAdjustment(from currentOffset: Int, by offset: Int) -> Bool {
