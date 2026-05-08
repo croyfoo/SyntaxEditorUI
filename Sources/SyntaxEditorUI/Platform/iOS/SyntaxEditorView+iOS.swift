@@ -311,6 +311,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return model.isEditable && (activeUndoManager?.canRedo ?? false)
         }
 
+        if isLineWrappingCommandAction(action) {
+            return true
+        }
+
         if isEditorCommandAction(action) {
             return model.isEditable
         }
@@ -514,17 +518,22 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func editorKeyCommands() -> [UIKeyCommand]? {
+        var commands = [
+            makeKeyCommand(input: "l", modifierFlags: [.control, .shift, .command], action: #selector(handleToggleLineWrappingCommand), title: "Wrap Lines"),
+        ]
+
         guard model.isEditable else {
-            return nil
+            return commands
         }
 
-        return [
+        commands.append(contentsOf: [
             makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleInsertTabCommand), title: "Insert Tab"),
             makeKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleOutdentCommand), title: "Outdent"),
             makeKeyCommand(input: "/", modifierFlags: [.command], action: #selector(handleToggleCommentCommand), title: "Toggle Comment"),
             makeKeyCommand(input: "]", modifierFlags: [.command], action: #selector(handleIndentCommand), title: "Indent"),
             makeKeyCommand(input: "[", modifierFlags: [.command], action: #selector(handleOutdentCommand), title: "Outdent"),
-        ]
+        ])
+        return commands
     }
 
     func isEditorCommandAction(_ action: Selector) -> Bool {
@@ -532,6 +541,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             || action == #selector(handleIndentCommand)
             || action == #selector(handleOutdentCommand)
             || action == #selector(handleToggleCommentCommand)
+    }
+
+    func isLineWrappingCommandAction(_ action: Selector) -> Bool {
+        action == #selector(handleToggleLineWrappingCommand)
     }
 
     func isUndoAction(_ action: Selector) -> Bool {
@@ -1124,6 +1137,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return
         }
         applyCommandResult(result)
+    }
+
+    @objc private func handleToggleLineWrappingCommand() {
+        model.lineWrappingEnabled.toggle()
     }
 
     @objc private func handleUndoCommand() {
