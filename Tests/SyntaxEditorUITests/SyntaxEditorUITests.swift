@@ -2209,6 +2209,260 @@ struct SyntaxEditorUITests {
         #expect(offset == firstLineEnd)
     }
 
+    @Test("SyntaxEditorView collapses iOS character range for trailing line-end tap")
+    @MainActor
+    func syntaxEditorViewIOSCharacterRangeForTrailingLineEndTapIsCollapsed() {
+        let source = "const answer = 42;\nfunction greet(name) {\n    return name\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let firstLineEnd = (source as NSString).range(of: "\n").location
+        let pointPastFirstLineText = CGPoint(
+            x: editorView.bounds.minX + 260,
+            y: editorView.textContainerInset.top + editorView.font.lineHeight * 0.5
+        )
+
+        guard let characterRange = editorView.characterRange(at: pointPastFirstLineText) else {
+            Issue.record("SyntaxEditorView could not resolve a first-line trailing character range")
+            return
+        }
+
+        let rangeStart = editorView.offset(from: editorView.beginningOfDocument, to: characterRange.start)
+        let rangeEnd = editorView.offset(from: editorView.beginningOfDocument, to: characterRange.end)
+        #expect(rangeStart == firstLineEnd)
+        #expect(rangeEnd == firstLineEnd)
+
+        editorView.selectedTextRange = characterRange
+        #expect(editorView.selectedRange == NSRange(location: firstLineEnd, length: 0))
+    }
+
+    @Test("SyntaxEditorView keeps iOS UIKit-adjusted trailing line-end tap before line break")
+    @MainActor
+    func syntaxEditorViewIOSKeepsUIKitAdjustedTrailingLineEndTapBeforeLineBreak() {
+        let source = "const answer = 42;\nfunction greet(name) {\n    return name\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let firstLineEnd = (source as NSString).range(of: "\n").location
+        let pointPastFirstLineText = CGPoint(
+            x: editorView.bounds.minX + 260,
+            y: editorView.textContainerInset.top + editorView.font.lineHeight * 0.5
+        )
+
+        guard let hitPosition = editorView.closestPosition(to: pointPastFirstLineText),
+              let hitRange = editorView.textRange(from: hitPosition, to: hitPosition),
+              let adjustedPosition = editorView.position(from: hitRange.end, offset: 1),
+              let adjustedRange = editorView.textRange(from: adjustedPosition, to: adjustedPosition)
+        else {
+            Issue.record("SyntaxEditorView could not simulate UIKit trailing line-end tap adjustment")
+            return
+        }
+
+        editorView.selectedTextRange = adjustedRange
+        #expect(editorView.selectedRange == NSRange(location: firstLineEnd, length: 0))
+
+        guard let explicitLineEndPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: firstLineEnd
+        ),
+              let explicitNextPosition = editorView.position(from: explicitLineEndPosition, offset: 1)
+        else {
+            Issue.record("SyntaxEditorView could not resolve explicit movement across a line break")
+            return
+        }
+
+        let explicitNextOffset = editorView.offset(
+            from: editorView.beginningOfDocument,
+            to: explicitNextPosition
+        )
+        #expect(explicitNextOffset == firstLineEnd + 1)
+    }
+
+    @Test("SyntaxEditorView keeps iOS UIKit-adjusted second-line trailing tap before line break")
+    @MainActor
+    func syntaxEditorViewIOSKeepsUIKitAdjustedSecondLineTrailingTapBeforeLineBreak() {
+        let source = "const answer = 42;\nfunction greet(name) {\n    return name\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let firstLineBreak = (source as NSString).range(of: "\n").location
+        let secondLineStart = firstLineBreak + 1
+        let secondLineEnd = (source as NSString).range(
+            of: "\n",
+            options: [],
+            range: NSRange(location: secondLineStart, length: (source as NSString).length - secondLineStart)
+        ).location
+        let nextLineContentStart = (source as NSString).range(
+            of: "return",
+            options: [],
+            range: NSRange(location: secondLineEnd, length: (source as NSString).length - secondLineEnd)
+        ).location
+        let uiKitAdjustedOffset = nextLineContentStart - secondLineEnd
+        let pointPastSecondLineText = CGPoint(
+            x: editorView.bounds.minX + 260,
+            y: editorView.textContainerInset.top + editorView.font.lineHeight * 1.5
+        )
+
+        guard let hitPosition = editorView.closestPosition(to: pointPastSecondLineText),
+              let hitRange = editorView.textRange(from: hitPosition, to: hitPosition),
+              let adjustedPosition = editorView.position(from: hitRange.end, offset: uiKitAdjustedOffset),
+              let adjustedRange = editorView.textRange(from: adjustedPosition, to: adjustedPosition)
+        else {
+            Issue.record("SyntaxEditorView could not simulate UIKit second-line trailing tap adjustment")
+            return
+        }
+
+        let hitOffset = editorView.offset(from: editorView.beginningOfDocument, to: hitPosition)
+        #expect(hitOffset == secondLineEnd)
+
+        editorView.selectedTextRange = adjustedRange
+        #expect(editorView.selectedRange == NSRange(location: secondLineEnd, length: 0))
+
+        guard let explicitLineEndPosition = editorView.position(
+            from: editorView.beginningOfDocument,
+            offset: secondLineEnd
+        ),
+              let explicitNextLineContentPosition = editorView.position(
+                from: explicitLineEndPosition,
+                offset: uiKitAdjustedOffset
+              )
+        else {
+            Issue.record("SyntaxEditorView could not resolve explicit movement to second-line next content")
+            return
+        }
+
+        let explicitNextLineContentOffset = editorView.offset(
+            from: editorView.beginningOfDocument,
+            to: explicitNextLineContentPosition
+        )
+        #expect(explicitNextLineContentOffset == nextLineContentStart)
+    }
+
+    @Test("SyntaxEditorView collapses iOS character range for trailing CRLF line-end tap")
+    @MainActor
+    func syntaxEditorViewIOSCharacterRangeForTrailingCRLFLineEndTapIsCollapsed() {
+        let source = "const answer = 42;\r\nfunction greet(name) {\r\n    return name\r\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let firstLineEnd = (source as NSString).range(of: "\r\n").location
+        let pointPastFirstLineText = CGPoint(
+            x: editorView.bounds.minX + 260,
+            y: editorView.textContainerInset.top + editorView.font.lineHeight * 0.5
+        )
+
+        guard let characterRange = editorView.characterRange(at: pointPastFirstLineText) else {
+            Issue.record("SyntaxEditorView could not resolve a first-line trailing CRLF character range")
+            return
+        }
+
+        let rangeStart = editorView.offset(from: editorView.beginningOfDocument, to: characterRange.start)
+        let rangeEnd = editorView.offset(from: editorView.beginningOfDocument, to: characterRange.end)
+        #expect(rangeStart == firstLineEnd)
+        #expect(rangeEnd == firstLineEnd)
+
+        editorView.selectedTextRange = characterRange
+        #expect(editorView.selectedRange == NSRange(location: firstLineEnd, length: 0))
+    }
+
+    @Test("SyntaxEditorView keeps iOS UIKit-adjusted trailing CRLF line-end tap before CRLF")
+    @MainActor
+    func syntaxEditorViewIOSKeepsUIKitAdjustedTrailingCRLFLineEndTapBeforeCRLF() {
+        let source = "const answer = 42;\r\nfunction greet(name) {\r\n    return name\r\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let firstLineEnd = (source as NSString).range(of: "\r\n").location
+        let nextLineContentStart = firstLineEnd + 2
+        let pointPastFirstLineText = CGPoint(
+            x: editorView.bounds.minX + 260,
+            y: editorView.textContainerInset.top + editorView.font.lineHeight * 0.5
+        )
+
+        guard let hitPosition = editorView.closestPosition(to: pointPastFirstLineText),
+              let hitRange = editorView.textRange(from: hitPosition, to: hitPosition),
+              let adjustedPosition = editorView.position(from: hitRange.end, offset: nextLineContentStart - firstLineEnd),
+              let adjustedRange = editorView.textRange(from: adjustedPosition, to: adjustedPosition)
+        else {
+            Issue.record("SyntaxEditorView could not simulate UIKit trailing CRLF line-end tap adjustment")
+            return
+        }
+
+        editorView.selectedTextRange = adjustedRange
+        #expect(editorView.selectedRange == NSRange(location: firstLineEnd, length: 0))
+    }
+
+    @Test("SyntaxEditorView keeps iOS UIKit-adjusted trailing CRLF indented tap before CRLF")
+    @MainActor
+    func syntaxEditorViewIOSKeepsUIKitAdjustedTrailingCRLFIndentedTapBeforeCRLF() {
+        let source = "const answer = 42;\r\nfunction greet(name) {\r\n    return name\r\n}"
+        let model = SyntaxEditorModel(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(model: model)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        let firstLineBreak = (source as NSString).range(of: "\r\n").location
+        let secondLineStart = firstLineBreak + 2
+        let secondLineEnd = (source as NSString).range(
+            of: "\r\n",
+            options: [],
+            range: NSRange(location: secondLineStart, length: (source as NSString).length - secondLineStart)
+        ).location
+        let nextLineContentStart = (source as NSString).range(
+            of: "return",
+            options: [],
+            range: NSRange(location: secondLineEnd, length: (source as NSString).length - secondLineEnd)
+        ).location
+        let uiKitAdjustedOffset = nextLineContentStart - secondLineEnd
+        let pointPastSecondLineText = CGPoint(
+            x: editorView.bounds.minX + 260,
+            y: editorView.textContainerInset.top + editorView.font.lineHeight * 1.5
+        )
+
+        guard let hitPosition = editorView.closestPosition(to: pointPastSecondLineText),
+              let hitRange = editorView.textRange(from: hitPosition, to: hitPosition),
+              let adjustedPosition = editorView.position(from: hitRange.end, offset: uiKitAdjustedOffset),
+              let adjustedRange = editorView.textRange(from: adjustedPosition, to: adjustedPosition)
+        else {
+            Issue.record("SyntaxEditorView could not simulate UIKit trailing CRLF indented tap adjustment")
+            return
+        }
+
+        let hitOffset = editorView.offset(from: editorView.beginningOfDocument, to: hitPosition)
+        #expect(hitOffset == secondLineEnd)
+
+        editorView.selectedTextRange = adjustedRange
+        #expect(editorView.selectedRange == NSRange(location: secondLineEnd, length: 0))
+    }
+
     @Test("SyntaxEditorView allows explicit iOS scrollRectToVisible to move horizontally")
     @MainActor
     func syntaxEditorViewIOSAllowsExplicitScrollRectToVisibleToMoveHorizontally() {
