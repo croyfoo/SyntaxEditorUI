@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import Foundation
 import UIKit
 
 @MainActor
@@ -9,6 +10,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     weak var editorView: SyntaxEditorView?
     lazy var findInteraction = UIFindInteraction(sessionDelegate: self)
     private var activeResultAggregator: UITextSearchAggregator<Int>?
+    private var activeSearchCancellation: FindSearchCancellation?
 
     init(editorView: SyntaxEditorView) {
         self.editorView = editorView
@@ -71,27 +73,45 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
             return
         }
 
+        activeSearchCancellation?.cancel()
+        let cancellation = FindSearchCancellation()
+        activeSearchCancellation = cancellation
         activeResultAggregator = resultAggregator
-        editorView.beginFindDecorationBatch()
-        defer {
-            editorView.endFindDecorationBatch()
-        }
-        editorView.clearFindDecorations()
-
-        let ranges = Self.searchRanges(
-            in: editorView.text,
+        let search = FindSearchRequest(
+            source: editorView.text,
             queryString: queryString,
             compareOptions: sanitizedCompareOptions(options.stringCompareOptions),
-            wordMatchMethod: options.wordMatchMethod
+            wordMatchMethod: options.wordMatchMethod,
+            documentIdentifier: documentIdentifier,
+            resultAggregator: resultAggregator,
+            cancellation: cancellation
         )
-        for range in ranges {
-            resultAggregator.foundRange(
-                SyntaxEditorTextRange(nsRange: range),
-                searchString: queryString,
-                document: documentIdentifier
-            )
+
+        editorView.clearFindDecorations()
+        editorView.beginFindDecorationBatch()
+
+        Task.detached(priority: .userInitiated) { [weak self, search] in
+            Self.enumerateSearchRanges(
+                in: search.source,
+                queryString: search.queryString,
+                compareOptions: search.compareOptions,
+                wordMatchMethod: search.wordMatchMethod
+            ) { range in
+                guard !search.cancellation.isCancelled else { return false }
+                search.resultAggregator.foundRange(
+                    SyntaxEditorTextRange(nsRange: range),
+                    searchString: search.queryString,
+                    document: search.documentIdentifier
+                )
+                return true
+            }
+
+            if !search.cancellation.isCancelled {
+                search.resultAggregator.finishedSearching()
+            }
+
+            await self?.finishTextSearch(cancellation: search.cancellation)
         }
-        resultAggregator.finishedSearching()
     }
 
     func decorate(
@@ -139,6 +159,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         editorView?.replaceFindText(in: range, with: text)
     }
 
+    @objc(replaceAllOccurrencesOfQueryString:usingOptions:withText:)
     func replaceAll(queryString: String, options: UITextSearchOptions, withText text: String) {
         editorView?.replaceAllFindMatches(
             queryString: queryString,
@@ -169,21 +190,50 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     }
 
     private func invalidateActiveResultAggregator() {
+        activeSearchCancellation?.cancel()
+        activeSearchCancellation = nil
         let resultAggregator = activeResultAggregator
         activeResultAggregator = nil
         resultAggregator?.invalidate()
     }
 
-    static func searchRanges(
+    private func finishTextSearch(cancellation: FindSearchCancellation) {
+        editorView?.endFindDecorationBatch()
+        if activeSearchCancellation === cancellation {
+            activeSearchCancellation = nil
+        }
+    }
+
+    nonisolated static func searchRanges(
         in source: String,
         queryString: String,
         compareOptions: NSString.CompareOptions = [],
         wordMatchMethod: UITextSearchOptions.WordMatchMethod = .contains
     ) -> [NSRange] {
-        guard !source.isEmpty, !queryString.isEmpty else { return [] }
+        var ranges: [NSRange] = []
+        enumerateSearchRanges(
+            in: source,
+            queryString: queryString,
+            compareOptions: compareOptions,
+            wordMatchMethod: wordMatchMethod
+        ) { range in
+            ranges.append(range)
+            return true
+        }
+        return ranges
+    }
+
+    @discardableResult
+    private nonisolated static func enumerateSearchRanges(
+        in source: String,
+        queryString: String,
+        compareOptions: NSString.CompareOptions,
+        wordMatchMethod: UITextSearchOptions.WordMatchMethod,
+        _ body: (NSRange) -> Bool
+    ) -> Bool {
+        guard !source.isEmpty, !queryString.isEmpty else { return true }
 
         let sourceString = source as NSString
-        var ranges: [NSRange] = []
         var searchRange = NSRange(location: 0, length: sourceString.length)
         var options = compareOptions
         options.remove(.backwards)
@@ -199,7 +249,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
 
             let alignedRange = composedCharacterAlignedRange(foundRange, in: sourceString)
             if accepts(range: alignedRange, in: sourceString, wordMatchMethod: wordMatchMethod) {
-                ranges.append(alignedRange)
+                guard body(alignedRange) else { return false }
             }
 
             let nextLocation = foundRange.location + max(foundRange.length, 1)
@@ -207,10 +257,10 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
             searchRange = NSRange(location: nextLocation, length: sourceString.length - nextLocation)
         }
 
-        return ranges
+        return true
     }
 
-    private static func composedCharacterAlignedRange(_ range: NSRange, in source: NSString) -> NSRange {
+    private nonisolated static func composedCharacterAlignedRange(_ range: NSRange, in source: NSString) -> NSRange {
         guard range.length > 0, source.length > 0 else { return range }
 
         let startRange = source.rangeOfComposedCharacterSequence(at: range.location)
@@ -220,7 +270,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         return NSRange(location: lower, length: upper - lower)
     }
 
-    private static func accepts(
+    private nonisolated static func accepts(
         range: NSRange,
         in source: NSString,
         wordMatchMethod: UITextSearchOptions.WordMatchMethod
@@ -238,7 +288,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         }
     }
 
-    private static func isIdentifierBoundary(at offset: Int, in source: NSString) -> Bool {
+    private nonisolated static func isIdentifierBoundary(at offset: Int, in source: NSString) -> Bool {
         guard offset > 0, offset < source.length else { return true }
         let source = source as String
         guard let index = stringIndex(forUTF16Offset: offset, in: source) else {
@@ -250,16 +300,43 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
             || !isIdentifierCharacter(source[index])
     }
 
-    private static func stringIndex(forUTF16Offset offset: Int, in source: String) -> String.Index? {
+    private nonisolated static func stringIndex(forUTF16Offset offset: Int, in source: String) -> String.Index? {
         let utf16Index = source.utf16.index(source.utf16.startIndex, offsetBy: offset)
         return String.Index(utf16Index, within: source)
     }
 
-    private static func isIdentifierCharacter(_ character: Character) -> Bool {
+    private nonisolated static func isIdentifierCharacter(_ character: Character) -> Bool {
         if character == "_" { return true }
         return character.unicodeScalars.contains { scalar in
             CharacterSet.alphanumerics.contains(scalar)
         }
+    }
+}
+
+private struct FindSearchRequest: @unchecked Sendable {
+    let source: String
+    let queryString: String
+    let compareOptions: NSString.CompareOptions
+    let wordMatchMethod: UITextSearchOptions.WordMatchMethod
+    let documentIdentifier: Int
+    let resultAggregator: UITextSearchAggregator<Int>
+    let cancellation: FindSearchCancellation
+}
+
+private final class FindSearchCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
     }
 }
 #endif

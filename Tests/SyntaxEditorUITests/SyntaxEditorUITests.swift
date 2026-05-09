@@ -447,14 +447,17 @@ struct SyntaxEditorUITests {
         #expect(editorView.isFindInteractionEnabled)
         #expect(editorView.findInteraction != nil)
         #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.find(_:)), withSender: nil))
+        #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.findAndReplace(_:)), withSender: nil))
 
         editorView.isFindInteractionEnabled = false
         #expect(editorView.findInteraction == nil)
         #expect(!editorView.canPerformAction(#selector(UIResponderStandardEditActions.find(_:)), withSender: nil))
+        #expect(!editorView.canPerformAction(#selector(UIResponderStandardEditActions.findAndReplace(_:)), withSender: nil))
 
         editorView.isFindInteractionEnabled = true
         #expect(editorView.findInteraction != nil)
         #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.find(_:)), withSender: nil))
+        #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.findAndReplace(_:)), withSender: nil))
     }
 
     @Test("SyntaxEditorView clears iOS find decorations when disabling find interaction")
@@ -536,6 +539,36 @@ struct SyntaxEditorUITests {
             queryString: "変数",
             wordMatchMethod: .fullWord
         ).count == 1)
+    }
+
+    @Test("SyntaxEditorFindCoordinator exposes iOS replace all selector")
+    @MainActor
+    func syntaxEditorFindCoordinatorIOSExposesReplaceAllSelector() {
+        let editorView = SyntaxEditorView(model: SyntaxEditorModel(text: "foo foo"))
+        let replaceAllSelector = NSSelectorFromString(
+            "replaceAllOccurrencesOfQueryString:usingOptions:withText:"
+        )
+
+        #expect(editorView.findCoordinator?.responds(to: replaceAllSelector) == true)
+    }
+
+    @Test("SyntaxEditorView filters iOS find highlight ranges to a fragment")
+    @MainActor
+    func syntaxEditorViewIOSFiltersFindHighlightRangesToFragment() {
+        let ranges = [
+            NSRange(location: 0, length: 3),
+            NSRange(location: 8, length: 3),
+            NSRange(location: 12, length: 2),
+            NSRange(location: 15, length: 1),
+        ]
+
+        #expect(SyntaxEditorView.ranges(
+            ranges,
+            intersecting: NSRange(location: 10, length: 5)
+        ) == [
+            NSRange(location: 8, length: 3),
+            NSRange(location: 12, length: 2),
+        ])
     }
 
     @Test("SyntaxEditorView clears stale iOS find decorations after text changes")
@@ -629,6 +662,7 @@ struct SyntaxEditorUITests {
 
         #expect(editorView.findInteraction != nil)
         #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.find(_:)), withSender: nil))
+        #expect(!editorView.canPerformAction(#selector(UIResponderStandardEditActions.findAndReplace(_:)), withSender: nil))
         #expect(editorView.findCoordinator?.supportsTextReplacement == false)
         #expect(!editorView.replaceAllFindMatches(
             queryString: "foo",

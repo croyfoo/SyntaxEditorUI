@@ -359,6 +359,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         case #selector(UIResponderStandardEditActions.selectAll(_:)):
             return isSelectable && !text.isEmpty
         default:
+            if isFindAndReplaceCommandAction(action) {
+                return model.isEditable && isFindInteractionEnabled && findInteraction != nil
+            }
             if isFindCommandAction(action) {
                 return isFindInteractionEnabled && findInteraction != nil
             }
@@ -406,6 +409,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     public override func find(_ sender: Any?) {
         findInteraction?.presentFindNavigator(showingReplace: false)
+    }
+
+    public override func findAndReplace(_ sender: Any?) {
+        guard model.isEditable else { return }
+        findInteraction?.presentFindNavigator(showingReplace: true)
     }
 
     public override func findNext(_ sender: Any?) {
@@ -626,6 +634,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             || action == #selector(UIResponderStandardEditActions.findNext(_:))
             || action == #selector(UIResponderStandardEditActions.findPrevious(_:))
             || action == #selector(UIResponderStandardEditActions.useSelectionForFind(_:))
+    }
+
+    func isFindAndReplaceCommandAction(_ action: Selector) -> Bool {
+        action == #selector(UIResponderStandardEditActions.findAndReplace(_:))
     }
 
     func isUndoAction(_ action: Selector) -> Bool {
@@ -1660,8 +1672,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         for fragmentView: SyntaxEditorTextLayoutFragmentView,
         layoutFragmentFrame: CGRect
     ) {
-        let foundRects = textHighlightRects(in: layoutFragmentFrame, ranges: findFoundRanges)
-        let highlightedRects = textHighlightRects(in: layoutFragmentFrame, ranges: findHighlightedRanges)
+        let fragmentRange = textRange(for: fragmentView.layoutFragment)
+        let foundRects = textHighlightRects(
+            in: layoutFragmentFrame,
+            ranges: Self.ranges(findFoundRanges, intersecting: fragmentRange)
+        )
+        let highlightedRects = textHighlightRects(
+            in: layoutFragmentFrame,
+            ranges: Self.ranges(findHighlightedRanges, intersecting: fragmentRange)
+        )
         let foundColor = foundRects.isEmpty
             ? nil
             : UIColor
@@ -1708,6 +1727,17 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         if rectsChanged || colorChanged {
             fragmentView.setNeedsDisplay()
         }
+    }
+
+    func textRange(for layoutFragment: NSTextLayoutFragment) -> NSRange {
+        let fragmentStart = utf16Offset(for: layoutFragment.rangeInElement.location)
+        let fragmentEnd = utf16Offset(for: layoutFragment.rangeInElement.endLocation)
+        return NSRange(location: fragmentStart, length: max(0, fragmentEnd - fragmentStart))
+    }
+
+    static func ranges(_ ranges: [NSRange], intersecting fragmentRange: NSRange) -> [NSRange] {
+        guard !ranges.isEmpty, fragmentRange.length > 0 else { return [] }
+        return ranges.filter { NSIntersectionRange($0, fragmentRange).length > 0 }
     }
 
     static func optionalColorsEqual(_ lhs: CGColor?, _ rhs: CGColor?) -> Bool {
