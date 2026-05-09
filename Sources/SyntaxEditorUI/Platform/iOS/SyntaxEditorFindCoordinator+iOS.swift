@@ -11,6 +11,8 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     lazy var findInteraction = UIFindInteraction(sessionDelegate: self)
     private var activeResultAggregator: UITextSearchAggregator<Int>?
     private var activeSearchCancellation: FindSearchCancellation?
+    private var activeSearchIdentifier: Int?
+    private var nextSearchIdentifier = 0
 
     init(editorView: SyntaxEditorView) {
         self.editorView = editorView
@@ -75,9 +77,13 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
 
         cancelActiveSearch()
         let cancellation = FindSearchCancellation()
+        let searchIdentifier = nextSearchIdentifier
+        nextSearchIdentifier += 1
         activeSearchCancellation = cancellation
+        activeSearchIdentifier = searchIdentifier
         activeResultAggregator = resultAggregator
         let search = FindSearchRequest(
+            identifier: searchIdentifier,
             source: editorView.text,
             queryString: queryString,
             compareOptions: sanitizedCompareOptions(options.stringCompareOptions),
@@ -100,7 +106,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
             ) { range in
                 guard !search.cancellation.isCancelled else { return false }
                 search.resultAggregator.foundRange(
-                    SyntaxEditorTextRange(nsRange: range),
+                    SyntaxEditorTextRange(nsRange: range, findSearchIdentifier: search.identifier),
                     searchString: search.queryString,
                     document: search.documentIdentifier
                 )
@@ -120,6 +126,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         document: Int?,
         usingStyle: UITextSearchFoundTextStyle
     ) {
+        guard isCurrentFindTextRange(foundTextRange) else { return }
         guard let range = nsRange(for: foundTextRange) else { return }
         editorView?.decorateFindTextRange(range, style: usingStyle)
     }
@@ -134,6 +141,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     }
 
     func willHighlight(foundTextRange: UITextRange, document: Int?) {
+        guard isCurrentFindTextRange(foundTextRange) else { return }
         scrollRangeToVisible(foundTextRange, inDocument: document)
     }
 
@@ -143,6 +151,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     }
 
     func shouldReplace(foundTextRange: UITextRange, document: Int?, withText: String) -> Bool {
+        guard isCurrentFindTextRange(foundTextRange) else { return false }
         guard editorView?.model.isEditable == true,
               let range = nsRange(for: foundTextRange)
         else {
@@ -190,20 +199,24 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         return sanitized
     }
 
+    func invalidateActiveSearch() {
+        invalidateActiveResultAggregator()
+    }
+
     private func invalidateActiveResultAggregator() {
         cancelActiveSearch()
-        let resultAggregator = activeResultAggregator
-        activeResultAggregator = nil
-        resultAggregator?.invalidate()
     }
 
     private func cancelActiveSearch() {
-        guard let cancellation = activeSearchCancellation else { return }
-
-        if cancellation.cancelAndClaimDecorationBatch() {
+        if activeSearchCancellation?.cancelAndClaimDecorationBatch() == true {
             editorView?.endFindDecorationBatch()
         }
         activeSearchCancellation = nil
+        activeSearchIdentifier = nil
+
+        let resultAggregator = activeResultAggregator
+        activeResultAggregator = nil
+        resultAggregator?.invalidate()
     }
 
     private func finishTextSearch(cancellation: FindSearchCancellation) {
@@ -213,6 +226,13 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         if activeSearchCancellation === cancellation {
             activeSearchCancellation = nil
         }
+    }
+
+    private func isCurrentFindTextRange(_ textRange: UITextRange) -> Bool {
+        guard let findSearchIdentifier = (textRange as? SyntaxEditorTextRange)?.findSearchIdentifier else {
+            return true
+        }
+        return findSearchIdentifier == activeSearchIdentifier
     }
 
     nonisolated static func searchRanges(
@@ -325,6 +345,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
 }
 
 private struct FindSearchRequest: @unchecked Sendable {
+    let identifier: Int
     let source: String
     let queryString: String
     let compareOptions: NSString.CompareOptions

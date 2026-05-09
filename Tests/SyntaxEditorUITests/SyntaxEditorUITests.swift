@@ -448,16 +448,22 @@ struct SyntaxEditorUITests {
         #expect(editorView.findInteraction != nil)
         #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.find(_:)), withSender: nil))
         #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.findAndReplace(_:)), withSender: nil))
+        #expect(!editorView.canPerformAction(#selector(UIResponderStandardEditActions.useSelectionForFind(_:)), withSender: nil))
+
+        editorView.selectedRange = NSRange(location: 4, length: 5)
+        #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.useSelectionForFind(_:)), withSender: nil))
 
         editorView.isFindInteractionEnabled = false
         #expect(editorView.findInteraction == nil)
         #expect(!editorView.canPerformAction(#selector(UIResponderStandardEditActions.find(_:)), withSender: nil))
         #expect(!editorView.canPerformAction(#selector(UIResponderStandardEditActions.findAndReplace(_:)), withSender: nil))
+        #expect(!editorView.canPerformAction(#selector(UIResponderStandardEditActions.useSelectionForFind(_:)), withSender: nil))
 
         editorView.isFindInteractionEnabled = true
         #expect(editorView.findInteraction != nil)
         #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.find(_:)), withSender: nil))
         #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.findAndReplace(_:)), withSender: nil))
+        #expect(editorView.canPerformAction(#selector(UIResponderStandardEditActions.useSelectionForFind(_:)), withSender: nil))
     }
 
     @Test("SyntaxEditorView clears iOS find decorations when disabling find interaction")

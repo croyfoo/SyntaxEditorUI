@@ -349,6 +349,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         switch action {
+        case #selector(UIResponderStandardEditActions.useSelectionForFind(_:)):
+            return isFindInteractionEnabled && findInteraction != nil && selectedRange.length > 0
         case #selector(UIResponderStandardEditActions.copy(_:)):
             return isSelectable && selectedRange.length > 0
         case #selector(UIResponderStandardEditActions.cut(_:)),
@@ -425,10 +427,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     public override func useSelectionForFind(_ sender: Any?) {
-        if selectedRange.length > 0,
-           let selectedText = string(in: selectedRange) {
-            findInteraction?.searchText = selectedText
+        guard selectedRange.length > 0,
+              let selectedText = string(in: selectedRange)
+        else {
+            return
         }
+        findInteraction?.searchText = selectedText
         findInteraction?.presentFindNavigator(showingReplace: false)
     }
 
@@ -531,6 +535,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 addInteraction(coordinator.findInteraction)
             }
         } else if let findCoordinator {
+            findCoordinator.invalidateActiveSearch()
             clearFindDecorations()
             removeInteraction(findCoordinator.findInteraction)
             self.findCoordinator = nil
@@ -633,7 +638,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         action == #selector(UIResponderStandardEditActions.find(_:))
             || action == #selector(UIResponderStandardEditActions.findNext(_:))
             || action == #selector(UIResponderStandardEditActions.findPrevious(_:))
-            || action == #selector(UIResponderStandardEditActions.useSelectionForFind(_:))
     }
 
     func isFindAndReplaceCommandAction(_ action: Selector) -> Bool {
