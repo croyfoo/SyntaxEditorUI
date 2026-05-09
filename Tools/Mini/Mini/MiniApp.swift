@@ -131,6 +131,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(deleteItem)
         editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(.separator())
+        let findMenuItem = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
+        let findMenu = NSMenu(title: "Find")
+        findMenu.addItem(textFinderMenuItem(title: "Find...", finderAction: .showFindInterface, keyEquivalent: "f"))
+        findMenu.addItem(
+            textFinderMenuItem(
+                title: "Find and Replace...",
+                finderAction: .showReplaceInterface,
+                keyEquivalent: "f",
+                modifiers: [.command, .option]
+            )
+        )
+        findMenu.addItem(.separator())
+        findMenu.addItem(textFinderMenuItem(title: "Find Next", finderAction: .nextMatch, keyEquivalent: "g"))
+        findMenu.addItem(
+            textFinderMenuItem(
+                title: "Find Previous",
+                finderAction: .previousMatch,
+                keyEquivalent: "g",
+                modifiers: [.command, .shift]
+            )
+        )
+        findMenu.addItem(
+            textFinderMenuItem(title: "Use Selection for Find", finderAction: .setSearchString, keyEquivalent: "e")
+        )
+        findMenuItem.submenu = findMenu
+        editMenu.addItem(findMenuItem)
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
@@ -154,6 +181,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = mainMenu
         NSApp.servicesMenu = servicesMenu
         NSApp.windowsMenu = windowMenu
+    }
+
+    private func textFinderMenuItem(
+        title: String,
+        finderAction: NSTextFinder.Action,
+        keyEquivalent: String,
+        modifiers: NSEvent.ModifierFlags = .command
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: title,
+            action: #selector(NSResponder.performTextFinderAction(_:)),
+            keyEquivalent: keyEquivalent
+        )
+        item.keyEquivalentModifierMask = modifiers
+        item.tag = finderAction.rawValue
+        return item
     }
 }
 

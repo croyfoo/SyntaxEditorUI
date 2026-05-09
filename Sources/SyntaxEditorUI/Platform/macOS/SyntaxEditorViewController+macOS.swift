@@ -116,6 +116,13 @@ private final class SyntaxEditorNativeTextView: NSTextView {
 public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     public private(set) var model: SyntaxEditorModel
     public let textView: NSTextView
+    public var isFindInteractionEnabled = true {
+        didSet {
+            guard isFindInteractionEnabled != oldValue else { return }
+            applyFindInteractionConfiguration()
+        }
+    }
+
     @ObservationIgnored
     private let fallbackUndoManager = UndoManager()
     @ObservationIgnored
@@ -411,9 +418,23 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         textView.isGrammarCheckingEnabled = false
 
         textView.isVerticallyResizable = true
+        applyFindInteractionConfiguration()
         configureBaseTextViewAppearance()
 
         applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
+    }
+
+    private func applyFindInteractionConfiguration() {
+        if isFindInteractionEnabled {
+            textView.usesFindBar = true
+            textView.isIncrementalSearchingEnabled = true
+            textView.usesFindPanel = false
+        } else {
+            isFindBarVisible = false
+            textView.isIncrementalSearchingEnabled = false
+            textView.usesFindBar = false
+            textView.usesFindPanel = false
+        }
     }
 
     private var activeUndoManager: UndoManager? {

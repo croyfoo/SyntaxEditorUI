@@ -29,6 +29,9 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 - `Ctrl+Shift+Cmd+L`: Toggle line wrapping
 - `Cmd+Z`: Undo
 - `Shift+Cmd+Z`: Redo
+- `Cmd+F`: Find
+- `Cmd+G`: Find next
+- `Shift+Cmd+G`: Find previous
 
 ## Usage
 
