@@ -73,7 +73,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
             return
         }
 
-        activeSearchCancellation?.cancel()
+        cancelActiveSearch()
         let cancellation = FindSearchCancellation()
         activeSearchCancellation = cancellation
         activeResultAggregator = resultAggregator
@@ -89,6 +89,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
 
         editorView.clearFindDecorations()
         editorView.beginFindDecorationBatch()
+        cancellation.beginDecorationBatch()
 
         Task.detached(priority: .userInitiated) { [weak self, search] in
             Self.enumerateSearchRanges(
@@ -190,15 +191,25 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     }
 
     private func invalidateActiveResultAggregator() {
-        activeSearchCancellation?.cancel()
-        activeSearchCancellation = nil
+        cancelActiveSearch()
         let resultAggregator = activeResultAggregator
         activeResultAggregator = nil
         resultAggregator?.invalidate()
     }
 
+    private func cancelActiveSearch() {
+        guard let cancellation = activeSearchCancellation else { return }
+
+        if cancellation.cancelAndClaimDecorationBatch() {
+            editorView?.endFindDecorationBatch()
+        }
+        activeSearchCancellation = nil
+    }
+
     private func finishTextSearch(cancellation: FindSearchCancellation) {
-        editorView?.endFindDecorationBatch()
+        if cancellation.finishAndClaimDecorationBatch() {
+            editorView?.endFindDecorationBatch()
+        }
         if activeSearchCancellation === cancellation {
             activeSearchCancellation = nil
         }
@@ -326,6 +337,7 @@ private struct FindSearchRequest: @unchecked Sendable {
 private final class FindSearchCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
+    private var decorationBatchActive = false
 
     var isCancelled: Bool {
         lock.lock()
@@ -333,10 +345,27 @@ private final class FindSearchCancellation: @unchecked Sendable {
         return cancelled
     }
 
-    func cancel() {
+    func beginDecorationBatch() {
+        lock.lock()
+        decorationBatchActive = true
+        lock.unlock()
+    }
+
+    func cancelAndClaimDecorationBatch() -> Bool {
         lock.lock()
         cancelled = true
+        let shouldEndDecorationBatch = decorationBatchActive
+        decorationBatchActive = false
         lock.unlock()
+        return shouldEndDecorationBatch
+    }
+
+    func finishAndClaimDecorationBatch() -> Bool {
+        lock.lock()
+        let shouldEndDecorationBatch = decorationBatchActive
+        decorationBatchActive = false
+        lock.unlock()
+        return shouldEndDecorationBatch
     }
 }
 #endif
