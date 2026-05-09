@@ -33,8 +33,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     }
 
     func findInteraction(_ interaction: UIFindInteraction, didEnd session: UIFindSession) {
-        activeResultAggregator?.invalidate()
-        activeResultAggregator = nil
+        invalidateActiveResultAggregator()
         editorView?.clearFindDecorations()
     }
 
@@ -109,8 +108,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     }
 
     func invalidateResultsAfterTextChange() {
-        activeResultAggregator?.invalidate()
-        activeResultAggregator = nil
+        invalidateActiveResultAggregator()
         findInteraction.updateResultCount()
     }
 
@@ -168,6 +166,12 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         sanitized.remove(.backwards)
         sanitized.remove(.anchored)
         return sanitized
+    }
+
+    private func invalidateActiveResultAggregator() {
+        let resultAggregator = activeResultAggregator
+        activeResultAggregator = nil
+        resultAggregator?.invalidate()
     }
 
     static func searchRanges(
