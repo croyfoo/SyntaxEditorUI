@@ -202,6 +202,10 @@ final class SyntaxEditorTextContentView: UIView {
 
 final class SyntaxEditorTextLayoutFragmentView: UIView {
     let layoutFragment: NSTextLayoutFragment
+    var findHighlightRects: [CGRect] = []
+    var findHighlightColor: CGColor?
+    var currentFindHighlightRects: [CGRect] = []
+    var currentFindHighlightColor: CGColor?
     var bracketHighlightRects: [CGRect] = []
     var bracketHighlightColor: CGColor?
 
@@ -221,6 +225,24 @@ final class SyntaxEditorTextLayoutFragmentView: UIView {
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else {
             return
+        }
+
+        if let findHighlightColor, !findHighlightRects.isEmpty {
+            context.saveGState()
+            context.setFillColor(findHighlightColor)
+            for findRect in findHighlightRects where findRect.intersects(rect) {
+                context.fill(findRect)
+            }
+            context.restoreGState()
+        }
+
+        if let currentFindHighlightColor, !currentFindHighlightRects.isEmpty {
+            context.saveGState()
+            context.setFillColor(currentFindHighlightColor)
+            for currentFindRect in currentFindHighlightRects where currentFindRect.intersects(rect) {
+                context.fill(currentFindRect)
+            }
+            context.restoreGState()
         }
 
         if let bracketHighlightColor, !bracketHighlightRects.isEmpty {
