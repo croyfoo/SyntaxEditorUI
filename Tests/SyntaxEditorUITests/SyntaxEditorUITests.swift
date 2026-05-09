@@ -3841,6 +3841,57 @@ struct SyntaxEditorUITests {
         #expect(editorView.textView.string == "{\"enabled\":true}")
     }
 
+    @Test("SyntaxEditorView enables macOS find bar by default")
+    @MainActor
+    func syntaxEditorViewMacEnablesFindBarByDefault() {
+        let editorView = SyntaxEditorView(model: SyntaxEditorModel(text: "let value = 1"))
+
+        #expect(editorView.isFindInteractionEnabled)
+        #expect(editorView.textView.usesFindBar)
+        #expect(editorView.textView.isIncrementalSearchingEnabled)
+        #expect(!editorView.textView.usesFindPanel)
+
+        let showFindItem = NSMenuItem()
+        showFindItem.tag = NSTextFinder.Action.showFindInterface.rawValue
+        editorView.textView.performTextFinderAction(showFindItem)
+        #expect(editorView.isFindBarVisible)
+
+        editorView.isFindInteractionEnabled = false
+        #expect(!editorView.textView.usesFindBar)
+        #expect(!editorView.textView.isIncrementalSearchingEnabled)
+        #expect(!editorView.textView.usesFindPanel)
+        #expect(!editorView.isFindBarVisible)
+
+        editorView.isFindInteractionEnabled = true
+        #expect(editorView.textView.usesFindBar)
+        #expect(editorView.textView.isIncrementalSearchingEnabled)
+        #expect(!editorView.textView.usesFindPanel)
+    }
+
+    @Test("SyntaxEditorView keeps macOS find bar available while read-only")
+    @MainActor
+    func syntaxEditorViewMacKeepsFindBarAvailableWhileReadOnly() {
+        let model = SyntaxEditorModel(text: "let value = 1", isEditable: false)
+        let editorView = SyntaxEditorView(model: model)
+
+        #expect(editorView.isFindInteractionEnabled)
+        #expect(editorView.textView.usesFindBar)
+        #expect(editorView.textView.isIncrementalSearchingEnabled)
+        #expect(editorView.textView.isEditable == false)
+
+        model.isEditable = true
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textView.usesFindBar)
+        #expect(editorView.textView.isIncrementalSearchingEnabled)
+        #expect(editorView.textView.isEditable)
+
+        model.isEditable = false
+        editorView.synchronizeModelForTesting()
+        #expect(editorView.textView.usesFindBar)
+        #expect(editorView.textView.isIncrementalSearchingEnabled)
+        #expect(editorView.textView.isEditable == false)
+    }
+
     @Test("SyntaxEditorView reflects custom macOS color theme")
     @MainActor
     func syntaxEditorViewMacColorThemeObservation() async {
