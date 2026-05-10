@@ -548,6 +548,15 @@ private func iOSEditorUnderlineColor(_ editorView: SyntaxEditorView, at location
 #if canImport(AppKit)
 private func requireNSTextViewDelegate(_ value: any NSTextViewDelegate) {}
 
+private final class SyntaxEditorNotificationRecorder: NSObject {
+    private(set) var count = 0
+
+    @objc
+    func record(_ notification: Notification) {
+        count += 1
+    }
+}
+
 @MainActor
 private func macEditorForegroundColor(_ editorView: SyntaxEditorView, at location: Int) -> NSColor? {
     guard let textStorage = editorView.textView.textStorage else {
@@ -4641,6 +4650,32 @@ struct SyntaxEditorUITests {
 
         #expect(editorView.textView.string == "\(source)\"\"")
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
+    @Test("SyntaxEditorView sends macOS text change notifications for command edits")
+    @MainActor
+    func syntaxEditorViewMacCommandEditsSendTextChangeNotifications() async {
+        let source = "let value = "
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let recorder = SyntaxEditorNotificationRecorder()
+        NotificationCenter.default.addObserver(
+            recorder,
+            selector: #selector(SyntaxEditorNotificationRecorder.record(_:)),
+            name: NSText.didChangeNotification,
+            object: editorView.textView
+        )
+        defer {
+            NotificationCenter.default.removeObserver(recorder)
+        }
+
+        let insertionRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.textView.setSelectedRange(insertionRange)
+        editorView.textView.insertText("\"", replacementRange: insertionRange)
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == "\(source)\"\"")
+        #expect(recorder.count == 1)
     }
 
     @Test("SyntaxEditorView fully applies macOS highlight when skipped revisions precede an incremental result")

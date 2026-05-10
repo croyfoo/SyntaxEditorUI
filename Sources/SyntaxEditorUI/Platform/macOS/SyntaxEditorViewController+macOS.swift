@@ -653,28 +653,28 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             ? SyntaxEditorDocument.applying(result.edits, to: previousText)
             : previousText
 
-        if textChanged, !isApplyingUndoRedo {
-            registerUndoAction(
-                restore: EditorUndoState(
-                    edits: SyntaxEditorDocument.inverseEdits(for: result.edits, in: previousText),
-                    selectedRange: previousSelection,
-                    refreshStartUTF16: 0
-                ),
-                counterpart: EditorUndoState(
-                    edits: result.edits,
-                    selectedRange: result.selectedRange,
-                    refreshStartUTF16: result.refreshStartUTF16
+        let undoState: (restore: EditorUndoState, counterpart: EditorUndoState)? =
+            if textChanged, !isApplyingUndoRedo {
+                (
+                    EditorUndoState(
+                        edits: SyntaxEditorDocument.inverseEdits(for: result.edits, in: previousText),
+                        selectedRange: previousSelection,
+                        refreshStartUTF16: 0
+                    ),
+                    EditorUndoState(
+                        edits: result.edits,
+                        selectedRange: result.selectedRange,
+                        refreshStartUTF16: result.refreshStartUTF16
+                    )
                 )
-            )
-        }
+            } else {
+                nil
+            }
 
         isApplyingModel = true
-        if textChanged {
-            textStorage.beginEditing()
-            for edit in result.edits.sorted(by: { $0.range.location > $1.range.location }) {
-                textStorage.replaceCharacters(in: edit.range, with: edit.replacement)
-            }
-            textStorage.endEditing()
+        if textChanged, !applyTextEdits(result.edits) {
+            isApplyingModel = false
+            return
         }
         isApplyingCommandSelection = true
         textView.setSelectedRange(result.selectedRange)
@@ -684,6 +684,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         pendingEditStartUTF16 = nil
         pendingHighlightMutation = nil
+
+        if let undoState {
+            registerUndoAction(restore: undoState.restore, counterpart: undoState.counterpart)
+        }
 
         var change: SyntaxEditorDocumentChange?
         if textChanged {
@@ -745,29 +749,39 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         isApplyingUndoRedo = false
     }
 
-    private func applyTextMutation(
-        previousText: String,
-        nextText: String
-    ) -> TextMutation? {
-        guard let mutation = TextMutation.diff(from: previousText, to: nextText) else {
-            return nil
-        }
-
+    private func applyTextEdits(_ edits: [SyntaxEditorTextEdit]) -> Bool {
         let textLength = textStorage.length
-        guard mutation.range.location + mutation.range.length <= textLength else {
-            return nil
+        let validationEdits = edits.sorted { $0.range.location < $1.range.location }
+        guard validationEdits.allSatisfy({ $0.range.location + $0.range.length <= textLength }) else {
+            return false
         }
 
-        guard textView.shouldChangeText(in: mutation.range, replacementString: mutation.replacement) else {
-            return nil
+        let undoManager = activeUndoManager
+        let disablesUndoRegistration = undoManager?.isUndoRegistrationEnabled == true
+        if disablesUndoRegistration {
+            undoManager?.disableUndoRegistration()
+        }
+        defer {
+            if disablesUndoRegistration {
+                undoManager?.enableUndoRegistration()
+            }
         }
 
+        let affectedRanges = validationEdits.map { NSValue(range: $0.range) }
+        let replacementStrings = validationEdits.map(\.replacement)
+        guard textView.shouldChangeText(inRanges: affectedRanges, replacementStrings: replacementStrings) else {
+            return false
+        }
+
+        let base = baseAttributes()
         textStorage.beginEditing()
-        textStorage.replaceCharacters(in: mutation.range, with: mutation.replacement)
+        for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
+            let replacement = NSAttributedString(string: edit.replacement, attributes: base)
+            textStorage.replaceCharacters(in: edit.range, with: replacement)
+        }
         textStorage.endEditing()
         textView.didChangeText()
-
-        return mutation
+        return true
     }
 
     private func handleShortcut(_ action: MacEditorShortcutAction) -> Bool {
