@@ -750,6 +750,60 @@ struct SyntaxEditorUITests {
 #endif
     }
 
+    @Test("SyntaxEditorView does not reuse cached highlights after document rebind")
+    @MainActor
+    func syntaxEditorViewDoesNotReuseCachedHighlightsAfterDocumentRebind() async {
+        let initialTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let updatedTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x654321),
+            keyword: syntaxEditorUITestColor(hex: 0x876543)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    captureName: "keyword"
+                ),
+            ],
+            delayNanoseconds: 30_000_000
+        )
+        let model = SyntaxEditorTestContext(
+            text: "let old = 1",
+            language: SyntaxLanguage.swift,
+            colorTheme: initialTheme
+        )
+        let replacementDocument = SyntaxEditorDocument(text: "abc new = 1")
+
+#if canImport(UIKit)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
+
+        editorView.update(document: replacementDocument, configuration: model.configuration)
+        model.configuration.colorTheme = updatedTheme
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.baseForeground))
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
+#elseif canImport(AppKit)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
+
+        editorView.update(document: replacementDocument, configuration: model.configuration)
+        model.configuration.colorTheme = updatedTheme
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.baseForeground))
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
+#endif
+    }
+
 #if canImport(UIKit)
     @Test("SyntaxEditorViewController preserves Observable conformance on iOS")
     @MainActor

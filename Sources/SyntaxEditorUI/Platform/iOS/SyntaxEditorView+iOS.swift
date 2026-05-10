@@ -30,6 +30,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     let commandEngine = EditorCommandEngine()
     var highlightTask: Task<Void, Never>?
     var lastHighlightTokens: [SyntaxHighlightToken] = []
+    var lastHighlightSource: String?
     var lastHighlightRevision: Int?
     var lastHighlightLanguage: SyntaxLanguage?
     var isApplyingModel = false
@@ -271,6 +272,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             documentObservations.cancelAll()
             activeUndoManager?.removeAllActions()
             commandEngine.invalidateTransientState()
+            clearHighlightCache()
             document = nextDocument
             refreshKeyboardAccessoryState()
         }
@@ -1467,6 +1469,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 refreshRange: refreshRange
             )
             self.lastHighlightTokens = result.tokens
+            self.lastHighlightSource = result.source
             self.lastHighlightRevision = result.revision
             self.lastHighlightLanguage = result.language
         }
@@ -1491,7 +1494,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func reapplyCachedHighlight() {
         let source = text
-        guard lastHighlightRevision == document.revision, lastHighlightLanguage == configuration.language else {
+        guard lastHighlightRevision == document.revision,
+              lastHighlightLanguage == configuration.language,
+              lastHighlightSource == source
+        else {
             scheduleHighlight(source: source, language: configuration.language, revision: document.revision)
             return
         }
@@ -1502,6 +1508,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             source: source,
             refreshRange: NSRange(location: 0, length: source.utf16.count)
         )
+    }
+
+    func clearHighlightCache() {
+        highlightTask?.cancel()
+        highlightTask = nil
+        lastHighlightTokens = []
+        lastHighlightSource = nil
+        lastHighlightRevision = nil
+        lastHighlightLanguage = nil
     }
 
     static func highlightMutation(_ change: SyntaxEditorDocumentChange) -> SyntaxHighlightMutation? {
@@ -1564,7 +1579,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let targetRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
         guard targetRange.length > 0 else { return }
 
-        if lastHighlightRevision == document.revision, lastHighlightLanguage == configuration.language {
+        if lastHighlightRevision == document.revision,
+           lastHighlightLanguage == configuration.language,
+           lastHighlightSource == text {
             applyHighlight(
                 lastHighlightTokens,
                 expectedRevision: document.revision,

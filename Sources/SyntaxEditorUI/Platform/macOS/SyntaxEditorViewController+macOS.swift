@@ -144,6 +144,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     @ObservationIgnored
     private var lastHighlightTokens: [SyntaxHighlightToken] = []
     @ObservationIgnored
+    private var lastHighlightSource: String?
+    @ObservationIgnored
     private var lastHighlightRevision: Int?
     @ObservationIgnored
     private var lastHighlightLanguage: SyntaxLanguage?
@@ -251,6 +253,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             documentObservations.cancelAll()
             activeUndoManager?.removeAllActions()
             commandEngine.invalidateTransientState()
+            clearHighlightCache()
             document = nextDocument
         }
 
@@ -553,7 +556,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             if change?.isWholeDocumentReplacement == true {
                 activeUndoManager?.removeAllActions()
             }
-            textView.string = text
+            replaceEntireStorageText(text)
             if let change,
                !(change.isWholeDocumentReplacement && change.selectedRange == NSRange(location: 0, length: 0)) {
                 textView.setSelectedRange(change.selectedRange)
@@ -892,6 +895,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
                 refreshRange: refreshRange
             )
             self.lastHighlightTokens = result.tokens
+            self.lastHighlightSource = result.source
             self.lastHighlightRevision = result.revision
             self.lastHighlightLanguage = result.language
         }
@@ -916,7 +920,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
     private func reapplyCachedHighlight() {
         let source = textView.string
-        guard lastHighlightRevision == document.revision, lastHighlightLanguage == configuration.language else {
+        guard lastHighlightRevision == document.revision,
+              lastHighlightLanguage == configuration.language,
+              lastHighlightSource == source
+        else {
             scheduleHighlight(source: source, language: configuration.language, revision: document.revision)
             return
         }
@@ -927,6 +934,21 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             source: source,
             refreshRange: NSRange(location: 0, length: source.utf16.count)
         )
+    }
+
+    private func clearHighlightCache() {
+        highlightTask?.cancel()
+        highlightTask = nil
+        lastHighlightTokens = []
+        lastHighlightSource = nil
+        lastHighlightRevision = nil
+        lastHighlightLanguage = nil
+    }
+
+    private func replaceEntireStorageText(_ nextText: String) {
+        textStorage.beginEditing()
+        textStorage.setAttributedString(NSAttributedString(string: nextText, attributes: baseAttributes()))
+        textStorage.endEditing()
     }
 
     private static func highlightMutation(_ change: SyntaxEditorDocumentChange) -> SyntaxHighlightMutation? {
