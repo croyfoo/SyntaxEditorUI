@@ -98,23 +98,29 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         cancellation.beginDecorationBatch()
 
         Task.detached(priority: .userInitiated) { [weak self, search] in
-            Self.enumerateSearchRanges(
+            await Self.enumerateSearchRangesAsync(
                 in: search.source,
                 queryString: search.queryString,
                 compareOptions: search.compareOptions,
                 wordMatchMethod: search.wordMatchMethod
             ) { range in
                 guard !search.cancellation.isCancelled else { return false }
-                search.resultAggregator.foundRange(
-                    SyntaxEditorTextRange(nsRange: range, findSearchIdentifier: search.identifier),
-                    searchString: search.queryString,
-                    document: search.documentIdentifier
-                )
-                return true
+                return await MainActor.run {
+                    guard !search.cancellation.isCancelled else { return false }
+                    search.resultAggregator.foundRange(
+                        SyntaxEditorTextRange(nsRange: range, findSearchIdentifier: search.identifier),
+                        searchString: search.queryString,
+                        document: search.documentIdentifier
+                    )
+                    return true
+                }
             }
 
             if !search.cancellation.isCancelled {
-                search.resultAggregator.finishedSearching()
+                await MainActor.run {
+                    guard !search.cancellation.isCancelled else { return }
+                    search.resultAggregator.finishedSearching()
+                }
             }
 
             await self?.finishTextSearch(cancellation: search.cancellation)
@@ -281,6 +287,43 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
             let alignedRange = composedCharacterAlignedRange(foundRange, in: sourceString)
             if accepts(range: alignedRange, in: sourceString, wordMatchMethod: wordMatchMethod) {
                 guard body(alignedRange) else { return false }
+            }
+
+            let nextLocation = foundRange.location + max(foundRange.length, 1)
+            guard nextLocation <= sourceString.length else { break }
+            searchRange = NSRange(location: nextLocation, length: sourceString.length - nextLocation)
+        }
+
+        return true
+    }
+
+    @discardableResult
+    private nonisolated static func enumerateSearchRangesAsync(
+        in source: String,
+        queryString: String,
+        compareOptions: NSString.CompareOptions,
+        wordMatchMethod: UITextSearchOptions.WordMatchMethod,
+        _ body: (NSRange) async -> Bool
+    ) async -> Bool {
+        guard !source.isEmpty, !queryString.isEmpty else { return true }
+
+        let sourceString = source as NSString
+        var searchRange = NSRange(location: 0, length: sourceString.length)
+        var options = compareOptions
+        options.remove(.backwards)
+        options.remove(.anchored)
+
+        while searchRange.length > 0 {
+            let foundRange = sourceString.range(
+                of: queryString,
+                options: options,
+                range: searchRange
+            )
+            guard foundRange.location != NSNotFound, foundRange.length > 0 else { break }
+
+            let alignedRange = composedCharacterAlignedRange(foundRange, in: sourceString)
+            if accepts(range: alignedRange, in: sourceString, wordMatchMethod: wordMatchMethod) {
+                guard await body(alignedRange) else { return false }
             }
 
             let nextLocation = foundRange.location + max(foundRange.length, 1)
