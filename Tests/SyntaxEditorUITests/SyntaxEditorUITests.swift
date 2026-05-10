@@ -4547,6 +4547,56 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView fully applies macOS highlight when skipped revisions precede an incremental result")
+    @MainActor
+    func syntaxEditorViewMacFullyAppliesHighlightAfterSkippedIncrementalRevisions() async {
+        let firstPaste = "let first = 1\n"
+        let secondPaste = "let second = 2\n"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    captureName: "keyword"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: firstPaste.utf16.count, length: 3),
+                    captureName: "keyword"
+                ),
+            ],
+            delayNanoseconds: 20_000_000,
+            updateRefreshRange: NSRange(location: firstPaste.utf16.count, length: secondPaste.utf16.count)
+        )
+        let model = SyntaxEditorTestContext(
+            text: "",
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        editorView.textView.insertText(firstPaste, replacementRange: NSRange(location: 0, length: 0))
+        editorView.textView.setSelectedRange(NSRange(location: firstPaste.utf16.count, length: 0))
+        editorView.textView.insertText(
+            secondPaste,
+            replacementRange: NSRange(location: firstPaste.utf16.count, length: 0)
+        )
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == firstPaste + secondPaste)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorForegroundColor(editorView, at: firstPaste.utf16.count),
+                theme.keyword
+            )
+        )
+    }
+
     @Test("SyntaxEditorView reflects editable and wrapping changes on macOS")
     @MainActor
     func syntaxEditorViewMacEditorStateObservation() async {

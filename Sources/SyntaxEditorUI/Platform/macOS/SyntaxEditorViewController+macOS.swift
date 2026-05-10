@@ -877,16 +877,37 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             guard !Task.isCancelled else { return }
             guard let self else { return }
             guard self.document.revision == result.revision else { return }
-            self.lastHighlightTokens = result.tokens
-            self.lastHighlightRevision = result.revision
-            self.lastHighlightLanguage = result.language
+            let refreshRange = self.highlightApplicationRefreshRange(
+                for: result,
+                mutation: mutation
+            )
             self.applyHighlight(
                 result.tokens,
                 expectedRevision: result.revision,
                 source: result.source,
-                refreshRange: result.refreshRange
+                refreshRange: refreshRange
             )
+            self.lastHighlightTokens = result.tokens
+            self.lastHighlightRevision = result.revision
+            self.lastHighlightLanguage = result.language
         }
+    }
+
+    private func highlightApplicationRefreshRange(
+        for result: SyntaxHighlightResult,
+        mutation: SyntaxHighlightMutation?
+    ) -> NSRange {
+        guard mutation != nil else {
+            return result.refreshRange
+        }
+
+        guard lastHighlightRevision == result.revision - 1,
+              lastHighlightLanguage == result.language
+        else {
+            return NSRange(location: 0, length: result.source.utf16.count)
+        }
+
+        return result.refreshRange
     }
 
     private func reapplyCachedHighlight() {
