@@ -550,13 +550,29 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         let text = document.textSnapshot()
         let textNeedsUpdate = forceTextUpdate || textView.string != text
+        var highlightMutation: SyntaxHighlightMutation?
         if textNeedsUpdate {
             commandEngine.invalidateTransientState()
             let change = document.latestChange
             if change?.isWholeDocumentReplacement == true {
                 activeUndoManager?.removeAllActions()
             }
-            replaceEntireStorageText(text)
+            let canApplyIncrementally = change.map {
+                $0.revision == revision
+                    && !$0.isWholeDocumentReplacement
+                    && !forceTextUpdate
+                    && lastAppliedDocumentRevision == revision - 1
+            } ?? false
+            let didApplyIncrementally = if canApplyIncrementally, let change {
+                applyStorageTextEdits(change.edits)
+            } else {
+                false
+            }
+            if didApplyIncrementally {
+                highlightMutation = change.flatMap(Self.highlightMutation)
+            } else {
+                replaceEntireStorageText(text)
+            }
             if let change,
                !(change.isWholeDocumentReplacement && change.selectedRange == NSRange(location: 0, length: 0)) {
                 textView.setSelectedRange(change.selectedRange)
@@ -569,7 +585,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
                 source: text,
                 language: configuration.language,
                 revision: revision,
-                mutation: document.latestChange.flatMap(Self.highlightMutation),
+                mutation: highlightMutation,
                 refreshStartUTF16: 0
             )
         }
@@ -750,9 +766,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func applyTextEdits(_ edits: [SyntaxEditorTextEdit]) -> Bool {
-        let textLength = textStorage.length
         let validationEdits = edits.sorted { $0.range.location < $1.range.location }
-        guard validationEdits.allSatisfy({ $0.range.location + $0.range.length <= textLength }) else {
+        guard editsAreValid(validationEdits) else {
             return false
         }
 
@@ -773,13 +788,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             return false
         }
 
-        let base = baseAttributes()
-        textStorage.beginEditing()
-        for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
-            let replacement = NSAttributedString(string: edit.replacement, attributes: base)
-            textStorage.replaceCharacters(in: edit.range, with: replacement)
-        }
-        textStorage.endEditing()
+        guard applyStorageTextEdits(edits) else { return false }
         textView.didChangeText()
         return true
     }
@@ -963,6 +972,26 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         textStorage.beginEditing()
         textStorage.setAttributedString(NSAttributedString(string: nextText, attributes: baseAttributes()))
         textStorage.endEditing()
+    }
+
+    private func applyStorageTextEdits(_ edits: [SyntaxEditorTextEdit]) -> Bool {
+        guard editsAreValid(edits) else { return false }
+
+        let base = baseAttributes()
+        textStorage.beginEditing()
+        for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
+            let replacement = NSAttributedString(string: edit.replacement, attributes: base)
+            textStorage.replaceCharacters(in: edit.range, with: replacement)
+        }
+        textStorage.endEditing()
+        return true
+    }
+
+    private func editsAreValid(_ edits: [SyntaxEditorTextEdit]) -> Bool {
+        let textLength = textStorage.length
+        return edits.allSatisfy { edit in
+            edit.range.location >= 0 && edit.range.location + edit.range.length <= textLength
+        }
     }
 
     private static func highlightMutation(_ change: SyntaxEditorDocumentChange) -> SyntaxHighlightMutation? {

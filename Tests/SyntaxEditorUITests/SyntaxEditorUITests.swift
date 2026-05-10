@@ -4678,6 +4678,47 @@ struct SyntaxEditorUITests {
         #expect(recorder.count == 1)
     }
 
+    @Test("SyntaxEditorView preserves macOS highlights for observed document edits")
+    @MainActor
+    func syntaxEditorViewMacObservedDocumentEditsPreserveExistingHighlights() async {
+        let source = "let first = 1\nlet second = 2"
+        let appendedText = "\nlet third = 3"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(range: NSRange(location: 0, length: 3), captureName: "keyword"),
+            ],
+            updateRefreshRange: NSRange(location: source.utf16.count, length: appendedText.utf16.count)
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        _ = model.document.commitEdits(
+            [
+                SyntaxEditorTextEdit(
+                    range: NSRange(location: source.utf16.count, length: 0),
+                    replacement: appendedText
+                ),
+            ],
+            selectedRange: NSRange(location: source.utf16.count + appendedText.utf16.count, length: 0)
+        )
+        editorView.synchronizeDocumentForTesting()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == source + appendedText)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
     @Test("SyntaxEditorView fully applies macOS highlight when skipped revisions precede an incremental result")
     @MainActor
     func syntaxEditorViewMacFullyAppliesHighlightAfterSkippedIncrementalRevisions() async {
