@@ -15,6 +15,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             name: "Default Configuration",
             sessionRole: connectingSceneSession.role
         )
+        configuration.sceneClass = UIWindowScene.self
         configuration.delegateClass = SceneDelegate.self
         return configuration
     }
