@@ -17,14 +17,3 @@ struct MiniLaunchConfiguration {
         MiniPreviewPreset.preset(for: initialPresetID) ?? .javascript
     }
 }
-
-extension SyntaxEditorModel {
-    @MainActor
-    convenience init(configuration: MiniLaunchConfiguration) {
-        self.init(
-            text: configuration.initialText,
-            language: configuration.initialPreset.language,
-            lineWrappingEnabled: false
-        )
-    }
-}

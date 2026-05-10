@@ -139,9 +139,17 @@ private extension HTMLLanguage {
             return nil
         }
 
-        let updatedSource = nsSource.replacingCharacters(in: context.range, with: embeddedEdit.text)
+        let edits = embeddedEdit.edits.map {
+            SyntaxEditorTextEdit(
+                range: NSRange(
+                    location: context.range.location + $0.range.location,
+                    length: $0.range.length
+                ),
+                replacement: $0.replacement
+            )
+        }
         return SyntaxLanguageEdit(
-            text: updatedSource,
+            edits: edits,
             selectedRange: NSRange(
                 location: context.range.location + embeddedEdit.selectedRange.location,
                 length: embeddedEdit.selectedRange.length

@@ -4,7 +4,8 @@ import SyntaxEditorUI
 @MainActor
 @Observable
 final class MiniContentViewModel {
-    var editorModel: SyntaxEditorModel
+    var editorDocument: SyntaxEditorDocument
+    var editorConfiguration: SyntaxEditorConfiguration
     var selectedPresetID: MiniPreviewPreset.ID? {
         didSet {
             guard let selectedPresetID,
@@ -15,9 +16,9 @@ final class MiniContentViewModel {
             }
 
             currentPresetID = selectedPresetID
-            let lineWrappingEnabled = editorModel.lineWrappingEnabled
-            editorModel = SyntaxEditorModel(
-                text: text(for: preset),
+            let lineWrappingEnabled = editorConfiguration.lineWrappingEnabled
+            editorDocument = SyntaxEditorDocument(text: text(for: preset))
+            editorConfiguration = SyntaxEditorConfiguration(
                 language: preset.language,
                 lineWrappingEnabled: lineWrappingEnabled
             )
@@ -32,7 +33,11 @@ final class MiniContentViewModel {
         self.initialPresetID = configuration.initialPresetID
         self.initialPresetText = configuration.initialText
         self.currentPresetID = configuration.initialPresetID
-        self.editorModel = SyntaxEditorModel(configuration: configuration)
+        self.editorDocument = SyntaxEditorDocument(text: configuration.initialText)
+        self.editorConfiguration = SyntaxEditorConfiguration(
+            language: configuration.initialPreset.language,
+            lineWrappingEnabled: false
+        )
         self.selectedPresetID = configuration.initialPresetID
     }
 

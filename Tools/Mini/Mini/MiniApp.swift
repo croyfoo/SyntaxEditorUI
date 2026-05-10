@@ -205,7 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     private let model: MiniContentViewModel
     private let splitViewController: MiniSplitViewController
-    private let modelObservations = ObservationScope()
+    private let configurationObservations = ObservationScope()
     private let editorObservations = ObservationScope()
     private var lineWrappingItem: NSToolbarItemGroup?
 
@@ -246,19 +246,19 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     }
 
     private func bindModel() {
-        modelObservations.update {
-            model.observe([\.currentPresetID, \.editorModel]) { [weak self] in
+        configurationObservations.update {
+            model.observe([\.currentPresetID, \.editorDocument, \.editorConfiguration]) { [weak self] in
                 self?.renderWindowState()
                 self?.bindEditorModel()
             }
-            .store(in: modelObservations)
+            .store(in: configurationObservations)
         }
         bindEditorModel()
     }
 
     private func bindEditorModel() {
         editorObservations.update {
-            model.editorModel.observe(\.lineWrappingEnabled) { [weak self] _ in
+            model.editorConfiguration.observe(\.lineWrappingEnabled) { [weak self] _ in
                 self?.updateLineWrappingItem()
             }
             .store(in: editorObservations)
@@ -271,11 +271,11 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     }
 
     private func updateLineWrappingItem() {
-        lineWrappingItem?.setSelected(model.editorModel.lineWrappingEnabled, at: 0)
+        lineWrappingItem?.setSelected(model.editorConfiguration.lineWrappingEnabled, at: 0)
     }
 
     @objc private func toggleLineWrapping() {
-        model.editorModel.lineWrappingEnabled.toggle()
+        model.editorConfiguration.lineWrappingEnabled.toggle()
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {

@@ -28,7 +28,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     }
 
     var supportsTextReplacement: Bool {
-        editorView?.model.isEditable ?? false
+        editorView?.configuration.isEditable ?? false
     }
 
     func findInteraction(_ interaction: UIFindInteraction, sessionFor view: UIView) -> UIFindSession? {
@@ -179,7 +179,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
 
     func shouldReplace(foundTextRange: UITextRange, document: Int?, withText: String) -> Bool {
         guard isCurrentFindTextRange(foundTextRange) else { return false }
-        guard editorView?.model.isEditable == true,
+        guard editorView?.configuration.isEditable == true,
               let range = nsRange(for: foundTextRange)
         else {
             return false

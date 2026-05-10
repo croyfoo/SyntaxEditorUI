@@ -5,6 +5,52 @@ import Testing
 
 private func requireObservable<T: Observable>(_ value: T) {}
 
+private func applying(_ result: EditorCommandResult?, to source: String) -> String? {
+    guard let result else { return nil }
+    return applyingIfValid(result.edits, to: source)
+}
+
+private func applying(_ result: EditorCommandResult, to source: String) -> String {
+    SyntaxEditorDocument.applying(result.edits, to: source)
+}
+
+private func applying(_ edit: SyntaxLanguageEdit?, to source: String) -> String? {
+    guard let edit else { return nil }
+    return applyingIfValid(edit.edits, to: source)
+}
+
+private func applying(_ edit: SyntaxLanguageEdit, to source: String) -> String {
+    SyntaxEditorDocument.applying(edit.edits, to: source)
+}
+
+private func applyingIfValid(_ edits: [SyntaxEditorTextEdit], to source: String) -> String? {
+    let length = source.utf16.count
+    guard edits.allSatisfy({ edit in
+        edit.range.location >= 0
+            && edit.range.length >= 0
+            && edit.range.location + edit.range.length <= length
+    }) else {
+        return nil
+    }
+    return SyntaxEditorDocument.applying(edits, to: source)
+}
+
+private extension SyntaxHighlighterEngine {
+    func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult {
+        await reset(source: source, language: language, revision: 0)
+    }
+
+    func update(
+        previousSource: String,
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation
+    ) async -> SyntaxHighlightResult {
+        _ = previousSource
+        return await update(source: source, language: language, mutation: mutation, revision: 1)
+    }
+}
+
 @Suite("SyntaxEditorCore")
 struct SyntaxEditorCoreTests {
     @Test("SyntaxLanguage.named maps supported values")
@@ -28,27 +74,29 @@ struct SyntaxEditorCoreTests {
         #expect(SyntaxLanguage.named("yaml") == nil)
     }
 
-    @Test("SyntaxEditorModel stores and mutates state on MainActor")
+    @Test("SyntaxEditorDocument and SyntaxEditorConfiguration store and mutate state on MainActor")
     @MainActor
-    func syntaxEditorModelState() {
-        let model = SyntaxEditorModel(text: "{}", language: SyntaxLanguage.json)
+    func syntaxEditorDocumentConfigurationState() {
+        let document = SyntaxEditorDocument(text: "{}")
+        let configuration = SyntaxEditorConfiguration(language: SyntaxLanguage.json)
 
-        #expect(model.text == "{}")
-        #expect(model.language.identifier == SyntaxLanguage.json.identifier)
-        #expect(model.isEditable == true)
-        #expect(model.lineWrappingEnabled == false)
-        #expect(model.colorTheme == .xcode)
+        #expect(document.textSnapshot() == "{}")
+        #expect(configuration.language.identifier == SyntaxLanguage.json.identifier)
+        #expect(configuration.isEditable == true)
+        #expect(configuration.lineWrappingEnabled == false)
+        #expect(configuration.colorTheme == .xcode)
 
-        model.text = "body { color: red; }"
-        model.language = SyntaxLanguage.css
-        model.isEditable = false
-        model.lineWrappingEnabled = true
+        document.replaceText("body { color: red; }")
+        configuration.language = SyntaxLanguage.css
+        configuration.isEditable = false
+        configuration.lineWrappingEnabled = true
 
-        #expect(model.text == "body { color: red; }")
-        #expect(model.language.identifier == SyntaxLanguage.css.identifier)
-        #expect(model.isEditable == false)
-        #expect(model.lineWrappingEnabled == true)
-        #expect(model.colorTheme == .xcode)
+        #expect(document.textSnapshot() == "body { color: red; }")
+        #expect(document.revision == 1)
+        #expect(configuration.language.identifier == SyntaxLanguage.css.identifier)
+        #expect(configuration.isEditable == false)
+        #expect(configuration.lineWrappingEnabled == true)
+        #expect(configuration.colorTheme == .xcode)
     }
 
     @Test("SyntaxEditorHighlightTheme maps representative captures to theme slots")
@@ -122,31 +170,81 @@ struct SyntaxEditorCoreTests {
         #expect((attributed.attribute(key, at: 2, effectiveRange: nil) as? String) == "comment")
     }
 
+    @Test("LineMetricsIndex indexes long offscreen lines")
+    func lineMetricsIndexInitialLongLineWidth() {
+        let source = "short\n\(String(repeating: "x", count: 120))\nmid"
+        let index = LineMetricsIndex(source: source, tabWidth: 4)
+
+        #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 120)
+        #expect(index.horizontalDocumentWidth(columnWidth: 2, textContainerInset: 10, lineFragmentPadding: 5) == 260)
+    }
+
+    @Test("LineMetricsIndex updates edited line ranges without full rebuild")
+    func lineMetricsIndexIncrementalEdits() {
+        var source = "abc\nabcdef"
+        let index = LineMetricsIndex(source: source, tabWidth: 4)
+        let initialRebuildCount = index.fullRebuildCount
+
+        func apply(_ edit: SyntaxEditorTextEdit) {
+            index.apply(edits: [edit], previousSource: source)
+            source = SyntaxEditorDocument.applying([edit], to: source)
+        }
+
+        #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 6)
+
+        apply(SyntaxEditorTextEdit(range: NSRange(location: 1, length: 0), replacement: "Z"))
+        #expect(source == "aZbc\nabcdef")
+        #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 6)
+
+        apply(SyntaxEditorTextEdit(range: NSRange(location: 4, length: 0), replacement: "\nwide-line"))
+        #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 9)
+
+        let maxLineRange = (source as NSString).range(of: "wide-line")
+        apply(SyntaxEditorTextEdit(range: maxLineRange, replacement: "w"))
+        #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 6)
+
+        let pasteLocation = source.utf16.count
+        apply(SyntaxEditorTextEdit(range: NSRange(location: pasteLocation, length: 0), replacement: "\n1234567890"))
+        #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 10)
+        #expect(index.fullRebuildCount == initialRebuildCount)
+    }
+
+    @Test("LineMetricsIndex matches display column rules for tabs and Unicode")
+    func lineMetricsIndexMatchesDisplayColumnRules() {
+        let source = "a\tあ\u{200D}b\nplain"
+        let index = LineMetricsIndex(source: source, tabWidth: 4)
+        let expected = SyntaxEditorDisplayColumnUtilities.maximumColumnCount(in: source, tabWidth: 4)
+
+        #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == CGFloat(expected))
+    }
+
     @Test("EditorCommandEngine auto-pairs opening braces")
     func editorCommandEngineAutoPair() {
         let engine = EditorCommandEngine()
+        let source = ""
         let result = engine.transformInput(
-            source: "",
+            source: source,
             range: NSRange(location: 0, length: 0),
             replacementText: "{",
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == "{}")
+        #expect(applying(result, to: source) == "{}")
         #expect(result?.selectedRange == NSRange(location: 1, length: 0))
     }
 
     @Test("EditorCommandEngine wraps selected text with quote")
     func editorCommandEngineWrapSelection() {
         let engine = EditorCommandEngine()
+        let source = "value"
         let result = engine.transformInput(
-            source: "value",
+            source: source,
             range: NSRange(location: 0, length: 5),
             replacementText: "\"",
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == "\"value\"")
+        #expect(applying(result, to: source) == "\"value\"")
         #expect(result?.selectedRange == NSRange(location: 7, length: 0))
     }
 
@@ -168,14 +266,15 @@ struct SyntaxEditorCoreTests {
     @Test("EditorCommandEngine skips duplicate closing brace")
     func editorCommandEngineSkipClosingBrace() {
         let engine = EditorCommandEngine()
+        let source = "{}"
         let result = engine.transformInput(
-            source: "{}",
+            source: source,
             range: NSRange(location: 1, length: 0),
             replacementText: "}",
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == "{}")
+        #expect(applying(result, to: source) == "{}")
         #expect(result?.selectedRange == NSRange(location: 2, length: 0))
     }
 
@@ -190,21 +289,22 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source)
+        #expect(applying(result, to: source) == source)
         #expect(result?.selectedRange == NSRange(location: 8, length: 0))
     }
 
     @Test("EditorCommandEngine inserts smart newline in brace block")
     func editorCommandEngineSmartNewline() {
         let engine = EditorCommandEngine()
+        let source = "{}"
         let result = engine.transformInput(
-            source: "{}",
+            source: source,
             range: NSRange(location: 1, length: 0),
             replacementText: "\n",
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == "{\n    \n}")
+        #expect(applying(result, to: source) == "{\n    \n}")
         #expect(result?.selectedRange == NSRange(location: 6, length: 0))
     }
 
@@ -224,7 +324,7 @@ struct SyntaxEditorCoreTests {
                 Issue.record("Smart newline unexpectedly returned nil")
                 return
             }
-            source = result.text
+            source = applying(result, to: source)
             selection = result.selectedRange
         }
 
@@ -234,43 +334,46 @@ struct SyntaxEditorCoreTests {
     @Test("EditorCommandEngine outdents closing brace at line start")
     func editorCommandEngineClosingBraceOutdent() {
         let engine = EditorCommandEngine()
+        let source = "    "
         let result = engine.transformInput(
-            source: "    ",
+            source: source,
             range: NSRange(location: 4, length: 0),
             replacementText: "}",
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == "}")
+        #expect(applying(result, to: source) == "}")
         #expect(result?.selectedRange == NSRange(location: 1, length: 0))
     }
 
     @Test("EditorCommandEngine outdents closing brace by one tab width")
     func editorCommandEngineClosingBraceOutdentWithTabs() {
         let engine = EditorCommandEngine()
+        let source = "\t\t"
         let result = engine.transformInput(
-            source: "\t\t",
+            source: source,
             range: NSRange(location: 2, length: 0),
             replacementText: "}",
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == "\t}")
+        #expect(applying(result, to: source) == "\t}")
         #expect(result?.selectedRange == NSRange(location: 2, length: 0))
     }
 
     @Test("EditorCommandEngine deletes paired symbols together")
     func editorCommandEnginePairBackspace() {
         let engine = EditorCommandEngine()
+        let source = "()"
         let result = engine.transformInput(
-            source: "()",
+            source: source,
             range: NSRange(location: 0, length: 1),
             replacementText: "",
             language: SyntaxLanguage.javascript,
             deletionIntent: .backward
         )
 
-        #expect(result?.text == "")
+        #expect(applying(result, to: source) == "")
         #expect(result?.selectedRange == NSRange(location: 0, length: 0))
     }
 
@@ -290,23 +393,25 @@ struct SyntaxEditorCoreTests {
     @Test("EditorCommandEngine indents selected lines")
     func editorCommandEngineIndentSelection() {
         let engine = EditorCommandEngine()
+        let source = "a\nb\n"
         let result = engine.indentSelection(
-            source: "a\nb\n",
+            source: source,
             selection: NSRange(location: 0, length: 3)
         )
 
-        #expect(result?.text == "    a\n    b\n")
+        #expect(applying(result, to: source) == "    a\n    b\n")
     }
 
     @Test("EditorCommandEngine inserts tab spaces at the caret")
     func editorCommandEngineInsertTabAtCaret() {
         let engine = EditorCommandEngine()
+        let source = "abcde"
         let result = engine.insertTab(
-            source: "abcde",
+            source: source,
             selection: NSRange(location: 2, length: 0)
         )
 
-        #expect(result?.text == "ab  cde")
+        #expect(applying(result, to: source) == "ab  cde")
         #expect(result?.selectedRange == NSRange(location: 4, length: 0))
     }
 
@@ -319,7 +424,7 @@ struct SyntaxEditorCoreTests {
             selection: NSRange(location: "あ".utf16.count, length: 0)
         )
 
-        #expect(result?.text == "あ  bc")
+        #expect(applying(result, to: source) == "あ  bc")
         #expect(result?.selectedRange == NSRange(location: "あ  ".utf16.count, length: 0))
     }
 
@@ -333,7 +438,7 @@ struct SyntaxEditorCoreTests {
             selection: NSRange(location: prefix.utf16.count, length: 0)
         )
 
-        #expect(result?.text == "\(prefix)   bc")
+        #expect(applying(result, to: source) == "\(prefix)   bc")
         #expect(result?.selectedRange == NSRange(location: "\(prefix)   ".utf16.count, length: 0))
     }
 
@@ -347,19 +452,20 @@ struct SyntaxEditorCoreTests {
             selection: NSRange(location: prefix.utf16.count, length: 0)
         )
 
-        #expect(result?.text == "\(prefix)  bc")
+        #expect(applying(result, to: source) == "\(prefix)  bc")
         #expect(result?.selectedRange == NSRange(location: "\(prefix)  ".utf16.count, length: 0))
     }
 
     @Test("EditorCommandEngine indents selected lines for tab range input")
     func editorCommandEngineInsertTabIndentsSelectedLines() {
         let engine = EditorCommandEngine()
+        let source = "a\nb\n"
         let result = engine.insertTab(
-            source: "a\nb\n",
+            source: source,
             selection: NSRange(location: 0, length: 3)
         )
 
-        #expect(result?.text == "    a\n    b\n")
+        #expect(applying(result, to: source) == "    a\n    b\n")
     }
 
     @Test("EditorCommandEngine indents trailing empty line at document end")
@@ -371,18 +477,19 @@ struct SyntaxEditorCoreTests {
             selection: NSRange(location: source.utf16.count, length: 0)
         )
 
-        #expect(result?.text == "a\n    ")
+        #expect(applying(result, to: source) == "a\n    ")
     }
 
     @Test("EditorCommandEngine outdents selected lines")
     func editorCommandEngineOutdentSelection() {
         let engine = EditorCommandEngine()
+        let source = "    a\n    b\n"
         let result = engine.outdentSelection(
-            source: "    a\n    b\n",
+            source: source,
             selection: NSRange(location: 0, length: 11)
         )
 
-        #expect(result?.text == "a\nb\n")
+        #expect(applying(result, to: source) == "a\nb\n")
     }
 
     @Test("EditorCommandEngine keeps caret on current line when outdenting overlapping indent")
@@ -394,7 +501,7 @@ struct SyntaxEditorCoreTests {
             selection: NSRange(location: 4, length: 0)
         )
 
-        #expect(result?.text == "x\ny")
+        #expect(applying(result, to: source) == "x\ny")
         #expect(result?.selectedRange == NSRange(location: 2, length: 0))
     }
 
@@ -409,15 +516,16 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(first?.text == "// let a = 1;\n// let b = 2;\n")
+        #expect(applying(first, to: source) == "// let a = 1;\n// let b = 2;\n")
+        let firstText = applying(first, to: source) ?? ""
 
         let second = engine.toggleComment(
-            source: first?.text ?? "",
-            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            source: firstText,
+            selection: NSRange(location: 0, length: firstText.utf16.count),
             language: SyntaxLanguage.javascript
         )
 
-        #expect(second?.text == source)
+        #expect(applying(second, to: firstText) == source)
     }
 
     @Test("EditorCommandEngine toggles Swift line comments")
@@ -431,15 +539,16 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.swift
         )
 
-        #expect(first?.text == "// let a = 1\n// let b = 2\n")
+        #expect(applying(first, to: source) == "// let a = 1\n// let b = 2\n")
+        let firstText = applying(first, to: source) ?? ""
 
         let second = engine.toggleComment(
-            source: first?.text ?? "",
-            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            source: firstText,
+            selection: NSRange(location: 0, length: firstText.utf16.count),
             language: SyntaxLanguage.swift
         )
 
-        #expect(second?.text == source)
+        #expect(applying(second, to: firstText) == source)
     }
 
     @Test("EditorCommandEngine toggles Objective-C line comments")
@@ -453,15 +562,16 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.objectiveC
         )
 
-        #expect(first?.text == "// NSString *name = @\"Editor\";\n// return name;\n")
+        #expect(applying(first, to: source) == "// NSString *name = @\"Editor\";\n// return name;\n")
+        let firstText = applying(first, to: source) ?? ""
 
         let second = engine.toggleComment(
-            source: first?.text ?? "",
-            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            source: firstText,
+            selection: NSRange(location: 0, length: firstText.utf16.count),
             language: SyntaxLanguage.objectiveC
         )
 
-        #expect(second?.text == source)
+        #expect(applying(second, to: firstText) == source)
     }
 
     @Test("EditorCommandEngine toggles TOML line comments")
@@ -475,15 +585,16 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(first?.text == "# title = \"SyntaxEditorUI\"\n# enabled = true\n")
+        #expect(applying(first, to: source) == "# title = \"SyntaxEditorUI\"\n# enabled = true\n")
+        let firstText = applying(first, to: source) ?? ""
 
         let second = engine.toggleComment(
-            source: first?.text ?? "",
-            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            source: firstText,
+            selection: NSRange(location: 0, length: firstText.utf16.count),
             language: SyntaxLanguage.toml
         )
 
-        #expect(second?.text == source)
+        #expect(applying(second, to: firstText) == source)
     }
 
     @Test("EditorCommandEngine toggles TOML comments without touching blank lines")
@@ -497,7 +608,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(result?.text == "# title = \"SyntaxEditorUI\"\n\n# enabled = true\n")
+        #expect(applying(result, to: source) == "# title = \"SyntaxEditorUI\"\n\n# enabled = true\n")
     }
 
     @Test("EditorCommandEngine toggles TOML comment for caret line")
@@ -512,7 +623,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(result?.text == "title = \"SyntaxEditorUI\"\n# enabled = true\n")
+        #expect(applying(result, to: source) == "title = \"SyntaxEditorUI\"\n# enabled = true\n")
     }
 
     @Test("EditorCommandEngine toggles CSS block comment")
@@ -526,16 +637,17 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.css
         )
 
-        #expect(first?.text.contains("/*") == true)
-        #expect(first?.text.contains("*/") == true)
+        #expect(applying(first, to: source)?.contains("/*") == true)
+        #expect(applying(first, to: source)?.contains("*/") == true)
+        let firstText = applying(first, to: source) ?? ""
 
         let second = engine.toggleComment(
-            source: first?.text ?? "",
-            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            source: firstText,
+            selection: NSRange(location: 0, length: firstText.utf16.count),
             language: SyntaxLanguage.css
         )
 
-        #expect(second?.text == source)
+        #expect(applying(second, to: firstText) == source)
     }
 
     @Test("EditorCommandEngine does not unwrap multiple CSS comments as one block")
@@ -575,15 +687,16 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(first?.text == "<!-- <div>hello</div>\n -->")
+        #expect(applying(first, to: source) == "<!-- <div>hello</div>\n -->")
+        let firstText = applying(first, to: source) ?? ""
 
         let second = engine.toggleComment(
-            source: first?.text ?? "",
-            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            source: firstText,
+            selection: NSRange(location: 0, length: firstText.utf16.count),
             language: SyntaxLanguage.html
         )
 
-        #expect(second?.text == source)
+        #expect(applying(second, to: firstText) == source)
     }
 
     @Test("EditorCommandEngine does not wrap HTML comments around double hyphen text")
@@ -639,15 +752,16 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(first?.text == "<!-- <note>hello</note>\n -->")
+        #expect(applying(first, to: source) == "<!-- <note>hello</note>\n -->")
+        let firstText = applying(first, to: source) ?? ""
 
         let second = engine.toggleComment(
-            source: first?.text ?? "",
-            selection: NSRange(location: 0, length: first?.text.utf16.count ?? 0),
+            source: firstText,
+            selection: NSRange(location: 0, length: firstText.utf16.count),
             language: SyntaxLanguage.xml
         )
 
-        #expect(second?.text == source)
+        #expect(applying(second, to: firstText) == source)
     }
 
     @Test("EditorCommandEngine toggles XML comment from a caret inside an element line")
@@ -662,7 +776,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<!-- <note priority=\"high\">hello</note>\n -->")
+        #expect(applying(result, to: source) == "<!-- <note priority=\"high\">hello</note>\n -->")
     }
 
     @Test("EditorCommandEngine does not wrap XML comments around double hyphen text")
@@ -779,7 +893,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <!DOCTYPE note [
         <!-- <!ELEMENT note (#PCDATA)>
          -->]>
@@ -802,7 +916,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <!DOCTYPE note [
         <!-- <!ELEMENT note (#PCDATA)>
          -->]>
@@ -828,7 +942,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <!DOCTYPE note [
         <!-- <!ENTITY marker "value ]> tail">
          -->]>
@@ -864,7 +978,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<!-- <!DOCTYPE note>\n -->")
+        #expect(applying(result, to: source) == "<!-- <!DOCTYPE note>\n -->")
     }
 
     @Test("EditorCommandEngine toggles standalone XML doctype lines with bracket characters in literals")
@@ -878,7 +992,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<!-- <!DOCTYPE note SYSTEM \"foo[bar].dtd\">\n -->")
+        #expect(applying(result, to: source) == "<!-- <!DOCTYPE note SYSTEM \"foo[bar].dtd\">\n -->")
     }
 
     @Test("EditorCommandEngine toggles standalone XML doctype lines with multiline bracket literals")
@@ -892,7 +1006,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<!-- <!DOCTYPE note SYSTEM \"foo\n[bar].dtd\">\n -->")
+        #expect(applying(result, to: source) == "<!-- <!DOCTYPE note SYSTEM \"foo\n[bar].dtd\">\n -->")
     }
 
     @Test("EditorCommandEngine does not toggle XML comments on doctype closing lines")
@@ -1016,7 +1130,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <!DOCTYPE note [
         <!-- <!ENTITY marker "value
         ]> tail">
@@ -1037,7 +1151,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == "\(startTag)// const answer = 42;\n</script>")
+        #expect(applying(result, to: source) == "\(startTag)// const answer = 42;\n</script>")
     }
 
     @Test("EditorCommandEngine delegates HTML comment toggle inside self-closing script raw text")
@@ -1055,7 +1169,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == "<script/>// const answer = 42;\n</script>")
+        #expect(applying(result, to: source) == "<script/>// const answer = 42;\n</script>")
     }
 
     @Test("EditorCommandEngine keeps script raw text active for unquoted attribute values ending with slash")
@@ -1071,7 +1185,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == "\(startTag)// const answer = 42;\n</script>")
+        #expect(applying(result, to: source) == "\(startTag)// const answer = 42;\n</script>")
     }
 
     @Test("EditorCommandEngine keeps script raw text active for general unquoted attribute values with slash")
@@ -1087,7 +1201,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == "\(startTag)// const answer = 42;\n</script>")
+        #expect(applying(result, to: source) == "\(startTag)// const answer = 42;\n</script>")
     }
 
     @Test("EditorCommandEngine does not delegate unsupported script types to JavaScript rules")
@@ -1164,7 +1278,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text.contains("<!-- <span>Hello</span>") == true)
+        #expect(applying(result, to: source)?.contains("<!-- <span>Hello</span>") == true)
     }
 
     @Test("EditorCommandEngine does not delegate non-CSS style types to CSS rules")
@@ -1294,7 +1408,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == "<style>/* body { color: red; }\n */</style>")
+        #expect(applying(result, to: source) == "<style>/* body { color: red; }\n */</style>")
     }
 
     @Test("EditorCommandEngine keeps style raw text open past repeated literal closing tag text")
@@ -1316,7 +1430,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <style>body::before { content: "</style> </style>"; }
         /* body { color: red; }
          */</style>
@@ -1342,7 +1456,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <style>/* </style> </style> */
         /* body { color: red; }
          */</style>
@@ -1369,7 +1483,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <style>body::before { content: none; }
         </style foo>
         /* body { color: red; }
@@ -1426,7 +1540,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <script>const marker = \"</scripted>\";
         // const answer = 42;
         </script>
@@ -1452,7 +1566,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <script>const marker = \"</script>\";
         // const answer = 42;
         </script>
@@ -1479,7 +1593,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <script>const marker = 1;
         </script foo>
         // const answer = 42;
@@ -1508,7 +1622,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <script><!--
         </script>
         // const answer = 42;
@@ -1608,7 +1722,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <script>/*
         <!--
         */
@@ -1637,7 +1751,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <script>const html = `
         // <!--
         `;
@@ -1662,7 +1776,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <!-- <script type="application/json"> -->
         <!-- <div>hello</div> -->
         """)
@@ -1687,7 +1801,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == """
+        #expect(applying(result, to: source) == """
         <script>const marker = "<!--";
         // const answer = 42;
         </script>
@@ -1709,7 +1823,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -1736,7 +1850,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -1765,7 +1879,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.objectiveC
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -1836,7 +1950,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -1921,7 +2035,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -1936,7 +2050,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -1951,7 +2065,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(result?.text == source + "''")
+        #expect(applying(result, to: source) == source + "''")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -1967,21 +2081,23 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
         let second = engine.transformInput(
-            source: first?.text ?? "",
+            source: applying(first, to: source) ?? "",
             range: first?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
             language: SyntaxLanguage.toml
         )
+        let firstText = applying(first, to: source) ?? ""
+        let secondText = applying(second, to: firstText) ?? ""
         let third = engine.transformInput(
-            source: second?.text ?? "",
+            source: secondText,
             range: second?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
             language: SyntaxLanguage.toml
         )
 
-        #expect(first?.text == source + "\"\"")
-        #expect(second?.text == source + "\"\"")
-        #expect(third?.text == source + "\"\"\"")
+        #expect(applying(first, to: source) == source + "\"\"")
+        #expect(secondText == source + "\"\"")
+        #expect(applying(third, to: secondText) == source + "\"\"\"")
         #expect(third?.selectedRange == NSRange(location: source.utf16.count + 3, length: 0))
     }
 
@@ -1997,21 +2113,23 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
         let second = engine.transformInput(
-            source: first?.text ?? "",
+            source: applying(first, to: source) ?? "",
             range: first?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "'",
             language: SyntaxLanguage.toml
         )
+        let firstText = applying(first, to: source) ?? ""
+        let secondText = applying(second, to: firstText) ?? ""
         let third = engine.transformInput(
-            source: second?.text ?? "",
+            source: secondText,
             range: second?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "'",
             language: SyntaxLanguage.toml
         )
 
-        #expect(first?.text == source + "''")
-        #expect(second?.text == source + "''")
-        #expect(third?.text == source + "'''")
+        #expect(applying(first, to: source) == source + "''")
+        #expect(secondText == source + "''")
+        #expect(applying(third, to: secondText) == source + "'''")
         #expect(third?.selectedRange == NSRange(location: source.utf16.count + 3, length: 0))
     }
 
@@ -2027,11 +2145,13 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
         let second = engine.transformInput(
-            source: first?.text ?? "",
+            source: applying(first, to: source) ?? "",
             range: first?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
             language: SyntaxLanguage.toml
         )
+        let firstText = applying(first, to: source) ?? ""
+        let secondText = applying(second, to: firstText) ?? ""
 
         _ = engine.indentSelection(
             source: "value\n",
@@ -2039,13 +2159,13 @@ struct SyntaxEditorCoreTests {
         )
 
         let third = engine.transformInput(
-            source: second?.text ?? "",
+            source: secondText,
             range: second?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
             language: SyntaxLanguage.toml
         )
 
-        #expect(third?.text == source + "\"\"\"\"")
+        #expect(applying(third, to: secondText) == source + "\"\"\"\"")
         #expect(third?.selectedRange == NSRange(location: source.utf16.count + 3, length: 0))
     }
 
@@ -2061,22 +2181,24 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
         let second = engine.transformInput(
-            source: first?.text ?? "",
+            source: applying(first, to: source) ?? "",
             range: first?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
             language: SyntaxLanguage.toml
         )
+        let firstText = applying(first, to: source) ?? ""
+        let secondText = applying(second, to: firstText) ?? ""
 
         engine.invalidateTransientState()
 
         let third = engine.transformInput(
-            source: second?.text ?? "",
+            source: secondText,
             range: second?.selectedRange ?? NSRange(location: 0, length: 0),
             replacementText: "\"",
             language: SyntaxLanguage.toml
         )
 
-        #expect(third?.text == source + "\"\"\"\"")
+        #expect(applying(third, to: secondText) == source + "\"\"\"\"")
         #expect(third?.selectedRange == NSRange(location: source.utf16.count + 3, length: 0))
     }
 
@@ -2091,7 +2213,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2106,7 +2228,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2121,7 +2243,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.toml
         )
 
-        #expect(result?.text == source + "''")
+        #expect(applying(result, to: source) == source + "''")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2136,7 +2258,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == "<div class=\"\"")
+        #expect(applying(result, to: source) == "<div class=\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2208,7 +2330,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == prefix + "\"\"" + "</script>")
+        #expect(applying(result, to: source) == prefix + "\"\"" + "</script>")
         #expect(result?.selectedRange == NSRange(location: prefix.utf16.count + 1, length: 0))
     }
 
@@ -2239,7 +2361,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.html
         )
 
-        #expect(result?.text == prefix + "\"\"" + "</style>")
+        #expect(applying(result, to: source) == prefix + "\"\"" + "</style>")
         #expect(result?.selectedRange == NSRange(location: prefix.utf16.count + 1, length: 0))
     }
 
@@ -2291,7 +2413,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<node attr=\"\"")
+        #expect(applying(result, to: source) == "<node attr=\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2306,7 +2428,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<?xml-stylesheet href=\"\"")
+        #expect(applying(result, to: source) == "<?xml-stylesheet href=\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2327,7 +2449,7 @@ struct SyntaxEditorCoreTests {
                 language: SyntaxLanguage.xml
             )
 
-            #expect(result?.text == source + "\"\"")
+            #expect(applying(result, to: source) == source + "\"\"")
             #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
         }
     }
@@ -2357,7 +2479,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<élement attr=\"\"")
+        #expect(applying(result, to: source) == "<élement attr=\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2372,7 +2494,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<a·b attr=\"\"")
+        #expect(applying(result, to: source) == "<a·b attr=\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2387,7 +2509,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<𐐷node attr=\"\"")
+        #expect(applying(result, to: source) == "<𐐷node attr=\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2402,7 +2524,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2417,7 +2539,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.xml
         )
 
-        #expect(result?.text == "<!ENTITY 𐐷foo \"\"")
+        #expect(applying(result, to: source) == "<!ENTITY 𐐷foo \"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2488,7 +2610,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.swift
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2517,7 +2639,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.swift
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2560,7 +2682,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.css
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2575,7 +2697,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2590,7 +2712,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2605,7 +2727,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2620,7 +2742,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2635,7 +2757,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2650,7 +2772,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2665,7 +2787,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2680,7 +2802,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2695,7 +2817,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2710,7 +2832,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2753,7 +2875,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2768,7 +2890,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2783,7 +2905,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2798,7 +2920,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2813,7 +2935,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2828,7 +2950,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2843,7 +2965,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2858,7 +2980,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2873,7 +2995,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2888,7 +3010,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2903,7 +3025,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2918,7 +3040,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2933,7 +3055,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2948,7 +3070,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2963,7 +3085,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2978,7 +3100,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -2993,7 +3115,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -3008,7 +3130,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 
@@ -3037,7 +3159,7 @@ struct SyntaxEditorCoreTests {
             language: SyntaxLanguage.javascript
         )
 
-        #expect(result?.text == source + "\"\"")
+        #expect(applying(result, to: source) == source + "\"\"")
         #expect(result?.selectedRange == NSRange(location: source.utf16.count + 1, length: 0))
     }
 

@@ -36,17 +36,20 @@ package struct SyntaxHighlightResult: Sendable {
     package let tokens: [SyntaxHighlightToken]
     package let source: String
     package let language: SyntaxLanguage
+    package let revision: Int
     package let refreshRange: NSRange
 
     package init(
         tokens: [SyntaxHighlightToken],
         source: String,
         language: SyntaxLanguage,
+        revision: Int,
         refreshRange: NSRange
     ) {
         self.tokens = tokens
         self.source = source
         self.language = language
+        self.revision = revision
         self.refreshRange = refreshRange
     }
 }
@@ -86,12 +89,12 @@ package enum SyntaxHighlightInvalidation {
 }
 
 package protocol SyntaxHighlighting: Sendable {
-    func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult
+    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult
     func update(
-        previousSource: String,
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation
+        mutation: SyntaxHighlightMutation,
+        revision: Int
     ) async -> SyntaxHighlightResult
 }
 
@@ -103,39 +106,39 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         self.registry = .shared
     }
 
-    package func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult {
+    package func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
         guard let setup = await registry.highlightingSetup(for: language) else {
             session = nil
-            return SyntaxHighlightResult.empty(source: source, language: language)
+            return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
         }
 
         let nextSession = SyntaxHighlightSession(language: language, setup: setup)
-        let result = nextSession.reset(source: source)
+        let result = nextSession.reset(source: source, revision: revision)
         session = nextSession
         return result
     }
 
     package func update(
-        previousSource: String,
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation
+        mutation: SyntaxHighlightMutation,
+        revision: Int
     ) async -> SyntaxHighlightResult {
         if let session,
            let result = session.update(
-               previousSource: previousSource,
                source: source,
                language: language,
-               mutation: mutation
+               mutation: mutation,
+               revision: revision
            ) {
             return result
         }
 
-        return await reset(source: source, language: language)
+        return await reset(source: source, language: language, revision: revision)
     }
 
     package func render(source: String, language: SyntaxLanguage) async -> [SyntaxHighlightToken] {
-        await reset(source: source, language: language).tokens
+        await reset(source: source, language: language, revision: 0).tokens
     }
 }
 
@@ -164,14 +167,14 @@ private final class SyntaxHighlightSession {
         self.setup = setup
     }
 
-    func reset(source: String) -> SyntaxHighlightResult {
+    func reset(source: String, revision: Int) -> SyntaxHighlightResult {
         self.source = source
         layeredSource = layeredSource(for: source)
 
         guard !layeredSource.isEmpty else {
             layer = nil
             tokens = []
-            return SyntaxHighlightResult.empty(source: source, language: language)
+            return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
         }
 
         do {
@@ -188,17 +191,18 @@ private final class SyntaxHighlightSession {
             tokens: tokens,
             source: source,
             language: language,
+            revision: revision,
             refreshRange: fullRange(for: source)
         )
     }
 
     func update(
-        previousSource: String,
         source nextSource: String,
         language nextLanguage: SyntaxLanguage,
-        mutation originalMutation: SyntaxHighlightMutation
+        mutation originalMutation: SyntaxHighlightMutation,
+        revision: Int
     ) -> SyntaxHighlightResult? {
-        guard nextLanguage == language, previousSource == source else {
+        guard nextLanguage == language else {
             return nil
         }
 
@@ -216,6 +220,7 @@ private final class SyntaxHighlightSession {
                     tokens: tokens,
                     source: nextSource,
                     language: language,
+                    revision: revision,
                     refreshRange: refreshRange(
                         in: nextSource,
                         from: originalMutation.location
@@ -258,6 +263,7 @@ private final class SyntaxHighlightSession {
             tokens: tokens,
             source: nextSource,
             language: language,
+            revision: revision,
             refreshRange: refreshRange(
                 in: nextSource,
                 from: SyntaxHighlightInvalidation.refreshStartUTF16(
@@ -923,11 +929,12 @@ private extension LanguageConfigurationResolver {
 }
 
 private extension SyntaxHighlightResult {
-    static func empty(source: String, language: SyntaxLanguage) -> SyntaxHighlightResult {
+    static func empty(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxHighlightResult {
         SyntaxHighlightResult(
             tokens: [],
             source: source,
             language: language,
+            revision: revision,
             refreshRange: NSRange(location: 0, length: source.utf16.count)
         )
     }

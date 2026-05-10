@@ -8,7 +8,7 @@ import UIKit
 final class MiniSplitViewController: UISplitViewController {
     private let model: MiniContentViewModel
     private let presetListViewController: MiniPresetListViewController
-    private let modelObservations = ObservationScope()
+    private let configurationObservations = ObservationScope()
     private let editorObservations = ObservationScope()
     private var editorViewController: SyntaxEditorViewController?
     private var detailViewController: MiniEditorContainerViewController?
@@ -37,19 +37,19 @@ final class MiniSplitViewController: UISplitViewController {
     }
 
     private func bindModel() {
-        modelObservations.update {
-            model.observe([\.currentPresetID, \.editorModel]) { [weak self] in
+        configurationObservations.update {
+            model.observe([\.currentPresetID, \.editorDocument, \.editorConfiguration]) { [weak self] in
                 self?.renderDetail()
                 self?.bindEditorModel()
             }
-            .store(in: modelObservations)
+            .store(in: configurationObservations)
         }
         bindEditorModel()
     }
 
     private func bindEditorModel() {
         editorObservations.update {
-            model.editorModel.observe(\.lineWrappingEnabled) { [weak self] _ in
+            model.editorConfiguration.observe(\.lineWrappingEnabled) { [weak self] _ in
                 self?.updateOverflowMenu()
             }
             .store(in: editorObservations)
@@ -57,16 +57,20 @@ final class MiniSplitViewController: UISplitViewController {
     }
 
     private func renderDetail() {
-        let editorModel = model.editorModel
-        if let currentModel = editorViewController?.model,
-           currentModel === editorModel
+        let editorDocument = model.editorDocument
+        let editorConfiguration = model.editorConfiguration
+        if let currentDocument = editorViewController?.document,
+           currentDocument === editorDocument
         {
             detailViewController?.title = model.currentPreset.title
             updateOverflowMenu()
             return
         }
 
-        let editorViewController = SyntaxEditorViewController(model: editorModel)
+        let editorViewController = SyntaxEditorViewController(
+            document: editorDocument,
+            configuration: editorConfiguration
+        )
         let detailViewController = MiniEditorContainerViewController(
             editorViewController: editorViewController
         )
@@ -97,7 +101,7 @@ final class MiniSplitViewController: UISplitViewController {
                 ) { [weak self] _ in
                     self?.toggleLineWrapping()
                 }
-                lineWrappingAction.state = self.model.editorModel.lineWrappingEnabled ? .on : .off
+                lineWrappingAction.state = self.model.editorConfiguration.lineWrappingEnabled ? .on : .off
                 completion([lineWrappingAction])
             }
         }
@@ -108,7 +112,7 @@ final class MiniSplitViewController: UISplitViewController {
     }
 
     private func toggleLineWrapping() {
-        model.editorModel.lineWrappingEnabled.toggle()
+        model.editorConfiguration.lineWrappingEnabled.toggle()
     }
 }
 
@@ -151,7 +155,7 @@ import AppKit
 final class MiniSplitViewController: NSSplitViewController {
     private let model: MiniContentViewModel
     private let presetListViewController: MiniPresetListViewController
-    private let modelObservations = ObservationScope()
+    private let configurationObservations = ObservationScope()
     private var editorViewController: SyntaxEditorViewController?
     private var detailSplitViewItem: NSSplitViewItem?
 
@@ -187,18 +191,19 @@ final class MiniSplitViewController: NSSplitViewController {
     }
 
     private func bindModel() {
-        modelObservations.update {
-            model.observe([\.currentPresetID, \.editorModel]) { [weak self] in
+        configurationObservations.update {
+            model.observe([\.currentPresetID, \.editorDocument, \.editorConfiguration]) { [weak self] in
                 self?.renderDetail()
             }
-            .store(in: modelObservations)
+            .store(in: configurationObservations)
         }
     }
 
     private func renderDetail() {
-        let editorModel = model.editorModel
-        if let currentModel = editorViewController?.model,
-           currentModel === editorModel
+        let editorDocument = model.editorDocument
+        let editorConfiguration = model.editorConfiguration
+        if let currentDocument = editorViewController?.document,
+           currentDocument === editorDocument
         {
             editorViewController?.title = model.currentPreset.title
             return
@@ -208,7 +213,10 @@ final class MiniSplitViewController: NSSplitViewController {
             removeSplitViewItem(detailSplitViewItem)
         }
 
-        let editorViewController = SyntaxEditorViewController(model: editorModel)
+        let editorViewController = SyntaxEditorViewController(
+            document: editorDocument,
+            configuration: editorConfiguration
+        )
         editorViewController.title = model.currentPreset.title
         editorViewController.scrollView.automaticallyAdjustsContentInsets = true
 

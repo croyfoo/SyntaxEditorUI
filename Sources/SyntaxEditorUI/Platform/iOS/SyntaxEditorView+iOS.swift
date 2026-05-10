@@ -4,9 +4,16 @@ import ObservationBridge
 import SyntaxEditorCore
 import UIKit
 
+struct SyntaxEditorMarkedTextUndoAnchor {
+    let source: String
+    let selectedRange: NSRange
+    let refreshStartUTF16: Int
+}
+
 @MainActor
 public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTraits, UITextInteractionDelegate, @preconcurrency NSTextViewportLayoutControllerDelegate {
-    public private(set) var model: SyntaxEditorModel
+    public private(set) var document: SyntaxEditorDocument
+    public private(set) var configuration: SyntaxEditorConfiguration
 
     let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
     let textContentStorage = NSTextContentStorage()
@@ -23,7 +30,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     let commandEngine = EditorCommandEngine()
     var highlightTask: Task<Void, Never>?
     var lastHighlightTokens: [SyntaxHighlightToken] = []
-    var lastHighlightSource: String?
+    var lastHighlightRevision: Int?
     var lastHighlightLanguage: SyntaxLanguage?
     var isApplyingModel = false
     var isApplyingHighlight = false
@@ -37,14 +44,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var isIgnoringTextInteractionHorizontalOffsetPreservation = false
     var preservedTextInteractionHorizontalOffset: CGFloat?
     var textInteractionHorizontalOffsetLockGeneration = 0
-    var cachedHorizontalDocumentLayoutWidth: CGFloat?
+    var lineMetricsIndex = LineMetricsIndex(tabWidth: SyntaxEditorView.estimatedTabColumnWidth)
+    var lastAppliedDocumentRevision = 0
     var isLayingOutText = false
     var needsTextRelayout = false
     var fragmentViewMap = NSMapTable<NSTextLayoutFragment, SyntaxEditorTextLayoutFragmentView>.weakToWeakObjects()
     var lastUsedFragmentViews: Set<SyntaxEditorTextLayoutFragmentView> = []
     var postLayoutAction: (() -> Void)?
     var markedRange: NSRange?
-    var markedTextUndoAnchor: EditorUndoState?
+    var markedTextUndoAnchor: SyntaxEditorMarkedTextUndoAnchor?
     var pendingTextInteractionCaretOverride: SyntaxEditorTextInteractionCaretOverride?
     var isTextInteractionSelectionDrag = false
     var findFoundRanges: [NSRange] = []
@@ -54,7 +62,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findHighlightUpdatePassCount = 0
     var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     var keyboardAccessoryView: UIView?
-    let modelObservations = ObservationScope()
+    let documentObservations = ObservationScope()
+    let configurationObservations = ObservationScope()
     var storage: NSTextStorage {
         guard let textStorage = textContentStorage.textStorage else {
             fatalError("SyntaxEditorView requires NSTextContentStorage-backed NSTextStorage")
@@ -131,10 +140,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     public var isEditable: Bool {
-        get { model.isEditable }
+        get { configuration.isEditable }
         set {
-            guard model.isEditable != newValue else { return }
-            model.isEditable = newValue
+            guard configuration.isEditable != newValue else { return }
+            configuration.isEditable = newValue
         }
     }
 
@@ -150,7 +159,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             storage.string
         }
         set {
-            applyExternalText(newValue, updatesModel: true, forceTextUpdate: false)
+            replaceDocumentText(newValue)
         }
     }
 
@@ -196,15 +205,24 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     public var textContentType: UITextContentType?
     public var passwordRules: UITextInputPasswordRules?
 
-    public convenience init(model: SyntaxEditorModel) {
-        self.init(model: model, highlighter: SyntaxHighlighterEngine())
+    public convenience init(
+        document: SyntaxEditorDocument = SyntaxEditorDocument(),
+        configuration: SyntaxEditorConfiguration = SyntaxEditorConfiguration()
+    ) {
+        self.init(document: document, configuration: configuration, highlighter: SyntaxHighlighterEngine())
     }
 
-    package init(model: SyntaxEditorModel, highlighter: any SyntaxHighlighting) {
-        self.model = model
+    package init(
+        document: SyntaxEditorDocument = SyntaxEditorDocument(),
+        configuration: SyntaxEditorConfiguration = SyntaxEditorConfiguration(),
+        highlighter: any SyntaxHighlighting
+    ) {
+        self.document = document
+        self.configuration = configuration
         self.highlighter = highlighter
-        self.lastAppliedLineWrappingEnabled = model.lineWrappingEnabled
-        self.lastAppliedColorTheme = model.colorTheme
+        self.lastAppliedLineWrappingEnabled = configuration.lineWrappingEnabled
+        self.lastAppliedColorTheme = configuration.colorTheme
+        self.lastAppliedDocumentRevision = document.revision
 
         super.init(frame: .zero)
 
@@ -212,16 +230,23 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         configureScrollView()
         configureUndoObservation()
         configureTraitChangeObservation()
-        applyObservedEditorState(
-            language: model.language,
-            isEditable: model.isEditable,
-            lineWrappingEnabled: model.lineWrappingEnabled,
-            colorTheme: model.colorTheme,
+        applyObservedConfiguration(
+            language: configuration.language,
+            isEditable: configuration.isEditable,
+            lineWrappingEnabled: configuration.lineWrappingEnabled,
+            colorTheme: configuration.colorTheme,
             forceLanguageRefresh: true,
             schedulesHighlight: false
         )
-        applyExternalText(model.text, updatesModel: false, forceTextUpdate: true)
-        startModelObservation()
+        replaceEntireStorageText(document.textSnapshot())
+        scheduleHighlight(
+            source: text,
+            language: configuration.language,
+            revision: document.revision,
+            refreshStartUTF16: 0
+        )
+        startDocumentObservation()
+        startConfigurationObservation()
     }
 
     @available(*, unavailable)
@@ -242,18 +267,22 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         keyboardAccessoryView
     }
 
-    internal func synchronizeModelForTesting() {
-        applyObservedEditorState(
-            language: model.language,
-            isEditable: model.isEditable,
-            lineWrappingEnabled: model.lineWrappingEnabled,
-            colorTheme: model.colorTheme
+    internal func synchronizeDocumentForTesting() {
+        applyObservedConfiguration(
+            language: configuration.language,
+            isEditable: configuration.isEditable,
+            lineWrappingEnabled: configuration.lineWrappingEnabled,
+            colorTheme: configuration.colorTheme
         )
-        applyObservedText(model.text)
+        applyObservedDocumentChange()
     }
 
     internal func waitForPendingHighlightForTesting() async {
         await highlightTask?.value
+    }
+
+    internal var lineMetricsFullRebuildCountForTesting: Int {
+        lineMetricsIndex.fullRebuildCount
     }
 
     public override var canBecomeFirstResponder: Bool {
@@ -333,11 +362,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if isUndoAction(action) {
-            return model.isEditable && (activeUndoManager?.canUndo ?? false)
+            return configuration.isEditable && (activeUndoManager?.canUndo ?? false)
         }
 
         if isRedoAction(action) {
-            return model.isEditable && (activeUndoManager?.canRedo ?? false)
+            return configuration.isEditable && (activeUndoManager?.canRedo ?? false)
         }
 
         if isLineWrappingCommandAction(action) {
@@ -345,7 +374,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         if isEditorCommandAction(action) {
-            return model.isEditable
+            return configuration.isEditable
         }
 
         switch action {
@@ -355,14 +384,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return isSelectable && selectedRange.length > 0
         case #selector(UIResponderStandardEditActions.cut(_:)),
              #selector(UIResponderStandardEditActions.delete(_:)):
-            return model.isEditable && selectedRange.length > 0
+            return configuration.isEditable && selectedRange.length > 0
         case #selector(UIResponderStandardEditActions.paste(_:)):
-            return model.isEditable && UIPasteboard.general.hasStrings
+            return configuration.isEditable && UIPasteboard.general.hasStrings
         case #selector(UIResponderStandardEditActions.selectAll(_:)):
             return isSelectable && !text.isEmpty
         default:
             if isFindAndReplaceCommandAction(action) {
-                return model.isEditable && isFindInteractionEnabled && findInteraction != nil
+                return configuration.isEditable && isFindInteractionEnabled && findInteraction != nil
             }
             if isFindCommandAction(action) {
                 return isFindInteractionEnabled && findInteraction != nil
@@ -381,13 +410,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     public override func cut(_ sender: Any?) {
-        guard model.isEditable, selectedRange.length > 0 else { return }
+        guard configuration.isEditable, selectedRange.length > 0 else { return }
         copy(sender)
         applyUserReplacement(in: selectedRange, replacement: "", deletionIntent: .unspecified)
     }
 
     public override func paste(_ sender: Any?) {
-        guard model.isEditable,
+        guard configuration.isEditable,
               let pastedText = UIPasteboard.general.string
         else {
             return
@@ -396,7 +425,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     public override func delete(_ sender: Any?) {
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
         if selectedRange.length > 0 {
             applyUserReplacement(in: selectedRange, replacement: "", deletionIntent: .unspecified)
         } else {
@@ -414,7 +443,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     public override func findAndReplace(_ sender: Any?) {
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
         findInteraction?.presentFindNavigator(showingReplace: true)
     }
 
@@ -461,7 +490,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         updateFindInteraction()
 
         guardedUndoManager.allowsMutation = { [weak self] in
-            self?.model.isEditable ?? true
+            self?.configuration.isEditable ?? true
         }
     }
 
@@ -512,7 +541,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             removeInteraction(nonEditableTextInteraction)
         }
 
-        if model.isEditable {
+        if configuration.isEditable {
             addEditableInteraction()
         } else if isSelectable {
             addNonEditableInteraction()
@@ -599,7 +628,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         updateBracketHighlightFragmentViews()
         scheduleHighlight(
             source: text,
-            language: model.language,
+            language: configuration.language,
+            revision: document.revision,
             refreshStartUTF16: 0
         )
     }
@@ -609,7 +639,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             makeKeyCommand(input: "l", modifierFlags: [.control, .shift, .command], action: #selector(handleToggleLineWrappingCommand), title: "Wrap Lines"),
         ]
 
-        guard model.isEditable else {
+        guard configuration.isEditable else {
             return commands
         }
 
@@ -686,8 +716,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func refreshKeyboardAccessoryState() {
         guard let keyboardAccessoryModel else { return }
-        keyboardAccessoryModel.isUndoable = model.isEditable && (activeUndoManager?.canUndo ?? false)
-        keyboardAccessoryModel.isRedoable = model.isEditable && (activeUndoManager?.canRedo ?? false)
+        keyboardAccessoryModel.isUndoable = configuration.isEditable && (activeUndoManager?.canUndo ?? false)
+        keyboardAccessoryModel.isRedoable = configuration.isEditable && (activeUndoManager?.canRedo ?? false)
     }
 
     var typingAttributes: [NSAttributedString.Key: Any] = [:]
@@ -696,47 +726,66 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         typingAttributes = baseAttributes()
     }
 
-    func startModelObservation() {
-        modelObservations.update {
-            model.observe(\.text) { [weak self] text in
+    func startConfigurationObservation() {
+        configurationObservations.update {
+            configuration.observe([\.language, \.isEditable, \.lineWrappingEnabled, \.colorTheme.id]) { [weak self] in
                 guard let self else { return }
-                self.applyObservedText(text)
-            }
-            .store(in: modelObservations)
-
-            model.observe([\.language, \.isEditable, \.lineWrappingEnabled, \.colorTheme.id]) { [weak self] in
-                guard let self else { return }
-                self.applyObservedEditorState(
-                    language: self.model.language,
-                    isEditable: self.model.isEditable,
-                    lineWrappingEnabled: self.model.lineWrappingEnabled,
-                    colorTheme: self.model.colorTheme
+                self.applyObservedConfiguration(
+                    language: self.configuration.language,
+                    isEditable: self.configuration.isEditable,
+                    lineWrappingEnabled: self.configuration.lineWrappingEnabled,
+                    colorTheme: self.configuration.colorTheme
                 )
             }
-            .store(in: modelObservations)
+            .store(in: configurationObservations)
         }
     }
 
-    func applyObservedText(_ text: String, forceTextUpdate: Bool = false) {
-        guard text == model.text else { return }
-        applyExternalText(text, updatesModel: false, forceTextUpdate: forceTextUpdate)
+    func startDocumentObservation() {
+        documentObservations.update {
+            document.observe(\.revision) { [weak self] _ in
+                guard let self else { return }
+                self.applyObservedDocumentChange()
+            }
+            .store(in: documentObservations)
+        }
     }
 
-    func applyExternalText(_ nextText: String, updatesModel: Bool, forceTextUpdate: Bool) {
+    func applyObservedDocumentChange(forceTextUpdate: Bool = false) {
+        let revision = document.revision
+        guard forceTextUpdate || revision != lastAppliedDocumentRevision else { return }
+
         isApplyingModel = true
         defer {
             isApplyingModel = false
         }
 
         let previousText = text
+        let nextText = document.textSnapshot()
         let textNeedsUpdate = forceTextUpdate || previousText != nextText
 
         if textNeedsUpdate {
             commandEngine.invalidateTransientState()
             let previousSelection = selectedRange
-            replaceEntireStorageText(nextText)
+            if let change = document.latestChange,
+               change.revision == revision,
+               !change.isWholeDocumentReplacement,
+               !forceTextUpdate,
+               lastAppliedDocumentRevision == revision - 1 {
+                performRawEdits(change.edits, previousText: previousText)
+            } else {
+                replaceEntireStorageText(nextText)
+            }
+            let change = document.latestChange
+            let nextSelection: NSRange
+            if change?.isWholeDocumentReplacement == true,
+               change?.selectedRange == NSRange(location: 0, length: 0) {
+                nextSelection = previousSelection
+            } else {
+                nextSelection = change?.selectedRange ?? previousSelection
+            }
             setSelectedRange(
-                clampedTextRange(previousSelection, in: nextText),
+                clampedTextRange(nextSelection, in: nextText),
                 preservesCommandState: true,
                 schedulesSelectionScroll: true
             )
@@ -744,23 +793,21 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             updateTextContainerForCurrentWrappingMode()
             invalidateTextLayout()
             scheduleHighlight(
-                previousSource: previousText,
                 source: nextText,
-                language: model.language,
-                mutation: TextMutation.diff(from: previousText, to: nextText).map(SyntaxHighlightMutation.init),
+                language: configuration.language,
+                revision: revision,
+                mutation: document.latestChange.flatMap(Self.highlightMutation),
                 refreshStartUTF16: 0
             )
         } else {
             updateTypingAttributes()
         }
 
-        if updatesModel, model.text != nextText {
-            model.text = nextText
-        }
+        lastAppliedDocumentRevision = revision
         refreshKeyboardAccessoryState()
     }
 
-    func applyObservedEditorState(
+    func applyObservedConfiguration(
         language: SyntaxLanguage,
         isEditable: Bool,
         lineWrappingEnabled: Bool,
@@ -794,6 +841,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             scheduleHighlight(
                 source: text,
                 language: language,
+                revision: document.revision,
                 refreshStartUTF16: 0
             )
         } else if colorThemeChanged && schedulesHighlight {
@@ -804,7 +852,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func replaceEntireStorageText(_ nextText: String) {
-        invalidateHorizontalMeasurement()
+        lineMetricsIndex.reset(source: nextText)
         textContentStorage.performEditingTransaction {
             storage.setAttributedString(NSAttributedString(string: nextText, attributes: baseAttributes()))
         }
@@ -855,7 +903,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         deletionIntent: EditorCommandEngine.DeletionIntent,
         allowsCommandTransform: Bool = true
     ) {
-        guard model.isEditable else {
+        guard configuration.isEditable else {
             return
         }
 
@@ -869,61 +917,26 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                source: source,
                range: clampedRange,
                replacementText: replacement,
-               language: model.language,
+               language: configuration.language,
                deletionIntent: deletionIntent
            ) {
             applyCommandResult(result)
             return
         }
 
-        let previousSelection = selectedRange
         let nextSelection = NSRange(
             location: clampedRange.location + replacement.utf16.count,
             length: 0
         )
-        let nextText = (source as NSString).replacingCharacters(in: clampedRange, with: replacement)
 
-        if !isApplyingUndoRedo {
-            registerUndoAction(
-                restore: EditorUndoState(
-                    text: source,
-                    selectedRange: previousSelection,
-                    refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
-                        in: source,
-                        around: clampedRange.location
-                    )
-                ),
-                counterpart: EditorUndoState(
-                    text: nextText,
-                    selectedRange: nextSelection,
-                    refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
-                        in: nextText,
-                        around: clampedRange.location
-                    )
-                )
+        commitEdits(
+            [SyntaxEditorTextEdit(range: clampedRange, replacement: replacement)],
+            selectedRange: nextSelection,
+            refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
+                in: source,
+                around: clampedRange.location
             )
-        }
-
-        inputDelegate?.textWillChange(self)
-        inputDelegate?.selectionWillChange(self)
-        performRawReplacement(in: clampedRange, replacement: replacement)
-        currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
-        syncTextLayoutSelection()
-        handleTextDidChange(
-            previousText: source,
-            nextText: nextText,
-            mutation: SyntaxHighlightMutation(
-                location: clampedRange.location,
-                length: clampedRange.length,
-                replacement: replacement
-            ),
-            editStartUTF16: clampedRange.location
         )
-        handleSelectionDidChange(preservesCommandState: false)
-        layoutAndScrollSelectionForTextInputGeometry()
-
-        inputDelegate?.selectionDidChange(self)
-        inputDelegate?.textDidChange(self)
     }
 
     func replaceFindText(in range: NSRange, with replacement: String) {
@@ -942,7 +955,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         wordMatchMethod: UITextSearchOptions.WordMatchMethod,
         with replacement: String
     ) -> Bool {
-        guard model.isEditable else { return false }
+        guard configuration.isEditable else { return false }
 
         let source = text
         let ranges = SyntaxEditorFindCoordinator.searchRanges(
@@ -953,72 +966,173 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         )
         guard let firstRange = ranges.first else { return false }
 
-        var nextText = source
-        for range in ranges.reversed() {
-            nextText = (nextText as NSString).replacingCharacters(in: range, with: replacement)
+        let edits = ranges.map {
+            SyntaxEditorTextEdit(range: $0, replacement: replacement)
+        }
+        let nextTextLength = source.utf16.count + ranges.reduce(0) { total, range in
+            total + replacement.utf16.count - range.length
         }
 
         let selectionLocation = min(
             firstRange.location + replacement.utf16.count,
-            nextText.utf16.count
+            nextTextLength
         )
         let refreshStartUTF16 = SyntaxEditorRangeUtilities.lineStartUTF16Offset(
-            in: nextText,
+            in: source,
             around: selectionLocation
         )
-        applyCommandResult(
-            EditorCommandResult(
-                text: nextText,
-                selectedRange: NSRange(location: selectionLocation, length: 0),
-                refreshStartUTF16: refreshStartUTF16
-            )
+        commitEdits(
+            edits,
+            selectedRange: NSRange(location: selectionLocation, length: 0),
+            refreshStartUTF16: refreshStartUTF16
         )
         return true
     }
 
-    func handleTextDidChange(
-        previousText: String,
-        nextText: String,
-        mutation: SyntaxHighlightMutation?,
-        editStartUTF16: Int
-    ) {
-        if model.text != nextText {
-            model.text = nextText
+    func replaceDocumentText(_ nextText: String) {
+        let previousText = text
+        guard previousText != nextText else {
+            updateTypingAttributes()
+            return
         }
 
+        isApplyingModel = true
+        defer {
+            isApplyingModel = false
+        }
+
+        commandEngine.invalidateTransientState()
+        let change = document.replaceText(
+            nextText,
+            selectedRange: clampedTextRange(selectedRange, in: nextText)
+        )
+        lastAppliedDocumentRevision = change.revision
+        replaceEntireStorageText(nextText)
+        updateTypingAttributes()
         updateTextContainerForCurrentWrappingMode()
         invalidateTextLayout()
-
-        let refreshStartUTF16 = SyntaxEditorRangeUtilities.lineStartUTF16Offset(
-            in: nextText,
-            around: editStartUTF16
-        )
         scheduleHighlight(
-            previousSource: previousText,
             source: nextText,
-            language: model.language,
-            mutation: mutation,
-            refreshStartUTF16: refreshStartUTF16
+            language: configuration.language,
+            revision: change.revision,
+            refreshStartUTF16: 0
         )
         refreshKeyboardAccessoryState()
     }
 
-    func performRawReplacement(
-        in range: NSRange,
-        replacement: String,
+    func commitEdits(
+        _ edits: [SyntaxEditorTextEdit],
+        selectedRange nextSelection: NSRange,
+        refreshStartUTF16: Int,
+        registersUndo: Bool = true,
+        preservesMarkedTextUndoAnchor: Bool = false,
+        preservesCommandState: Bool = false,
+        notifiesInputDelegate: Bool = true
+    ) {
+        guard configuration.isEditable else {
+            refreshKeyboardAccessoryState()
+            return
+        }
+
+        guard !edits.isEmpty else {
+            setSelectedRange(
+                clampedTextRange(nextSelection),
+                preservesCommandState: preservesCommandState,
+                schedulesSelectionScroll: true
+            )
+            applyMatchingBracketHighlight()
+            refreshKeyboardAccessoryState()
+            return
+        }
+
+        let previousText = text
+        let previousSelection = selectedRange
+
+        if registersUndo, !isApplyingUndoRedo {
+            registerUndoAction(
+                restore: EditorUndoState(
+                    edits: SyntaxEditorDocument.inverseEdits(for: edits, in: previousText),
+                    selectedRange: previousSelection,
+                    refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
+                        in: previousText,
+                        around: refreshStartUTF16
+                    )
+                ),
+                counterpart: EditorUndoState(
+                    edits: edits,
+                    selectedRange: nextSelection,
+                    refreshStartUTF16: refreshStartUTF16
+                )
+            )
+        }
+
+        isApplyingModel = true
+        if notifiesInputDelegate {
+            inputDelegate?.textWillChange(self)
+            inputDelegate?.selectionWillChange(self)
+        }
+
+        performWithoutUndoRegistration {
+            performRawEdits(
+                edits,
+                previousText: previousText,
+                preservesMarkedTextUndoAnchor: preservesMarkedTextUndoAnchor
+            )
+        }
+
+        let change = document.commitEdits(
+            edits,
+            selectedRange: nextSelection,
+            isWholeDocumentReplacement: false
+        )
+        lastAppliedDocumentRevision = change.revision
+        let nextText = document.textSnapshot()
+        currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
+        syncTextLayoutSelection()
+        updateTypingAttributes()
+        updateTextContainerForCurrentWrappingMode()
+        invalidateTextLayout()
+        layoutAndScrollSelectionForTextInputGeometry()
+        isApplyingModel = false
+
+        let refreshStart = min(
+            refreshStartUTF16,
+            edits.map(\.range.location).min() ?? refreshStartUTF16
+        )
+        scheduleHighlight(
+            source: nextText,
+            language: configuration.language,
+            revision: change.revision,
+            mutation: Self.highlightMutation(change),
+            refreshStartUTF16: refreshStart
+        )
+        handleSelectionDidChange(preservesCommandState: preservesCommandState)
+
+        if notifiesInputDelegate {
+            inputDelegate?.selectionDidChange(self)
+            inputDelegate?.textDidChange(self)
+        }
+        refreshKeyboardAccessoryState()
+    }
+
+    func performRawEdits(
+        _ edits: [SyntaxEditorTextEdit],
+        previousText: String,
         preservesMarkedTextUndoAnchor: Bool = false
     ) {
-        invalidateHorizontalMeasurement()
         textContentStorage.performEditingTransaction {
-            if replacement.isEmpty {
-                storage.replaceCharacters(in: range, with: "")
-            } else {
-                storage.replaceCharacters(
-                    in: range,
-                    with: NSAttributedString(string: replacement, attributes: typingAttributes)
-                )
+            for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
+                if edit.replacement.isEmpty {
+                    storage.replaceCharacters(in: edit.range, with: "")
+                } else {
+                    storage.replaceCharacters(
+                        in: edit.range,
+                        with: NSAttributedString(string: edit.replacement, attributes: typingAttributes)
+                    )
+                }
             }
         }
+        lineMetricsIndex.apply(edits: edits, previousSource: previousText)
         invalidateFindResultsAfterTextChange()
         if !preservesMarkedTextUndoAnchor {
             markedTextUndoAnchor = nil
@@ -1028,88 +1142,17 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func applyCommandResult(_ result: EditorCommandResult) {
-        guard model.isEditable else {
+        guard configuration.isEditable else {
             refreshKeyboardAccessoryState()
             return
         }
 
-        let previousText = text
-        let previousSelection = selectedRange
-        let textChanged = previousText != result.text
-        var appliedMutation: TextMutation?
-
-        if textChanged, !isApplyingUndoRedo {
-            registerUndoAction(
-                restore: EditorUndoState(
-                    text: previousText,
-                    selectedRange: previousSelection,
-                    refreshStartUTF16: 0
-                ),
-                counterpart: EditorUndoState(
-                    text: result.text,
-                    selectedRange: result.selectedRange,
-                    refreshStartUTF16: result.refreshStartUTF16
-                )
-            )
-        }
-
-        isApplyingModel = true
-        if textChanged {
-            inputDelegate?.textWillChange(self)
-            invalidateFindResultsAfterTextChange()
-            performWithoutUndoRegistration {
-                appliedMutation = applyTextMutation(
-                    previousText: previousText,
-                    nextText: result.text
-                )
-                if appliedMutation == nil {
-                    replaceEntireStorageText(result.text)
-                }
-                updateTextContainerForCurrentWrappingMode()
-                invalidateTextLayout()
-            }
-        }
-        setTextSelectionPreservingCommandState(clampedTextRange(result.selectedRange, in: result.text))
-        updateTypingAttributes()
-        layoutAndScrollSelectionForTextInputGeometry()
-        isApplyingModel = false
-
-        if textChanged, model.text != result.text {
-            model.text = result.text
-        }
-        if textChanged {
-            inputDelegate?.textDidChange(self)
-        }
-
-        if textChanged {
-            let refreshStartUTF16: Int
-            let highlightMutation: SyntaxHighlightMutation?
-            if let appliedMutation {
-                let mutationLineStart = SyntaxEditorRangeUtilities.lineStartUTF16Offset(
-                    in: result.text,
-                    around: appliedMutation.range.location
-                )
-                refreshStartUTF16 = min(result.refreshStartUTF16, mutationLineStart)
-                highlightMutation = SyntaxHighlightMutation(appliedMutation)
-            } else {
-                refreshStartUTF16 = 0
-                highlightMutation = TextMutation.diff(
-                    from: previousText,
-                    to: result.text
-                ).map(SyntaxHighlightMutation.init)
-            }
-
-            scheduleHighlight(
-                previousSource: previousText,
-                source: result.text,
-                language: model.language,
-                mutation: highlightMutation,
-                refreshStartUTF16: refreshStartUTF16
-            )
-        } else {
-            applyMatchingBracketHighlight()
-        }
-        refreshKeyboardAccessoryState()
+        commitEdits(
+            result.edits,
+            selectedRange: result.selectedRange,
+            refreshStartUTF16: result.refreshStartUTF16,
+            preservesCommandState: true
+        )
     }
 
     func registerUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
@@ -1136,7 +1179,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func applyUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
-        guard model.isEditable else {
+        guard configuration.isEditable else {
             return
         }
 
@@ -1145,7 +1188,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         isApplyingUndoRedo = true
         applyCommandResult(
             EditorCommandResult(
-                text: restore.text,
+                edits: restore.edits,
                 selectedRange: restore.selectedRange,
                 refreshStartUTF16: restore.refreshStartUTF16
             )
@@ -1236,12 +1279,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return nil
         }
 
-        performRawReplacement(in: mutation.range, replacement: mutation.replacement)
+        performRawEdits(
+            [SyntaxEditorTextEdit(range: mutation.range, replacement: mutation.replacement)],
+            previousText: previousText
+        )
         return mutation
     }
 
     @objc private func handleIndentCommand() {
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
 
         guard let result = commandEngine.indentSelection(
             source: text,
@@ -1253,7 +1299,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @objc private func handleInsertTabCommand() {
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
 
         guard let result = commandEngine.insertTab(
             source: text,
@@ -1265,7 +1311,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @objc private func handleOutdentCommand() {
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
 
         guard let result = commandEngine.outdentSelection(
             source: text,
@@ -1277,12 +1323,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @objc private func handleToggleCommentCommand() {
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
 
         guard let result = commandEngine.toggleComment(
             source: text,
             selection: selectedRange,
-            language: model.language
+            language: configuration.language
         ) else {
             return
         }
@@ -1290,11 +1336,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @objc private func handleToggleLineWrappingCommand() {
-        model.lineWrappingEnabled.toggle()
+        configuration.lineWrappingEnabled.toggle()
     }
 
     @objc private func handleUndoCommand() {
-        guard model.isEditable else {
+        guard configuration.isEditable else {
             refreshKeyboardAccessoryState()
             return
         }
@@ -1304,7 +1350,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @objc private func handleRedoCommand() {
-        guard model.isEditable else {
+        guard configuration.isEditable else {
             refreshKeyboardAccessoryState()
             return
         }
@@ -1318,9 +1364,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func scheduleHighlight(
-        previousSource: String? = nil,
         source: String,
         language: SyntaxLanguage,
+        revision: Int,
         mutation: SyntaxHighlightMutation? = nil,
         refreshStartUTF16: Int = 0
     ) {
@@ -1337,29 +1383,34 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let highlighter = self.highlighter
         highlightTask = Task { [weak self] in
             let result: SyntaxHighlightResult
-            if let previousSource, let mutation {
+            if let mutation {
                 result = await highlighter.update(
-                    previousSource: previousSource,
                     source: expectedSource,
                     language: language,
-                    mutation: mutation
+                    mutation: mutation,
+                    revision: revision
                 )
             } else {
-                result = await highlighter.reset(source: expectedSource, language: language)
+                result = await highlighter.reset(
+                    source: expectedSource,
+                    language: language,
+                    revision: revision
+                )
             }
             guard let self else { return }
             guard !Task.isCancelled else {
                 return
             }
-            guard self.text == result.source else {
+            guard self.document.revision == result.revision else {
                 return
             }
             self.lastHighlightTokens = result.tokens
-            self.lastHighlightSource = result.source
+            self.lastHighlightRevision = result.revision
             self.lastHighlightLanguage = result.language
             self.applyHighlight(
                 result.tokens,
-                expectedSource: result.source,
+                expectedRevision: result.revision,
+                source: result.source,
                 refreshRange: Self.combinedRefreshRange(
                     result.refreshRange,
                     fallbackRefreshRange,
@@ -1371,14 +1422,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func reapplyCachedHighlight() {
         let source = text
-        guard lastHighlightSource == source, lastHighlightLanguage == model.language else {
-            scheduleHighlight(source: source, language: model.language)
+        guard lastHighlightRevision == document.revision, lastHighlightLanguage == configuration.language else {
+            scheduleHighlight(source: source, language: configuration.language, revision: document.revision)
             return
         }
 
         applyHighlight(
             lastHighlightTokens,
-            expectedSource: source,
+            expectedRevision: document.revision,
+            source: source,
             refreshRange: NSRange(location: 0, length: source.utf16.count)
         )
     }
@@ -1394,12 +1446,22 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return NSRange(location: location, length: sourceUTF16Length - location)
     }
 
+    static func highlightMutation(_ change: SyntaxEditorDocumentChange) -> SyntaxHighlightMutation? {
+        guard change.edits.count == 1, let edit = change.edits.first else { return nil }
+        return SyntaxHighlightMutation(
+            location: edit.range.location,
+            length: edit.range.length,
+            replacement: edit.replacement
+        )
+    }
+
     func applyHighlight(
         _ tokens: [SyntaxHighlightToken],
-        expectedSource: String,
+        expectedRevision: Int,
+        source expectedSource: String,
         refreshRange: NSRange
     ) {
-        guard text == expectedSource else { return }
+        guard document.revision == expectedRevision else { return }
 
         let textLength = expectedSource.utf16.count
         let clampedRefreshRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
@@ -1443,8 +1505,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let targetRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
         guard targetRange.length > 0 else { return }
 
-        if lastHighlightSource == text, lastHighlightLanguage == model.language {
-            applyHighlight(lastHighlightTokens, expectedSource: text, refreshRange: targetRange)
+        if lastHighlightRevision == document.revision, lastHighlightLanguage == configuration.language {
+            applyHighlight(
+                lastHighlightTokens,
+                expectedRevision: document.revision,
+                source: text,
+                refreshRange: targetRange
+            )
         } else {
             storage.beginEditing()
             storage.setAttributes(baseAttributes(), range: targetRange)
@@ -1860,36 +1927,22 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func measuredHorizontalDocumentLayoutWidth() -> CGFloat {
-        if let cachedHorizontalDocumentLayoutWidth {
-            return cachedHorizontalDocumentLayoutWidth
-        }
-
         guard !text.isEmpty else {
             return bounds.width
         }
 
-        let columnWidth = Self.estimatedMonospacedColumnWidth(for: font)
-        let maxColumns = Self.maximumDisplayColumnCount(
-            in: text,
-            tabWidth: Self.estimatedTabColumnWidth
+        return max(
+            bounds.width,
+            lineMetricsIndex.horizontalDocumentWidth(
+                columnWidth: Self.estimatedMonospacedColumnWidth(for: font),
+                textContainerInset: textContainerInset.left + textContainerInset.right,
+                lineFragmentPadding: container.lineFragmentPadding
+            )
         )
-        let textWidth = CGFloat(maxColumns) * columnWidth
-        let measuredWidth = ceil(
-            textWidth
-                + container.lineFragmentPadding * 2
-                + textContainerInset.left
-                + textContainerInset.right
-        )
-        cachedHorizontalDocumentLayoutWidth = measuredWidth
-        return measuredWidth
     }
 
     static func estimatedMonospacedColumnWidth(for font: UIFont) -> CGFloat {
         font.pointSize * 0.65
-    }
-
-    static func maximumDisplayColumnCount(in source: String, tabWidth: Int) -> Int {
-        SyntaxEditorDisplayColumnUtilities.maximumColumnCount(in: source, tabWidth: tabWidth)
     }
 
     func invalidateTextLayout() {
@@ -1904,7 +1957,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func invalidateHorizontalMeasurement() {
-        cachedHorizontalDocumentLayoutWidth = nil
+        setNeedsLayout()
     }
 
     func setNeedsTextLayout() {

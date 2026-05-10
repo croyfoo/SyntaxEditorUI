@@ -73,11 +73,11 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
 }
 
 struct SyntaxLanguageEdit {
-    let text: String
+    let edits: [SyntaxEditorTextEdit]
     let selectedRange: NSRange
 
-    init(text: String, selectedRange: NSRange) {
-        self.text = text
+    init(edits: [SyntaxEditorTextEdit], selectedRange: NSRange) {
+        self.edits = edits
         self.selectedRange = selectedRange
     }
 }
