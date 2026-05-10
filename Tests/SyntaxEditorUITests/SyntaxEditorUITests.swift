@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 import Testing
 @testable import SyntaxEditorUI
 
@@ -12,6 +13,90 @@ import AppKit
 #endif
 
 private func requireObservable<T: Observable>(_ value: T) {}
+
+@MainActor
+@Observable
+private final class SyntaxEditorSwiftUIProbe {
+    var tick = 0
+    let document = SyntaxEditorDocument(text: "let value = 1")
+    var configuration = SyntaxEditorConfiguration(language: SyntaxLanguage.javascript)
+}
+
+private struct SyntaxEditorDefaultWrapperHost: View {
+    var probe: SyntaxEditorSwiftUIProbe
+
+    var body: some View {
+        VStack {
+            SyntaxEditor()
+            Text("\(probe.tick)")
+        }
+    }
+}
+
+private struct SyntaxEditorConfigurationReplacementHost: View {
+    var probe: SyntaxEditorSwiftUIProbe
+
+    var body: some View {
+        VStack {
+            SyntaxEditor(document: probe.document, configuration: probe.configuration)
+            Text("\(probe.tick)")
+        }
+    }
+}
+
+#if canImport(UIKit)
+@MainActor
+private func syntaxEditorUIView<Subview: UIView>(
+    ofType type: Subview.Type,
+    in view: UIView
+) -> Subview? {
+    if let view = view as? Subview {
+        return view
+    }
+
+    for subview in view.subviews {
+        if let match = syntaxEditorUIView(ofType: type, in: subview) {
+            return match
+        }
+    }
+
+    return nil
+}
+
+@MainActor
+private func syntaxEditorSettleUIKitHost<Content: View>(_ controller: UIHostingController<Content>) {
+    controller.view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+    controller.view.setNeedsLayout()
+    controller.view.layoutIfNeeded()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+}
+#elseif canImport(AppKit)
+@MainActor
+private func syntaxEditorNSView<Subview: NSView>(
+    ofType type: Subview.Type,
+    in view: NSView
+) -> Subview? {
+    if let view = view as? Subview {
+        return view
+    }
+
+    for subview in view.subviews {
+        if let match = syntaxEditorNSView(ofType: type, in: subview) {
+            return match
+        }
+    }
+
+    return nil
+}
+
+@MainActor
+private func syntaxEditorSettleAppKitHost<Content: View>(_ controller: NSHostingController<Content>) {
+    controller.view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+    controller.view.needsLayout = true
+    controller.view.layoutSubtreeIfNeeded()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+}
+#endif
 
 @MainActor
 private struct SyntaxEditorTestContext {
@@ -498,6 +583,89 @@ private func makeMacCommandKeyEvent(
 
 @Suite("SyntaxEditorUI")
 struct SyntaxEditorUITests {
+    @Test("SyntaxEditor preserves default SwiftUI document across parent updates")
+    @MainActor
+    func syntaxEditorPreservesDefaultSwiftUIDocumentAcrossParentUpdates() throws {
+        let probe = SyntaxEditorSwiftUIProbe()
+        let editedText = "let edited = 2"
+
+#if canImport(UIKit)
+        let controller = UIHostingController(rootView: SyntaxEditorDefaultWrapperHost(probe: probe))
+        syntaxEditorSettleUIKitHost(controller)
+        let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
+
+        firstEditor.document.replaceText(editedText)
+        firstEditor.synchronizeDocumentForTesting()
+        syntaxEditorSettleUIKitHost(controller)
+        probe.tick += 1
+        syntaxEditorSettleUIKitHost(controller)
+
+        let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
+        #expect(firstEditor === secondEditor)
+        #expect(secondEditor.document === firstEditor.document)
+        #expect(secondEditor.document.textSnapshot() == editedText)
+        #expect(secondEditor.text == editedText)
+#elseif canImport(AppKit)
+        let controller = NSHostingController(rootView: SyntaxEditorDefaultWrapperHost(probe: probe))
+        syntaxEditorSettleAppKitHost(controller)
+        let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
+
+        firstEditor.document.replaceText(editedText)
+        firstEditor.synchronizeDocumentForTesting()
+        syntaxEditorSettleAppKitHost(controller)
+        probe.tick += 1
+        syntaxEditorSettleAppKitHost(controller)
+
+        let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
+        #expect(firstEditor === secondEditor)
+        #expect(secondEditor.document === firstEditor.document)
+        #expect(secondEditor.document.textSnapshot() == editedText)
+        #expect(secondEditor.textView.string == editedText)
+#endif
+    }
+
+    @Test("SyntaxEditor rebinds replaced SwiftUI configuration without recreating native view")
+    @MainActor
+    func syntaxEditorRebindsReplacedSwiftUIConfigurationWithoutRecreatingNativeView() throws {
+        let probe = SyntaxEditorSwiftUIProbe()
+        let replacementConfiguration = SyntaxEditorConfiguration(
+            language: SyntaxLanguage.json,
+            isEditable: false,
+            lineWrappingEnabled: true
+        )
+
+#if canImport(UIKit)
+        let controller = UIHostingController(rootView: SyntaxEditorConfigurationReplacementHost(probe: probe))
+        syntaxEditorSettleUIKitHost(controller)
+        let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
+
+        probe.configuration = replacementConfiguration
+        probe.tick += 1
+        syntaxEditorSettleUIKitHost(controller)
+
+        let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
+        #expect(firstEditor === secondEditor)
+        #expect(secondEditor.configuration === replacementConfiguration)
+        #expect(secondEditor.configuration.language == SyntaxLanguage.json)
+        #expect(secondEditor.configuration.isEditable == false)
+#elseif canImport(AppKit)
+        let controller = NSHostingController(rootView: SyntaxEditorConfigurationReplacementHost(probe: probe))
+        syntaxEditorSettleAppKitHost(controller)
+        let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
+
+        probe.configuration = replacementConfiguration
+        probe.tick += 1
+        syntaxEditorSettleAppKitHost(controller)
+
+        let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
+        #expect(firstEditor === secondEditor)
+        #expect(secondEditor.configuration === replacementConfiguration)
+        #expect(secondEditor.configuration.language == SyntaxLanguage.json)
+        #expect(secondEditor.configuration.isEditable == false)
+        #expect(secondEditor.textView.isEditable == false)
+#endif
+    }
+
 #if canImport(UIKit)
     @Test("SyntaxEditorViewController preserves Observable conformance on iOS")
     @MainActor

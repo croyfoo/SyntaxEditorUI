@@ -11,7 +11,7 @@ private struct SyntaxEditorContainer: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SyntaxEditorView, context: Context) {
-        // Document/configuration observation keeps the native view synchronized.
+        uiView.update(document: document, configuration: configuration)
     }
 }
 #elseif canImport(AppKit)
@@ -24,26 +24,46 @@ private struct SyntaxEditorContainer: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: SyntaxEditorView, context: Context) {
-        // Document/configuration observation keeps the native view synchronized.
+        nsView.update(document: document, configuration: configuration)
     }
 }
 #endif
 
 @MainActor
 public struct SyntaxEditor: View {
-    let document: SyntaxEditorDocument
-    let configuration: SyntaxEditorConfiguration
+    @State private var defaultDocument = SyntaxEditorDocument()
+    @State private var defaultConfiguration = SyntaxEditorConfiguration()
+
+    private let providedDocument: SyntaxEditorDocument?
+    private let providedConfiguration: SyntaxEditorConfiguration?
+
+    public init() {
+        self.providedDocument = nil
+        self.providedConfiguration = nil
+    }
+
+    public init(document: SyntaxEditorDocument) {
+        self.providedDocument = document
+        self.providedConfiguration = nil
+    }
+
+    public init(configuration: SyntaxEditorConfiguration) {
+        self.providedDocument = nil
+        self.providedConfiguration = configuration
+    }
 
     public init(
-        document: SyntaxEditorDocument = SyntaxEditorDocument(),
-        configuration: SyntaxEditorConfiguration = SyntaxEditorConfiguration()
+        document: SyntaxEditorDocument,
+        configuration: SyntaxEditorConfiguration
     ) {
-        self.document = document
-        self.configuration = configuration
+        self.providedDocument = document
+        self.providedConfiguration = configuration
     }
 
     public var body: some View {
+        let document = providedDocument ?? defaultDocument
+        let configuration = providedConfiguration ?? defaultConfiguration
+
         SyntaxEditorContainer(document: document, configuration: configuration)
-            .id(ObjectIdentifier(document))
     }
 }

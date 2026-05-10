@@ -3654,6 +3654,28 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(languageChange.tokens, fullJSON.tokens))
     }
 
+    @Test("SyntaxHighlighterEngine resets when mutation is not based on the current session source")
+    func highlighterResetsWhenMutationBaseDoesNotMatchSessionSource() async throws {
+        let sessionSource = "const value = 1;"
+        let stalePreviousSource = "let value = 1;"
+        let updatedSource = "let value = 2;"
+        let staleMutation = try #require(TextMutation.diff(from: stalePreviousSource, to: updatedSource))
+        let engine = SyntaxHighlighterEngine()
+
+        _ = await engine.reset(source: sessionSource, language: SyntaxLanguage.javascript)
+        let staleUpdate = await engine.update(
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(staleMutation),
+            revision: 2
+        )
+        let full = await SyntaxHighlighterEngine()
+            .reset(source: updatedSource, language: SyntaxLanguage.javascript, revision: 2)
+
+        #expect(highlightTokensMatch(staleUpdate.tokens, full.tokens))
+        #expect(staleUpdate.refreshRange == NSRange(location: 0, length: updatedSource.utf16.count))
+    }
+
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")
     func highlighterKeepsUnsupportedInjectionsDirect() async {
         let engine = SyntaxHighlighterEngine()

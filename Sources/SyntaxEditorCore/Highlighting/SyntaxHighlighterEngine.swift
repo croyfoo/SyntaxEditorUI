@@ -205,6 +205,14 @@ private final class SyntaxHighlightSession {
             return nil
         }
 
+        guard Self.mutationMatchesSourceTransition(
+            originalMutation,
+            previousSource: source,
+            nextSource: nextSource
+        ) else {
+            return nil
+        }
+
         guard let layer else {
             return nil
         }
@@ -620,6 +628,54 @@ private extension SyntaxHighlightSession {
                 by: mutation.replacement
             )
         )
+    }
+
+    static func mutationMatchesSourceTransition(
+        _ mutation: SyntaxHighlightMutation,
+        previousSource: String,
+        nextSource: String
+    ) -> Bool {
+        let previousLength = previousSource.utf16.count
+        let replacementLength = mutation.replacement.utf16.count
+        guard mutation.location >= 0,
+              mutation.length >= 0,
+              mutation.location <= previousLength,
+              mutation.location + mutation.length <= previousLength
+        else {
+            return false
+        }
+
+        let oldEnd = mutation.location + mutation.length
+        let newEnd = mutation.location + replacementLength
+        let suffixLength = previousLength - oldEnd
+        guard nextSource.utf16.count == previousLength - mutation.length + replacementLength else {
+            return false
+        }
+
+        let previous = previousSource as NSString
+        let next = nextSource as NSString
+        if mutation.location > 0 {
+            let prefixRange = NSRange(location: 0, length: mutation.location)
+            guard previous.substring(with: prefixRange) == next.substring(with: prefixRange) else {
+                return false
+            }
+        }
+
+        if replacementLength > 0 {
+            guard next.substring(with: NSRange(location: mutation.location, length: replacementLength)) == mutation.replacement else {
+                return false
+            }
+        }
+
+        if suffixLength > 0 {
+            guard previous.substring(with: NSRange(location: oldEnd, length: suffixLength)) ==
+                next.substring(with: NSRange(location: newEnd, length: suffixLength))
+            else {
+                return false
+            }
+        }
+
+        return true
     }
 
     static func mutationTouchesMarkupBoundary(

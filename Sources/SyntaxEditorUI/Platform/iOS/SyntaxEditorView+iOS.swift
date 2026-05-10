@@ -259,6 +259,39 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         NotificationCenter.default.removeObserver(self)
     }
 
+    public func update(
+        document nextDocument: SyntaxEditorDocument,
+        configuration nextConfiguration: SyntaxEditorConfiguration
+    ) {
+        let documentChanged = document !== nextDocument
+        let configurationChanged = configuration !== nextConfiguration
+        guard documentChanged || configurationChanged else { return }
+
+        if documentChanged {
+            documentObservations.cancelAll()
+            document = nextDocument
+        }
+
+        if configurationChanged {
+            configurationObservations.cancelAll()
+            configuration = nextConfiguration
+            applyObservedConfiguration(
+                language: nextConfiguration.language,
+                isEditable: nextConfiguration.isEditable,
+                lineWrappingEnabled: nextConfiguration.lineWrappingEnabled,
+                colorTheme: nextConfiguration.colorTheme,
+                forceLanguageRefresh: true,
+                schedulesHighlight: !documentChanged
+            )
+            startConfigurationObservation()
+        }
+
+        if documentChanged {
+            applyObservedDocumentChange(forceTextUpdate: true)
+            startDocumentObservation()
+        }
+    }
+
     public override var undoManager: UndoManager? {
         guardedUndoManager
     }
