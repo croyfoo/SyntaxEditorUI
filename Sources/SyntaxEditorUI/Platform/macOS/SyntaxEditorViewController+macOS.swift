@@ -663,7 +663,11 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         isApplyingModel = true
         if textChanged {
-            textView.string = nextText
+            textStorage.beginEditing()
+            for edit in result.edits.sorted(by: { $0.range.location > $1.range.location }) {
+                textStorage.replaceCharacters(in: edit.range, with: edit.replacement)
+            }
+            textStorage.endEditing()
         }
         isApplyingCommandSelection = true
         textView.setSelectedRange(result.selectedRange)

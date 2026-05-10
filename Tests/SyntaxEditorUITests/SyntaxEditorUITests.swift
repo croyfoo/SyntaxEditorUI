@@ -4511,6 +4511,42 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView preserves macOS syntax colors outside command edit ranges")
+    @MainActor
+    func syntaxEditorViewMacCommandEditsPreserveSyntaxColorsOutsideRefreshRange() async {
+        let source = "let value = "
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    captureName: "keyword"
+                ),
+            ],
+            updateRefreshRange: NSRange(location: source.utf16.count, length: 2)
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        let insertionRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.textView.setSelectedRange(insertionRange)
+        editorView.textView.insertText("\"", replacementRange: insertionRange)
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == "\(source)\"\"")
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
     @Test("SyntaxEditorView reflects editable and wrapping changes on macOS")
     @MainActor
     func syntaxEditorViewMacEditorStateObservation() async {
