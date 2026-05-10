@@ -98,25 +98,46 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         cancellation.beginDecorationBatch()
 
         Task.detached(priority: .userInitiated) { [weak self, search] in
-            await Self.enumerateSearchRangesAsync(
+            let searchResultBatchSize = 128
+            var pendingRanges: [NSRange] = []
+            pendingRanges.reserveCapacity(searchResultBatchSize)
+
+            func flushPendingRanges() async -> Bool {
+                guard !pendingRanges.isEmpty else {
+                    return !search.cancellation.isCancelled
+                }
+
+                let ranges = pendingRanges
+                pendingRanges.removeAll(keepingCapacity: true)
+                return await MainActor.run {
+                    guard !search.cancellation.isCancelled else { return false }
+                    for range in ranges {
+                        guard !search.cancellation.isCancelled else { return false }
+                        search.resultAggregator.foundRange(
+                            SyntaxEditorTextRange(nsRange: range, findSearchIdentifier: search.identifier),
+                            searchString: search.queryString,
+                            document: search.documentIdentifier
+                        )
+                    }
+                    return true
+                }
+            }
+
+            let completedSearch = await Self.enumerateSearchRangesAsync(
                 in: search.source,
                 queryString: search.queryString,
                 compareOptions: search.compareOptions,
                 wordMatchMethod: search.wordMatchMethod
             ) { range in
                 guard !search.cancellation.isCancelled else { return false }
-                return await MainActor.run {
-                    guard !search.cancellation.isCancelled else { return false }
-                    search.resultAggregator.foundRange(
-                        SyntaxEditorTextRange(nsRange: range, findSearchIdentifier: search.identifier),
-                        searchString: search.queryString,
-                        document: search.documentIdentifier
-                    )
-                    return true
+                pendingRanges.append(range)
+                if pendingRanges.count >= searchResultBatchSize {
+                    return await flushPendingRanges()
                 }
+                return true
             }
 
-            if !search.cancellation.isCancelled {
+            if completedSearch, await flushPendingRanges(), !search.cancellation.isCancelled {
                 await MainActor.run {
                     guard !search.cancellation.isCancelled else { return }
                     search.resultAggregator.finishedSearching()
