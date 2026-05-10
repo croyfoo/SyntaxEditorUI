@@ -189,15 +189,24 @@ private let syntaxEditorKeyCommandModifierMask: UIKeyModifierFlags = [
 ]
 
 @MainActor
+private func syntaxEditorKeyCommand(
+    _ commands: [UIKeyCommand]?,
+    input: String,
+    modifierFlags: UIKeyModifierFlags
+) -> UIKeyCommand? {
+    commands?.first { command in
+        command.input == input
+            && command.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == modifierFlags
+    }
+}
+
+@MainActor
 private func hasSyntaxEditorKeyCommand(
     _ commands: [UIKeyCommand]?,
     input: String,
     modifierFlags: UIKeyModifierFlags
 ) -> Bool {
-    commands?.contains { command in
-        command.input == input
-            && command.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == modifierFlags
-    } ?? false
+    syntaxEditorKeyCommand(commands, input: input, modifierFlags: modifierFlags) != nil
 }
 
 @MainActor
@@ -3672,6 +3681,7 @@ struct SyntaxEditorUITests {
         #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "]", modifierFlags: [.command]))
         #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "[", modifierFlags: [.command]))
         #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "/", modifierFlags: [.command]))
+        #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "v", modifierFlags: [.command]))
         #expect(hasSyntaxEditorKeyCommand(readOnlyCommands, input: "l", modifierFlags: [.control, .shift, .command]))
 
         let readOnlyLineWrappingActionTarget = editorView.target(
@@ -3688,6 +3698,9 @@ struct SyntaxEditorUITests {
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "]", modifierFlags: [.command]))
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "[", modifierFlags: [.command]))
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "/", modifierFlags: [.command]))
+        let pasteCommand = syntaxEditorKeyCommand(editableCommands, input: "v", modifierFlags: [.command])
+        #expect(pasteCommand != nil)
+        #expect(pasteCommand?.wantsPriorityOverSystemBehavior == true)
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "l", modifierFlags: [.control, .shift, .command]))
 
         let indentActionTarget = editorView.target(
@@ -3701,6 +3714,46 @@ struct SyntaxEditorUITests {
             withSender: nil
         ) as AnyObject?
         #expect(insertTabActionTarget === editorView)
+
+        let pasteActionTarget = editorView.target(
+            forAction: NSSelectorFromString("handlePasteCommand"),
+            withSender: nil
+        ) as AnyObject?
+        #expect(pasteActionTarget === editorView)
+    }
+
+    @Test("SyntaxEditorView applies iOS paste payload repeatedly")
+    @MainActor
+    func syntaxEditorViewIOSAppliesPastePayloadRepeatedly() {
+        let model = SyntaxEditorTestContext(text: "let ")
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.selectedRange = NSRange(location: model.document.textSnapshot().utf16.count, length: 0)
+
+        editorView.insertPastedText("42")
+        editorView.insertPastedText("42")
+        #expect(model.document.textSnapshot() == "let 4242")
+    }
+
+    @Test("SyntaxEditorView handles iOS ASCII hardware key repeat directly")
+    @MainActor
+    func syntaxEditorViewIOSHandlesASCIIHardwareKeyRepeatDirectly() {
+        let model = SyntaxEditorTestContext(text: "")
+        let editorView = SyntaxEditorView(testContext: model)
+
+        #expect(editorView.keyboardType == .asciiCapable)
+        #expect(SyntaxEditorView.hardwareRepeatText(characters: "a", modifierFlags: [], keyboardType: .asciiCapable) == "a")
+        #expect(SyntaxEditorView.hardwareRepeatText(characters: "A", modifierFlags: [.shift], keyboardType: .asciiCapable) == "A")
+        #expect(SyntaxEditorView.hardwareRepeatText(characters: " ", modifierFlags: [], keyboardType: .asciiCapable) == " ")
+        #expect(SyntaxEditorView.hardwareRepeatText(characters: "v", modifierFlags: [.command], keyboardType: .asciiCapable) == nil)
+        #expect(SyntaxEditorView.hardwareRepeatText(characters: "a", modifierFlags: [.alternate], keyboardType: .asciiCapable) == nil)
+        #expect(SyntaxEditorView.hardwareRepeatText(characters: "\t", modifierFlags: [], keyboardType: .asciiCapable) == nil)
+        #expect(SyntaxEditorView.hardwareRepeatText(characters: "a", modifierFlags: [], keyboardType: .default) == nil)
+
+        let repeatInput = SyntaxEditorHardwareKeyRepeat(keyCode: .keyboardA, text: "a")
+        editorView.hardwareKeyRepeat = repeatInput
+        editorView.repeatHardwareKey(repeatInput)
+        editorView.repeatHardwareKey(repeatInput)
+        #expect(model.document.textSnapshot() == "aa")
     }
 
     @Test("SyntaxEditorView toggles iOS line wrapping key command")

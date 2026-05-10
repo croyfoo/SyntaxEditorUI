@@ -10,6 +10,11 @@ struct SyntaxEditorMarkedTextUndoAnchor {
     let refreshStartUTF16: Int
 }
 
+struct SyntaxEditorHardwareKeyRepeat: Equatable {
+    let keyCode: UIKeyboardHIDUsage
+    let text: String
+}
+
 @MainActor
 public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTraits, UITextInteractionDelegate, @preconcurrency NSTextViewportLayoutControllerDelegate {
     public private(set) var document: SyntaxEditorDocument
@@ -25,6 +30,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findCoordinator: SyntaxEditorFindCoordinator?
     static let estimatedTabColumnWidth = 4
     static let defaultEditorFont = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+    static let hardwareKeyRepeatInitialDelayNanoseconds: UInt64 = 350_000_000
+    static let hardwareKeyRepeatIntervalNanoseconds: UInt64 = 45_000_000
 
     let highlighter: any SyntaxHighlighting
     let commandEngine = EditorCommandEngine()
@@ -62,6 +69,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findHighlightUpdatePassCount = 0
     var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     var keyboardAccessoryView: UIView?
+    var hardwareKeyRepeat: SyntaxEditorHardwareKeyRepeat?
+    var hardwareKeyRepeatTask: Task<Void, Never>?
     let documentObservations = ObservationScope()
     let configurationObservations = ObservationScope()
     var storage: NSTextStorage {
@@ -197,7 +206,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     public var smartQuotesType: UITextSmartQuotesType = .no
     public var smartDashesType: UITextSmartDashesType = .no
     public var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
-    public var keyboardType: UIKeyboardType = .default
+    public var keyboardType: UIKeyboardType = .asciiCapable
     public var keyboardAppearance: UIKeyboardAppearance = .default
     public var returnKeyType: UIReturnKeyType = .default
     public var enablesReturnKeyAutomatically = false
@@ -256,6 +265,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     deinit {
         highlightTask?.cancel()
+        hardwareKeyRepeatTask?.cancel()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -349,6 +359,45 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         super.setContentOffset(CGPoint(x: preservedX, y: contentOffset.y), animated: false)
     }
 
+    public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandledPresses = Set<UIPress>()
+        for press in presses {
+            if handleHardwareTextInputPress(press) {
+                continue
+            }
+            unhandledPresses.insert(press)
+        }
+
+        guard !unhandledPresses.isEmpty else { return }
+        super.pressesBegan(unhandledPresses, with: event)
+    }
+
+    public override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandledPresses = Set<UIPress>()
+        for press in presses {
+            if endHardwareTextInputPress(press) {
+                continue
+            }
+            unhandledPresses.insert(press)
+        }
+
+        guard !unhandledPresses.isEmpty else { return }
+        super.pressesEnded(unhandledPresses, with: event)
+    }
+
+    public override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandledPresses = Set<UIPress>()
+        for press in presses {
+            if endHardwareTextInputPress(press) {
+                continue
+            }
+            unhandledPresses.insert(press)
+        }
+
+        guard !unhandledPresses.isEmpty else { return }
+        super.pressesCancelled(unhandledPresses, with: event)
+    }
+
     public override func layoutSubviews() {
         super.layoutSubviews()
         updateTextContainerForCurrentWrappingMode()
@@ -421,6 +470,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         else {
             return
         }
+        insertPastedText(pastedText)
+    }
+
+    func insertPastedText(_ pastedText: String) {
+        guard configuration.isEditable else { return }
         insertText(pastedText)
     }
 
@@ -630,6 +684,93 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         setNeedsDisplayForVisibleTextFragments()
     }
 
+    static func hardwareRepeatText(
+        characters: String,
+        modifierFlags: UIKeyModifierFlags,
+        keyboardType: UIKeyboardType
+    ) -> String? {
+        guard keyboardType == .asciiCapable,
+              modifierFlags.intersection([.command, .control, .alternate]).isEmpty,
+              !characters.isEmpty,
+              characters.rangeOfCharacter(from: .controlCharacters) == nil
+        else {
+            return nil
+        }
+        return characters
+    }
+
+    func handleHardwareTextInputPress(_ press: UIPress) -> Bool {
+        guard configuration.isEditable,
+              let key = press.key,
+              let text = Self.hardwareRepeatText(
+                  characters: key.characters,
+                  modifierFlags: key.modifierFlags,
+                  keyboardType: keyboardType
+              )
+        else {
+            return false
+        }
+
+        let nextRepeat = SyntaxEditorHardwareKeyRepeat(keyCode: key.keyCode, text: text)
+        guard hardwareKeyRepeat != nextRepeat else {
+            return true
+        }
+
+        insertText(text)
+        startHardwareKeyRepeat(nextRepeat)
+        return true
+    }
+
+    func endHardwareTextInputPress(_ press: UIPress) -> Bool {
+        guard let key = press.key,
+              hardwareKeyRepeat?.keyCode == key.keyCode
+        else {
+            return false
+        }
+
+        stopHardwareKeyRepeat()
+        return true
+    }
+
+    func startHardwareKeyRepeat(_ repeatInput: SyntaxEditorHardwareKeyRepeat) {
+        hardwareKeyRepeatTask?.cancel()
+        hardwareKeyRepeat = repeatInput
+        hardwareKeyRepeatTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.hardwareKeyRepeatInitialDelayNanoseconds)
+            } catch {
+                return
+            }
+
+            while !Task.isCancelled {
+                guard let self else { return }
+                self.repeatHardwareKey(repeatInput)
+                do {
+                    try await Task.sleep(nanoseconds: Self.hardwareKeyRepeatIntervalNanoseconds)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    func repeatHardwareKey(_ repeatInput: SyntaxEditorHardwareKeyRepeat) {
+        guard configuration.isEditable,
+              hardwareKeyRepeat == repeatInput
+        else {
+            stopHardwareKeyRepeat()
+            return
+        }
+
+        insertText(repeatInput.text)
+    }
+
+    func stopHardwareKeyRepeat() {
+        hardwareKeyRepeatTask?.cancel()
+        hardwareKeyRepeatTask = nil
+        hardwareKeyRepeat = nil
+    }
+
     func editorKeyCommands() -> [UIKeyCommand]? {
         var commands = [
             makeKeyCommand(input: "l", modifierFlags: [.control, .shift, .command], action: #selector(handleToggleLineWrappingCommand), title: "Wrap Lines"),
@@ -645,6 +786,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             makeKeyCommand(input: "/", modifierFlags: [.command], action: #selector(handleToggleCommentCommand), title: "Toggle Comment"),
             makeKeyCommand(input: "]", modifierFlags: [.command], action: #selector(handleIndentCommand), title: "Indent"),
             makeKeyCommand(input: "[", modifierFlags: [.command], action: #selector(handleOutdentCommand), title: "Outdent"),
+            makeKeyCommand(
+                input: "v",
+                modifierFlags: [.command],
+                action: #selector(handlePasteCommand),
+                title: "Paste"
+            ),
         ])
         return commands
     }
@@ -654,6 +801,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             || action == #selector(handleIndentCommand)
             || action == #selector(handleOutdentCommand)
             || action == #selector(handleToggleCommentCommand)
+            || action == #selector(handlePasteCommand)
     }
 
     func isLineWrappingCommandAction(_ action: Selector) -> Bool {
@@ -687,6 +835,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     ) -> UIKeyCommand {
         let command = UIKeyCommand(input: input, modifierFlags: modifierFlags, action: action)
         command.discoverabilityTitle = title
+        command.wantsPriorityOverSystemBehavior = true
         return command
     }
 
@@ -1332,6 +1481,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return
         }
         applyCommandResult(result)
+    }
+
+    @objc private func handlePasteCommand() {
+        paste(nil)
     }
 
     @objc private func handleToggleLineWrappingCommand() {
