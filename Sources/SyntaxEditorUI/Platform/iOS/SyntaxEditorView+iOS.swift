@@ -878,6 +878,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         storage.beginEditing()
         storage.addAttributes(baseAttributes(), range: fullRange)
         storage.endEditing()
+        invalidateRenderingAttributes(for: fullRange)
     }
 
     func applyBaseForegroundColorChange(
@@ -906,6 +907,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             storage.addAttribute(.foregroundColor, value: nextBaseForeground, range: range)
         }
         storage.endEditing()
+        invalidateRenderingAttributes(for: textRange)
     }
 
     func applyUserReplacement(
@@ -1413,16 +1415,37 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             guard self.document.revision == result.revision else {
                 return
             }
-            self.lastHighlightTokens = result.tokens
-            self.lastHighlightRevision = result.revision
-            self.lastHighlightLanguage = result.language
+            let refreshRange = self.highlightApplicationRefreshRange(
+                for: result,
+                mutation: mutation
+            )
             self.applyHighlight(
                 result.tokens,
                 expectedRevision: result.revision,
                 source: result.source,
-                refreshRange: result.refreshRange
+                refreshRange: refreshRange
             )
+            self.lastHighlightTokens = result.tokens
+            self.lastHighlightRevision = result.revision
+            self.lastHighlightLanguage = result.language
         }
+    }
+
+    func highlightApplicationRefreshRange(
+        for result: SyntaxHighlightResult,
+        mutation: SyntaxHighlightMutation?
+    ) -> NSRange {
+        guard mutation != nil else {
+            return result.refreshRange
+        }
+
+        guard lastHighlightRevision == result.revision - 1,
+              lastHighlightLanguage == result.language
+        else {
+            return NSRange(location: 0, length: result.source.utf16.count)
+        }
+
+        return result.refreshRange
     }
 
     func reapplyCachedHighlight() {
@@ -1488,6 +1511,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         storage.endEditing()
+        invalidateRenderingAttributes(for: targetRange)
         applyMarkedTextAttributes()
         updateTypingAttributes()
         applyMatchingBracketHighlight(force: true)
@@ -1510,6 +1534,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             storage.beginEditing()
             storage.setAttributes(baseAttributes(), range: targetRange)
             storage.endEditing()
+            invalidateRenderingAttributes(for: targetRange)
             setNeedsDisplayForVisibleTextFragments()
         }
     }
@@ -1523,6 +1548,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         storage.beginEditing()
         storage.addAttributes(markedTextAttributes(), range: targetRange)
         storage.endEditing()
+        invalidateRenderingAttributes(for: targetRange)
         setNeedsDisplayForVisibleTextFragments()
     }
 
@@ -1699,6 +1725,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func estimatedDocumentLayoutSize() -> CGSize {
+        if !lastAppliedLineWrappingEnabled {
+            let horizontalInset = textContainerInset.left + textContainerInset.right
+            return CGSize(
+                width: max(0, measuredHorizontalDocumentLayoutWidth() - horizontalInset),
+                height: CGFloat(lineMetricsIndex.lineCount) * font.lineHeight
+            )
+        }
+
         var estimatedSize = layoutManager.usageBoundsForTextContainer.size
         let documentEndLocation = textContentStorage.documentRange.endLocation
 
@@ -1971,6 +2005,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func invalidateLayoutManagerLayout() {
         layoutManager.invalidateLayout(for: textContentStorage.documentRange)
         layoutManager.textSelectionNavigation.flushLayoutCache()
+    }
+
+    func invalidateRenderingAttributes(for range: NSRange) {
+        guard let textRange = textRange(forUTF16Range: range) else { return }
+        layoutManager.invalidateRenderingAttributes(for: textRange)
     }
 
     func invalidateHorizontalMeasurement() {
@@ -2280,11 +2319,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
         lastUsedFragmentViews.removeAll()
 
-        if let viewportRange = textViewportLayoutController.viewportRange {
-            layoutManager.ensureLayout(for: viewportRange)
+        if !isLayingOutText {
+            updateContentSizeIfNeeded()
         }
-
-        updateContentSizeIfNeeded()
     }
 
     func textLocation(forUTF16Offset offset: Int) -> NSTextLocation? {

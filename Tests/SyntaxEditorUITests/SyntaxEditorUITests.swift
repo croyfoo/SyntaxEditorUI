@@ -135,18 +135,24 @@ private func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: Syn
 private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     private let tokens: [SyntaxHighlightToken]
     private let delayNanoseconds: UInt64
+    private let updateRefreshRange: NSRange?
     private var resetCount = 0
     private var updateCount = 0
 
-    init(tokens: [SyntaxHighlightToken] = [], delayNanoseconds: UInt64 = 0) {
+    init(
+        tokens: [SyntaxHighlightToken] = [],
+        delayNanoseconds: UInt64 = 0,
+        updateRefreshRange: NSRange? = nil
+    ) {
         self.tokens = tokens
         self.delayNanoseconds = delayNanoseconds
+        self.updateRefreshRange = updateRefreshRange
     }
 
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
         resetCount += 1
         await delayIfNeeded()
-        return result(source: source, language: language, revision: revision)
+        return result(source: source, language: language, revision: revision, refreshRange: nil)
     }
 
     func update(
@@ -157,7 +163,7 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     ) async -> SyntaxHighlightResult {
         updateCount += 1
         await delayIfNeeded()
-        return result(source: source, language: language, revision: revision)
+        return result(source: source, language: language, revision: revision, refreshRange: updateRefreshRange)
     }
 
     func callCount() -> Int {
@@ -169,13 +175,18 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
         try? await Task.sleep(nanoseconds: delayNanoseconds)
     }
 
-    private func result(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxHighlightResult {
+    private func result(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int,
+        refreshRange: NSRange?
+    ) -> SyntaxHighlightResult {
         SyntaxHighlightResult(
             tokens: tokens,
             source: source,
             language: language,
             revision: revision,
-            refreshRange: NSRange(location: 0, length: source.utf16.count)
+            refreshRange: refreshRange ?? NSRange(location: 0, length: source.utf16.count)
         )
     }
 }
@@ -381,6 +392,29 @@ private func iOSEditorForegroundColor(_ editorView: SyntaxEditorView, at locatio
     }
 
     return attributedText.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor
+}
+
+@MainActor
+private func iOSEditorLineFragmentForegroundColor(_ editorView: SyntaxEditorView, at location: Int) -> UIColor? {
+    guard let textLayoutManager = editorView.textLayoutManager,
+          let textLocation = editorView.textLocation(forUTF16Offset: location)
+    else {
+        return nil
+    }
+
+    guard let layoutFragment = textLayoutManager.textLayoutFragment(for: textLocation),
+          let lineFragment = layoutFragment.textLineFragments.first(where: {
+              NSLocationInRange(location, $0.characterRange)
+          })
+    else {
+        return nil
+    }
+
+    let localLocation = location - lineFragment.characterRange.location
+    guard localLocation >= 0, localLocation < lineFragment.attributedString.length else {
+        return nil
+    }
+    return lineFragment.attributedString.attribute(.foregroundColor, at: localLocation, effectiveRange: nil) as? UIColor
 }
 
 @MainActor
@@ -1344,6 +1378,91 @@ struct SyntaxEditorUITests {
         #expect(await highlighter.callCount() == initialCallCount)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))
+    }
+
+    @Test("SyntaxEditorView refreshes iOS TextKit line fragments after async syntax highlight")
+    @MainActor
+    func syntaxEditorViewIOSRefreshesLineFragmentsAfterAsyncHighlight() async {
+        let source = String(
+            repeating: "let value = \"text\"\n",
+            count: 100
+        )
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    captureName: "keyword"
+                ),
+            ],
+            delayNanoseconds: 1_000_000
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorLineFragmentForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        await editorView.waitForPendingHighlightForTesting()
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorLineFragmentForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
+    @Test("SyntaxEditorView fully applies iOS highlight when skipped revisions precede an incremental result")
+    @MainActor
+    func syntaxEditorViewIOSFullyAppliesHighlightAfterSkippedIncrementalRevisions() async {
+        let firstPaste = "let first = 1\n"
+        let secondPaste = "let second = 2\n"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    captureName: "keyword"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: firstPaste.utf16.count, length: 3),
+                    captureName: "keyword"
+                ),
+            ],
+            delayNanoseconds: 20_000_000,
+            updateRefreshRange: NSRange(location: firstPaste.utf16.count, length: secondPaste.utf16.count)
+        )
+        let model = SyntaxEditorTestContext(
+            text: "",
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        editorView.insertPastedText(firstPaste)
+        editorView.insertPastedText(secondPaste)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.text == firstPaste + secondPaste)
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                iOSEditorForegroundColor(editorView, at: firstPaste.utf16.count),
+                theme.keyword
+            )
+        )
     }
 
     @Test("SyntaxEditorView reflects editable and wrapping changes on iOS")

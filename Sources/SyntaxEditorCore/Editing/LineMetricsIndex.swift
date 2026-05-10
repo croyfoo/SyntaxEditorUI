@@ -9,6 +9,7 @@ package final class LineMetricsIndex {
     private let tabWidth: Int
 
     package private(set) var fullRebuildCount = 0
+    package var lineCount: Int { lineStartOffsets.count }
     package var cachedMaxColumnEntryCountForTesting: Int { maxColumnHeap.count }
     package var lineCountForTesting: Int { lineStartOffsets.count }
 
