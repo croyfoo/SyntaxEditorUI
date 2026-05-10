@@ -35,6 +35,22 @@ private func applyingIfValid(_ edits: [SyntaxEditorTextEdit], to source: String)
     return SyntaxEditorDocument.applying(edits, to: source)
 }
 
+private func highlightTokensMatch(_ lhs: [SyntaxHighlightToken], _ rhs: [SyntaxHighlightToken]) -> Bool {
+    sortHighlightTokens(lhs) == sortHighlightTokens(rhs)
+}
+
+private func sortHighlightTokens(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHighlightToken] {
+    tokens.sorted {
+        if $0.range.location != $1.range.location {
+            return $0.range.location < $1.range.location
+        }
+        if $0.range.length != $1.range.length {
+            return $0.range.length < $1.range.length
+        }
+        return $0.captureName < $1.captureName
+    }
+}
+
 private extension SyntaxHighlighterEngine {
     func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult {
         await reset(source: source, language: language, revision: 0)
@@ -207,6 +223,63 @@ struct SyntaxEditorCoreTests {
         apply(SyntaxEditorTextEdit(range: NSRange(location: pasteLocation, length: 0), replacement: "\n1234567890"))
         #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 10)
         #expect(index.fullRebuildCount == initialRebuildCount)
+    }
+
+    @Test("LineMetricsIndex does not accumulate heap entries for repeated same-width edits")
+    func lineMetricsIndexKeepsMaxColumnCacheBounded() {
+        var source = "a"
+        let index = LineMetricsIndex(source: source, tabWidth: 4)
+
+        for iteration in 0..<100 {
+            let replacement = iteration.isMultiple(of: 2) ? "b" : "a"
+            let edit = SyntaxEditorTextEdit(
+                range: NSRange(location: 0, length: 1),
+                replacement: replacement
+            )
+            index.apply(edits: [edit], previousSource: source)
+            source = SyntaxEditorDocument.applying([edit], to: source)
+            #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 1)
+        }
+
+        #expect(index.cachedMaxColumnEntryCountForTesting == 1)
+    }
+
+    @Test("LineMetricsIndex prunes stale heap entries below the maximum")
+    func lineMetricsIndexPrunesStaleHeapEntriesBelowMaximum() {
+        var source = "\(String(repeating: "x", count: 200))\nshort"
+        let index = LineMetricsIndex(source: source, tabWidth: 4)
+
+        for width in 1...80 {
+            let lineBreakRange = (source as NSString).range(of: "\n")
+            let lineStart = lineBreakRange.location + lineBreakRange.length
+            let edit = SyntaxEditorTextEdit(
+                range: NSRange(location: lineStart, length: source.utf16.count - lineStart),
+                replacement: String(repeating: "y", count: width)
+            )
+            index.apply(edits: [edit], previousSource: source)
+            source = SyntaxEditorDocument.applying([edit], to: source)
+
+            #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 200)
+        }
+
+        #expect(index.cachedMaxColumnEntryCountForTesting == 2)
+    }
+
+    @Test("LineMetricsIndex removes trailing empty line after deleting final newline")
+    func lineMetricsIndexHandlesFinalNewlineDeletion() {
+        var source = "abc\n"
+        let index = LineMetricsIndex(source: source, tabWidth: 4)
+        let edit = SyntaxEditorTextEdit(
+            range: NSRange(location: source.utf16.count - 1, length: 1),
+            replacement: ""
+        )
+
+        index.apply(edits: [edit], previousSource: source)
+        source = SyntaxEditorDocument.applying([edit], to: source)
+
+        #expect(source == "abc")
+        #expect(index.lineCountForTesting == 1)
+        #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 3)
     }
 
     @Test("LineMetricsIndex matches display column rules for tabs and Unicode")
@@ -3242,6 +3315,113 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.refreshRange.location <= mutation.range.location)
     }
 
+    @Test("SyntaxHighlighterEngine queries full touched lines for partial token edits")
+    func highlighterIncrementallyRefreshesPartialTokenEdits() async throws {
+        let source = "const value = 42;\nconst message = value;"
+        let updatedSource = "const label = 42;\nconst message = value;"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+    }
+
+    @Test("SyntaxHighlighterEngine re-queries expanded JavaScript template coverage")
+    func highlighterIncrementallyRefreshesExpandedTemplateCoverage() async throws {
+        let source = "const message = `${first}-${second}-${third}`;"
+        let updatedSource = "const message = `${first}-${secondValue}-${third}`;"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+        let nsSource = updatedSource as NSString
+        let firstRange = nsSource.range(of: "first")
+        let thirdRange = nsSource.range(of: "third")
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(full.tokens.contains {
+            SyntaxEditorRangeUtilities.intersection(of: $0.range, and: firstRange).length > 0
+        })
+        #expect(incremental.tokens.contains {
+            SyntaxEditorRangeUtilities.intersection(of: $0.range, and: firstRange).length > 0
+        })
+        #expect(full.tokens.contains {
+            SyntaxEditorRangeUtilities.intersection(of: $0.range, and: thirdRange).length > 0
+        })
+        #expect(incremental.tokens.contains {
+            SyntaxEditorRangeUtilities.intersection(of: $0.range, and: thirdRange).length > 0
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine repaints dropped JavaScript comment captures")
+    func highlighterRepaintsDroppedCommentCaptureExtents() async throws {
+        let source = "/* comment */\nconst value = 1;"
+        let updatedSource = "* comment */\nconst value = 1;"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+        let oldCommentExtent = (updatedSource as NSString).range(of: "* comment */")
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(
+            SyntaxEditorRangeUtilities.intersection(
+                of: incremental.refreshRange,
+                and: oldCommentExtent
+            ) == oldCommentExtent
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine keeps incremental refresh ranges local")
+    func highlighterIncrementalRefreshRangeStaysLocal() async throws {
+        let prefix = (0..<400)
+            .map { "const value\($0) = \($0);" }
+            .joined(separator: "\n")
+        let source = "\(prefix)\nconst tail = 1;"
+        let updatedSource = "\(prefix)\nlet tail = 2;"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count / 10)
+    }
+
     @Test("SyntaxHighlighterEngine incrementally updates HTML injected languages")
     func highlighterIncrementallyUpdatesHTMLInjections() async throws {
         let source = """
@@ -3298,7 +3478,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(mutation.range == NSRange(location: 2, length: 5))
         #expect(incremental.refreshRange == NSRange(location: 0, length: updatedSource.utf16.count))
-        #expect(incremental.tokens == full.tokens)
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
     }
 
     @Test("SyntaxHighlighterEngine handles emoji and newline incremental edit ranges")
@@ -3326,43 +3506,117 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
         let sourceLength = updatedSource.utf16.count
 
-        #expect(incremental.tokens == full.tokens)
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
         #expect(incremental.tokens.allSatisfy { token in
             token.range.location >= 0 &&
                 token.range.length > 0 &&
                 token.range.upperBound <= sourceLength
-        })
+            })
     }
 
-    @Test("SyntaxHighlighterEngine converts invalidated byte offsets before refreshing")
-    func highlighterConvertsInvalidatedByteOffsetsForRefreshRange() {
-        #expect(
-            SyntaxHighlightInvalidation.refreshStartUTF16(
-                mutationLocation: 180,
-                invalidatedStartByteOffset: 120 * 2,
-                sourceUTF16Length: 240
-            ) == 120
+    @Test("SyntaxHighlighterEngine keeps incremental state after deleting a line break")
+    func highlighterIncrementalEditHandlesDeletedLineBreakFollowedByEdit() async throws {
+        let source = "const first = 1;\nconst second = 2;\nconst third = 3;"
+        let mergedSource = "const first = 1;const second = 2;\nconst third = 3;"
+        let updatedSource = "const first = 1;let second = 2;\nconst third = 3;"
+        let deleteLineBreak = try #require(TextMutation.diff(from: source, to: mergedSource))
+        let editMergedLine = try #require(TextMutation.diff(from: mergedSource, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: mergedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(deleteLineBreak)
         )
-        #expect(
-            SyntaxHighlightInvalidation.refreshStartUTF16(
-                mutationLocation: 80,
-                invalidatedStartByteOffset: 120 * 2,
-                sourceUTF16Length: 240
-            ) == 80
+        let incremental = await incrementalEngine.update(
+            previousSource: mergedSource,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(editMergedLine)
         )
-        #expect(
-            SyntaxHighlightInvalidation.refreshStartUTF16(
-                mutationLocation: 180,
-                invalidatedStartByteOffset: nil,
-                sourceUTF16Length: 240
-            ) == 180
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
+    }
+
+    @Test("SyntaxHighlighterEngine keeps incremental state after deleting a final line break")
+    func highlighterIncrementalEditHandlesDeletedFinalLineBreakFollowedByEdit() async throws {
+        let source = "const first = 1;\n"
+        let mergedSource = "const first = 1;"
+        let updatedSource = "const first = 1; const second = 2;"
+        let deleteLineBreak = try #require(TextMutation.diff(from: source, to: mergedSource))
+        let appendStatement = try #require(TextMutation.diff(from: mergedSource, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: mergedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(deleteLineBreak)
         )
+        let incremental = await incrementalEngine.update(
+            previousSource: mergedSource,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(appendStatement)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
+    }
+
+    @Test("SyntaxHighlighterEngine keeps incremental state with carriage-return separators")
+    func highlighterIncrementalEditHandlesCarriageReturnSeparators() async throws {
+        let source = "const first = 1;\rconst second = 2;"
+        let updatedAfterCR = "const first = 1;\rlet second = 2;"
+        let finalSource = "let first = 1;\rlet second = 2;"
+        let editAfterCR = try #require(TextMutation.diff(from: source, to: updatedAfterCR))
+        let editBeforeCR = try #require(TextMutation.diff(from: updatedAfterCR, to: finalSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedAfterCR,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(editAfterCR)
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: updatedAfterCR,
+            source: finalSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(editBeforeCR)
+        )
+        let full = await fullEngine.reset(source: finalSource, language: SyntaxLanguage.javascript)
+
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
+    }
+
+    @Test("SyntaxHighlighterEngine keeps invalidation query ranges in UTF-16 coordinates")
+    func highlighterUsesUTF16InvalidationQueryRanges() {
+        var invalidatedSet = IndexSet()
+        invalidatedSet.insert(integersIn: 120..<150)
+        let queryRange = SyntaxHighlightInvalidation.queryRange(
+            invalidatedSet: invalidatedSet,
+            mutation: SyntaxHighlightMutation(location: 180, length: 0, replacement: ""),
+            sourceUTF16Length: 240
+        )
+        #expect(queryRange == NSRange(location: 120, length: 60))
+
+        invalidatedSet = IndexSet()
+        invalidatedSet.insert(integersIn: 241..<280)
         #expect(
-            SyntaxHighlightInvalidation.refreshStartUTF16(
-                mutationLocation: 180,
-                invalidatedStartByteOffset: 241,
+            SyntaxHighlightInvalidation.queryRange(
+                invalidatedSet: invalidatedSet,
+                mutation: SyntaxHighlightMutation(location: 180, length: 0, replacement: ""),
                 sourceUTF16Length: 240
-            ) == 0
+            ) == NSRange(location: 180, length: 60)
         )
     }
 
@@ -3383,8 +3637,8 @@ struct SyntaxHighlighterEngineTests {
         let fullJavaScript = await SyntaxHighlighterEngine()
             .reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
-        #expect(staleUpdate.tokens == fullJavaScript.tokens)
-        #expect(staleUpdate.refreshRange == NSRange(location: 0, length: updatedSource.utf16.count))
+        #expect(highlightTokensMatch(staleUpdate.tokens, fullJavaScript.tokens))
+        #expect(staleUpdate.refreshRange.location <= mutation.range.location)
 
         let jsonSource = #"{"enabled": true}"#
         let languageChange = await engine.update(
@@ -3397,7 +3651,7 @@ struct SyntaxHighlighterEngineTests {
             .reset(source: jsonSource, language: SyntaxLanguage.json)
 
         #expect(languageChange.language == SyntaxLanguage.json)
-        #expect(languageChange.tokens == fullJSON.tokens)
+        #expect(highlightTokensMatch(languageChange.tokens, fullJSON.tokens))
     }
 
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")

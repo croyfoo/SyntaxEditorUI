@@ -3,9 +3,14 @@ import Foundation
 package final class LineMetricsIndex {
     private var lineStartOffsets: [Int] = [0]
     private var lineColumns: [Int] = [0]
+    private var columnCounts: [Int: Int] = [:]
+    private var maxColumnHeap: [Int] = []
+    private var maxColumnHeapIndices: [Int: Int] = [:]
     private let tabWidth: Int
 
     package private(set) var fullRebuildCount = 0
+    package var cachedMaxColumnEntryCountForTesting: Int { maxColumnHeap.count }
+    package var lineCountForTesting: Int { lineStartOffsets.count }
 
     package init(source: String = "", tabWidth: Int) {
         self.tabWidth = max(1, tabWidth)
@@ -17,6 +22,7 @@ package final class LineMetricsIndex {
         let metrics = Self.metrics(in: source, baseOffset: 0, tabWidth: tabWidth)
         lineStartOffsets = metrics.starts
         lineColumns = metrics.columns
+        rebuildColumnCountsAndHeap()
     }
 
     package func apply(edits: [SyntaxEditorTextEdit], previousSource: String) {
@@ -45,8 +51,10 @@ package final class LineMetricsIndex {
 
         let startIndex = lineIndex(containingUTF16Offset: affected.range.location)
         let endIndex = oldLineEndIndex(for: affected.range, sourceUTF16Length: nsSource.length)
+        removeColumnCounts(lineColumns[startIndex..<endIndex])
         lineStartOffsets.replaceSubrange(startIndex..<endIndex, with: metrics.starts)
         lineColumns.replaceSubrange(startIndex..<endIndex, with: metrics.columns)
+        addColumnCounts(metrics.columns)
 
         let delta = newSegment.utf16.count - affected.range.length
         guard delta != 0 else { return }
@@ -62,7 +70,7 @@ package final class LineMetricsIndex {
         textContainerInset: CGFloat,
         lineFragmentPadding: CGFloat
     ) -> CGFloat {
-        let maxColumns = lineColumns.max() ?? 0
+        let maxColumns = currentMaxColumns()
         return ceil(CGFloat(maxColumns) * columnWidth + lineFragmentPadding * 2 + textContainerInset)
     }
 }
@@ -104,9 +112,12 @@ private extension LineMetricsIndex {
 
     func oldLineEndIndex(for range: NSRange, sourceUTF16Length: Int) -> Int {
         guard !lineStartOffsets.isEmpty else { return 0 }
+        let upperBound = min(sourceUTF16Length, range.upperBound)
         let lookup = range.length == 0
             ? range.location
-            : max(range.location, min(sourceUTF16Length, range.upperBound) - 1)
+            : upperBound == sourceUTF16Length
+                ? upperBound
+                : max(range.location, upperBound - 1)
         return min(lineStartOffsets.count, lineIndex(containingUTF16Offset: lookup) + 1)
     }
 
@@ -143,6 +154,91 @@ private extension LineMetricsIndex {
     static func isLineBreak(_ character: Character) -> Bool {
         character.unicodeScalars.contains { scalar in
             scalar.value == 10 || scalar.value == 13
+        }
+    }
+
+    func rebuildColumnCountsAndHeap() {
+        columnCounts = [:]
+        maxColumnHeap = []
+        maxColumnHeapIndices = [:]
+        addColumnCounts(lineColumns)
+    }
+
+    func addColumnCounts<S: Sequence>(_ columns: S) where S.Element == Int {
+        for column in columns {
+            let needsHeapEntry = columnCounts[column] == nil
+            columnCounts[column, default: 0] += 1
+            if needsHeapEntry {
+                pushMaxColumn(column)
+            }
+        }
+    }
+
+    func removeColumnCounts<S: Sequence>(_ columns: S) where S.Element == Int {
+        for column in columns {
+            guard let count = columnCounts[column] else { continue }
+            if count <= 1 {
+                columnCounts[column] = nil
+                removeMaxColumn(column)
+            } else {
+                columnCounts[column] = count - 1
+            }
+        }
+    }
+
+    func currentMaxColumns() -> Int {
+        return maxColumnHeap.first ?? 0
+    }
+
+    func pushMaxColumn(_ column: Int) {
+        guard maxColumnHeapIndices[column] == nil else { return }
+        maxColumnHeap.append(column)
+        maxColumnHeapIndices[column] = maxColumnHeap.count - 1
+        siftUpMaxColumn(from: maxColumnHeap.count - 1)
+    }
+
+    func removeMaxColumn(_ column: Int) {
+        guard let index = maxColumnHeapIndices.removeValue(forKey: column) else { return }
+        let last = maxColumnHeap.removeLast()
+        guard index < maxColumnHeap.count else { return }
+
+        maxColumnHeap[index] = last
+        maxColumnHeapIndices[last] = index
+        let movedIndex = siftUpMaxColumn(from: index)
+        siftDownMaxColumn(from: movedIndex)
+    }
+
+    @discardableResult
+    func siftUpMaxColumn(from index: Int) -> Int {
+        var child = index
+        while child > 0 {
+            let parent = (child - 1) / 2
+            guard maxColumnHeap[parent] < maxColumnHeap[child] else { break }
+            maxColumnHeap.swapAt(parent, child)
+            maxColumnHeapIndices[maxColumnHeap[parent]] = parent
+            maxColumnHeapIndices[maxColumnHeap[child]] = child
+            child = parent
+        }
+        return child
+    }
+
+    func siftDownMaxColumn(from index: Int) {
+        var parent = index
+        while true {
+            let left = parent * 2 + 1
+            let right = left + 1
+            var largest = parent
+            if left < maxColumnHeap.count, maxColumnHeap[largest] < maxColumnHeap[left] {
+                largest = left
+            }
+            if right < maxColumnHeap.count, maxColumnHeap[largest] < maxColumnHeap[right] {
+                largest = right
+            }
+            guard largest != parent else { break }
+            maxColumnHeap.swapAt(parent, largest)
+            maxColumnHeapIndices[maxColumnHeap[parent]] = parent
+            maxColumnHeapIndices[maxColumnHeap[largest]] = largest
+            parent = largest
         }
     }
 }

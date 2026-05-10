@@ -812,15 +812,9 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         language: SyntaxLanguage,
         revision: Int,
         mutation: SyntaxHighlightMutation? = nil,
-        refreshStartUTF16: Int = 0
+        refreshStartUTF16 _: Int = 0
     ) {
         let expectedSource = source
-        let utf16Length = expectedSource.utf16.count
-        let clampedRefreshStart = min(max(0, refreshStartUTF16), utf16Length)
-        let fallbackRefreshRange = NSRange(
-            location: clampedRefreshStart,
-            length: utf16Length - clampedRefreshStart
-        )
 
         highlightTask?.cancel()
 
@@ -851,11 +845,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
                 result.tokens,
                 expectedRevision: result.revision,
                 source: result.source,
-                refreshRange: Self.combinedRefreshRange(
-                    result.refreshRange,
-                    fallbackRefreshRange,
-                    sourceUTF16Length: result.source.utf16.count
-                )
+                refreshRange: result.refreshRange
             )
         }
     }
@@ -873,17 +863,6 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             source: source,
             refreshRange: NSRange(location: 0, length: source.utf16.count)
         )
-    }
-
-    private static func combinedRefreshRange(
-        _ lhs: NSRange,
-        _ rhs: NSRange,
-        sourceUTF16Length: Int
-    ) -> NSRange {
-        let lhs = SyntaxEditorRangeUtilities.clampedRange(lhs, utf16Length: sourceUTF16Length)
-        let rhs = SyntaxEditorRangeUtilities.clampedRange(rhs, utf16Length: sourceUTF16Length)
-        let location = min(lhs.location, rhs.location)
-        return NSRange(location: location, length: sourceUTF16Length - location)
     }
 
     private static func highlightMutation(_ change: SyntaxEditorDocumentChange) -> SyntaxHighlightMutation? {
