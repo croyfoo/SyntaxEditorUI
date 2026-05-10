@@ -666,6 +666,48 @@ struct SyntaxEditorUITests {
 #endif
     }
 
+    @Test("SyntaxEditorView clears undo state when rebinding document")
+    @MainActor
+    func syntaxEditorViewClearsUndoStateWhenRebindingDocument() throws {
+        let source = "let value = 1"
+        let editedSource = "\(source)!"
+        let replacementDocument = SyntaxEditorDocument(text: "let other = 2")
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+
+#if canImport(UIKit)
+        let editorView = SyntaxEditorView(testContext: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.insertText("!")
+        let undoManager = try #require(editorView.undoManager)
+
+        #expect(model.document.textSnapshot() == editedSource)
+        #expect(undoManager.canUndo)
+
+        editorView.update(document: replacementDocument, configuration: model.configuration)
+
+        #expect(editorView.document === replacementDocument)
+        #expect(editorView.text == replacementDocument.textSnapshot())
+        #expect(!undoManager.canUndo)
+#elseif canImport(AppKit)
+        let editorView = SyntaxEditorView(testContext: model)
+        let undoManager = try #require(editorView.textView.undoManager)
+        let editRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.textView.setSelectedRange(editRange)
+        editorView.textView.insertText("!", replacementRange: editRange)
+        editorView.textView.breakUndoCoalescing()
+
+        #expect(model.document.textSnapshot() == editedSource)
+        #expect(undoManager.canUndo)
+
+        editorView.update(document: replacementDocument, configuration: model.configuration)
+
+        #expect(editorView.document === replacementDocument)
+        #expect(editorView.textView.string == replacementDocument.textSnapshot())
+        #expect(!undoManager.canUndo)
+#endif
+    }
+
 #if canImport(UIKit)
     @Test("SyntaxEditorViewController preserves Observable conformance on iOS")
     @MainActor
@@ -1416,6 +1458,20 @@ struct SyntaxEditorUITests {
 
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.text == "{\"enabled\":true}")
+    }
+
+    @Test("SyntaxEditorView clamps iOS selection after setting shorter text")
+    @MainActor
+    func syntaxEditorViewIOSClampsSelectionAfterSettingShorterText() {
+        let source = "abcdef"
+        let editorView = SyntaxEditorView(testContext: SyntaxEditorTestContext(text: source))
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+
+        editorView.text = "x"
+
+        #expect(editorView.text == "x")
+        #expect(editorView.selectedRange == NSRange(location: 1, length: 0))
+        #expect(editorView.document.latestChange?.selectedRange == NSRange(location: 1, length: 0))
     }
 
     @Test("SyntaxEditorView clamps iOS horizontal offset after observed text replacement")

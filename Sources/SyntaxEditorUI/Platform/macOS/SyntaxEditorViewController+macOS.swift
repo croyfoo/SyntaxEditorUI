@@ -249,6 +249,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         if documentChanged {
             documentObservations.cancelAll()
+            activeUndoManager?.removeAllActions()
+            commandEngine.invalidateTransientState()
             document = nextDocument
         }
 

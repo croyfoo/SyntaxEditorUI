@@ -269,7 +269,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         if documentChanged {
             documentObservations.cancelAll()
+            activeUndoManager?.removeAllActions()
+            commandEngine.invalidateTransientState()
             document = nextDocument
+            refreshKeyboardAccessoryState()
         }
 
         if configurationChanged {
@@ -1048,11 +1051,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         commandEngine.invalidateTransientState()
+        let nextSelection = clampedTextRange(selectedRange, in: nextText)
         let change = document.replaceText(
             nextText,
-            selectedRange: clampedTextRange(selectedRange, in: nextText)
+            selectedRange: nextSelection
         )
         lastAppliedDocumentRevision = change.revision
+        currentSelectedRange = change.selectedRange
         replaceEntireStorageText(nextText)
         updateTypingAttributes()
         updateTextContainerForCurrentWrappingMode()
