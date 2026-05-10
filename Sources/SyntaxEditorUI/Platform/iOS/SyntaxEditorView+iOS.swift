@@ -1722,15 +1722,22 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         for fragmentView: SyntaxEditorTextLayoutFragmentView,
         layoutFragmentFrame: CGRect
     ) {
-        let fragmentRange = textRange(for: fragmentView.layoutFragment)
-        let foundRects = textHighlightRects(
-            in: layoutFragmentFrame,
-            ranges: Self.ranges(findFoundRanges, intersecting: fragmentRange)
-        )
-        let highlightedRects = textHighlightRects(
-            in: layoutFragmentFrame,
-            ranges: Self.ranges(findHighlightedRanges, intersecting: fragmentRange)
-        )
+        let foundRects: [CGRect]
+        let highlightedRects: [CGRect]
+        if findFoundRanges.isEmpty && findHighlightedRanges.isEmpty {
+            foundRects = []
+            highlightedRects = []
+        } else {
+            let fragmentRange = textRange(for: fragmentView.layoutFragment)
+            foundRects = textHighlightRects(
+                in: layoutFragmentFrame,
+                ranges: Self.ranges(findFoundRanges, intersecting: fragmentRange)
+            )
+            highlightedRects = textHighlightRects(
+                in: layoutFragmentFrame,
+                ranges: Self.ranges(findHighlightedRanges, intersecting: fragmentRange)
+            )
+        }
         let foundColor = foundRects.isEmpty
             ? nil
             : UIColor
@@ -1762,7 +1769,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         for fragmentView: SyntaxEditorTextLayoutFragmentView,
         layoutFragmentFrame: CGRect
     ) {
-        let rects = textHighlightRects(in: layoutFragmentFrame, ranges: matchedBracketRanges)
+        let rects: [CGRect]
+        if matchedBracketRanges.isEmpty {
+            rects = []
+        } else {
+            let fragmentRange = textRange(for: fragmentView.layoutFragment)
+            rects = textHighlightRects(
+                in: layoutFragmentFrame,
+                ranges: Self.ranges(matchedBracketRanges, intersecting: fragmentRange)
+            )
+        }
         let color = rects.isEmpty
             ? nil
             : UIColor
@@ -1787,7 +1803,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     static func ranges(_ ranges: [NSRange], intersecting fragmentRange: NSRange) -> [NSRange] {
         guard !ranges.isEmpty, fragmentRange.length > 0 else { return [] }
-        return ranges.filter { NSIntersectionRange($0, fragmentRange).length > 0 }
+        return ranges.compactMap { range in
+            let intersection = NSIntersectionRange(range, fragmentRange)
+            return intersection.length > 0 ? intersection : nil
+        }
     }
 
     static func optionalColorsEqual(_ lhs: CGColor?, _ rhs: CGColor?) -> Bool {
@@ -2288,13 +2307,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func clampedTextRange(_ range: NSRange) -> NSRange {
-        clampedTextRange(range, in: text)
+        clampedTextRange(range, utf16Length: storage.length)
     }
 
     func clampedTextRange(_ range: NSRange, in source: String) -> NSRange {
-        let textLength = source.utf16.count
-        let location = min(max(0, range.location), textLength)
-        let length = min(max(0, range.length), textLength - location)
+        clampedTextRange(range, utf16Length: source.utf16.count)
+    }
+
+    func clampedTextRange(_ range: NSRange, utf16Length: Int) -> NSRange {
+        let location = min(max(0, range.location), utf16Length)
+        let length = min(max(0, range.length), utf16Length - location)
         return NSRange(location: location, length: length)
     }
 

@@ -547,6 +547,27 @@ struct SyntaxEditorUITests {
         #expect(editorView.findHighlightUpdatePassCountForTesting == initialUpdatePassCount + 1)
     }
 
+    @Test("SyntaxEditorView clips iOS highlight ranges to layout fragments")
+    @MainActor
+    func syntaxEditorViewIOSClipsHighlightRangesToLayoutFragments() {
+        let ranges = [
+            NSRange(location: 10, length: 5),
+            NSRange(location: 30, length: 10),
+            NSRange(location: 60, length: 2),
+        ]
+
+        #expect(
+            SyntaxEditorView.ranges(
+                ranges,
+                intersecting: NSRange(location: 12, length: 25)
+            ) == [
+                NSRange(location: 12, length: 3),
+                NSRange(location: 30, length: 7),
+            ]
+        )
+        #expect(SyntaxEditorView.ranges(ranges, intersecting: NSRange(location: 100, length: 5)).isEmpty)
+    }
+
     @Test("SyntaxEditorFindCoordinator matches iOS find options")
     @MainActor
     func syntaxEditorFindCoordinatorIOSMatchesFindOptions() {
@@ -599,9 +620,9 @@ struct SyntaxEditorUITests {
         #expect(editorView.findCoordinator?.responds(to: replaceAllSelector) == true)
     }
 
-    @Test("SyntaxEditorView filters iOS find highlight ranges to a fragment")
+    @Test("SyntaxEditorView clips iOS find highlight ranges to a fragment")
     @MainActor
-    func syntaxEditorViewIOSFiltersFindHighlightRangesToFragment() {
+    func syntaxEditorViewIOSClipsFindHighlightRangesToFragment() {
         let ranges = [
             NSRange(location: 0, length: 3),
             NSRange(location: 8, length: 3),
@@ -613,7 +634,7 @@ struct SyntaxEditorUITests {
             ranges,
             intersecting: NSRange(location: 10, length: 5)
         ) == [
-            NSRange(location: 8, length: 3),
+            NSRange(location: 10, length: 1),
             NSRange(location: 12, length: 2),
         ])
     }
