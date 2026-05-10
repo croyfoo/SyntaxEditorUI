@@ -77,6 +77,9 @@ final class MiniSplitViewController: UISplitViewController {
         self.editorViewController = editorViewController
         self.detailViewController = detailViewController
         setViewController(navigationController, for: .secondary)
+        if isCollapsed {
+            show(.secondary)
+        }
         updateOverflowMenu()
     }
 
