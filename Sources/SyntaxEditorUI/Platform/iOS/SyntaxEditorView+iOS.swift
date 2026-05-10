@@ -10,11 +10,6 @@ struct SyntaxEditorMarkedTextUndoAnchor {
     let refreshStartUTF16: Int
 }
 
-struct SyntaxEditorHardwareKeyRepeat: Equatable {
-    let keyCode: UIKeyboardHIDUsage
-    let text: String
-}
-
 @MainActor
 public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTraits, UITextInteractionDelegate, @preconcurrency NSTextViewportLayoutControllerDelegate {
     public private(set) var document: SyntaxEditorDocument
@@ -30,8 +25,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findCoordinator: SyntaxEditorFindCoordinator?
     static let estimatedTabColumnWidth = 4
     static let defaultEditorFont = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
-    static let hardwareKeyRepeatInitialDelayNanoseconds: UInt64 = 350_000_000
-    static let hardwareKeyRepeatIntervalNanoseconds: UInt64 = 45_000_000
 
     let highlighter: any SyntaxHighlighting
     let commandEngine = EditorCommandEngine()
@@ -69,8 +62,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findHighlightUpdatePassCount = 0
     var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     var keyboardAccessoryView: UIView?
-    var hardwareKeyRepeat: SyntaxEditorHardwareKeyRepeat?
-    var hardwareKeyRepeatTask: Task<Void, Never>?
     let documentObservations = ObservationScope()
     let configurationObservations = ObservationScope()
     var storage: NSTextStorage {
@@ -206,7 +197,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     public var smartQuotesType: UITextSmartQuotesType = .no
     public var smartDashesType: UITextSmartDashesType = .no
     public var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
-    public var keyboardType: UIKeyboardType = .asciiCapable
+    public var keyboardType: UIKeyboardType = .default
     public var keyboardAppearance: UIKeyboardAppearance = .default
     public var returnKeyType: UIReturnKeyType = .default
     public var enablesReturnKeyAutomatically = false
@@ -265,7 +256,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     deinit {
         highlightTask?.cancel()
-        hardwareKeyRepeatTask?.cancel()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -357,45 +347,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         super.scrollRectToVisible(rect, animated: animated)
         guard !contentOffset.x.isNearlyEqual(to: preservedX) else { return }
         super.setContentOffset(CGPoint(x: preservedX, y: contentOffset.y), animated: false)
-    }
-
-    public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        var unhandledPresses = Set<UIPress>()
-        for press in presses {
-            if handleHardwareTextInputPress(press) {
-                continue
-            }
-            unhandledPresses.insert(press)
-        }
-
-        guard !unhandledPresses.isEmpty else { return }
-        super.pressesBegan(unhandledPresses, with: event)
-    }
-
-    public override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        var unhandledPresses = Set<UIPress>()
-        for press in presses {
-            if endHardwareTextInputPress(press) {
-                continue
-            }
-            unhandledPresses.insert(press)
-        }
-
-        guard !unhandledPresses.isEmpty else { return }
-        super.pressesEnded(unhandledPresses, with: event)
-    }
-
-    public override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        var unhandledPresses = Set<UIPress>()
-        for press in presses {
-            if endHardwareTextInputPress(press) {
-                continue
-            }
-            unhandledPresses.insert(press)
-        }
-
-        guard !unhandledPresses.isEmpty else { return }
-        super.pressesCancelled(unhandledPresses, with: event)
     }
 
     public override func layoutSubviews() {
@@ -682,93 +633,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         updateFindHighlightFragmentViews()
         updateBracketHighlightFragmentViews()
         setNeedsDisplayForVisibleTextFragments()
-    }
-
-    static func hardwareRepeatText(
-        characters: String,
-        modifierFlags: UIKeyModifierFlags,
-        keyboardType: UIKeyboardType
-    ) -> String? {
-        guard keyboardType == .asciiCapable,
-              modifierFlags.intersection([.command, .control, .alternate]).isEmpty,
-              !characters.isEmpty,
-              characters.rangeOfCharacter(from: .controlCharacters) == nil
-        else {
-            return nil
-        }
-        return characters
-    }
-
-    func handleHardwareTextInputPress(_ press: UIPress) -> Bool {
-        guard configuration.isEditable,
-              let key = press.key,
-              let text = Self.hardwareRepeatText(
-                  characters: key.characters,
-                  modifierFlags: key.modifierFlags,
-                  keyboardType: keyboardType
-              )
-        else {
-            return false
-        }
-
-        let nextRepeat = SyntaxEditorHardwareKeyRepeat(keyCode: key.keyCode, text: text)
-        guard hardwareKeyRepeat != nextRepeat else {
-            return true
-        }
-
-        insertText(text)
-        startHardwareKeyRepeat(nextRepeat)
-        return true
-    }
-
-    func endHardwareTextInputPress(_ press: UIPress) -> Bool {
-        guard let key = press.key,
-              hardwareKeyRepeat?.keyCode == key.keyCode
-        else {
-            return false
-        }
-
-        stopHardwareKeyRepeat()
-        return true
-    }
-
-    func startHardwareKeyRepeat(_ repeatInput: SyntaxEditorHardwareKeyRepeat) {
-        hardwareKeyRepeatTask?.cancel()
-        hardwareKeyRepeat = repeatInput
-        hardwareKeyRepeatTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: Self.hardwareKeyRepeatInitialDelayNanoseconds)
-            } catch {
-                return
-            }
-
-            while !Task.isCancelled {
-                guard let self else { return }
-                self.repeatHardwareKey(repeatInput)
-                do {
-                    try await Task.sleep(nanoseconds: Self.hardwareKeyRepeatIntervalNanoseconds)
-                } catch {
-                    return
-                }
-            }
-        }
-    }
-
-    func repeatHardwareKey(_ repeatInput: SyntaxEditorHardwareKeyRepeat) {
-        guard configuration.isEditable,
-              hardwareKeyRepeat == repeatInput
-        else {
-            stopHardwareKeyRepeat()
-            return
-        }
-
-        insertText(repeatInput.text)
-    }
-
-    func stopHardwareKeyRepeat() {
-        hardwareKeyRepeatTask?.cancel()
-        hardwareKeyRepeatTask = nil
-        hardwareKeyRepeat = nil
     }
 
     func editorKeyCommands() -> [UIKeyCommand]? {
@@ -1376,14 +1240,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func syncTextLayoutSelection() {
-        guard currentSelectedRange.length > 0 else {
-            layoutManager.textSelections = []
-            return
-        }
-
         if let textRange = textRange(forUTF16Range: currentSelectedRange) {
+            let affinity: NSTextSelection.Affinity = currentSelectedRange.length == 0
+                && isHardLineBreakCaretLocation(currentSelectedRange.location)
+                ? .upstream
+                : .downstream
             layoutManager.textSelections = [
-                NSTextSelection(range: textRange, affinity: .downstream, granularity: .character),
+                NSTextSelection(range: textRange, affinity: affinity, granularity: .character),
             ]
         } else {
             layoutManager.textSelections = []

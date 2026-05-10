@@ -487,6 +487,7 @@ struct SyntaxEditorUITests {
 
         #expect(scrollSurface === editorView)
         #expect(textInputSurface.textInputView === editorView)
+        #expect(editorView.keyboardType == .default)
     }
 
     @Test("SyntaxEditorView enables iOS find interaction by default")
@@ -2286,9 +2287,9 @@ struct SyntaxEditorUITests {
         #expect(abs(downRect.midX - lineEndRect.midX) <= 1)
     }
 
-    @Test("SyntaxEditorView omits collapsed iOS TextKit selections")
+    @Test("SyntaxEditorView syncs iOS line-end selections with upstream affinity")
     @MainActor
-    func syntaxEditorViewIOSOmitsCollapsedTextKitSelections() {
+    func syntaxEditorViewIOSSyncsLineEndSelectionsWithUpstreamAffinity() {
         let source = "abcde\n01234"
         let model = SyntaxEditorTestContext(
             text: source,
@@ -2298,10 +2299,13 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
+        editorView.selectedRange = NSRange(location: 1, length: 0)
+        #expect(editorView.textLayoutManager?.textSelections.first?.affinity == .downstream)
+
         let firstLineEnd = (source as NSString).range(of: "\n").location
         editorView.selectedRange = NSRange(location: firstLineEnd, length: 0)
 
-        #expect(editorView.textLayoutManager?.textSelections.isEmpty == true)
+        #expect(editorView.textLayoutManager?.textSelections.first?.affinity == .upstream)
     }
 
     @Test("SyntaxEditorView keeps iOS caret on the edited whitespace line after text input")
@@ -3732,28 +3736,6 @@ struct SyntaxEditorUITests {
         editorView.insertPastedText("42")
         editorView.insertPastedText("42")
         #expect(model.document.textSnapshot() == "let 4242")
-    }
-
-    @Test("SyntaxEditorView handles iOS ASCII hardware key repeat directly")
-    @MainActor
-    func syntaxEditorViewIOSHandlesASCIIHardwareKeyRepeatDirectly() {
-        let model = SyntaxEditorTestContext(text: "")
-        let editorView = SyntaxEditorView(testContext: model)
-
-        #expect(editorView.keyboardType == .asciiCapable)
-        #expect(SyntaxEditorView.hardwareRepeatText(characters: "a", modifierFlags: [], keyboardType: .asciiCapable) == "a")
-        #expect(SyntaxEditorView.hardwareRepeatText(characters: "A", modifierFlags: [.shift], keyboardType: .asciiCapable) == "A")
-        #expect(SyntaxEditorView.hardwareRepeatText(characters: " ", modifierFlags: [], keyboardType: .asciiCapable) == " ")
-        #expect(SyntaxEditorView.hardwareRepeatText(characters: "v", modifierFlags: [.command], keyboardType: .asciiCapable) == nil)
-        #expect(SyntaxEditorView.hardwareRepeatText(characters: "a", modifierFlags: [.alternate], keyboardType: .asciiCapable) == nil)
-        #expect(SyntaxEditorView.hardwareRepeatText(characters: "\t", modifierFlags: [], keyboardType: .asciiCapable) == nil)
-        #expect(SyntaxEditorView.hardwareRepeatText(characters: "a", modifierFlags: [], keyboardType: .default) == nil)
-
-        let repeatInput = SyntaxEditorHardwareKeyRepeat(keyCode: .keyboardA, text: "a")
-        editorView.hardwareKeyRepeat = repeatInput
-        editorView.repeatHardwareKey(repeatInput)
-        editorView.repeatHardwareKey(repeatInput)
-        #expect(model.document.textSnapshot() == "aa")
     }
 
     @Test("SyntaxEditorView toggles iOS line wrapping key command")
