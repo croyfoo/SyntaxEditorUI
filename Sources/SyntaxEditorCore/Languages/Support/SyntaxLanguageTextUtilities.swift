@@ -1,9 +1,6 @@
 import Foundation
 
-struct SyntaxLanguageTextEdit {
-    let range: NSRange
-    let replacement: String
-}
+typealias SyntaxLanguageTextEdit = SyntaxEditorTextEdit
 
 enum SyntaxLanguageSelectionBoundaryAffinity {
     case forward
@@ -154,12 +151,10 @@ enum SyntaxLanguageTextUtilities {
             lhs.range.location > rhs.range.location
         }
 
-        let mutable = NSMutableString(string: source)
         var selectionStart = selection.location
         var selectionEnd = selection.location + selection.length
 
         for edit in sorted {
-            mutable.replaceCharacters(in: edit.range, with: edit.replacement)
             selectionStart = adjustedSelectionOffset(selectionStart, for: edit, affinity: .forward)
             selectionEnd = adjustedSelectionOffset(selectionEnd, for: edit, affinity: .backward)
         }
@@ -167,7 +162,7 @@ enum SyntaxLanguageTextUtilities {
         let clampedStart = max(0, selectionStart)
         let clampedEnd = max(clampedStart, selectionEnd)
         return SyntaxLanguageEdit(
-            text: mutable as String,
+            edits: edits,
             selectedRange: NSRange(location: clampedStart, length: clampedEnd - clampedStart)
         )
     }
@@ -549,8 +544,8 @@ package enum SyntaxEditorDisplayColumnUtilities {
     }
 }
 
-private extension SyntaxEditorDisplayColumnUtilities {
-    static func columnWidth(for character: Character, currentColumn: Int, tabWidth: Int) -> Int {
+extension SyntaxEditorDisplayColumnUtilities {
+    package static func columnWidth(for character: Character, currentColumn: Int, tabWidth: Int) -> Int {
         if isTab(character) {
             return spacesToNextTabStop(from: currentColumn, tabWidth: tabWidth)
         }

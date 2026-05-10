@@ -1,14 +1,26 @@
 import Foundation
 
 package struct EditorCommandResult {
-    package let text: String
+    package let edits: [SyntaxEditorTextEdit]
     package let selectedRange: NSRange
     package let refreshStartUTF16: Int
 
-    package init(text: String, selectedRange: NSRange, refreshStartUTF16: Int) {
-        self.text = text
+    package init(
+        edits: [SyntaxEditorTextEdit],
+        selectedRange: NSRange,
+        refreshStartUTF16: Int
+    ) {
+        self.edits = edits
         self.selectedRange = selectedRange
         self.refreshStartUTF16 = refreshStartUTF16
+    }
+
+    package init(
+        edit: SyntaxEditorTextEdit,
+        selectedRange: NSRange,
+        refreshStartUTF16: Int
+    ) {
+        self.init(edits: [edit], selectedRange: selectedRange, refreshStartUTF16: refreshStartUTF16)
     }
 }
 
@@ -94,10 +106,9 @@ package final class EditorCommandEngine {
         let column = SyntaxEditorDisplayColumnUtilities.columnCount(in: linePrefix, tabWidth: tabWidth)
         let spaces = SyntaxEditorDisplayColumnUtilities.spacesToNextTabStop(from: column, tabWidth: tabWidth)
         let replacement = String(repeating: " ", count: spaces)
-        let updated = nsSource.replacingCharacters(in: safeSelection, with: replacement)
 
         return EditorCommandResult(
-            text: updated,
+            edit: SyntaxEditorTextEdit(range: safeSelection, replacement: replacement),
             selectedRange: NSRange(location: safeSelection.location + replacement.utf16.count, length: 0),
             refreshStartUTF16: lineRange.location
         )
@@ -168,7 +179,7 @@ package final class EditorCommandEngine {
 private extension EditorCommandEngine {
     func wrap(_ edit: SyntaxLanguageEdit, refreshStartUTF16: Int) -> EditorCommandResult {
         EditorCommandResult(
-            text: edit.text,
+            edits: edit.edits,
             selectedRange: edit.selectedRange,
             refreshStartUTF16: max(0, refreshStartUTF16)
         )
@@ -204,9 +215,8 @@ private extension EditorCommandEngine {
             language: language
         ) {
             pendingTOMLMultilineDelimiter = nil
-            let updated = nsSource.replacingCharacters(in: range, with: String(input))
             return EditorCommandResult(
-                text: updated,
+                edit: SyntaxEditorTextEdit(range: range, replacement: String(input)),
                 selectedRange: NSRange(location: range.location + 1, length: 0),
                 refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(in: source, around: range.location)
             )
@@ -232,7 +242,7 @@ private extension EditorCommandEngine {
             }
 
             return EditorCommandResult(
-                text: source,
+                edits: [],
                 selectedRange: NSRange(location: range.location + 1, length: 0),
                 refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(in: source, around: range.location)
             )
@@ -248,19 +258,17 @@ private extension EditorCommandEngine {
             if range.length > 0 {
                 let selected = nsSource.substring(with: range)
                 let wrapped = String(input) + selected + String(open)
-                let updated = nsSource.replacingCharacters(in: range, with: wrapped)
                 let cursor = range.location + wrapped.utf16.count
                 return EditorCommandResult(
-                    text: updated,
+                    edit: SyntaxEditorTextEdit(range: range, replacement: wrapped),
                     selectedRange: NSRange(location: cursor, length: 0),
                     refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(in: source, around: range.location)
                 )
             }
 
             let inserted = String(input) + String(open)
-            let updated = nsSource.replacingCharacters(in: range, with: inserted)
             return EditorCommandResult(
-                text: updated,
+                edit: SyntaxEditorTextEdit(range: range, replacement: inserted),
                 selectedRange: NSRange(location: range.location + 1, length: 0),
                 refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(in: source, around: range.location)
             )
@@ -269,7 +277,7 @@ private extension EditorCommandEngine {
         if let pairOpen = closingPairs[input], range.length == 0 {
             if let next = SyntaxLanguageTextUtilities.character(in: nsSource, at: range.location), next == input {
                 return EditorCommandResult(
-                    text: source,
+                    edits: [],
                     selectedRange: NSRange(location: range.location + 1, length: 0),
                     refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(in: source, around: range.location)
                 )
@@ -280,7 +288,7 @@ private extension EditorCommandEngine {
                    SyntaxLanguageTextUtilities.character(in: nsSource, at: nextNonWhitespace) == input
                 {
                     return EditorCommandResult(
-                        text: source,
+                        edits: [],
                         selectedRange: NSRange(location: nextNonWhitespace + 1, length: 0),
                         refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(in: source, around: range.location)
                     )
@@ -321,9 +329,8 @@ private extension EditorCommandEngine {
         guard pairs[deleted] == after else { return nil }
 
         let removeRange = NSRange(location: deleteOffset, length: 2)
-        let updated = nsSource.replacingCharacters(in: removeRange, with: "")
         return EditorCommandResult(
-            text: updated,
+            edit: SyntaxEditorTextEdit(range: removeRange, replacement: ""),
             selectedRange: NSRange(location: deleteOffset, length: 0),
             refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(in: source, around: deleteOffset)
         )
@@ -358,9 +365,8 @@ private extension EditorCommandEngine {
             cursorOffset = insertion.utf16.count
         }
 
-        let updated = nsSource.replacingCharacters(in: range, with: insertion)
         return EditorCommandResult(
-            text: updated,
+            edit: SyntaxEditorTextEdit(range: range, replacement: insertion),
             selectedRange: NSRange(location: range.location + cursorOffset, length: 0),
             refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(in: source, around: range.location)
         )
@@ -385,11 +391,10 @@ private extension EditorCommandEngine {
         let reducedPrefixLength = max(0, prefix.utf16.count - removable)
         let reducedPrefix = String(prefix.prefix(reducedPrefixLength))
         let replacement = reducedPrefix + String(closingCharacter(for: expectedPairOpen))
-        let updated = nsSource.replacingCharacters(in: prefixRange, with: replacement)
         let cursor = lineRange.location + replacement.utf16.count
 
         return EditorCommandResult(
-            text: updated,
+            edit: SyntaxEditorTextEdit(range: prefixRange, replacement: replacement),
             selectedRange: NSRange(location: cursor, length: 0),
             refreshStartUTF16: lineRange.location
         )

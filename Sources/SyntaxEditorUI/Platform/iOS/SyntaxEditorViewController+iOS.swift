@@ -7,13 +7,18 @@ import UIKit
 @MainActor
 @Observable
 public final class SyntaxEditorViewController: UIViewController {
-    public private(set) var model: SyntaxEditorModel
+    public private(set) var document: SyntaxEditorDocument
+    public private(set) var configuration: SyntaxEditorConfiguration
     @ObservationIgnored
     public let editorView: SyntaxEditorView
 
-    public init(model: SyntaxEditorModel) {
-        self.model = model
-        self.editorView = SyntaxEditorView(model: model)
+    public init(
+        document: SyntaxEditorDocument = SyntaxEditorDocument(),
+        configuration: SyntaxEditorConfiguration = SyntaxEditorConfiguration()
+    ) {
+        self.document = document
+        self.configuration = configuration
+        self.editorView = SyntaxEditorView(document: document, configuration: configuration)
 
         super.init(nibName: nil, bundle: nil)
     }

@@ -12,7 +12,7 @@ extension SyntaxEditorView {
     }
 
     public func insertText(_ text: String) {
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
 
         if markedRange != nil {
             replaceCommittedMarkedText(with: text)
@@ -28,7 +28,7 @@ extension SyntaxEditorView {
     }
 
     public func deleteBackward() {
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
 
         let deletionRange: NSRange
         let deletionIntent: EditorCommandEngine.DeletionIntent
@@ -84,7 +84,7 @@ extension SyntaxEditorView {
     }
 
     public func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
         guard let markedText else {
             unmarkText()
             return
@@ -99,7 +99,6 @@ extension SyntaxEditorView {
         let source = text
         let clampedRange = clampedTextRange(range, in: source)
         let replacementUTF16Length = replacement.utf16.count
-        let nextText = (source as NSString).replacingCharacters(in: clampedRange, with: replacement)
         let nextMarkedRange = replacement.isEmpty
             ? nil
             : NSRange(location: clampedRange.location, length: replacementUTF16Length)
@@ -122,35 +121,28 @@ extension SyntaxEditorView {
 
         inputDelegate?.textWillChange(self)
         inputDelegate?.selectionWillChange(self)
-
-        performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextUndoAnchor: true)
+        commitEdits(
+            [SyntaxEditorTextEdit(range: clampedRange, replacement: replacement)],
+            selectedRange: nextSelection,
+            refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
+                in: source,
+                around: clampedRange.location
+            ),
+            registersUndo: false,
+            preservesMarkedTextUndoAnchor: true,
+            notifiesInputDelegate: false
+        )
         markedRange = nextMarkedRange
         applyMarkedTextAttributes()
-        currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
-        syncTextLayoutSelection()
-
-        handleTextDidChange(
-            previousText: source,
-            nextText: nextText,
-            mutation: SyntaxHighlightMutation(
-                location: clampedRange.location,
-                length: clampedRange.length,
-                replacement: replacement
-            ),
-            editStartUTF16: clampedRange.location
-        )
-        handleSelectionDidChange(preservesCommandState: false)
-        layoutAndScrollSelectionForTextInputGeometry()
+        inputDelegate?.selectionDidChange(self)
+        inputDelegate?.textDidChange(self)
         if nextMarkedRange == nil {
             finishMarkedTextUndoSessionIfNeeded(
-                finalText: nextText,
+                finalText: text,
                 selectedRange: currentSelectedRange,
                 editStartUTF16: clampedRange.location
             )
         }
-
-        inputDelegate?.selectionDidChange(self)
-        inputDelegate?.textDidChange(self)
     }
 
     func clearMarkedTextIfSelectionLeavesComposition(_ selection: NSRange) {
@@ -171,38 +163,27 @@ extension SyntaxEditorView {
 
         let source = text
         let clampedRange = clampedTextRange(markedRange, in: source)
-        guard model.isEditable else { return }
+        guard configuration.isEditable else { return }
         beginMarkedTextCommitUndoSessionIfNeeded(source: source, markedRange: clampedRange)
 
-        let nextText = (source as NSString).replacingCharacters(in: clampedRange, with: replacement)
         let nextSelection = NSRange(location: clampedRange.location + replacement.utf16.count, length: 0)
 
-        inputDelegate?.textWillChange(self)
-        inputDelegate?.selectionWillChange(self)
-
-        performRawReplacement(in: clampedRange, replacement: replacement, preservesMarkedTextUndoAnchor: true)
-        currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
-        syncTextLayoutSelection()
-        handleTextDidChange(
-            previousText: source,
-            nextText: nextText,
-            mutation: SyntaxHighlightMutation(
-                location: clampedRange.location,
-                length: clampedRange.length,
-                replacement: replacement
+        commitEdits(
+            [SyntaxEditorTextEdit(range: clampedRange, replacement: replacement)],
+            selectedRange: nextSelection,
+            refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
+                in: source,
+                around: clampedRange.location
             ),
-            editStartUTF16: clampedRange.location
+            registersUndo: false,
+            preservesMarkedTextUndoAnchor: true,
+            notifiesInputDelegate: true
         )
-        handleSelectionDidChange(preservesCommandState: false)
-        layoutAndScrollSelectionForTextInputGeometry()
         finishMarkedTextUndoSessionIfNeeded(
-            finalText: nextText,
+            finalText: text,
             selectedRange: currentSelectedRange,
             editStartUTF16: clampedRange.location
         )
-
-        inputDelegate?.selectionDidChange(self)
-        inputDelegate?.textDidChange(self)
     }
 
     public func unmarkText() {
@@ -1066,8 +1047,8 @@ extension SyntaxEditorView {
 
         let restoreText = (source as NSString).replacingCharacters(in: markedRange, with: "")
         let restoreLocation = min(markedRange.location, restoreText.utf16.count)
-        markedTextUndoAnchor = EditorUndoState(
-            text: restoreText,
+        markedTextUndoAnchor = SyntaxEditorMarkedTextUndoAnchor(
+            source: restoreText,
             selectedRange: NSRange(location: restoreLocation, length: 0),
             refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                 in: restoreText,
@@ -1082,8 +1063,8 @@ extension SyntaxEditorView {
         editStartUTF16: Int
     ) {
         guard markedTextUndoAnchor == nil else { return }
-        markedTextUndoAnchor = EditorUndoState(
-            text: source,
+        markedTextUndoAnchor = SyntaxEditorMarkedTextUndoAnchor(
+            source: source,
             selectedRange: selectedRange,
             refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                 in: source,
@@ -1102,9 +1083,26 @@ extension SyntaxEditorView {
         guard !isApplyingUndoRedo else { return }
 
         registerUndoAction(
-            restore: restore,
+            restore: EditorUndoState(
+                edits: SyntaxEditorDocument.inverseEdits(
+                    for: [
+                        SyntaxEditorTextEdit(
+                            range: NSRange(location: 0, length: restore.source.utf16.count),
+                            replacement: finalText
+                        ),
+                    ],
+                    in: restore.source
+                ),
+                selectedRange: restore.selectedRange,
+                refreshStartUTF16: restore.refreshStartUTF16
+            ),
             counterpart: EditorUndoState(
-                text: finalText,
+                edits: [
+                    SyntaxEditorTextEdit(
+                        range: NSRange(location: 0, length: restore.source.utf16.count),
+                        replacement: finalText
+                    ),
+                ],
                 selectedRange: selectedRange,
                 refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                     in: finalText,
