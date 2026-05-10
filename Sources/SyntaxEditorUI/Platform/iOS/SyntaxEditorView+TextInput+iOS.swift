@@ -119,6 +119,8 @@ extension SyntaxEditorView {
             )
         }
 
+        inputDelegate?.textWillChange(self)
+        inputDelegate?.selectionWillChange(self)
         commitEdits(
             [SyntaxEditorTextEdit(range: clampedRange, replacement: replacement)],
             selectedRange: nextSelection,
@@ -128,10 +130,12 @@ extension SyntaxEditorView {
             ),
             registersUndo: false,
             preservesMarkedTextUndoAnchor: true,
-            notifiesInputDelegate: true
+            notifiesInputDelegate: false
         )
         markedRange = nextMarkedRange
         applyMarkedTextAttributes()
+        inputDelegate?.selectionDidChange(self)
+        inputDelegate?.textDidChange(self)
         if nextMarkedRange == nil {
             finishMarkedTextUndoSessionIfNeeded(
                 finalText: text,

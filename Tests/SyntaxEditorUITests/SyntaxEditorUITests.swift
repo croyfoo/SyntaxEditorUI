@@ -70,6 +70,15 @@ private func syntaxEditorSettleUIKitHost<Content: View>(_ controller: UIHostingC
     controller.view.layoutIfNeeded()
     RunLoop.main.run(until: Date().addingTimeInterval(0.05))
 }
+
+@MainActor
+private func syntaxEditorAttachUIKitHost<Content: View>(_ controller: UIHostingController<Content>) -> UIWindow {
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+    window.rootViewController = controller
+    window.makeKeyAndVisible()
+    syntaxEditorSettleUIKitHost(controller)
+    return window
+}
 #elseif canImport(AppKit)
 @MainActor
 private func syntaxEditorNSView<Subview: NSView>(
@@ -600,6 +609,11 @@ struct SyntaxEditorUITests {
 
 #if canImport(UIKit)
         let controller = UIHostingController(rootView: SyntaxEditorDefaultWrapperHost(probe: probe))
+        let window = syntaxEditorAttachUIKitHost(controller)
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
         syntaxEditorSettleUIKitHost(controller)
         let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
 
@@ -645,6 +659,11 @@ struct SyntaxEditorUITests {
 
 #if canImport(UIKit)
         let controller = UIHostingController(rootView: SyntaxEditorConfigurationReplacementHost(probe: probe))
+        let window = syntaxEditorAttachUIKitHost(controller)
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
         syntaxEditorSettleUIKitHost(controller)
         let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
 
@@ -1155,6 +1174,35 @@ struct SyntaxEditorUITests {
 
         editorView.insertText("{")
 
+        #expect(inputDelegate.textWillChangeCount == 1)
+        #expect(inputDelegate.textDidChangeCount == 1)
+        #expect(inputDelegate.selectionWillChangeCount == 1)
+        #expect(inputDelegate.selectionDidChangeCount == 1)
+    }
+
+    @Test("SyntaxEditorView exposes active iOS marked text during input delegate updates")
+    @MainActor
+    func syntaxEditorViewIOSMarkedTextRangeIsCurrentDuringInputDelegateUpdate() {
+        let source = "let value = "
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let inputDelegate = SyntaxEditorUITestInputDelegate()
+        var observedMarkedRange: NSRange?
+        inputDelegate.textDidChangeHandler = { textInput in
+            guard let editorView = textInput as? SyntaxEditorView,
+                  let markedRange = editorView.markedTextRange as? SyntaxEditorTextRange
+            else {
+                return
+            }
+            observedMarkedRange = markedRange.nsRange
+        }
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.inputDelegate = inputDelegate
+
+        editorView.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 0))
+
+        #expect(observedMarkedRange == NSRange(location: source.utf16.count, length: "かな".utf16.count))
         #expect(inputDelegate.textWillChangeCount == 1)
         #expect(inputDelegate.textDidChangeCount == 1)
         #expect(inputDelegate.selectionWillChangeCount == 1)
