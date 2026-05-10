@@ -624,14 +624,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func refreshForColorAppearanceChange() {
         updateTypingAttributes()
+        reapplyCachedHighlight()
         updateFindHighlightFragmentViews()
         updateBracketHighlightFragmentViews()
-        scheduleHighlight(
-            source: text,
-            language: configuration.language,
-            revision: document.revision,
-            refreshStartUTF16: 0
-        )
+        setNeedsDisplayForVisibleTextFragments()
     }
 
     func editorKeyCommands() -> [UIKeyCommand]? {
@@ -878,10 +874,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let textRange = NSRange(location: 0, length: storage.length)
         guard textRange.length > 0 else { return }
 
+        let previousBaseForeground = resolvedSyntaxColor(previousColorTheme.baseForeground)
+        let nextBaseForeground = resolvedSyntaxColor(colorTheme.baseForeground)
         var rangesToUpdate: [NSRange] = []
         unsafe storage.enumerateAttribute(.foregroundColor, in: textRange) { value, range, _ in
             guard let color = value as? UIColor,
-                  color.isEqual(previousColorTheme.baseForeground)
+                  color.isEqual(previousBaseForeground)
             else {
                 return
             }
@@ -892,7 +890,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         storage.beginEditing()
         for range in rangesToUpdate {
-            storage.addAttribute(.foregroundColor, value: colorTheme.baseForeground, range: range)
+            storage.addAttribute(.foregroundColor, value: nextBaseForeground, range: range)
         }
         storage.endEditing()
     }
@@ -1229,13 +1227,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func syncTextLayoutSelection() {
+        guard currentSelectedRange.length > 0 else {
+            layoutManager.textSelections = []
+            return
+        }
+
         if let textRange = textRange(forUTF16Range: currentSelectedRange) {
-            let affinity: NSTextSelection.Affinity = currentSelectedRange.length == 0
-                && isHardLineBreakCaretLocation(currentSelectedRange.location)
-                ? .upstream
-                : .downstream
             layoutManager.textSelections = [
-                NSTextSelection(range: textRange, affinity: affinity, granularity: .character),
+                NSTextSelection(range: textRange, affinity: .downstream, granularity: .character),
             ]
         } else {
             layoutManager.textSelections = []
@@ -1554,7 +1553,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func baseAttributes() -> [NSAttributedString.Key: Any] {
         [
             .font: font,
-            .foregroundColor: lastAppliedColorTheme.baseForeground,
+            .foregroundColor: resolvedSyntaxColor(lastAppliedColorTheme.baseForeground),
             .paragraphStyle: baseParagraphStyle(),
         ]
     }
@@ -1594,7 +1593,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guard let color = SyntaxEditorHighlightTheme.color(for: captureName, in: lastAppliedColorTheme) else {
             return [:]
         }
-        return [.foregroundColor: color]
+        return [.foregroundColor: resolvedSyntaxColor(color)]
+    }
+
+    func resolvedSyntaxColor(_ color: UIColor) -> UIColor {
+        color.resolvedColor(with: traitCollection)
     }
 
     func applyLineWrappingConfiguration(lineWrappingEnabled: Bool) {

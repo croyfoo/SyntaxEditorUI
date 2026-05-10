@@ -2277,9 +2277,9 @@ struct SyntaxEditorUITests {
         #expect(abs(downRect.midX - lineEndRect.midX) <= 1)
     }
 
-    @Test("SyntaxEditorView syncs iOS line-end selections with upstream affinity")
+    @Test("SyntaxEditorView omits collapsed iOS TextKit selections")
     @MainActor
-    func syntaxEditorViewIOSSyncsLineEndSelectionsWithUpstreamAffinity() {
+    func syntaxEditorViewIOSOmitsCollapsedTextKitSelections() {
         let source = "abcde\n01234"
         let model = SyntaxEditorTestContext(
             text: source,
@@ -2292,7 +2292,7 @@ struct SyntaxEditorUITests {
         let firstLineEnd = (source as NSString).range(of: "\n").location
         editorView.selectedRange = NSRange(location: firstLineEnd, length: 0)
 
-        #expect(editorView.textLayoutManager?.textSelections.first?.affinity == .upstream)
+        #expect(editorView.textLayoutManager?.textSelections.isEmpty == true)
     }
 
     @Test("SyntaxEditorView keeps iOS caret on the edited whitespace line after text input")
