@@ -708,6 +708,48 @@ struct SyntaxEditorUITests {
 #endif
     }
 
+    @Test("SyntaxEditorView clears undo state for observed whole document replacements")
+    @MainActor
+    func syntaxEditorViewClearsUndoStateForObservedWholeDocumentReplacements() throws {
+        let source = "abc"
+        let editedSource = "\(source)!"
+        let replacementText = "x"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+
+#if canImport(UIKit)
+        let editorView = SyntaxEditorView(testContext: model)
+        layoutIOSEditorView(editorView)
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.insertText("!")
+        let undoManager = try #require(editorView.undoManager)
+
+        #expect(model.document.textSnapshot() == editedSource)
+        #expect(undoManager.canUndo)
+
+        model.document.replaceText(replacementText)
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(editorView.text == replacementText)
+        #expect(!undoManager.canUndo)
+#elseif canImport(AppKit)
+        let editorView = SyntaxEditorView(testContext: model)
+        let undoManager = try #require(editorView.textView.undoManager)
+        let editRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.textView.setSelectedRange(editRange)
+        editorView.textView.insertText("!", replacementRange: editRange)
+        editorView.textView.breakUndoCoalescing()
+
+        #expect(model.document.textSnapshot() == editedSource)
+        #expect(undoManager.canUndo)
+
+        model.document.replaceText(replacementText)
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(editorView.textView.string == replacementText)
+        #expect(!undoManager.canUndo)
+#endif
+    }
+
 #if canImport(UIKit)
     @Test("SyntaxEditorViewController preserves Observable conformance on iOS")
     @MainActor

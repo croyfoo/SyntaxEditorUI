@@ -811,8 +811,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         if textNeedsUpdate {
             commandEngine.invalidateTransientState()
+            let change = document.latestChange
+            if change?.isWholeDocumentReplacement == true {
+                activeUndoManager?.removeAllActions()
+            }
             let previousSelection = selectedRange
-            if let change = document.latestChange,
+            if let change,
                change.revision == revision,
                !change.isWholeDocumentReplacement,
                !forceTextUpdate,
@@ -821,7 +825,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             } else {
                 replaceEntireStorageText(nextText)
             }
-            let change = document.latestChange
             let nextSelection: NSRange
             if change?.isWholeDocumentReplacement == true,
                change?.selectedRange == NSRange(location: 0, length: 0) {

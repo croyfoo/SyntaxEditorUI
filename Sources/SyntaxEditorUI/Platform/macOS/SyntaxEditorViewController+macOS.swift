@@ -549,8 +549,12 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         let textNeedsUpdate = forceTextUpdate || textView.string != text
         if textNeedsUpdate {
             commandEngine.invalidateTransientState()
+            let change = document.latestChange
+            if change?.isWholeDocumentReplacement == true {
+                activeUndoManager?.removeAllActions()
+            }
             textView.string = text
-            if let change = document.latestChange,
+            if let change,
                !(change.isWholeDocumentReplacement && change.selectedRange == NSRange(location: 0, length: 0)) {
                 textView.setSelectedRange(change.selectedRange)
             }

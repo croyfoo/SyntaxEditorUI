@@ -54,7 +54,7 @@ public struct SyntaxEditorDocumentChange: Equatable, Sendable {
 @MainActor
 @Observable
 public final class SyntaxEditorDocument {
-    @ObservationIgnored private var storage: String
+    private var storage: String
     public private(set) var revision: Int
     public private(set) var latestChange: SyntaxEditorDocumentChange?
 

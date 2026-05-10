@@ -115,6 +115,25 @@ struct SyntaxEditorCoreTests {
         #expect(configuration.colorTheme == .xcode)
     }
 
+    @Test("SyntaxEditorDocument text snapshots participate in observation")
+    @MainActor
+    func syntaxEditorDocumentTextSnapshotObservation() {
+        let document = SyntaxEditorDocument(text: "let value = 1")
+        var observedText = ""
+        let didChange = DispatchSemaphore(value: 0)
+
+        withObservationTracking {
+            observedText = document.textSnapshot()
+        } onChange: {
+            didChange.signal()
+        }
+
+        document.replaceText("let value = 2")
+
+        #expect(observedText == "let value = 1")
+        #expect(didChange.wait(timeout: .now()) == .success)
+    }
+
     @Test("SyntaxEditorHighlightTheme maps representative captures to theme slots")
     func syntaxEditorHighlightThemeMapping() {
         let theme = SyntaxEditorColorTheme.xcode
