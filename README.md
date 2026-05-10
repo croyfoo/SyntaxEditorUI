@@ -38,13 +38,13 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 ```swift
 import SyntaxEditorUI
 
-let model = SyntaxEditorModel(
-    text: "const answer = 42;",
+let document = SyntaxEditorDocument(text: "const answer = 42;")
+let configuration = SyntaxEditorConfiguration(
     language: .javascript
 )
 
-let editor = SyntaxEditor(model: model)
-let editorView = SyntaxEditorView(model: model)
+let editor = SyntaxEditor(document: document, configuration: configuration)
+let editorView = SyntaxEditorView(document: document, configuration: configuration)
 ```
 
 Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
@@ -68,12 +68,24 @@ GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `
 
 ## Migration
 
+### v0.7.0
+
+These notes apply when upgrading from `v0.6.x` or earlier to `v0.7.0`.
+
+- `SyntaxEditorModel` has been replaced by separate `SyntaxEditorDocument` and `SyntaxEditorConfiguration` objects.
+- Store editor text in `SyntaxEditorDocument`. Read the current text with `textSnapshot()` and replace it with `replaceText(_:selectedRange:)`.
+- Store editor settings in `SyntaxEditorConfiguration`: `language`, `isEditable`, `lineWrappingEnabled`, and `colorTheme`.
+- Replace `SyntaxEditor(model:)` with `SyntaxEditor(document:configuration:)`. `SyntaxEditor()` is also available when the default document and configuration are enough.
+- Replace `SyntaxEditorView(model:)` and `SyntaxEditorViewController(model:)` with `SyntaxEditorView(document:configuration:)` and `SyntaxEditorViewController(document:configuration:)`.
+- If your app observed `SyntaxEditorModel`, observe `SyntaxEditorDocument` for text changes and `SyntaxEditorConfiguration` for configuration changes. `SyntaxEditorDocument` exposes `revision` and `latestChange` for tracking committed edits.
+- `SyntaxEditorModel` and the model-based initializers have been removed without a compatibility shim.
+
 ### v0.5.0
 
 These notes apply when upgrading from `v0.4.x` or earlier to `v0.5.0`.
 
 - Starting with `v0.5.0`, non-UI implementation has moved into the internal `SyntaxEditorCore` target. `SyntaxEditorCore` is not a public package product; clients should keep importing `SyntaxEditorUI` only.
-- `SyntaxEditorModel`, `SyntaxLanguage`, and related non-UI APIs remain available from `SyntaxEditorUI` via module re-export.
+- In `v0.5.0`, `SyntaxEditorModel`, `SyntaxLanguage`, and related non-UI APIs remained available from `SyntaxEditorUI` via module re-export. `SyntaxEditorModel` was removed in `v0.7.0`; see the `v0.7.0` notes above.
 - `SyntaxLanguage` is now a concrete enum of supported languages. Use `SyntaxLanguage.javascript` or shorthand `.javascript` instead of `BuiltinSyntaxLanguages.javascript`.
 - `BuiltinSyntaxLanguages` has been removed without a compatibility shim.
 - Custom `SyntaxLanguage` conformers are no longer supported. `SyntaxTreeSitterSupport`, custom query directories, and custom highlight cache keys are no longer public API.
