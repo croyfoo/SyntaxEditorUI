@@ -137,6 +137,52 @@ private func captureNames(
         .map(\.captureName)
 }
 
+private func effectiveSemanticSnapshot(
+    in tokens: [SyntaxHighlightToken],
+    source: String,
+    text: String,
+    language: SyntaxLanguage,
+    inOccurrenceOf containingText: String
+) throws -> HighlightSemanticSnapshot {
+    let nsSource = source as NSString
+    let searchRange = nsSource.range(of: containingText)
+    #expect(searchRange.location != NSNotFound)
+    let expectedRange = nsSource.range(of: text, options: [], range: searchRange)
+    #expect(expectedRange.location != NSNotFound)
+
+    let matchedToken = tokens.last {
+        SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0
+    }
+    if matchedToken == nil {
+        let nearby = tokens
+            .filter { SyntaxEditorRangeUtilities.intersection(of: $0.range, and: searchRange).length > 0 }
+            .map { token in
+                "\(nsSource.substring(with: token.range)):\(token.captureName)"
+            }
+            .joined(separator: ", ")
+        Issue.record("Could not find effective token for \(text) in \(containingText). Nearby: \(nearby)")
+    }
+
+    let token = try #require(matchedToken)
+    let tokenText = nsSource.substring(with: token.range)
+    let styleKeys = try #require(SyntaxEditorHighlightTheme.semanticStyleKeys(
+        for: token.captureName,
+        language: language
+    ))
+    let style = try #require(SyntaxEditorHighlightTheme.style(
+        for: token.captureName,
+        in: .default,
+        language: language,
+        appearance: .dark
+    ))
+    return HighlightSemanticSnapshot(
+        text: tokenText,
+        captureName: token.captureName,
+        styleKeys: styleKeys,
+        resolvedStyle: style
+    )
+}
+
 private extension SyntaxHighlighterEngine {
     func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult {
         await reset(source: source, language: language, revision: 0)
@@ -3642,7 +3688,78 @@ struct SyntaxHighlighterEngineTests {
             #expect(snapshot.styleKeys.first == expectation.styleKey)
         }
 
+        let effectiveExpectations: [(text: String, capture: String, styleKey: String, occurrence: String)] = [
+            ("#if", "keyword.directive", "editor.syntax.preprocessor", "#if os(iOS)"),
+            ("iOS", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if os(iOS)"),
+            ("macOS", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif os(macOS)"),
+            ("#else", "keyword.directive", "editor.syntax.preprocessor", "#else"),
+            ("#endif", "keyword.directive", "editor.syntax.preprocessor", "#endif"),
+            ("swift", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
+            (">=", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
+            ("5.9", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
+            ("&&", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("compiler", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("6.0", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("#", "keyword.swift.availability.punctuation", "editor.syntax.keyword", "if #available(macOS"),
+            ("#available", "keyword.swift.availability", "editor.syntax.keyword", "if #available(macOS"),
+        ]
+
+        for expectation in effectiveExpectations {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: expectation.text,
+                language: .swift,
+                inOccurrenceOf: expectation.occurrence
+            )
+            #expect(snapshot.captureName == expectation.capture)
+            #expect(snapshot.styleKeys.first == expectation.styleKey)
+        }
+
         #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine classifies Swift directive condition operators")
+    func highlighterClassifiesSwiftDirectiveConditionOperators() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        #if !DEBUG
+        let mode = "release"
+        #elseif canImport(UIKit, _version: 17.0)
+        let mode = "versioned"
+        #elseif swift(>=5.9) && compiler(>=6.0)
+        let mode = "modern"
+        #endif
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
+
+        let expectations: [(text: String, capture: String, styleKey: String, occurrence: String)] = [
+            ("#if", "keyword.directive", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("!", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("DEBUG", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("canImport", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif canImport(UIKit"),
+            ("_version", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "_version: 17.0"),
+            (":", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "_version: 17.0"),
+            ("17.0", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "_version: 17.0"),
+            ("#elseif", "keyword.directive", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
+            (">=", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
+            ("5.9", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
+            ("&&", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("6.0", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("#endif", "keyword.directive", "editor.syntax.preprocessor", "#endif"),
+        ]
+
+        for expectation in expectations {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: expectation.text,
+                language: .swift,
+                inOccurrenceOf: expectation.occurrence
+            )
+            #expect(snapshot.captureName == expectation.capture)
+            #expect(snapshot.styleKeys.first == expectation.styleKey)
+        }
     }
 
     @Test("SyntaxHighlighterEngine keeps contextual Swift keywords as identifiers")

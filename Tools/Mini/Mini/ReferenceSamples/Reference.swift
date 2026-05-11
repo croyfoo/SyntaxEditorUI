@@ -95,6 +95,18 @@ final class ReferenceStore: OpenReferenceBase, @unchecked Sendable, ReferenceRen
         let platform = "other"
         #endif
 
+        #if swift(>=5.9) && compiler(>=6.0)
+        let toolchain = "modern"
+        #else
+        let toolchain = "legacy"
+        #endif
+
+        #if canImport(UIKit, _version: 17.0)
+        let runtime = "UIKit"
+        #else
+        let runtime = "portable"
+        #endif
+
         if #available(macOS 15.0, iOS 18.0, *) {
             let title = #localized("reference.title")
             let pattern = #/item-(?<number>\d+)-(?<kind>[A-Z]+)/#
@@ -102,7 +114,7 @@ final class ReferenceStore: OpenReferenceBase, @unchecked Sendable, ReferenceRen
             items = [
                 Item(
                     id: UUID(),
-                    title: "\(title) \(platform) \(matched)",
+                    title: "\(title) \(platform) \(toolchain) \(runtime) \(matched)",
                     metadata: ["scope": "preview"]
                 ),
             ]

@@ -720,14 +720,25 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
         existingTokens: [SyntaxHighlightToken],
         targetRange: NSRange
     ) -> [SyntaxHighlightToken] {
-        regexTokens(
-            pattern: #"(?m)^[ \t]*#(?:if|elseif|else|endif)\b[^\n]*"#,
+        let directiveConditionRanges = directiveConditionRanges(in: source, targetRange: targetRange)
+        return regexTokens(
+            pattern: #"\b[A-Za-z_][A-Za-z0-9_]*\b|\d+|>=|<=|==|!=|>|<|&&|\|\||!|[.:(),]"#,
             captureGroup: 0,
             captureName: "keyword.directive.condition.swift",
             in: source,
-            ranges: [targetRange],
+            ranges: directiveConditionRanges,
             existingTokens: existingTokens
         )
+    }
+
+    private static func directiveConditionRanges(in source: String, targetRange: NSRange) -> [NSRange] {
+        guard let regex = try? NSRegularExpression(pattern: #"(?m)^[ \t]*#(?:if|elseif)\b([^\n]*)"#) else {
+            return []
+        }
+        return regex.matches(in: source, range: targetRange).compactMap { match in
+            let range = match.range(at: 1)
+            return range.location == NSNotFound ? nil : range
+        }
     }
 
     private static func availabilityKeywordTokens(
@@ -738,6 +749,22 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
         regexTokens(
             pattern: #"#(?:available|unavailable)\b"#,
             captureGroup: 0,
+            captureName: "keyword.swift.availability",
+            in: source,
+            ranges: [targetRange],
+            existingTokens: existingTokens
+        )
+        + regexTokens(
+            pattern: #"(#)(?:available|unavailable)\b"#,
+            captureGroup: 1,
+            captureName: "keyword.swift.availability.punctuation",
+            in: source,
+            ranges: [targetRange],
+            existingTokens: existingTokens
+        )
+        + regexTokens(
+            pattern: #"#(available|unavailable)\b"#,
+            captureGroup: 1,
             captureName: "keyword.swift.availability",
             in: source,
             ranges: [targetRange],
