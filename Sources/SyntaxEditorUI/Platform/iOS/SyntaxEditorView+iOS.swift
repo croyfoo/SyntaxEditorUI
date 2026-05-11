@@ -538,7 +538,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func configureScrollView() {
-        backgroundColor = .clear
+        updateEditorBackgroundColor()
         alwaysBounceVertical = true
         keyboardDismissMode = .interactive
         delaysContentTouches = false
@@ -666,11 +666,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func refreshForColorAppearanceChange() {
+        updateEditorBackgroundColor()
+        invalidateHorizontalMeasurement()
         updateTypingAttributes()
         reapplyCachedHighlight()
         updateFindHighlightFragmentViews()
         updateBracketHighlightFragmentViews()
-        setNeedsDisplayForVisibleTextFragments()
+        updateTextContainerForCurrentWrappingMode()
+        invalidateTextLayout()
     }
 
     func editorKeyCommands() -> [UIKeyCommand]? {
@@ -871,9 +874,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let previousColorTheme = lastAppliedColorTheme
         let colorThemeChanged = previousColorTheme != colorTheme
         if colorThemeChanged {
+            invalidateHorizontalMeasurement()
             applyBaseForegroundColorChange(from: previousColorTheme, to: colorTheme)
         }
         lastAppliedColorTheme = colorTheme
+        updateEditorBackgroundColor()
 
         updateTextInteractions()
         applyLineWrappingConfiguration(lineWrappingEnabled: lineWrappingEnabled)
@@ -929,8 +934,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let textRange = NSRange(location: 0, length: storage.length)
         guard textRange.length > 0 else { return }
 
-        let previousBaseForeground = resolvedSyntaxColor(previousColorTheme.baseForeground)
-        let nextBaseForeground = resolvedSyntaxColor(colorTheme.baseForeground)
+        let previousBaseForeground = resolvedSyntaxColor(
+            previousColorTheme
+                .resolved(for: configuration.language, appearance: currentThemeAppearance)
+                .baseForeground
+        )
+        let nextBaseForeground = resolvedSyntaxColor(
+            colorTheme
+                .resolved(for: configuration.language, appearance: currentThemeAppearance)
+                .baseForeground
+        )
         var rangesToUpdate: [NSRange] = []
         unsafe storage.enumerateAttribute(.foregroundColor, in: textRange) { value, range, _ in
             guard let color = value as? UIColor,
@@ -1651,9 +1664,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func baseAttributes() -> [NSAttributedString.Key: Any] {
-        [
+        let theme = resolvedColorTheme()
+        return [
             .font: font,
-            .foregroundColor: resolvedSyntaxColor(lastAppliedColorTheme.baseForeground),
+            .foregroundColor: resolvedSyntaxColor(theme.baseForeground),
             .paragraphStyle: baseParagraphStyle(),
         ]
     }
@@ -1690,14 +1704,42 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func styleAttributes(for captureName: String) -> [NSAttributedString.Key: Any] {
-        guard let color = SyntaxEditorHighlightTheme.color(for: captureName, in: lastAppliedColorTheme) else {
+        guard let style = SyntaxEditorHighlightTheme.style(
+            for: captureName,
+            in: lastAppliedColorTheme,
+            language: configuration.language,
+            appearance: currentThemeAppearance
+        ) else {
             return [:]
         }
-        return [.foregroundColor: resolvedSyntaxColor(color)]
+
+        var attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: resolvedSyntaxColor(style.foreground),
+        ]
+        if let tokenFont = style.font?.platformFont(fallback: font) {
+            attributes[.font] = tokenFont
+        }
+        return attributes
     }
 
     func resolvedSyntaxColor(_ color: UIColor) -> UIColor {
         color.resolvedColor(with: traitCollection)
+    }
+
+    var currentThemeAppearance: SyntaxEditorThemeAppearance {
+        traitCollection.userInterfaceStyle == .dark ? .dark : .light
+    }
+
+    func resolvedColorTheme() -> SyntaxEditorResolvedColorTheme {
+        lastAppliedColorTheme.resolved(
+            for: configuration.language,
+            appearance: currentThemeAppearance
+        )
+    }
+
+    func updateEditorBackgroundColor() {
+        backgroundColor = resolvedSyntaxColor(resolvedColorTheme().background)
+        textContentView.backgroundColor = backgroundColor
     }
 
     func applyLineWrappingConfiguration(lineWrappingEnabled: Bool) {
@@ -1756,7 +1798,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func updateContentSizeIfNeeded() {
         let estimatedLayoutSize = estimatedDocumentLayoutSize()
-        let textHeight = max(font.lineHeight, ceil(estimatedLayoutSize.height))
+        let lineHeight = font.lineHeight
+        let textHeight = max(lineHeight, ceil(estimatedLayoutSize.height))
         let targetWidth = lastAppliedLineWrappingEnabled
             ? bounds.width
             : max(bounds.width, measuredHorizontalDocumentLayoutWidth(), ceil(estimatedLayoutSize.width + textContainerInset.left + textContainerInset.right))
@@ -1893,7 +1936,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let color = rects.isEmpty
             ? nil
             : UIColor
-                .syntaxEditorAlpha(lastAppliedColorTheme.bracketBackground, alpha: 0.24)
+                .syntaxEditorAlpha(resolvedColorTheme().bracketBackground, alpha: 0.24)
                 .resolvedColor(with: traitCollection)
                 .cgColor
         let colorChanged = !Self.optionalColorsEqual(fragmentView.bracketHighlightColor, color)

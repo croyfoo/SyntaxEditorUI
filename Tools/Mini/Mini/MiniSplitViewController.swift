@@ -49,7 +49,7 @@ final class MiniSplitViewController: UISplitViewController {
 
     private func bindEditorModel() {
         editorObservations.update {
-            model.editorConfiguration.observe(\.lineWrappingEnabled) { [weak self] _ in
+            model.editorConfiguration.observe([\.lineWrappingEnabled, \.colorTheme.id]) { [weak self] in
                 self?.updateOverflowMenu()
             }
             .store(in: editorObservations)
@@ -102,7 +102,21 @@ final class MiniSplitViewController: UISplitViewController {
                     self?.toggleLineWrapping()
                 }
                 lineWrappingAction.state = self.model.editorConfiguration.lineWrappingEnabled ? .on : .off
-                completion([lineWrappingAction])
+
+                let themeActions = SyntaxEditorColorTheme.Preset.allCases.map { preset in
+                    let action = UIAction(title: preset.displayName) { [weak self] _ in
+                        self?.model.selectedThemePreset = preset
+                    }
+                    action.state = self.model.selectedThemePreset == preset ? .on : .off
+                    return action
+                }
+                let themeMenu = UIMenu(
+                    title: "Theme",
+                    image: UIImage(systemName: "paintpalette"),
+                    children: themeActions
+                )
+
+                completion([themeMenu, lineWrappingAction])
             }
         }
     }

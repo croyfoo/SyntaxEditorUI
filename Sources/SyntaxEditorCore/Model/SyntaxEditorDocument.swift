@@ -13,7 +13,7 @@ public final class SyntaxEditorConfiguration {
         language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .xcode
+        colorTheme: SyntaxEditorColorTheme = .default
     ) {
         self.language = language
         self.isEditable = isEditable

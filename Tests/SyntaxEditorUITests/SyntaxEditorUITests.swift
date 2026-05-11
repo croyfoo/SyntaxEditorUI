@@ -117,7 +117,7 @@ private struct SyntaxEditorTestContext {
         language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .xcode
+        colorTheme: SyntaxEditorColorTheme = .default
     ) {
         self.document = SyntaxEditorDocument(text: text)
         self.configuration = SyntaxEditorConfiguration(

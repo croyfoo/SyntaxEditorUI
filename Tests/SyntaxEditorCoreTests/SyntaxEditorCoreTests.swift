@@ -100,7 +100,7 @@ struct SyntaxEditorCoreTests {
         #expect(configuration.language.identifier == SyntaxLanguage.json.identifier)
         #expect(configuration.isEditable == true)
         #expect(configuration.lineWrappingEnabled == false)
-        #expect(configuration.colorTheme == .xcode)
+        #expect(configuration.colorTheme == .default)
 
         document.replaceText("body { color: red; }")
         configuration.language = SyntaxLanguage.css
@@ -112,7 +112,7 @@ struct SyntaxEditorCoreTests {
         #expect(configuration.language.identifier == SyntaxLanguage.css.identifier)
         #expect(configuration.isEditable == false)
         #expect(configuration.lineWrappingEnabled == true)
-        #expect(configuration.colorTheme == .xcode)
+        #expect(configuration.colorTheme == .default)
     }
 
     @Test("SyntaxEditorDocument text snapshots participate in observation")
@@ -136,18 +136,60 @@ struct SyntaxEditorCoreTests {
 
     @Test("SyntaxEditorHighlightTheme maps representative captures to theme slots")
     func syntaxEditorHighlightThemeMapping() {
-        let theme = SyntaxEditorColorTheme.xcode
+        let theme = SyntaxEditorColorTheme.default
+        let resolved = theme.resolved(for: .swift, appearance: .light)
 
-        #expect(SyntaxEditorHighlightTheme.color(for: "keyword.control", in: theme) == theme.keyword)
-        #expect(SyntaxEditorHighlightTheme.color(for: "include", in: theme) == theme.keyword)
-        #expect(SyntaxEditorHighlightTheme.color(for: "string.quoted", in: theme) == theme.string)
-        #expect(SyntaxEditorHighlightTheme.color(for: "constructor", in: theme) == theme.function)
-        #expect(SyntaxEditorHighlightTheme.color(for: "parameter", in: theme) == theme.variable)
-        #expect(SyntaxEditorHighlightTheme.color(for: "namespace", in: theme) == theme.type)
-        #expect(SyntaxEditorHighlightTheme.color(for: "number", in: theme) == theme.number)
-        #expect(SyntaxEditorHighlightTheme.color(for: "text.uri", in: theme) == theme.number)
-        #expect(SyntaxEditorHighlightTheme.color(for: "delimiter", in: theme) == theme.punctuation)
+        #expect(SyntaxEditorHighlightTheme.color(for: "keyword.control", in: theme, language: .swift, appearance: .light) == resolved.keyword.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: "string.quoted", in: theme, language: .swift, appearance: .light) == resolved.string.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: "constructor", in: theme, language: .swift, appearance: .light) == resolved.function.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: "parameter", in: theme, language: .swift, appearance: .light) == resolved.variable.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: "namespace", in: theme, language: .swift, appearance: .light) == resolved.type.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: "number", in: theme, language: .swift, appearance: .light) == resolved.number.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: "delimiter", in: theme, language: .swift, appearance: .light) == resolved.punctuation.foreground)
         #expect(SyntaxEditorHighlightTheme.color(for: "unknown.capture", in: theme) == nil)
+    }
+
+    @Test("SyntaxEditorHighlightTheme resolves language-specific built-in styles")
+    func syntaxEditorHighlightThemeLanguageSpecificStyles() {
+        let theme = SyntaxEditorColorTheme.default
+        let swiftStyle = SyntaxEditorHighlightTheme.style(
+            for: "variable",
+            in: theme,
+            language: .swift,
+            appearance: .light
+        )
+        let swiftResolved = theme.resolved(for: .swift, appearance: .light)
+        #expect(swiftStyle?.foreground == swiftResolved.variable.foreground)
+
+        let objectiveCStyle = SyntaxEditorHighlightTheme.style(
+            for: "variable",
+            in: theme,
+            language: .objectiveC,
+            appearance: .light
+        )
+        let objectiveCResolved = theme.resolved(for: .objectiveC, appearance: .light)
+        #expect(objectiveCStyle?.foreground == objectiveCResolved.baseForeground)
+    }
+
+    @Test("SyntaxEditorHighlightTheme resolves built-in fonts")
+    func syntaxEditorHighlightThemeFonts() {
+        let theme = SyntaxEditorColorTheme.default
+        let lightComment = SyntaxEditorHighlightTheme.style(
+            for: "comment.doc",
+            in: theme,
+            language: .swift,
+            appearance: .light
+        )
+        #expect(lightComment?.font?.family == "HelveticaNeue")
+        #expect(lightComment?.font?.size == 12)
+
+        let darkKeyword = SyntaxEditorHighlightTheme.style(
+            for: "keyword.control",
+            in: theme,
+            language: .swift,
+            appearance: .dark
+        )
+        #expect(darkKeyword?.font?.weight == .bold)
     }
 
     @Test("SyntaxEditorRangeUtilities clamps and intersects UTF-16 ranges")

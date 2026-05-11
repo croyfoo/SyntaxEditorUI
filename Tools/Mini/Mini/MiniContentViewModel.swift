@@ -17,10 +17,12 @@ final class MiniContentViewModel {
 
             currentPresetID = selectedPresetID
             let lineWrappingEnabled = editorConfiguration.lineWrappingEnabled
+            let colorTheme = editorConfiguration.colorTheme
             editorDocument = SyntaxEditorDocument(text: text(for: preset))
             editorConfiguration = SyntaxEditorConfiguration(
                 language: preset.language,
-                lineWrappingEnabled: lineWrappingEnabled
+                lineWrappingEnabled: lineWrappingEnabled,
+                colorTheme: colorTheme
             )
         }
     }
@@ -43,6 +45,11 @@ final class MiniContentViewModel {
 
     var currentPreset: MiniPreviewPreset {
         MiniPreviewPreset.preset(for: currentPresetID) ?? .javascript
+    }
+
+    var selectedThemePreset: SyntaxEditorColorTheme.Preset {
+        get { editorConfiguration.colorTheme.preset ?? .default }
+        set { editorConfiguration.colorTheme = .preset(newValue) }
     }
 
     private func text(for preset: MiniPreviewPreset) -> String {

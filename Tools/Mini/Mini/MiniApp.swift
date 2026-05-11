@@ -208,6 +208,7 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     private let configurationObservations = ObservationScope()
     private let editorObservations = ObservationScope()
     private var lineWrappingItem: NSToolbarItemGroup?
+    private var themePopUpButton: NSPopUpButton?
 
     init(model: MiniContentViewModel) {
         self.model = model
@@ -258,8 +259,9 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
 
     private func bindEditorModel() {
         editorObservations.update {
-            model.editorConfiguration.observe(\.lineWrappingEnabled) { [weak self] _ in
+            model.editorConfiguration.observe([\.lineWrappingEnabled, \.colorTheme.id]) { [weak self] in
                 self?.updateLineWrappingItem()
+                self?.updateThemeItem()
             }
             .store(in: editorObservations)
         }
@@ -268,22 +270,41 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     private func renderWindowState() {
         window?.title = model.currentPreset.title
         updateLineWrappingItem()
+        updateThemeItem()
     }
 
     private func updateLineWrappingItem() {
         lineWrappingItem?.setSelected(model.editorConfiguration.lineWrappingEnabled, at: 0)
     }
 
+    private func updateThemeItem() {
+        let selectedRawValue = model.selectedThemePreset.rawValue
+        for item in themePopUpButton?.itemArray ?? [] where item.representedObject as? String == selectedRawValue {
+            themePopUpButton?.select(item)
+            return
+        }
+    }
+
     @objc private func toggleLineWrapping() {
         model.editorConfiguration.lineWrappingEnabled.toggle()
     }
 
+    @objc private func selectThemePreset(_ sender: NSPopUpButton) {
+        guard let rawValue = sender.selectedItem?.representedObject as? String,
+              let preset = SyntaxEditorColorTheme.Preset(rawValue: rawValue)
+        else {
+            return
+        }
+
+        model.selectedThemePreset = preset
+    }
+
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sidebarTrackingSeparator, .flexibleSpace, .lineWrapping]
+        [.sidebarTrackingSeparator, .flexibleSpace, .theme, .lineWrapping]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sidebarTrackingSeparator, .flexibleSpace, .lineWrapping]
+        [.sidebarTrackingSeparator, .flexibleSpace, .theme, .lineWrapping]
     }
 
     func toolbar(
@@ -297,6 +318,26 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
                 splitView: splitViewController.splitView,
                 dividerIndex: 0
             )
+        }
+
+        if itemIdentifier == .theme {
+            let button = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 178, height: 28), pullsDown: false)
+            button.target = self
+            button.action = #selector(selectThemePreset(_:))
+            for preset in SyntaxEditorColorTheme.Preset.allCases {
+                button.addItem(withTitle: preset.displayName)
+                button.lastItem?.representedObject = preset.rawValue
+            }
+            button.setAccessibilityIdentifier("mini.toolbar.theme")
+            themePopUpButton = button
+            updateThemeItem()
+
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Theme"
+            item.paletteLabel = "Theme"
+            item.toolTip = "Select theme"
+            item.view = button
+            return item
         }
 
         guard itemIdentifier == .lineWrapping else { return nil }
@@ -330,6 +371,7 @@ private extension NSToolbar.Identifier {
 }
 
 private extension NSToolbarItem.Identifier {
+    static let theme = NSToolbarItem.Identifier("Theme")
     static let lineWrapping = NSToolbarItem.Identifier("LineWrapping")
 }
 #endif

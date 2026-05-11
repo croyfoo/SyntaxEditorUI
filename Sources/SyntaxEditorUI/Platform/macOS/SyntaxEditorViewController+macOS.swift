@@ -305,6 +305,14 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         applyLineWrappingConfiguration(lineWrappingEnabled: configuration.lineWrappingEnabled)
     }
 
+    public override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateEditorBackgroundColor()
+        updateTypingAttributes()
+        reapplyCachedHighlight()
+        applyMatchingBracketHighlight()
+    }
+
     public override func tile() {
         super.tile()
         guard isScrollViewConfigured, !isApplyingLineWrappingConfiguration else { return }
@@ -456,7 +464,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func configureScrollView() {
-        scrollView.drawsBackground = false
+        scrollView.drawsBackground = true
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = !configuration.lineWrappingEnabled
@@ -467,8 +475,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
     private func configureTextView() {
         textView.delegate = self
-        textView.backgroundColor = .clear
-        textView.drawsBackground = false
+        textView.drawsBackground = true
+        updateEditorBackgroundColor()
         textView.isEditable = configuration.isEditable
         textView.allowsUndo = true
         textView.isRichText = false
@@ -606,6 +614,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             applyBaseForegroundColorChange(from: previousColorTheme, to: colorTheme)
         }
         lastAppliedColorTheme = colorTheme
+        updateEditorBackgroundColor()
 
         if textView.isEditable != isEditable {
             textView.isEditable = isEditable
@@ -639,9 +648,15 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         guard textRange.length > 0 else { return }
 
         var rangesToUpdate: [NSRange] = []
+        let previousBaseForeground = previousColorTheme
+            .resolved(for: configuration.language, appearance: currentThemeAppearance)
+            .baseForeground
+        let nextBaseForeground = colorTheme
+            .resolved(for: configuration.language, appearance: currentThemeAppearance)
+            .baseForeground
         unsafe textStorage.enumerateAttribute(.foregroundColor, in: textRange) { value, range, _ in
             guard let color = value as? NSColor,
-                  color.isEqual(previousColorTheme.baseForeground)
+                  color.isEqual(previousBaseForeground)
             else {
                 return
             }
@@ -652,7 +667,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         textStorage.beginEditing()
         for range in rangesToUpdate {
-            textStorage.addAttribute(.foregroundColor, value: colorTheme.baseForeground, range: range)
+            textStorage.addAttribute(.foregroundColor, value: nextBaseForeground, range: range)
         }
         textStorage.endEditing()
     }
@@ -1064,7 +1079,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             guard clamped.length > 0 else { continue }
             textStorage.addAttribute(
                 .backgroundColor,
-                value: NSColor.syntaxEditorAlpha(configuration.colorTheme.bracketBackground, alpha: 0.24),
+                value: NSColor.syntaxEditorAlpha(resolvedColorTheme().bracketBackground, alpha: 0.24),
                 range: clamped
             )
         }
@@ -1074,17 +1089,48 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
-        [
-            .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
-            .foregroundColor: configuration.colorTheme.baseForeground,
+        let fallbackFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let theme = resolvedColorTheme()
+        return [
+            .font: fallbackFont,
+            .foregroundColor: theme.baseForeground,
         ]
     }
 
     private func styleAttributes(for captureName: String) -> [NSAttributedString.Key: Any] {
-        guard let color = SyntaxEditorHighlightTheme.color(for: captureName, in: configuration.colorTheme) else {
+        guard let style = SyntaxEditorHighlightTheme.style(
+            for: captureName,
+            in: configuration.colorTheme,
+            language: configuration.language,
+            appearance: currentThemeAppearance
+        ) else {
             return [:]
         }
-        return [.foregroundColor: color]
+
+        var attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: style.foreground,
+        ]
+        if let tokenFont = style.font?.platformFont(fallback: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)) {
+            attributes[.font] = tokenFont
+        }
+        return attributes
+    }
+
+    private var currentThemeAppearance: SyntaxEditorThemeAppearance {
+        effectiveAppearance.syntaxEditorThemeAppearance
+    }
+
+    private func resolvedColorTheme() -> SyntaxEditorResolvedColorTheme {
+        (lastAppliedColorTheme ?? configuration.colorTheme).resolved(
+            for: configuration.language,
+            appearance: currentThemeAppearance
+        )
+    }
+
+    private func updateEditorBackgroundColor() {
+        let color = resolvedColorTheme().background
+        scrollView.backgroundColor = color
+        textView.backgroundColor = color
     }
 
     private func applyLineWrappingConfiguration(lineWrappingEnabled: Bool) {
@@ -1293,6 +1339,27 @@ private extension NSColor {
             }
             return resolvedColor
         }
+    }
+}
+
+private extension NSAppearance {
+    var syntaxEditorThemeAppearance: SyntaxEditorThemeAppearance {
+        let match = bestMatch(from: [
+            .darkAqua,
+            .accessibilityHighContrastDarkAqua,
+            .vibrantDark,
+            .accessibilityHighContrastVibrantDark,
+            .aqua,
+            .accessibilityHighContrastAqua,
+            .vibrantLight,
+            .accessibilityHighContrastVibrantLight,
+        ])
+        return match == .darkAqua
+            || match == .accessibilityHighContrastDarkAqua
+            || match == .vibrantDark
+            || match == .accessibilityHighContrastVibrantDark
+            ? .dark
+            : .light
     }
 }
 
