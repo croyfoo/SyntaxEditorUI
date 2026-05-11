@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reference Preview</title>
+    <style>
+    :root {
+        --brand-accent: #007aff;
+    }
+
+    body {
+        margin: 0;
+        min-height: 100vh;
+        color: #1d1d1f;
+        background: linear-gradient(135deg, #eef4ff 0%, #fff8ea 52%, #f4fff5 100%);
+    }
+
+    .page {
+        max-width: 760px;
+        margin: 0 auto;
+    }
+
+    nav a[aria-current="page"] {
+        border-color: rgba(0, 122, 255, 0.55);
+        color: var(--brand-accent);
+    }
+    </style>
+</head>
+<body>
+    <!-- Reference sample for markup, style, and script highlighting. -->
+    <main class="page" id="hero">
+        <nav aria-label="Primary">
+            <a href="/" aria-current="page">Overview</a>
+            <a href="/details">Details</a>
+        </nav>
+        <section data-state="ready">
+            <h1>Reference Preview</h1>
+            <p>Theme coverage sample.</p>
+            <button type="button" disabled>Open</button>
+            <template id="row-template">
+                <article class="card" data-kind="reference">
+                    <h2>Generated Row</h2>
+                </article>
+            </template>
+            <svg viewBox="0 0 32 32" role="img" aria-label="Status">
+                <circle cx="16" cy="16" r="12" fill="currentColor" />
+            </svg>
+        </section>
+    </main>
+    <script>
+    const state = { enabled: true, count: 2 };
+
+    function renderLabel(item) {
+        return `Item ${item.count}`;
+    }
+
+    console.log(renderLabel(state));
+    </script>
+</body>
+</html>

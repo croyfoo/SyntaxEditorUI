@@ -42,7 +42,10 @@ let package = Package(
                 .product(name: "TreeSitterXML", package: "tree-sitter-xml"),
             ],
             resources: [
+                .copy("Resources/CSSQueries"),
+                .copy("Resources/HTMLQueries"),
                 .copy("Resources/ObjectiveCQueries"),
+                .copy("Resources/SwiftQueries"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

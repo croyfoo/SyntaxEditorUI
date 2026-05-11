@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "AB5455722F73E81C002604FB"
-               BuildableName = "Mini.app"
+               BuildableName = "SyntaxPreview.app"
                BlueprintName = "Mini"
                ReferencedContainer = "container:Mini.xcodeproj">
             </BuildableReference>
@@ -45,7 +45,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "AB5455722F73E81C002604FB"
-            BuildableName = "Mini.app"
+            BuildableName = "SyntaxPreview.app"
             BlueprintName = "Mini"
             ReferencedContainer = "container:Mini.xcodeproj">
          </BuildableReference>
@@ -62,7 +62,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "AB5455722F73E81C002604FB"
-            BuildableName = "Mini.app"
+            BuildableName = "SyntaxPreview.app"
             BlueprintName = "Mini"
             ReferencedContainer = "container:Mini.xcodeproj">
          </BuildableReference>

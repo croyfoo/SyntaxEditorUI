@@ -159,6 +159,7 @@ private final class SyntaxHighlightSession {
     private var layer: LanguageLayer?
     private let lineIndex = SyntaxHighlightLineIndex()
     private var tokens: [SyntaxHighlightToken] = []
+    private var swiftSymbols = SwiftCurrentFileSymbolTable()
 
     init(language: SyntaxLanguage, setup: HighlightingSetup) {
         self.language = language
@@ -173,6 +174,7 @@ private final class SyntaxHighlightSession {
         guard !layeredSource.isEmpty else {
             layer = nil
             tokens = []
+            swiftSymbols = SwiftCurrentFileSymbolTable()
             return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
         }
 
@@ -181,9 +183,11 @@ private final class SyntaxHighlightSession {
             layer.replaceContent(with: layeredSource)
             self.layer = layer
             tokens = highlightTokens(in: fullRange(for: layeredSource), source: layeredSource)
+            classifySwiftTokensIfNeeded(source: layeredSource)
         } catch {
             layer = nil
             tokens = []
+            swiftSymbols = SwiftCurrentFileSymbolTable()
         }
 
         return SyntaxHighlightResult(
@@ -286,13 +290,17 @@ private final class SyntaxHighlightSession {
         layeredSource = nextLayeredSource
         lineIndex.apply(mutation: layeredMutation, previousSource: previousLayeredSource)
         tokens = mergedHighlight.tokens
+        let refreshRange = mergedHighlight.refreshRange
+        if language == .swift {
+            classifySwiftTokensIfNeeded(source: nextLayeredSource, refreshRange: refreshRange)
+        }
 
         return SyntaxHighlightResult(
             tokens: tokens,
             source: nextSource,
             language: language,
             revision: revision,
-            refreshRange: mergedHighlight.refreshRange
+            refreshRange: refreshRange
         )
     }
 }
@@ -334,7 +342,7 @@ private extension SyntaxHighlightSession {
                 }
                 return SyntaxHighlightToken(range: range, captureName: $0.name)
             }
-                .sorted(by: Self.highlightTokenDisplayOrder)
+                .sorted(by: SyntaxHighlightTokenOrdering.displayOrder)
         } catch {
             return []
         }
@@ -464,25 +472,22 @@ private extension SyntaxHighlightSession {
             }
         }
 
-        return ((before + replacementTokens + after).sorted(by: highlightTokenDisplayOrder), refreshRange)
+        return ((before + replacementTokens + after).sorted(by: SyntaxHighlightTokenOrdering.displayOrder), refreshRange)
     }
 
-    static func highlightTokenDisplayOrder(_ lhs: SyntaxHighlightToken, _ rhs: SyntaxHighlightToken) -> Bool {
-        if lhs.range.location != rhs.range.location {
-            return lhs.range.location < rhs.range.location
+    func classifySwiftTokensIfNeeded(source: String, refreshRange: NSRange? = nil) {
+        guard language == .swift else {
+            swiftSymbols = SwiftCurrentFileSymbolTable()
+            return
         }
 
-        let lhsSpecificity = lhs.captureName.split(separator: ".").count
-        let rhsSpecificity = rhs.captureName.split(separator: ".").count
-        if lhsSpecificity != rhsSpecificity {
-            return lhsSpecificity < rhsSpecificity
-        }
-
-        if lhs.range.length != rhs.range.length {
-            return lhs.range.length > rhs.range.length
-        }
-
-        return lhs.captureName < rhs.captureName
+        let classified = SwiftCurrentFileSymbolTable.classify(
+            tokens: tokens,
+            source: source,
+            refreshRange: refreshRange
+        )
+        tokens = classified.tokens
+        swiftSymbols = classified.symbols
     }
 
     static func oldRange(

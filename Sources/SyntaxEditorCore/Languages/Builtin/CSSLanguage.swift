@@ -11,6 +11,7 @@ struct CSSLanguage {
         SyntaxTreeSitterSupport(
             name: "CSS",
             bundleName: "TreeSitterCSS_TreeSitterCSS",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_css()) }
         )
     }
@@ -29,6 +30,19 @@ struct CSSLanguage {
         let clampedLocation = max(0, min(location, nsSource.length))
         let prefix = nsSource.substring(to: clampedLocation)
         return PrefixAnalyzer(text: prefix).analysis.isInsideLiteralOrComment
+    }
+}
+
+private extension CSSLanguage {
+    static var queryDirectories: [URL] {
+        guard let queriesURL = Bundle.module.resourceURL?.appendingPathComponent(
+            "CSSQueries",
+            isDirectory: true
+        ) else {
+            return []
+        }
+
+        return [queriesURL]
     }
 }
 

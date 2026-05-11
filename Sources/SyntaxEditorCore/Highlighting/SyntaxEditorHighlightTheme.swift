@@ -279,7 +279,7 @@ package struct SyntaxEditorResolvedColorTheme {
     package var baseForeground: SyntaxEditorColor { base.foreground }
 
     package func style(for captureName: String) -> SyntaxEditorResolvedTextStyle? {
-        switch SyntaxEditorHighlightTheme.tokenCategory(for: captureName.lowercased()) {
+        switch SyntaxEditorHighlightTheme.tokenCategory(for: captureName) {
         case .comment: comment
         case .string: string
         case .keyword: keyword
@@ -390,12 +390,46 @@ package enum SyntaxEditorHighlightTheme {
         theme.style(for: captureName, language: language, appearance: appearance)
     }
 
-    fileprivate static func tokenCategory(for name: String) -> TokenCategory? {
+    package static func semanticStyleKeys(
+        for captureName: String,
+        language: SyntaxLanguage? = nil
+    ) -> [String]? {
+        SyntaxHighlightStyleKeyResolver.styleKeys(for: captureName, language: language)
+    }
+
+    fileprivate static func tokenCategory(for captureName: String) -> TokenCategory? {
+        let name = captureName.lowercased()
         if name.hasPrefix("comment") {
             return .comment
         }
         if name.hasPrefix("string") || name.contains("regex") {
             return .string
+        }
+        if name.hasPrefix("declaration.swift.type.name")
+            || name.hasPrefix("identifier.swift.project.type")
+            || name.hasPrefix("identifier.swift.other.type")
+        {
+            return .type
+        }
+        if name.hasPrefix("declaration.swift")
+            || name.hasPrefix("identifier.swift.project.function")
+            || name.hasPrefix("identifier.swift.other.function")
+            || name.hasPrefix("identifier.swift.project.macro")
+            || name.hasPrefix("identifier.swift.other.macro")
+        {
+            return .function
+        }
+        if name.hasPrefix("identifier.swift.project.constant")
+            || name.hasPrefix("identifier.swift.other.constant")
+        {
+            return .constant
+        }
+        if name.hasPrefix("identifier.swift.project.property")
+            || name.hasPrefix("identifier.swift.other.property")
+            || name.hasPrefix("identifier.swift.argument.label")
+            || name.hasPrefix("identifier.swift.local")
+        {
+            return .variable
         }
         if name.hasPrefix("keyword")
             || name.hasPrefix("operator")
@@ -412,7 +446,12 @@ package enum SyntaxEditorHighlightTheme {
         if name.hasPrefix("function") || name.hasPrefix("method") || name.hasPrefix("constructor") {
             return .function
         }
-        if name.hasPrefix("type") || name.hasPrefix("tag") || name.hasPrefix("namespace") {
+        if name.hasPrefix("type")
+            || name.hasPrefix("tag")
+            || name.hasPrefix("selector.css.element")
+            || name.hasPrefix("selector.css.universal")
+            || name.hasPrefix("namespace")
+        {
             return .type
         }
         if name.hasPrefix("constant") || name.hasPrefix("boolean") || name.hasPrefix("literal") {
@@ -447,66 +486,341 @@ package enum SyntaxEditorHighlightTheme {
     }
 }
 
-enum BuiltInEditorColorThemeStore {
-    static func resolvedTheme(
-        for preset: SyntaxEditorColorTheme.Preset,
-        language: SyntaxLanguage?,
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorResolvedColorTheme {
-        let pair = pair(for: preset)
-        return SyntaxEditorResolvedColorTheme(
-            background: pair.backgroundColor(appearance: appearance),
-            bracketBackground: fallbackBracketBackground(appearance: appearance),
-            base: pair.style(for: .base, language: language, appearance: appearance),
-            comment: pair.style(for: .comment, language: language, appearance: appearance),
-            string: pair.style(for: .string, language: language, appearance: appearance),
-            keyword: pair.style(for: .keyword, language: language, appearance: appearance),
-            number: pair.style(for: .number, language: language, appearance: appearance),
-            function: pair.style(for: .function, language: language, appearance: appearance),
-            type: pair.style(for: .type, language: language, appearance: appearance),
-            constant: pair.style(for: .constant, language: language, appearance: appearance),
-            variable: pair.style(for: .variable, language: language, appearance: appearance),
-            punctuation: pair.style(for: .punctuation, language: language, appearance: appearance)
-        )
-    }
-
-    static func style(
-        for captureName: String,
-        preset: SyntaxEditorColorTheme.Preset,
-        language: SyntaxLanguage?,
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorResolvedTextStyle? {
-        let pair = pair(for: preset)
+private enum SyntaxHighlightStyleKeyResolver {
+    static func styleKeys(for captureName: String, language: SyntaxLanguage?) -> [String]? {
         let name = captureName.lowercased()
-        guard SyntaxEditorHighlightTheme.tokenCategory(for: name) != nil else {
-            return nil
+
+        if let keys = cssStyleKeys(for: name) {
+            return keys
         }
-        return pair.style(
-            for: styleKeys(for: name, language: language),
-            appearance: appearance
-        )
+        if let keys = htmlStyleKeys(for: name) {
+            return keys
+        }
+        if shouldResolveSwiftStyleKeys(for: name, language: language),
+           let keys = swiftStyleKeys(for: name) {
+            return keys
+        }
+
+        return commonStyleKeys(for: name, language: language)
     }
 
-    private static func pair(for preset: SyntaxEditorColorTheme.Preset) -> BuiltInEditorColorThemePair {
-        BuiltInEditorColorThemePair(
-            light: definition(for: preset.lightResourceID),
-            dark: definition(for: preset.darkResourceID)
-        )
+    private static func shouldResolveSwiftStyleKeys(for name: String, language: SyntaxLanguage?) -> Bool {
+        language == .swift
+            || name.hasPrefix("declaration.swift")
+            || name.hasPrefix("identifier.swift")
+            || name.hasPrefix("type.swift")
+            || name.hasPrefix("function.swift")
+            || name.hasPrefix("attribute.swift")
+            || name.hasPrefix("keyword.swift")
     }
 
-    private static func definition(for id: String) -> BuiltInEditorColorThemeDefinition {
-        BuiltInEditorColorThemeDefinitions.all[id] ?? BuiltInEditorColorThemeDefinitions.all["defaultLight"]!
+    private static func cssStyleKeys(for name: String) -> [String]? {
+        if name.hasPrefix("selector.css.element") || name.hasPrefix("selector.css.universal") {
+            return [
+                "editor.syntax.css.selector.element",
+                "editor.syntax.identifier.type",
+                "editor.syntax.identifier.class",
+                "editor.syntax.plain",
+            ]
+        }
+        if name.hasPrefix("selector.css.class")
+            || name.hasPrefix("selector.css.id")
+            || name.hasPrefix("selector.css.nesting")
+            || name.hasPrefix("selector.css.pseudoclass")
+            || name.hasPrefix("selector.css.pseudoelement")
+            || name.hasPrefix("selector.css.namespace")
+        {
+            return [
+                "editor.syntax.css.selector",
+                "editor.syntax.identifier.type",
+                "editor.syntax.identifier.class",
+                "editor.syntax.plain",
+            ]
+        }
+        if name.hasPrefix("property.css.name") || name.hasPrefix("property.css.feature") {
+            return [
+                "editor.syntax.css.property.name",
+                "editor.syntax.attribute",
+                "editor.syntax.keyword",
+                "editor.syntax.identifier.variable",
+            ]
+        }
+        if name.hasPrefix("attribute.css.name") {
+            return [
+                "editor.syntax.css.attribute.name",
+                "editor.syntax.attribute",
+                "editor.syntax.identifier.variable",
+            ]
+        }
+        if name.hasPrefix("variable.css.customproperty") {
+            return [
+                "editor.syntax.css.customProperty",
+                "editor.syntax.identifier.variable",
+                "editor.syntax.identifier.constant",
+                "editor.syntax.plain",
+            ]
+        }
+        if name.hasPrefix("function.css.name") {
+            return [
+                "editor.syntax.css.function.name",
+                "editor.syntax.identifier.function",
+                "editor.syntax.identifier.variable",
+            ]
+        }
+        if name.hasPrefix("keyword.css") {
+            return [
+                "editor.syntax.css.atRule",
+                "editor.syntax.keyword",
+                "editor.syntax.preprocessor",
+            ]
+        }
+        if name.hasPrefix("string.css.color") {
+            return [
+                "editor.syntax.css.color",
+                "editor.syntax.string",
+                "editor.syntax.number",
+            ]
+        }
+        if name.hasPrefix("string.css") {
+            return [
+                "editor.syntax.css.string",
+                "editor.syntax.string",
+                "editor.syntax.character",
+            ]
+        }
+        if name.hasPrefix("number.css") {
+            return [
+                "editor.syntax.css.number",
+                "editor.syntax.number",
+            ]
+        }
+        if name.hasPrefix("type.css.unit") {
+            return [
+                "editor.syntax.css.unit",
+                "editor.syntax.identifier.type",
+                "editor.syntax.number",
+            ]
+        }
+
+        return nil
     }
 
-    private static func fallbackBracketBackground(
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorColor {
-        color(light: .init(red: 245, green: 232, blue: 144, alpha: 1),
-              dark: .init(red: 102, green: 92, blue: 43, alpha: 1),
-              appearance: appearance)
+    private static func htmlStyleKeys(for name: String) -> [String]? {
+        if name.hasPrefix("tag.html.error") {
+            return [
+                "editor.syntax.html.tag.error",
+                "editor.syntax.keyword",
+                "editor.syntax.identifier.type",
+            ]
+        }
+        if name.hasPrefix("tag.html.name") {
+            return [
+                "editor.syntax.html.tag.name",
+                "editor.syntax.keyword",
+                "editor.syntax.identifier.type",
+            ]
+        }
+        if name.hasPrefix("attribute.html.name") {
+            return [
+                "editor.syntax.html.attribute.name",
+                "editor.syntax.attribute",
+                "editor.syntax.identifier.variable",
+            ]
+        }
+        if name.hasPrefix("string.html.attributevalue") {
+            return [
+                "editor.syntax.html.attribute.value",
+                "editor.syntax.string",
+                "editor.syntax.character",
+            ]
+        }
+        if name.hasPrefix("constant.html.doctype") {
+            return [
+                "editor.syntax.html.doctype",
+                "editor.syntax.keyword",
+                "editor.syntax.identifier.constant",
+            ]
+        }
+        if name.hasPrefix("punctuation.html.bracket") {
+            return [
+                "editor.syntax.html.bracket",
+                "editor.syntax.plain",
+            ]
+        }
+
+        return nil
     }
 
-    private static func styleKeys(for name: String, language: SyntaxLanguage?) -> [String] {
+    private static func swiftStyleKeys(for name: String) -> [String]? {
+        if name.hasPrefix("comment.documentation.keyword")
+            || name.hasPrefix("comment.doc.keyword")
+        {
+            return ["editor.syntax.comment.doc.keyword", "editor.syntax.comment.doc", "editor.syntax.comment"]
+        }
+        if name.hasPrefix("comment.mark") {
+            return ["editor.syntax.mark", "editor.syntax.comment"]
+        }
+        if name.hasPrefix("declaration.swift.type.name") {
+            return [
+                "editor.syntax.declaration.type",
+                "editor.syntax.identifier.type",
+            ]
+        }
+        if name.hasPrefix("declaration.swift.") {
+            return [
+                "editor.syntax.declaration.other",
+                "editor.syntax.identifier.function",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.project.type") {
+            return [
+                "editor.syntax.identifier.type",
+                "editor.syntax.identifier.class",
+                "editor.syntax.declaration.type",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.other.type") {
+            return [
+                "editor.syntax.identifier.type.system",
+                "editor.syntax.identifier.class.system",
+                "editor.syntax.identifier.type",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.project.function") {
+            return [
+                "editor.syntax.identifier.function",
+                "editor.syntax.declaration.other",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.other.function") {
+            return [
+                "editor.syntax.identifier.function.system",
+                "editor.syntax.identifier.function",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.project.property") {
+            return [
+                "editor.syntax.identifier.variable",
+                "editor.syntax.plain",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.other.property") {
+            return [
+                "editor.syntax.identifier.variable.system",
+                "editor.syntax.identifier.variable",
+                "editor.syntax.plain",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.project.constant") {
+            return [
+                "editor.syntax.identifier.constant",
+                "editor.syntax.identifier.variable",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.other.constant") {
+            return [
+                "editor.syntax.identifier.constant.system",
+                "editor.syntax.identifier.constant",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.project.macro") {
+            return [
+                "editor.syntax.identifier.macro",
+                "editor.syntax.identifier.function",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.other.macro") {
+            return [
+                "editor.syntax.identifier.macro.system",
+                "editor.syntax.identifier.macro",
+            ]
+        }
+        if name.hasPrefix("identifier.swift.argument.label") {
+            return ["editor.syntax.plain"]
+        }
+        if name.hasPrefix("identifier.swift.import.name") {
+            return ["editor.syntax.plain"]
+        }
+        if name.hasPrefix("identifier.swift.local") {
+            return ["editor.syntax.plain"]
+        }
+        if name.hasPrefix("type.swift.reference") {
+            return [
+                "editor.syntax.identifier.type.system",
+                "editor.syntax.identifier.type",
+            ]
+        }
+        if name.hasPrefix("function.swift.call") {
+            return [
+                "editor.syntax.identifier.function.system",
+                "editor.syntax.identifier.function",
+            ]
+        }
+        if name.hasPrefix("function.swift.macro") {
+            return [
+                "editor.syntax.identifier.macro.system",
+                "editor.syntax.identifier.macro",
+            ]
+        }
+        if name.hasPrefix("constructor") {
+            return ["editor.syntax.keyword"]
+        }
+        if name.hasPrefix("keyword.directive") {
+            return [
+                "editor.syntax.preprocessor",
+                "editor.syntax.keyword",
+            ]
+        }
+        if name.hasPrefix("keyword.swift.attribute.builtin") {
+            return ["editor.syntax.keyword"]
+        }
+        if name.hasPrefix("keyword.swift.type.builtin") {
+            return ["editor.syntax.keyword", "editor.syntax.identifier.type.system"]
+        }
+        if name.hasPrefix("attribute.swift.punctuation") {
+            return [
+                "editor.syntax.identifier.type.system",
+                "editor.syntax.attribute",
+            ]
+        }
+        if name.hasPrefix("attribute.swift.name") {
+            return [
+                "editor.syntax.attribute",
+                "editor.syntax.identifier.type.system",
+            ]
+        }
+        if name.hasPrefix("boolean") || name.hasPrefix("constant.builtin") {
+            return ["editor.syntax.keyword", "editor.syntax.identifier.constant"]
+        }
+        if name.hasPrefix("constant.macro") {
+            return [
+                "editor.syntax.identifier.macro.system",
+                "editor.syntax.identifier.macro",
+                "editor.syntax.preprocessor",
+            ]
+        }
+        if name.hasPrefix("operator")
+            || name.hasPrefix("punctuation")
+            || name.hasPrefix("delimiter")
+        {
+            return ["editor.syntax.plain"]
+        }
+        if name == "variable" || name.hasPrefix("variable.parameter") {
+            return ["editor.syntax.plain"]
+        }
+
+        return nil
+    }
+
+    private static func commonStyleKeys(for name: String, language: SyntaxLanguage?) -> [String]? {
+        if name.hasPrefix("comment.documentation.keyword")
+            || name.hasPrefix("comment.doc.keyword")
+        {
+            return ["editor.syntax.comment.doc.keyword", "editor.syntax.comment.doc", "editor.syntax.comment"]
+        }
+        if name.hasPrefix("comment.mark") {
+            return ["editor.syntax.mark", "editor.syntax.comment"]
+        }
         if name.hasPrefix("comment.doc") {
             return ["editor.syntax.comment.doc", "editor.syntax.comment"]
         }
@@ -525,13 +839,20 @@ enum BuiltInEditorColorThemeStore {
         if name.hasPrefix("include") || name.hasPrefix("preproc") {
             return ["editor.syntax.preprocessor", "editor.syntax.keyword"]
         }
-        if name.hasPrefix("keyword") || name.hasPrefix("operator") || name.hasPrefix("storageclass") || name.hasPrefix("exception") {
+        if name.hasPrefix("keyword")
+            || name.hasPrefix("operator")
+            || name.hasPrefix("storageclass")
+            || name.hasPrefix("exception")
+        {
             return ["editor.syntax.keyword"]
         }
         if name.hasPrefix("function.macro") {
             return ["editor.syntax.identifier.macro", "editor.syntax.identifier.function"]
         }
-        if name.hasPrefix("method.call") || name.hasPrefix("function.builtin") || name.hasPrefix("constructor") {
+        if name.hasPrefix("method.call")
+            || name.hasPrefix("function.builtin")
+            || name.hasPrefix("constructor")
+        {
             return language == .objectiveC
                 ? ["editor.syntax.identifier.function.system", "editor.syntax.identifier.function"]
                 : ["editor.syntax.identifier.function"]
@@ -565,12 +886,83 @@ enum BuiltInEditorColorThemeStore {
         if name.hasPrefix("attribute") {
             return ["editor.syntax.attribute", "editor.syntax.identifier.variable"]
         }
-        if name.hasPrefix("parameter") || name.hasPrefix("property") || name.hasPrefix("selector") || name.hasPrefix("variable") || name.hasPrefix("name") {
+        if name.hasPrefix("parameter")
+            || name.hasPrefix("property")
+            || name.hasPrefix("selector")
+            || name.hasPrefix("variable")
+            || name.hasPrefix("name")
+        {
             return language == .objectiveC
                 ? ["editor.syntax.plain"]
                 : ["editor.syntax.identifier.variable", "editor.syntax.identifier.constant", "editor.syntax.plain"]
         }
-        return ["editor.syntax.plain"]
+        if name.hasPrefix("punctuation") || name.hasPrefix("delimiter") {
+            return ["editor.syntax.plain"]
+        }
+
+        return nil
+    }
+}
+
+enum BuiltInEditorColorThemeStore {
+    static func resolvedTheme(
+        for preset: SyntaxEditorColorTheme.Preset,
+        language: SyntaxLanguage?,
+        appearance: SyntaxEditorThemeAppearance?
+    ) -> SyntaxEditorResolvedColorTheme {
+        let pair = pair(for: preset)
+        return SyntaxEditorResolvedColorTheme(
+            background: pair.backgroundColor(appearance: appearance),
+            bracketBackground: fallbackBracketBackground(appearance: appearance),
+            base: pair.style(for: .base, language: language, appearance: appearance),
+            comment: pair.style(for: .comment, language: language, appearance: appearance),
+            string: pair.style(for: .string, language: language, appearance: appearance),
+            keyword: pair.style(for: .keyword, language: language, appearance: appearance),
+            number: pair.style(for: .number, language: language, appearance: appearance),
+            function: pair.style(for: .function, language: language, appearance: appearance),
+            type: pair.style(for: .type, language: language, appearance: appearance),
+            constant: pair.style(for: .constant, language: language, appearance: appearance),
+            variable: pair.style(for: .variable, language: language, appearance: appearance),
+            punctuation: pair.style(for: .punctuation, language: language, appearance: appearance)
+        )
+    }
+
+    static func style(
+        for captureName: String,
+        preset: SyntaxEditorColorTheme.Preset,
+        language: SyntaxLanguage?,
+        appearance: SyntaxEditorThemeAppearance?
+    ) -> SyntaxEditorResolvedTextStyle? {
+        let pair = pair(for: preset)
+        guard let styleKeys = SyntaxEditorHighlightTheme.semanticStyleKeys(
+            for: captureName,
+            language: language
+        ) else {
+            return nil
+        }
+        return pair.style(
+            for: styleKeys,
+            appearance: appearance
+        )
+    }
+
+    private static func pair(for preset: SyntaxEditorColorTheme.Preset) -> BuiltInEditorColorThemePair {
+        BuiltInEditorColorThemePair(
+            light: definition(for: preset.lightResourceID),
+            dark: definition(for: preset.darkResourceID)
+        )
+    }
+
+    private static func definition(for id: String) -> BuiltInEditorColorThemeDefinition {
+        BuiltInEditorColorThemeDefinitions.all[id] ?? BuiltInEditorColorThemeDefinitions.all["defaultLight"]!
+    }
+
+    private static func fallbackBracketBackground(
+        appearance: SyntaxEditorThemeAppearance?
+    ) -> SyntaxEditorColor {
+        color(light: .init(red: 245, green: 232, blue: 144, alpha: 1),
+              dark: .init(red: 102, green: 92, blue: 43, alpha: 1),
+              appearance: appearance)
     }
 
     fileprivate static func color(

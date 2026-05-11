@@ -11,6 +11,7 @@ struct SwiftLanguage {
         SyntaxTreeSitterSupport(
             name: "Swift",
             bundleName: "TreeSitterSwift_TreeSitterSwift",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_swift()) }
         )
     }
@@ -28,6 +29,13 @@ struct SwiftLanguage {
         let clampedLocation = max(0, min(location, nsSource.length))
         let prefix = nsSource.substring(to: clampedLocation)
         return PrefixAnalyzer(text: prefix).analysis.isInsideLiteralOrComment
+    }
+}
+
+private extension SwiftLanguage {
+    static var queryDirectories: [URL] {
+        guard let resourceURL = Bundle.module.resourceURL else { return [] }
+        return [resourceURL.appendingPathComponent("SwiftQueries", isDirectory: true)]
     }
 }
 

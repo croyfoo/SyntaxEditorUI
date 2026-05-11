@@ -11,6 +11,7 @@ struct HTMLLanguage {
         SyntaxTreeSitterSupport(
             name: "HTML",
             bundleName: "TreeSitterHTML_TreeSitterHTML",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_html()) }
         )
     }
@@ -106,6 +107,19 @@ struct HTMLLanguage {
         let prefix = nsSource.substring(to: clampedLocation)
         let analysis = PrefixAnalyzer(text: prefix).analysis
         return analysis.shouldSuppressQuoteAutoPair
+    }
+}
+
+private extension HTMLLanguage {
+    static var queryDirectories: [URL] {
+        guard let queriesURL = Bundle.module.resourceURL?.appendingPathComponent(
+            "HTMLQueries",
+            isDirectory: true
+        ) else {
+            return []
+        }
+
+        return [queriesURL]
     }
 }
 

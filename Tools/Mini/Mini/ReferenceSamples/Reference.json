@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "count": 2,
+  "tags": ["reference", "preview"],
+  "theme": null,
+  "metrics": {
+    "latency": 12.5,
+    "visible": false
+  }
+}

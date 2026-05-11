@@ -11,12 +11,16 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		AB5455732F73E81C002604FB /* Mini.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mini.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB5455732F73E81C002604FB /* SyntaxPreview.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SyntaxPreview.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		AB5455752F73E81C002604FB /* Mini */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			explicitFileTypes = {
+				ReferenceSamples/Reference.m = text;
+				ReferenceSamples/Reference.swift = text;
+			};
 			path = Mini;
 			sourceTree = "<group>";
 		};
@@ -45,7 +49,7 @@
 		AB5455742F73E81C002604FB /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AB5455732F73E81C002604FB /* Mini.app */,
+				AB5455732F73E81C002604FB /* SyntaxPreview.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -72,8 +76,8 @@
 			packageProductDependencies = (
 				F0A200000000000000000003 /* SyntaxEditorUI */,
 			);
-			productName = Mini;
-			productReference = AB5455732F73E81C002604FB /* Mini.app */;
+			productName = SyntaxPreview;
+			productReference = AB5455732F73E81C002604FB /* SyntaxPreview.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -280,8 +284,8 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.syntaxeditorui.mini;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.syntaxeditorui.syntaxpreview;
+				PRODUCT_NAME = SyntaxPreview;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -321,8 +325,8 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.syntaxeditorui.mini;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.syntaxeditorui.syntaxpreview;
+				PRODUCT_NAME = SyntaxPreview;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
