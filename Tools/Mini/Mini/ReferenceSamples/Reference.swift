@@ -23,6 +23,9 @@ struct Clamped<Value: Comparable> {
     }
     let range: ClosedRange<Value>
 
+    isolated deinit {
+    }
+
     init(wrappedValue: Value, _ range: ClosedRange<Value>) {
         self.range = range
         self.wrappedValue = min(max(wrappedValue, range.lowerBound), range.upperBound)

@@ -362,6 +362,8 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
         targetRange: NSRange
     ) -> [SyntaxHighlightToken] {
         precedenceGroupKeywordTokens(in: source, existingTokens: existingTokens, targetRange: targetRange)
+            + contextualKeywordTokens(in: source, existingTokens: existingTokens, targetRange: targetRange)
+            + compilerDirectiveKeywordTokens(in: source, existingTokens: existingTokens, targetRange: targetRange)
             + compilerDirectiveLineTokens(in: source, existingTokens: existingTokens, targetRange: targetRange)
             + availabilityKeywordTokens(in: source, existingTokens: existingTokens, targetRange: targetRange)
     }
@@ -713,6 +715,44 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
                 return SyntaxHighlightToken(range: tokenRange, captureName: captureName)
             }
         }
+    }
+
+    private static func contextualKeywordTokens(
+        in source: String,
+        existingTokens: [SyntaxHighlightToken],
+        targetRange: NSRange
+    ) -> [SyntaxHighlightToken] {
+        regexTokens(
+            pattern: #"(?m)(?:^[ \t]*|[{\n;][ \t]*)(defer)(?=[ \t]*\{)"#,
+            captureGroup: 1,
+            captureName: "keyword.swift.statement.reserved",
+            in: source,
+            ranges: [targetRange],
+            existingTokens: existingTokens
+        )
+        + regexTokens(
+            pattern: #"\bisolated\b(?=[ \t]+deinit\b)"#,
+            captureGroup: 0,
+            captureName: "keyword.swift.modifier.contextual",
+            in: source,
+            ranges: [targetRange],
+            existingTokens: existingTokens
+        )
+    }
+
+    private static func compilerDirectiveKeywordTokens(
+        in source: String,
+        existingTokens: [SyntaxHighlightToken],
+        targetRange: NSRange
+    ) -> [SyntaxHighlightToken] {
+        regexTokens(
+            pattern: #"(?m)^[ \t]*(#(?:if|elseif|else|endif))\b"#,
+            captureGroup: 1,
+            captureName: "keyword.directive",
+            in: source,
+            ranges: [targetRange],
+            existingTokens: existingTokens
+        )
     }
 
     private static func compilerDirectiveLineTokens(

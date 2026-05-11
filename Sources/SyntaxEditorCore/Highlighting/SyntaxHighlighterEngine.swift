@@ -337,7 +337,9 @@ private extension SyntaxHighlightSession {
                 guard let range = Self.utf16Range(
                     fromByteRange: $0.tsRange.bytes,
                     sourceUTF16Length: sourceUTF16Length
-                ) else {
+                ),
+                    range.length > 0
+                else {
                     return nil
                 }
                 return SyntaxHighlightToken(range: range, captureName: $0.name)

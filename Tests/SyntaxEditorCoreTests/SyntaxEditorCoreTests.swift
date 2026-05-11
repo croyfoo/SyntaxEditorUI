@@ -3689,6 +3689,8 @@ struct SyntaxHighlighterEngineTests {
         }
 
         let effectiveExpectations: [(text: String, capture: String, styleKey: String, occurrence: String)] = [
+            ("isolated", "keyword.swift.modifier.contextual", "editor.syntax.keyword", "isolated deinit"),
+            ("defer", "keyword.swift.statement.reserved", "editor.syntax.keyword", "defer { state = .ready }"),
             ("#if", "keyword.directive", "editor.syntax.preprocessor", "#if os(iOS)"),
             ("iOS", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if os(iOS)"),
             ("macOS", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif os(macOS)"),
@@ -3700,6 +3702,7 @@ struct SyntaxHighlighterEngineTests {
             ("&&", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
             ("compiler", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
             ("6.0", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("#if", "keyword.directive", "editor.syntax.preprocessor", "#if canImport(UIKit"),
             ("#", "keyword.swift.availability.punctuation", "editor.syntax.keyword", "if #available(macOS"),
             ("#available", "keyword.swift.availability", "editor.syntax.keyword", "if #available(macOS"),
         ]
@@ -3716,7 +3719,15 @@ struct SyntaxHighlighterEngineTests {
             #expect(snapshot.styleKeys.first == expectation.styleKey)
         }
 
-        #expect(tokens.allSatisfy { $0.range.length > 0 })
+        let zeroLengthTokens = tokens.filter { $0.range.length == 0 }
+        if zeroLengthTokens.isEmpty == false {
+            let nsSource = source as NSString
+            let details = zeroLengthTokens.map { token in
+                "\(token.range.location):\(nsSource.substring(with: token.range)):\(token.captureName)"
+            }
+            Issue.record("Zero-length tokens: \(details.joined(separator: ", "))")
+        }
+        #expect(zeroLengthTokens.isEmpty)
     }
 
     @Test("SyntaxHighlighterEngine classifies Swift directive condition operators")
@@ -3737,6 +3748,7 @@ struct SyntaxHighlighterEngineTests {
             ("#if", "keyword.directive", "editor.syntax.preprocessor", "#if !DEBUG"),
             ("!", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if !DEBUG"),
             ("DEBUG", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("#elseif", "keyword.directive", "editor.syntax.preprocessor", "#elseif canImport(UIKit"),
             ("canImport", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif canImport(UIKit"),
             ("_version", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "_version: 17.0"),
             (":", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "_version: 17.0"),
@@ -3770,7 +3782,16 @@ struct SyntaxHighlighterEngineTests {
             let async = 1
             let get = 2
             let left = 3
-            return async + get + left
+            let `defer` = 4
+            return async + get + left + `defer`
+        }
+
+        struct KeywordMembers {
+            var `defer`: Int
+        }
+
+        func read(_ value: KeywordMembers) -> Int {
+            value.defer
         }
 
         precedencegroup ContextualPrecedence {
@@ -3785,6 +3806,8 @@ struct SyntaxHighlighterEngineTests {
             ("async", "let async = 1"),
             ("get", "let get = 2"),
             ("left", "let left = 3"),
+            ("defer", "let `defer` = 4"),
+            ("defer", "value.defer"),
         ] {
             let names = captureNames(
                 in: tokens,
