@@ -1046,7 +1046,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             guard intersection.length > 0 else { continue }
 
             var attributes = base
-            for (key, value) in styleAttributes(for: token.captureName) {
+            for (key, value) in styleAttributes(for: token.syntaxID, language: token.language) {
                 attributes[key] = value
             }
             textStorage.setAttributes(attributes, range: intersection)
@@ -1097,11 +1097,14 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         ]
     }
 
-    private func styleAttributes(for captureName: String) -> [NSAttributedString.Key: Any] {
+    private func styleAttributes(
+        for syntaxID: EditorSourceSyntaxID,
+        language: SyntaxLanguage?
+    ) -> [NSAttributedString.Key: Any] {
         guard let style = SyntaxEditorHighlightTheme.style(
-            for: captureName,
+            for: syntaxID,
             in: configuration.colorTheme,
-            language: configuration.language,
+            language: language ?? configuration.language,
             appearance: currentThemeAppearance
         ) else {
             return [:]

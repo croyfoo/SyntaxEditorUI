@@ -1,19 +1,20 @@
 import Foundation
 
-struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
+// Adds Swift-specific semantic overlays that Tree-sitter captures do not
+// provide directly. This does not resolve project or same-file symbols.
+enum SwiftSyntaxOverlayClassifier {
     static func classify(
         tokens: [SyntaxHighlightToken],
         source: String,
         refreshRange: NSRange? = nil
-    ) -> (tokens: [SyntaxHighlightToken], symbols: SwiftCurrentFileSymbolTable) {
-        let symbols = SwiftCurrentFileSymbolTable()
+    ) -> [SyntaxHighlightToken] {
         let nsSource = source as NSString
         let classificationRange = refreshRange.map {
             lineEnvelopeRange(containing: $0, in: nsSource)
         }
         let declarationRanges = Set(
             tokens
-                .filter { $0.captureName.lowercased().hasPrefix("declaration.swift.") }
+                .filter { $0.rawCaptureName.lowercased().hasPrefix("declaration.swift.") }
                 .map { rangeKey($0.range) }
         )
 
@@ -34,7 +35,7 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
             let text = nsSource.substring(with: token.range)
             guard text.isEmpty == false else { return token }
 
-            let captureName = token.captureName.lowercased()
+            let captureName = token.rawCaptureName.lowercased()
             let nextCaptureName: String?
             if shouldTreatAsPlainAttributeArgument(text, token: token, captureName: captureName, in: nsSource) {
                 nextCaptureName = "identifier.swift.argument.label"
@@ -71,7 +72,7 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
             }
 
             guard let nextCaptureName else { return token }
-            return SyntaxHighlightToken(range: token.range, captureName: nextCaptureName)
+            return SyntaxHighlightToken(range: token.range, rawCaptureName: nextCaptureName)
         }
 
         let augmented = classified + semanticOverlayTokens(
@@ -79,7 +80,7 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
             existingTokens: classified,
             targetRange: classificationRange
         )
-        return (deduplicated(augmented.sorted(by: SyntaxHighlightTokenOrdering.displayOrder)), symbols)
+        return deduplicated(augmented.sorted(by: SyntaxHighlightTokenOrdering.displayOrder))
     }
 
     private static func rangeKey(_ range: NSRange) -> String {
@@ -92,7 +93,7 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
         unique.reserveCapacity(tokens.count)
 
         for token in tokens {
-            let key = "\(rangeKey(token.range)):\(token.captureName)"
+            let key = "\(rangeKey(token.range)):\(token.rawCaptureName)"
             guard seen.insert(key).inserted else { continue }
             unique.append(token)
         }
@@ -271,7 +272,7 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
 
             if trimmed.hasPrefix("// MARK:"),
                let markRange = substringRange("MARK:", in: nsSource, lineRange: clampedLineRange) {
-                tokens.append(SyntaxHighlightToken(range: markRange, captureName: "comment.mark"))
+                tokens.append(SyntaxHighlightToken(range: markRange, rawCaptureName: "comment.mark"))
             }
 
             if trimmed.hasPrefix("///") || trimmed.hasPrefix("/**") || trimmed.hasPrefix("*") {
@@ -281,7 +282,7 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
                     }
                     tokens.append(SyntaxHighlightToken(
                         range: NSRange(location: keywordRange.location, length: keyword.utf16.count),
-                        captureName: "comment.documentation.keyword"
+                        rawCaptureName: "comment.documentation.keyword"
                     ))
                 }
             }
@@ -352,7 +353,7 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
         }
 
         return regex.matches(in: source as String, range: lineRange).map {
-            SyntaxHighlightToken(range: $0.range, captureName: "text.uri")
+            SyntaxHighlightToken(range: $0.range, rawCaptureName: "text.uri")
         }
     }
 
@@ -374,19 +375,19 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
         targetRange: NSRange
     ) -> [SyntaxHighlightToken] {
         typeDeclarations(in: source, existingTokens: existingTokens, targetRange: targetRange).map {
-            SyntaxHighlightToken(range: $0.range, captureName: "declaration.swift.type.name")
+            SyntaxHighlightToken(range: $0.range, rawCaptureName: "declaration.swift.type.name")
         }
         + functionDeclarations(in: source, existingTokens: existingTokens, targetRange: targetRange).map {
-            SyntaxHighlightToken(range: $0.range, captureName: "declaration.swift.function.name")
+            SyntaxHighlightToken(range: $0.range, rawCaptureName: "declaration.swift.function.name")
         }
         + typeAliasLikeDeclarations(in: source, existingTokens: existingTokens, targetRange: targetRange).map {
-            SyntaxHighlightToken(range: $0.range, captureName: "declaration.swift.other.name")
+            SyntaxHighlightToken(range: $0.range, rawCaptureName: "declaration.swift.other.name")
         }
         + macroDeclarations(in: source, existingTokens: existingTokens, targetRange: targetRange).map {
-            SyntaxHighlightToken(range: $0.range, captureName: "declaration.swift.macro.name")
+            SyntaxHighlightToken(range: $0.range, rawCaptureName: "declaration.swift.macro.name")
         }
         + precedenceGroupDeclarations(in: source, existingTokens: existingTokens, targetRange: targetRange).map {
-            SyntaxHighlightToken(range: $0.range, captureName: "declaration.swift.type.name")
+            SyntaxHighlightToken(range: $0.range, rawCaptureName: "declaration.swift.type.name")
         }
     }
 
@@ -443,11 +444,11 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
             return [
                 SyntaxHighlightToken(
                     range: punctuationRange,
-                    captureName: "keyword.swift.attribute.builtin.punctuation"
+                    rawCaptureName: "keyword.swift.attribute.builtin.punctuation"
                 ),
                 SyntaxHighlightToken(
                     range: nameRange,
-                    captureName: "keyword.swift.attribute.builtin"
+                    rawCaptureName: "keyword.swift.attribute.builtin"
                 ),
             ]
         }
@@ -712,7 +713,7 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
                 else {
                     return nil
                 }
-                return SyntaxHighlightToken(range: tokenRange, captureName: captureName)
+                return SyntaxHighlightToken(range: tokenRange, rawCaptureName: captureName)
             }
         }
     }
@@ -902,7 +903,7 @@ struct SwiftCurrentFileSymbolTable: Equatable, Sendable {
         existingTokens: [SyntaxHighlightToken]
     ) -> Bool {
         existingTokens.contains { token in
-            let captureName = token.captureName.lowercased()
+            let captureName = token.rawCaptureName.lowercased()
             guard captureName.hasPrefix("comment")
                 || captureName.hasPrefix("string")
                 || captureName.contains("regex")
@@ -928,8 +929,8 @@ enum SyntaxHighlightTokenOrdering {
             return lhs.range.location < rhs.range.location
         }
 
-        let lhsSpecificity = lhs.captureName.split(separator: ".").count
-        let rhsSpecificity = rhs.captureName.split(separator: ".").count
+        let lhsSpecificity = lhs.rawCaptureName.split(separator: ".").count
+        let rhsSpecificity = rhs.rawCaptureName.split(separator: ".").count
         if lhsSpecificity != rhsSpecificity {
             return lhsSpecificity < rhsSpecificity
         }
@@ -938,13 +939,13 @@ enum SyntaxHighlightTokenOrdering {
             return lhs.range.length > rhs.range.length
         }
 
-        let lhsPriority = renderPriority(lhs.captureName)
-        let rhsPriority = renderPriority(rhs.captureName)
+        let lhsPriority = renderPriority(lhs.rawCaptureName)
+        let rhsPriority = renderPriority(rhs.rawCaptureName)
         if lhsPriority != rhsPriority {
             return lhsPriority < rhsPriority
         }
 
-        return lhs.captureName < rhs.captureName
+        return lhs.rawCaptureName < rhs.rawCaptureName
     }
 
     private static func renderPriority(_ captureName: String) -> Int {

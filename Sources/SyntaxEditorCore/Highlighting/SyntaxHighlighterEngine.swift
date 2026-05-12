@@ -4,13 +4,40 @@ import SwiftTreeSitterLayer
 
 package struct SyntaxHighlightToken: Equatable, Sendable {
     package let range: NSRange
-    package let captureName: String
+    package let syntaxID: EditorSourceSyntaxID
+    package let language: SyntaxLanguage?
+    package let rawCaptureName: String
 
-    package init(range: NSRange, captureName: String) {
-        self.range = range
-        self.captureName = captureName
+    package init(
+        range: NSRange,
+        rawCaptureName: String,
+        language: SyntaxLanguage = .swift,
+        tokenText: String = ""
+    ) {
+        let classification = TreeSitterCaptureClassifier.classify(
+            rawCaptureName: rawCaptureName,
+            tokenText: tokenText,
+            rootLanguage: language
+        )
+        self.init(
+            range: range,
+            syntaxID: classification.syntaxID,
+            language: classification.language ?? language,
+            rawCaptureName: rawCaptureName
+        )
     }
 
+    package init(
+        range: NSRange,
+        syntaxID: EditorSourceSyntaxID,
+        language: SyntaxLanguage?,
+        rawCaptureName: String
+    ) {
+        self.range = range
+        self.syntaxID = syntaxID
+        self.language = language
+        self.rawCaptureName = rawCaptureName
+    }
 }
 
 package struct SyntaxHighlightMutation: Equatable, Sendable {
@@ -159,7 +186,6 @@ private final class SyntaxHighlightSession {
     private var layer: LanguageLayer?
     private let lineIndex = SyntaxHighlightLineIndex()
     private var tokens: [SyntaxHighlightToken] = []
-    private var swiftSymbols = SwiftCurrentFileSymbolTable()
 
     init(language: SyntaxLanguage, setup: HighlightingSetup) {
         self.language = language
@@ -174,7 +200,6 @@ private final class SyntaxHighlightSession {
         guard !layeredSource.isEmpty else {
             layer = nil
             tokens = []
-            swiftSymbols = SwiftCurrentFileSymbolTable()
             return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
         }
 
@@ -187,7 +212,6 @@ private final class SyntaxHighlightSession {
         } catch {
             layer = nil
             tokens = []
-            swiftSymbols = SwiftCurrentFileSymbolTable()
         }
 
         return SyntaxHighlightResult(
@@ -330,6 +354,7 @@ private extension SyntaxHighlightSession {
 
         do {
             let sourceUTF16Length = source.utf16.count
+            let nsSource = source as NSString
             return try layer.highlights(
                 in: range,
                 provider: source.predicateTextProvider
@@ -342,7 +367,18 @@ private extension SyntaxHighlightSession {
                 else {
                     return nil
                 }
-                return SyntaxHighlightToken(range: range, captureName: $0.name)
+                let tokenText = nsSource.substring(with: range)
+                let classification = TreeSitterCaptureClassifier.classify(
+                    rawCaptureName: $0.name,
+                    tokenText: tokenText,
+                    rootLanguage: language
+                )
+                return SyntaxHighlightToken(
+                    range: range,
+                    syntaxID: classification.syntaxID,
+                    language: classification.language ?? language,
+                    rawCaptureName: $0.name
+                )
             }
                 .sorted(by: SyntaxHighlightTokenOrdering.displayOrder)
         } catch {
@@ -466,7 +502,12 @@ private extension SyntaxHighlightSession {
             ) else {
                 continue
             }
-            let adjustedToken = SyntaxHighlightToken(range: adjustedRange, captureName: token.captureName)
+            let adjustedToken = SyntaxHighlightToken(
+                range: adjustedRange,
+                syntaxID: token.syntaxID,
+                language: token.language,
+                rawCaptureName: token.rawCaptureName
+            )
             if adjustedRange.location < refreshedRange.location {
                 before.append(adjustedToken)
             } else {
@@ -479,17 +520,14 @@ private extension SyntaxHighlightSession {
 
     func classifySwiftTokensIfNeeded(source: String, refreshRange: NSRange? = nil) {
         guard language == .swift else {
-            swiftSymbols = SwiftCurrentFileSymbolTable()
             return
         }
 
-        let classified = SwiftCurrentFileSymbolTable.classify(
+        tokens = SwiftSyntaxOverlayClassifier.classify(
             tokens: tokens,
             source: source,
             refreshRange: refreshRange
         )
-        tokens = classified.tokens
-        swiftSymbols = classified.symbols
     }
 
     static func oldRange(

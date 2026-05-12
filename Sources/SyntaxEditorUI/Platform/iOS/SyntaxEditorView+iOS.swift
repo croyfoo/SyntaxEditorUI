@@ -1573,7 +1573,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             guard intersection.length > 0 else { continue }
 
             var attributes = base
-            for (key, value) in styleAttributes(for: token.captureName) {
+            for (key, value) in styleAttributes(for: token.syntaxID, language: token.language) {
                 attributes[key] = value
             }
             storage.setAttributes(attributes, range: intersection)
@@ -1703,11 +1703,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         storage.endEditing()
     }
 
-    func styleAttributes(for captureName: String) -> [NSAttributedString.Key: Any] {
+    func styleAttributes(
+        for syntaxID: EditorSourceSyntaxID,
+        language: SyntaxLanguage?
+    ) -> [NSAttributedString.Key: Any] {
         guard let style = SyntaxEditorHighlightTheme.style(
-            for: captureName,
+            for: syntaxID,
             in: lastAppliedColorTheme,
-            language: configuration.language,
+            language: language ?? configuration.language,
             appearance: currentThemeAppearance
         ) else {
             return [:]

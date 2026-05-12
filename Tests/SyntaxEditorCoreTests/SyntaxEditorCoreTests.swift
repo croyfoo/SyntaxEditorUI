@@ -47,13 +47,14 @@ private func sortHighlightTokens(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHig
         if $0.range.length != $1.range.length {
             return $0.range.length < $1.range.length
         }
-        return $0.captureName < $1.captureName
+        return $0.rawCaptureName < $1.rawCaptureName
     }
 }
 
 private struct HighlightSemanticSnapshot {
     let text: String
-    let captureName: String
+    let rawCaptureName: String
+    let syntaxID: EditorSourceSyntaxID
     let styleKeys: [String]
     let resolvedStyle: SyntaxEditorResolvedTextStyle
 }
@@ -67,6 +68,22 @@ private func referenceSampleText(named filename: String) throws -> String {
         .appendingPathComponent("Tools/Mini/Mini/ReferenceSamples", isDirectory: true)
         .appendingPathComponent(filename)
     return try String(contentsOf: sampleURL, encoding: .utf8)
+}
+
+private func semanticStyleKeysForCapture(
+    _ captureName: String,
+    tokenText: String = "",
+    language: SyntaxLanguage
+) -> [String]? {
+    let classification = TreeSitterCaptureClassifier.classify(
+        rawCaptureName: captureName,
+        tokenText: tokenText,
+        rootLanguage: language
+    )
+    return SyntaxEditorHighlightTheme.semanticStyleKeys(
+        for: classification.syntaxID,
+        language: classification.language ?? language
+    )
 }
 
 private func semanticSnapshot(
@@ -88,14 +105,14 @@ private func semanticSnapshot(
     let expectedRange = nsSource.range(of: text, options: [], range: searchRange)
     #expect(expectedRange.location != NSNotFound)
     let matchedToken = tokens.first {
-        $0.captureName == captureName
+        $0.rawCaptureName == captureName
             && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0
     }
     if matchedToken == nil {
         let nearby = tokens
             .filter { SyntaxEditorRangeUtilities.intersection(of: $0.range, and: searchRange).length > 0 }
             .map { token in
-                "\(nsSource.substring(with: token.range)):\(token.captureName)"
+                "\(nsSource.substring(with: token.range)):\(token.rawCaptureName)"
             }
             .joined(separator: ", ")
         Issue.record("Could not find \(captureName) for \(text) in \(containingText ?? source). Nearby: \(nearby)")
@@ -103,18 +120,19 @@ private func semanticSnapshot(
     let token = try #require(matchedToken)
     let tokenText = nsSource.substring(with: token.range)
     let styleKeys = try #require(SyntaxEditorHighlightTheme.semanticStyleKeys(
-        for: token.captureName,
+        for: token.syntaxID,
         language: language
     ))
     let style = try #require(SyntaxEditorHighlightTheme.style(
-        for: token.captureName,
+        for: token.syntaxID,
         in: .default,
         language: language,
         appearance: .dark
     ))
     return HighlightSemanticSnapshot(
         text: tokenText,
-        captureName: token.captureName,
+        rawCaptureName: token.rawCaptureName,
+        syntaxID: token.syntaxID,
         styleKeys: styleKeys,
         resolvedStyle: style
     )
@@ -134,7 +152,7 @@ private func captureNames(
 
     return tokens
         .filter { SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0 }
-        .map(\.captureName)
+        .map(\.rawCaptureName)
 }
 
 private func effectiveSemanticSnapshot(
@@ -157,7 +175,7 @@ private func effectiveSemanticSnapshot(
         let nearby = tokens
             .filter { SyntaxEditorRangeUtilities.intersection(of: $0.range, and: searchRange).length > 0 }
             .map { token in
-                "\(nsSource.substring(with: token.range)):\(token.captureName)"
+                "\(nsSource.substring(with: token.range)):\(token.rawCaptureName)"
             }
             .joined(separator: ", ")
         Issue.record("Could not find effective token for \(text) in \(containingText). Nearby: \(nearby)")
@@ -166,18 +184,19 @@ private func effectiveSemanticSnapshot(
     let token = try #require(matchedToken)
     let tokenText = nsSource.substring(with: token.range)
     let styleKeys = try #require(SyntaxEditorHighlightTheme.semanticStyleKeys(
-        for: token.captureName,
+        for: token.syntaxID,
         language: language
     ))
     let style = try #require(SyntaxEditorHighlightTheme.style(
-        for: token.captureName,
+        for: token.syntaxID,
         in: .default,
         language: language,
         appearance: .dark
     ))
     return HighlightSemanticSnapshot(
         text: tokenText,
-        captureName: token.captureName,
+        rawCaptureName: token.rawCaptureName,
+        syntaxID: token.syntaxID,
         styleKeys: styleKeys,
         resolvedStyle: style
     )
@@ -285,27 +304,25 @@ struct SyntaxEditorCoreTests {
         )
         let customResolved = custom.resolved(for: .swift, appearance: .light)
 
-        #expect(SyntaxEditorHighlightTheme.color(for: "keyword.control", in: theme, language: .swift, appearance: .light) == resolved.keyword.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "string.quoted", in: theme, language: .swift, appearance: .light) == resolved.string.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "constructor", in: theme, language: .swift, appearance: .light) == resolved.keyword.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "variable.parameter", in: theme, language: .swift, appearance: .light) == resolved.base.foreground)
-        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "type.swift.reference", language: .swift)?.first == "editor.syntax.identifier.type.system")
-        #expect(SyntaxEditorHighlightTheme.color(for: "number", in: theme, language: .swift, appearance: .light) == resolved.number.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "punctuation.delimiter", in: theme, language: .swift, appearance: .light) == resolved.base.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "declaration.swift.type.name", in: custom, language: .swift, appearance: .light) == customResolved.type.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "declaration.swift.other.name", in: custom, language: .swift, appearance: .light) == customResolved.function.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "identifier.swift.project.function", in: custom, language: .swift, appearance: .light) == customResolved.function.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "identifier.swift.project.constant", in: custom, language: .swift, appearance: .light) == customResolved.constant.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "identifier.swift.project.property", in: custom, language: .swift, appearance: .light) == customResolved.variable.foreground)
-        #expect(SyntaxEditorHighlightTheme.color(for: "identifier.swift.import.name", in: custom, language: .swift, appearance: .light) == nil)
-        #expect(SyntaxEditorHighlightTheme.color(for: "unknown.capture", in: theme) == nil)
+        #expect(SyntaxEditorHighlightTheme.color(for: .keyword, in: theme, language: .swift, appearance: .light) == resolved.keyword.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .string, in: theme, language: .swift, appearance: .light) == resolved.string.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .plain, in: theme, language: .swift, appearance: .light) == resolved.base.foreground)
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: .identifierTypeSystem, language: .swift)?.first == "editor.syntax.identifier.type.system")
+        #expect(SyntaxEditorHighlightTheme.color(for: .number, in: theme, language: .swift, appearance: .light) == resolved.number.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .declarationType, in: custom, language: .swift, appearance: .light) == customResolved.type.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .declarationOther, in: custom, language: .swift, appearance: .light) == customResolved.function.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .identifierFunctionSystem, in: custom, language: .swift, appearance: .light) == customResolved.function.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .identifierConstantSystem, in: custom, language: .swift, appearance: .light) == customResolved.constant.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .identifierVariableSystem, in: custom, language: .swift, appearance: .light) == customResolved.variable.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .plain, in: custom, language: .swift, appearance: .light) == nil)
+        #expect(SyntaxEditorHighlightTheme.color(for: "unknown.capture", in: theme, language: .swift, appearance: .light) == resolved.base.foreground)
     }
 
     @Test("SyntaxEditorHighlightTheme resolves language-specific built-in styles")
     func syntaxEditorHighlightThemeLanguageSpecificStyles() {
         let theme = SyntaxEditorColorTheme.default
         let swiftStyle = SyntaxEditorHighlightTheme.style(
-            for: "variable",
+            for: .plain,
             in: theme,
             language: .swift,
             appearance: .light
@@ -314,7 +331,7 @@ struct SyntaxEditorCoreTests {
         #expect(swiftStyle?.foreground == swiftResolved.baseForeground)
 
         let objectiveCStyle = SyntaxEditorHighlightTheme.style(
-            for: "variable",
+            for: .plain,
             in: theme,
             language: .objectiveC,
             appearance: .light
@@ -326,132 +343,166 @@ struct SyntaxEditorCoreTests {
     @Test("SyntaxEditorHighlightTheme resolves semantic keys for language-specific captures")
     func syntaxEditorHighlightThemeSemanticStyleKeys() throws {
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "property.css.name",
-                language: .css
-            )?.first == "editor.syntax.keyword"
+            semanticStyleKeysForCapture("property.css.name", language: .css)?.first
+                == "editor.syntax.keyword"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "tag.html.name",
-                language: .html
-            )?.first == "editor.syntax.keyword"
+            semanticStyleKeysForCapture("tag.html.name", language: .html)?.first
+                == "editor.syntax.keyword"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "function.swift.macro",
-                language: .swift
-            )?.first == "editor.syntax.identifier.macro.system"
+            semanticStyleKeysForCapture("function.swift.macro", language: .swift)?.first
+                == "editor.syntax.identifier.macro.system"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "declaration.swift.type.name",
-                language: .swift
-            )?.first == "editor.syntax.declaration.type"
+            semanticStyleKeysForCapture("constant.macro", language: .swift)?.first
+                == "editor.syntax.identifier.macro.system"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "identifier.swift.project.type",
-                language: .swift
-            )?.first == "editor.syntax.identifier.type"
+            semanticStyleKeysForCapture("declaration.swift.type.name", language: .swift)?.first
+                == "editor.syntax.declaration.type"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "identifier.swift.other.type",
-                language: .swift
-            )?.first == "editor.syntax.identifier.type.system"
+            semanticStyleKeysForCapture("identifier.swift.project.type", language: .swift)?.first
+                == "editor.syntax.identifier.type.system"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "comment.documentation.keyword",
-                language: .swift
-            )?.first == "editor.syntax.comment.doc.keyword"
+            semanticStyleKeysForCapture("identifier.swift.other.type", language: .swift)?.first
+                == "editor.syntax.identifier.type.system"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "comment.mark",
-                language: .swift
-            )?.first == "editor.syntax.mark"
+            semanticStyleKeysForCapture("comment.documentation.keyword", language: .swift)?.first
+                == "editor.syntax.comment.doc.keyword"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "keyword.directive",
-                language: .swift
-            )?.first == "editor.syntax.preprocessor"
+            semanticStyleKeysForCapture("comment.documentation", language: .javascript)?.first
+                == "editor.syntax.comment.doc"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "keyword.directive.condition.swift",
-                language: .swift
-            )?.first == "editor.syntax.preprocessor"
+            semanticStyleKeysForCapture("comment.doc", language: .json)?.first
+                == "editor.syntax.comment.doc"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "keyword.swift.availability",
-                language: .swift
-            )?.first == "editor.syntax.keyword"
+            semanticStyleKeysForCapture("comment.mark", language: .swift)?.first
+                == "editor.syntax.mark"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "constructor",
-                language: .swift
-            )?.first == "editor.syntax.keyword"
+            semanticStyleKeysForCapture("keyword.directive", language: .swift)?.first
+                == "editor.syntax.preprocessor"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "attribute.swift.punctuation",
-                language: .swift
-            )?.first == "editor.syntax.identifier.type.system"
+            semanticStyleKeysForCapture("keyword.directive.condition.swift", language: .swift)?.first
+                == "editor.syntax.preprocessor"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "constant.builtin",
-                language: .swift
-            )?.first == "editor.syntax.keyword"
+            semanticStyleKeysForCapture("keyword.swift.availability", language: .swift)?.first
+                == "editor.syntax.keyword"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "constant.builtin",
-                language: .json
-            )?.first == "editor.syntax.keyword"
+            semanticStyleKeysForCapture("constructor", language: .swift)?.first
+                == "editor.syntax.keyword"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "operator",
-                language: .javascript
-            )?.first == "editor.syntax.plain"
+            semanticStyleKeysForCapture("attribute.swift.punctuation", language: .swift)?.first
+                == "editor.syntax.identifier.type.system"
         )
         #expect(
-            SyntaxEditorHighlightTheme.semanticStyleKeys(
-                for: "operator",
-                language: .swift
-            )?.first == "editor.syntax.plain"
+            semanticStyleKeysForCapture("constant.builtin", language: .swift)?.first
+                == "editor.syntax.keyword"
         )
-        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "unknown.capture", language: .css) == nil)
+        #expect(
+            semanticStyleKeysForCapture("constant.builtin", language: .json)?.first
+                == "editor.syntax.keyword"
+        )
+        #expect(
+            semanticStyleKeysForCapture("boolean", language: .javascript)?.first
+                == "editor.syntax.keyword"
+        )
+        #expect(
+            semanticStyleKeysForCapture("variable.builtin", language: .html)?.first
+                == "editor.syntax.plain"
+        )
+        #expect(
+            semanticStyleKeysForCapture("property.identifier", language: .html)?.first
+                == "editor.syntax.plain"
+        )
+        #expect(
+            semanticStyleKeysForCapture("boolean", language: .objectiveC)?.first
+                == "editor.syntax.keyword"
+        )
+        #expect(
+            semanticStyleKeysForCapture("type.qualifier", language: .objectiveC)?.first
+                == "editor.syntax.keyword"
+        )
+        #expect(
+            semanticStyleKeysForCapture("exception", language: .objectiveC)?.first
+                == "editor.syntax.keyword"
+        )
+        #expect(
+            semanticStyleKeysForCapture("variable", language: .objectiveC)?.first
+                == "editor.syntax.plain"
+        )
+        #expect(
+            semanticStyleKeysForCapture("markup.raw", language: .xml)?.first
+                == "editor.syntax.string"
+        )
+        #expect(
+            semanticStyleKeysForCapture("markup.heading", language: .xml)?.first
+                == "editor.syntax.keyword"
+        )
+        #expect(
+            semanticStyleKeysForCapture("markup.link", language: .xml)?.first
+                == "editor.syntax.url"
+        )
+        #expect(
+            semanticStyleKeysForCapture("escape", language: .json)?.first
+                == "editor.syntax.character"
+        )
+        #expect(
+            semanticStyleKeysForCapture("character.special", language: .swift)?.first
+                == "editor.syntax.character"
+        )
+        #expect(
+            semanticStyleKeysForCapture("operator", language: .javascript)?.first
+                == "editor.syntax.plain"
+        )
+        #expect(
+            semanticStyleKeysForCapture("operator", language: .swift)?.first
+                == "editor.syntax.plain"
+        )
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: EditorSourceSyntaxID("unknown.capture"), language: .css)?.last == "editor.syntax.plain")
     }
 
     @Test("Generated language syntax definitions cover supported languages")
     func generatedLanguageSyntaxDefinitionsCoverSupportedLanguages() throws {
-        #expect(Set(BuiltInEditorLanguageSyntaxDefinitions.all.keys) == Set(SyntaxLanguage.allCases))
+        #expect(Set(BuiltInEditorSourceSyntaxDefinitions.all.keys) == Set(SyntaxLanguage.allCases))
 
-        let swift = try #require(BuiltInEditorLanguageSyntaxDefinitions.all[.swift])
+        let swift = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.swift])
         #expect(swift.fileExtensions.contains("swift"))
-        #expect(swift.syntaxTypeSuffixes.contains("declaration.precedencegroup"))
-        #expect(swift.ruleSyntaxTypeSuffixes["swift.precedencegroup"] == ["declaration.precedencegroup"])
-        #expect(swift.ruleSyntaxTypeSuffixes["swift.preprocessor.line"] == ["preprocessor"])
+        #expect(swift.rootRuleIdentifier == "swift")
+        #expect(swift.syntaxTypes.contains("declaration.precedencegroup"))
+        let swiftRules = Dictionary(uniqueKeysWithValues: swift.rules.map { ($0.identifier, $0) })
+        #expect(swiftRules["swift.precedencegroup"]?.syntaxTypes == ["declaration.precedencegroup"])
+        #expect(swiftRules["swift.preprocessor.line"]?.syntaxTypes == ["preprocessor"])
+        #expect(swift.rules.isEmpty == false)
+        #expect(swift.keywordWords.contains("defer"))
+        #expect(swift.keywordWords.contains("isolated"))
 
-        let html = try #require(BuiltInEditorLanguageSyntaxDefinitions.all[.html])
-        #expect(html.syntaxTypeSuffixes.contains("definition.entity"))
-        #expect(html.ruleSyntaxTypeSuffixes["html.entity.element"] == ["keyword"])
+        let html = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.html])
+        #expect(html.rootRuleIdentifier == "html")
+        #expect(html.syntaxTypes.contains("definition.entity"))
+        let htmlRules = Dictionary(uniqueKeysWithValues: html.rules.map { ($0.identifier, $0) })
+        #expect(htmlRules["html.entity.element"]?.syntaxTypes == ["keyword"])
 
-        let css = try #require(BuiltInEditorLanguageSyntaxDefinitions.all[.css])
-        #expect(css.ruleSyntaxTypeSuffixes["css.style"] == ["definition.style"])
+        let css = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.css])
+        let cssRules = Dictionary(uniqueKeysWithValues: css.rules.map { ($0.identifier, $0) })
+        #expect(cssRules["css.style"]?.syntaxTypes == ["definition.style"])
 
-        #expect(BuiltInEditorTreeSitterCaptureStyleKeyResolver.styleKeys(for: "property", language: .toml)?.first == "editor.syntax.attribute")
-        #expect(BuiltInEditorTreeSitterCaptureStyleKeyResolver.styleKeys(for: "type", language: .toml)?.first == "editor.syntax.plain")
-        #expect(BuiltInEditorTreeSitterCaptureStyleKeyResolver.styleKeys(for: "operator", language: .toml)?.first == "editor.syntax.plain")
-        #expect(BuiltInEditorTreeSitterCaptureStyleKeyResolver.styleKeys(for: "property.css.name", language: .css)?.first == "editor.syntax.keyword")
-        #expect(BuiltInEditorTreeSitterCaptureStyleKeyResolver.styleKeys(for: "tag.html.name", language: .html)?.first == "editor.syntax.keyword")
+        #expect(semanticStyleKeysForCapture("property", language: .toml)?.first == "editor.syntax.attribute")
+        #expect(semanticStyleKeysForCapture("type", language: .toml)?.first == "editor.syntax.plain")
+        #expect(semanticStyleKeysForCapture("operator", language: .toml)?.first == "editor.syntax.plain")
+        #expect(semanticStyleKeysForCapture("property.css.name", language: .css)?.first == "editor.syntax.keyword")
+        #expect(semanticStyleKeysForCapture("tag.html.name", language: .html)?.first == "editor.syntax.keyword")
     }
 
     @Test("Generated source syntax type resolver maps source syntax types")
@@ -470,6 +521,21 @@ struct SyntaxEditorCoreTests {
             BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
                 for: "xcode.syntax.declaration.precedencegroup"
             )?.first == "editor.syntax.declaration.type"
+        )
+        #expect(
+            BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
+                for: "xcode.syntax.definition.style"
+            )?.first == "editor.syntax.identifier.type"
+        )
+        #expect(
+            BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
+                for: "xcode.syntax.entity"
+            )?.first == "editor.syntax.identifier.type"
+        )
+        #expect(
+            BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
+                for: "xcode.syntax.definition.property"
+            )?.first == "editor.syntax.identifier.variable"
         )
         #expect(
             SyntaxEditorHighlightTheme.semanticStyleKeys(
@@ -3669,20 +3735,21 @@ struct SyntaxHighlighterEngineTests {
             let source = try referenceSampleText(named: testCase.filename)
             let tokens = await engine.render(source: source, language: testCase.language)
             let auxiliaryCaptures = Set(["spell"])
-            let unresolvedCaptures = Set(tokens.map(\.captureName))
+            let unresolvedTokens = tokens
                 .filter {
-                    auxiliaryCaptures.contains($0.lowercased()) == false
+                    auxiliaryCaptures.contains($0.rawCaptureName.lowercased()) == false
                         &&
                     SyntaxEditorHighlightTheme.semanticStyleKeys(
-                        for: $0,
-                        language: testCase.language
+                        for: $0.syntaxID,
+                        language: $0.language ?? testCase.language
                     ) == nil
                 }
+                .map { "\($0.rawCaptureName)->\($0.syntaxID.rawValue)" }
                 .sorted()
 
             #expect(
-                unresolvedCaptures.isEmpty,
-                "Unresolved captures for \(testCase.language.rawValue): \(unresolvedCaptures.joined(separator: ", "))"
+                unresolvedTokens.isEmpty,
+                "Unresolved source syntax IDs for \(testCase.language.rawValue): \(unresolvedTokens.joined(separator: ", "))"
             )
         }
     }
@@ -3801,7 +3868,7 @@ struct SyntaxHighlighterEngineTests {
                 language: .swift,
                 inOccurrenceOf: expectation.occurrence
             )
-            #expect(snapshot.captureName == expectation.capture)
+            #expect(snapshot.rawCaptureName == expectation.capture)
             #expect(snapshot.styleKeys.first == expectation.styleKey)
         }
 
@@ -3809,7 +3876,7 @@ struct SyntaxHighlighterEngineTests {
         if zeroLengthTokens.isEmpty == false {
             let nsSource = source as NSString
             let details = zeroLengthTokens.map { token in
-                "\(token.range.location):\(nsSource.substring(with: token.range)):\(token.captureName)"
+                "\(token.range.location):\(nsSource.substring(with: token.range)):\(token.rawCaptureName)"
             }
             Issue.record("Zero-length tokens: \(details.joined(separator: ", "))")
         }
@@ -3855,7 +3922,7 @@ struct SyntaxHighlighterEngineTests {
                 language: .swift,
                 inOccurrenceOf: expectation.occurrence
             )
-            #expect(snapshot.captureName == expectation.capture)
+            #expect(snapshot.rawCaptureName == expectation.capture)
             #expect(snapshot.styleKeys.first == expectation.styleKey)
         }
     }
@@ -3976,7 +4043,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.captureName)" }).count == incremental.tokens.count)
+        #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
     }
 
     @Test("SyntaxHighlighterEngine emits semantic CSS captures for the reference sample")
@@ -4242,7 +4309,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(embeddedJavaScript.styleKeys.first == "editor.syntax.keyword")
         let nsSource = source as NSString
         #expect(tokens.contains {
-            $0.captureName == "string.html.attributeValue"
+            $0.rawCaptureName == "string.html.attributeValue"
                 && nsSource.substring(with: $0.range) == "\"ready\""
         })
         let theme = SyntaxEditorColorTheme.default.resolved(for: .html, appearance: .dark)
@@ -4420,11 +4487,11 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(incremental.tokens == full.tokens)
         #expect(incremental.tokens.contains {
-            $0.captureName.hasPrefix("property") &&
+            $0.rawCaptureName.hasPrefix("property") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
         })
         #expect(incremental.tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
         })
     }
@@ -4658,8 +4725,8 @@ struct SyntaxHighlighterEngineTests {
             language: SyntaxLanguage.swift
         ).tokens
 
-        #expect(javascriptTokens.contains { $0.captureName.hasPrefix("keyword") })
-        #expect(swiftTokens.contains { $0.captureName.hasPrefix("keyword") })
+        #expect(javascriptTokens.contains { $0.rawCaptureName.hasPrefix("keyword") })
+        #expect(swiftTokens.contains { $0.rawCaptureName.hasPrefix("keyword") })
     }
 
     @Test("SyntaxHighlighterEngine returns UTF-16-safe ranges for non-ASCII source")
@@ -4705,23 +4772,23 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            ($0.captureName.hasPrefix("include") || $0.captureName.hasPrefix("preproc"))
+            ($0.rawCaptureName.hasPrefix("include") || $0.rawCaptureName.hasPrefix("preproc"))
                 && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: importRange).length > 0
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword")
+            $0.rawCaptureName.hasPrefix("keyword")
                 && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: interfaceRange).length > 0
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("method")
+            $0.rawCaptureName.hasPrefix("method")
                 && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: methodRange).length > 0
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("comment")
+            $0.rawCaptureName.hasPrefix("comment")
                 && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: commentRange).length > 0
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("string")
+            $0.rawCaptureName.hasPrefix("string")
                 && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stringRange).length > 0
         })
     }
@@ -4743,15 +4810,15 @@ struct SyntaxHighlighterEngineTests {
         let scriptKeywordRange = nsSource.range(of: "const")
 
         #expect(tokens.isEmpty == false)
-        #expect(tokens.contains { $0.captureName.hasPrefix("comment") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("tag") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("attribute") })
+        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("comment") })
+        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("tag") })
+        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("attribute") })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("property") &&
+            $0.rawCaptureName.hasPrefix("property") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
         })
     }
@@ -4771,11 +4838,11 @@ struct SyntaxHighlighterEngineTests {
         let nestedAttributeRange = nsSource.range(of: "class")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("tag") &&
+            $0.rawCaptureName.hasPrefix("tag") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: nestedTagRange).length > 0
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("attribute") &&
+            $0.rawCaptureName.hasPrefix("attribute") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: nestedAttributeRange).length > 0
         })
     }
@@ -4794,10 +4861,10 @@ struct SyntaxHighlighterEngineTests {
         let tokens = await engine.render(source: source, language: SyntaxLanguage.xml)
 
         #expect(tokens.isEmpty == false)
-        #expect(tokens.contains { $0.captureName.hasPrefix("keyword") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("tag") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("property") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("comment") })
+        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("keyword") })
+        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("tag") })
+        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("property") })
+        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("comment") })
     }
 
     @Test("SyntaxHighlighterEngine highlights TOML structures")
@@ -4821,23 +4888,23 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("comment") &&
+            $0.rawCaptureName.hasPrefix("comment") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: commentRange).length > 0
         })
         #expect(tokens.contains {
-            ($0.captureName.hasPrefix("property") || $0.captureName.hasPrefix("type")) &&
+            ($0.rawCaptureName.hasPrefix("property") || $0.rawCaptureName.hasPrefix("type")) &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: propertyRange).length > 0
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("string") &&
+            $0.rawCaptureName.hasPrefix("string") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stringRange).length > 0
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("boolean") &&
+            $0.rawCaptureName.hasPrefix("boolean") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: booleanRange).length > 0
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("number") &&
+            $0.rawCaptureName.hasPrefix("number") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: numberRange).length > 0
         })
     }
@@ -4913,10 +4980,10 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("tag") || $0.captureName.hasPrefix("attribute")
+            $0.rawCaptureName.hasPrefix("tag") || $0.rawCaptureName.hasPrefix("attribute")
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
         } == false)
     }
@@ -4931,11 +4998,11 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
         } == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
         } == false)
     }
@@ -4949,7 +5016,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
         } == false)
     }
@@ -4962,7 +5029,7 @@ struct SyntaxHighlighterEngineTests {
         let answerConstRange = (source as NSString).range(of: "const answer")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: answerConstRange).length > 0
         })
     }
@@ -4975,7 +5042,7 @@ struct SyntaxHighlighterEngineTests {
         let answerConstRange = (source as NSString).range(of: "const answer")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: answerConstRange).length > 0
         })
     }
@@ -4991,7 +5058,7 @@ struct SyntaxHighlighterEngineTests {
         let divRange = (source as NSString).range(of: "<div")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("tag") &&
+            $0.rawCaptureName.hasPrefix("tag") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: divRange).length > 0
         })
     }
@@ -5005,7 +5072,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
         } == false)
     }
@@ -5019,7 +5086,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
+            $0.rawCaptureName.hasPrefix("keyword") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
         } == false)
     }
@@ -5035,7 +5102,7 @@ struct SyntaxHighlighterEngineTests {
         let spanRange = (source as NSString).range(of: "<span")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("tag") &&
+            $0.rawCaptureName.hasPrefix("tag") &&
                 SyntaxEditorRangeUtilities.intersection(of: $0.range, and: spanRange).length > 0
         })
     }
@@ -5059,7 +5126,7 @@ struct SyntaxHighlighterEngineTests {
 
             #expect(tokens.isEmpty == false)
             #expect(tokens.contains {
-                $0.captureName.hasPrefix("keyword") &&
+                $0.rawCaptureName.hasPrefix("keyword") &&
                     SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
             } == false)
         }
@@ -5079,7 +5146,7 @@ struct SyntaxHighlighterEngineTests {
             let constRange = (source as NSString).range(of: "const")
 
             #expect(tokens.contains {
-                $0.captureName.hasPrefix("keyword") &&
+                $0.rawCaptureName.hasPrefix("keyword") &&
                     SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
             })
         }
@@ -5098,7 +5165,7 @@ struct SyntaxHighlighterEngineTests {
             let constRange = (source as NSString).range(of: "const")
 
             #expect(tokens.contains {
-                $0.captureName.hasPrefix("keyword") &&
+                $0.rawCaptureName.hasPrefix("keyword") &&
                     SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
             } == false)
         }

@@ -38,7 +38,7 @@ python3 Tools/EditorSpecSnapshot/generate_highlight_definitions.py
 ```
 
 This rewrites
-`Sources/SyntaxEditorCore/Highlighting/BuiltInEditorLanguageSyntaxDefinitions+Generated.swift`
+`Sources/SyntaxEditorCore/Highlighting/BuiltInEditorSourceSyntaxDefinitions+Generated.swift`
 from the local `.xclangspec` files. It keeps only the SyntaxEditorUI-supported
 languages in package code.
 

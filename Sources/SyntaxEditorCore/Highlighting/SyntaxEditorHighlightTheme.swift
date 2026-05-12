@@ -221,16 +221,16 @@ public struct SyntaxEditorColorTheme: Identifiable, Hashable {
     }
 
     package func style(
-        for captureName: String,
+        for syntaxID: EditorSourceSyntaxID,
         language: SyntaxLanguage?,
         appearance: SyntaxEditorThemeAppearance? = nil
     ) -> SyntaxEditorResolvedTextStyle? {
         switch storage {
         case let .custom(theme):
-            theme.style(for: captureName)
+            theme.style(for: syntaxID)
         case let .preset(preset):
             BuiltInEditorColorThemeStore.style(
-                for: captureName,
+                for: syntaxID,
                 preset: preset,
                 language: language,
                 appearance: appearance
@@ -278,8 +278,8 @@ package struct SyntaxEditorResolvedColorTheme {
 
     package var baseForeground: SyntaxEditorColor { base.foreground }
 
-    package func style(for captureName: String) -> SyntaxEditorResolvedTextStyle? {
-        switch SyntaxEditorHighlightTheme.tokenCategory(for: captureName) {
+    package func style(for syntaxID: EditorSourceSyntaxID) -> SyntaxEditorResolvedTextStyle? {
+        switch EditorSourceSyntaxCategory.category(for: syntaxID) {
         case .comment: comment
         case .string: string
         case .keyword: keyword
@@ -368,13 +368,13 @@ package enum SyntaxEditorFontWeight: String, Sendable {
 
 package enum SyntaxEditorHighlightTheme {
     package static func color(
-        for captureName: String,
+        for syntaxID: EditorSourceSyntaxID,
         in theme: SyntaxEditorColorTheme = .default,
         language: SyntaxLanguage? = nil,
         appearance: SyntaxEditorThemeAppearance? = nil
     ) -> SyntaxEditorColor? {
         style(
-            for: captureName,
+            for: syntaxID,
             in: theme,
             language: language,
             appearance: appearance
@@ -382,124 +382,54 @@ package enum SyntaxEditorHighlightTheme {
     }
 
     package static func style(
-        for captureName: String,
+        for syntaxID: EditorSourceSyntaxID,
         in theme: SyntaxEditorColorTheme = .default,
         language: SyntaxLanguage? = nil,
         appearance: SyntaxEditorThemeAppearance? = nil
     ) -> SyntaxEditorResolvedTextStyle? {
-        theme.style(for: captureName, language: language, appearance: appearance)
+        theme.style(for: syntaxID, language: language, appearance: appearance)
+    }
+
+    package static func color(
+        for sourceSyntaxID: String,
+        in theme: SyntaxEditorColorTheme = .default,
+        language: SyntaxLanguage? = nil,
+        appearance: SyntaxEditorThemeAppearance? = nil
+    ) -> SyntaxEditorColor? {
+        color(
+            for: EditorSourceSyntaxID(sourceSyntaxID),
+            in: theme,
+            language: language,
+            appearance: appearance
+        )
+    }
+
+    package static func style(
+        for sourceSyntaxID: String,
+        in theme: SyntaxEditorColorTheme = .default,
+        language: SyntaxLanguage? = nil,
+        appearance: SyntaxEditorThemeAppearance? = nil
+    ) -> SyntaxEditorResolvedTextStyle? {
+        style(
+            for: EditorSourceSyntaxID(sourceSyntaxID),
+            in: theme,
+            language: language,
+            appearance: appearance
+        )
     }
 
     package static func semanticStyleKeys(
-        for captureName: String,
+        for syntaxID: EditorSourceSyntaxID,
         language: SyntaxLanguage? = nil
     ) -> [String]? {
-        SyntaxHighlightStyleKeyResolver.styleKeys(for: captureName, language: language)
+        BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(for: syntaxID, language: language)
     }
 
-    fileprivate static func tokenCategory(for captureName: String) -> TokenCategory? {
-        let name = captureName.lowercased()
-        if name.hasPrefix("comment") {
-            return .comment
-        }
-        if name.hasPrefix("string") || name.contains("regex") {
-            return .string
-        }
-        if name.hasPrefix("declaration.swift.type.name")
-            || name.hasPrefix("identifier.swift.project.type")
-            || name.hasPrefix("identifier.swift.other.type")
-        {
-            return .type
-        }
-        if name.hasPrefix("declaration.swift")
-            || name.hasPrefix("identifier.swift.project.function")
-            || name.hasPrefix("identifier.swift.other.function")
-            || name.hasPrefix("identifier.swift.project.macro")
-            || name.hasPrefix("identifier.swift.other.macro")
-        {
-            return .function
-        }
-        if name.hasPrefix("identifier.swift.project.constant")
-            || name.hasPrefix("identifier.swift.other.constant")
-        {
-            return .constant
-        }
-        if name.hasPrefix("identifier.swift.project.property")
-            || name.hasPrefix("identifier.swift.other.property")
-            || name.hasPrefix("identifier.swift.argument.label")
-            || name.hasPrefix("identifier.swift.local")
-        {
-            return .variable
-        }
-        if name.hasPrefix("keyword")
-            || name.hasPrefix("operator")
-            || name.hasPrefix("preproc")
-            || name.hasPrefix("include")
-            || name.hasPrefix("storageclass")
-            || name.hasPrefix("exception")
-        {
-            return .keyword
-        }
-        if name.hasPrefix("number") || name.contains("numeric") || name.hasPrefix("text.uri") {
-            return .number
-        }
-        if name.hasPrefix("function") || name.hasPrefix("method") || name.hasPrefix("constructor") {
-            return .function
-        }
-        if name.hasPrefix("type")
-            || name.hasPrefix("tag")
-            || name.hasPrefix("selector.css.element")
-            || name.hasPrefix("selector.css.universal")
-            || name.hasPrefix("namespace")
-        {
-            return .type
-        }
-        if name.hasPrefix("constant") || name.hasPrefix("boolean") || name.hasPrefix("literal") {
-            return .constant
-        }
-        if name.hasPrefix("attribute")
-            || name.hasPrefix("parameter")
-            || name.hasPrefix("property")
-            || name.hasPrefix("selector")
-            || name.hasPrefix("variable")
-            || name.hasPrefix("name")
-        {
-            return .variable
-        }
-        if name.hasPrefix("punctuation") || name.hasPrefix("delimiter") {
-            return .punctuation
-        }
-
-        return nil
-    }
-
-    fileprivate enum TokenCategory {
-        case comment
-        case string
-        case keyword
-        case number
-        case function
-        case type
-        case constant
-        case variable
-        case punctuation
-    }
-}
-
-private enum SyntaxHighlightStyleKeyResolver {
-    static func styleKeys(for captureName: String, language: SyntaxLanguage?) -> [String]? {
-        let name = captureName.lowercased()
-
-        if name.hasPrefix("xcode.syntax.") || name.hasPrefix("editor.syntax."),
-           let keys = BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(for: name, language: language) {
-            return keys
-        }
-
-        if let keys = BuiltInEditorTreeSitterCaptureStyleKeyResolver.styleKeys(for: name, language: language) {
-            return keys
-        }
-
-        return nil
+    package static func semanticStyleKeys(
+        for sourceSyntaxID: String,
+        language: SyntaxLanguage? = nil
+    ) -> [String]? {
+        semanticStyleKeys(for: EditorSourceSyntaxID(sourceSyntaxID), language: language)
     }
 }
 
@@ -527,14 +457,14 @@ enum BuiltInEditorColorThemeStore {
     }
 
     static func style(
-        for captureName: String,
+        for syntaxID: EditorSourceSyntaxID,
         preset: SyntaxEditorColorTheme.Preset,
         language: SyntaxLanguage?,
         appearance: SyntaxEditorThemeAppearance?
     ) -> SyntaxEditorResolvedTextStyle? {
         let pair = pair(for: preset)
         guard let styleKeys = SyntaxEditorHighlightTheme.semanticStyleKeys(
-            for: captureName,
+            for: syntaxID,
             language: language
         ) else {
             return nil

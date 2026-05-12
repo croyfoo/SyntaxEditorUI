@@ -136,9 +136,9 @@ struct SyntaxEditorCorePlatformTests {
     func syntaxEditorHighlightThemeCustomTheme() {
         let theme = customColorTheme()
 
-        #expect(SyntaxEditorHighlightTheme.color(for: "keyword.control", in: theme) == theme.keyword)
-        #expect(SyntaxEditorHighlightTheme.color(for: "string.quoted", in: theme) == theme.string)
-        #expect(SyntaxEditorHighlightTheme.color(for: "constructor", in: theme) == theme.function)
-        #expect(SyntaxEditorHighlightTheme.color(for: "unknown.capture", in: theme) == nil)
+        #expect(SyntaxEditorHighlightTheme.color(for: .keyword, in: theme) == theme.keyword)
+        #expect(SyntaxEditorHighlightTheme.color(for: .string, in: theme) == theme.string)
+        #expect(SyntaxEditorHighlightTheme.color(for: .identifierFunction, in: theme) == theme.function)
+        #expect(SyntaxEditorHighlightTheme.color(for: .plain, in: theme) == nil)
     }
 }
