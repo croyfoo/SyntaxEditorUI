@@ -10,11 +10,15 @@
 (property_name) @property.css.name
 (feature_name) @property.css.feature
 (attribute_name) @attribute.css.name
+(supports_statement (feature_query (feature_name) @property.css.feature.supports))
 
 (pseudo_element_selector (tag_name) @selector.css.pseudoElement)
 (pseudo_class_selector (class_name) @selector.css.pseudoClass)
+(attribute_selector (string_value) @string.css.attributeValue)
 (attribute_selector (plain_value) @string.css.attributeValue)
 
+((function_name) @function.css.name.keyword
+ (#match? @function.css.name.keyword "^(rgba?|hsla?|repeat)$"))
 (function_name) @function.css.name
 
 ((property_name) @variable.css.customProperty
@@ -30,7 +34,10 @@
   "@supports"
   "@keyframes"
 ] @keyword.css.atRule
+"@supports" @keyword.css.supports
+"@keyframes" @keyword.css.keyframes
 (at_keyword) @keyword.css.atRule
+(keyframes_name) @selector.css.keyframesName
 (to) @keyword.css.keyframe
 (from) @keyword.css.keyframe
 (important) @keyword.css.important
@@ -58,7 +65,7 @@
   "or"
   "not"
   "only"
-] @operator
+] @operator.css
 
 [
   "#"
