@@ -609,6 +609,8 @@ struct SyntaxEditorCoreTests {
         let objectiveC = try #require(vocabulariesByLanguage[.objectiveC])
         #expect(objectiveC.attributeWords.contains("@interface"))
         #expect(objectiveC.keywordWords.contains("typedef"))
+        #expect(objectiveC.preprocessorWords.contains("define"))
+        #expect(objectiveC.preprocessorWords.contains("include"))
 
         #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "attribute", language: .toml)?.first == "editor.syntax.attribute")
         #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "plain", language: .toml)?.first == "editor.syntax.plain")
@@ -687,6 +689,24 @@ struct SyntaxEditorCoreTests {
         let objectiveCAttributes = Set(objectiveC.attributeWords).intersection(stableObjectiveCAttributes)
         #expect(Set(quotedStrings(in: try generatedQueryBlock(named: "objectivec-attributes", language: .objectiveC))) == objectiveCAttributes)
 
+        let stableObjectiveCPreprocessorWords: Set<String> = [
+            "define",
+            "elif",
+            "else",
+            "endif",
+            "if",
+            "ifdef",
+            "ifndef",
+            "undef",
+        ]
+        let objectiveCPreprocessorWords = Set(objectiveC.preprocessorWords)
+            .intersection(stableObjectiveCPreprocessorWords)
+            .map { "#\($0)" }
+        #expect(
+            Set(quotedStrings(in: try generatedQueryBlock(named: "objectivec-preprocessor-keywords", language: .objectiveC))) ==
+                Set(objectiveCPreprocessorWords)
+        )
+
         let css = SyntaxLanguage.css.syntaxVocabulary
         let stableCSSAtRules: Set<String> = ["@keyframes", "@supports"]
         let cssAtRules = Set(css.attributeWords).union(["@keyframes", "@supports"]).intersection(stableCSSAtRules)
@@ -712,6 +732,21 @@ struct SyntaxEditorCoreTests {
         #expect(
             SyntaxEditorThemeStyleFallbacks.styleKeys(
                 for: "xcode.syntax.preprocessor"
+            )?.first == "editor.syntax.preprocessor"
+        )
+        #expect(
+            SyntaxEditorThemeStyleFallbacks.styleKeys(
+                for: "xcode.syntax.preprocessor.define"
+            )?.first == "editor.syntax.preprocessor"
+        )
+        #expect(
+            SyntaxEditorThemeStyleFallbacks.styleKeys(
+                for: "xcode.syntax.preprocessor.include"
+            )?.first == "editor.syntax.preprocessor"
+        )
+        #expect(
+            SyntaxEditorThemeStyleFallbacks.styleKeys(
+                for: "xcode.syntax.preprocessor.keyword"
             )?.first == "editor.syntax.preprocessor"
         )
         #expect(
@@ -4985,6 +5020,11 @@ struct SyntaxHighlighterEngineTests {
         let engine = sharedSyntaxHighlighterEngine
         let source = """
         #import <Foundation/Foundation.h>
+        #define ReferenceLog(format, ...) NSLog((@"[Reference] " format), ##__VA_ARGS__)
+        #if defined(DEBUG)
+        #define ReferenceEnabled 1
+        #endif
+
         __attribute__((visibility("default"))) @interface VisibleSample : NSObject
         @end
 
@@ -5004,6 +5044,9 @@ struct SyntaxHighlighterEngineTests {
         let tokens = await engine.render(source: source, language: SyntaxLanguage.objectiveC)
         let nsSource = source as NSString
         let importRange = nsSource.range(of: "#import")
+        let defineRange = nsSource.range(of: "#define")
+        let macroNameRange = nsSource.range(of: "ReferenceLog")
+        let debugMacroRange = nsSource.range(of: "DEBUG")
         let visibleSampleRange = nsSource.range(of: "VisibleSample")
         let interfaceRange = nsSource.range(of: "@interface")
         let methodRange = nsSource.range(of: "greetingFor")
@@ -5012,9 +5055,18 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            ($0.syntaxID == .preprocessor || $0.syntaxID == .keyword)
-                && tokenIntersects($0, range: importRange, language: .objectiveC)
+            tokenIntersects($0, range: importRange, syntaxID: "preprocessor.include", language: .objectiveC)
         })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: defineRange, syntaxID: "preprocessor.keyword", language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: macroNameRange, syntaxID: "preprocessor.define", language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: debugMacroRange, syntaxID: "preprocessor.identifier", language: .objectiveC)
+        })
+        #expect(tokens.contains { tokenIntersects($0, range: defineRange, syntaxID: .keyword, language: .objectiveC) } == false)
         #expect(tokens.contains {
             tokenIntersects($0, range: interfaceRange, syntaxID: .keyword, language: .objectiveC)
         })

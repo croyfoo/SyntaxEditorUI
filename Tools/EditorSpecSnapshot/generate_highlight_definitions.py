@@ -90,6 +90,17 @@ OBJECTIVEC_STABLE_ATTRIBUTE_WORDS = {
     "@try",
 }
 
+OBJECTIVEC_STABLE_PREPROCESSOR_WORDS = {
+    "define",
+    "elif",
+    "else",
+    "endif",
+    "if",
+    "ifdef",
+    "ifndef",
+    "undef",
+}
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate bundled editor syntax vocabularies from local xclangspec files."
@@ -208,8 +219,12 @@ def language_words(rule_vocabularies: list[dict[str, Any]], syntax_filter: str |
     words: set[str] = set()
     for rule in rule_vocabularies:
         syntax_types = set(rule["syntaxTypes"])
-        if syntax_filter and syntax_filter not in syntax_types:
-            continue
+        if syntax_filter:
+            if syntax_filter == "preprocessor":
+                if not any(value == "preprocessor" or value.startswith("preprocessor.") for value in syntax_types):
+                    continue
+            elif syntax_filter not in syntax_types:
+                continue
         words.update(rule["words"])
     return sorted(words)
 
@@ -341,6 +356,19 @@ def generated_block_body(name: str, languages: dict[str, dict[str, Any]]) -> str
         ]
         return "\n".join(lines)
 
+    if name == "objectivec-preprocessor-keywords":
+        values = sorted({
+            f"#{word}"
+            for word in languages["objectiveC"]["preprocessorWords"]
+            if word in OBJECTIVEC_STABLE_PREPROCESSOR_WORDS
+        })
+        lines = [
+            "[",
+            *scm_string_lines(values, "  "),
+            "] @editor.syntax.objectivec.preprocessor.keyword",
+        ]
+        return "\n".join(lines)
+
     if name == "css-at-rules":
         css_words = set(languages["css"]["attributeWords"]) | {"@keyframes", "@supports"}
         values = sorted(css_words.intersection(CSS_STABLE_AT_RULE_WORDS))
@@ -406,6 +434,7 @@ def update_query_blocks(snapshot: dict[str, Any], query_root: Path) -> None:
     for language_case, block_name in [
         ("swift", "swift-attributes"),
         ("objectiveC", "objectivec-attributes"),
+        ("objectiveC", "objectivec-preprocessor-keywords"),
         ("css", "css-at-rules"),
         ("json", "json-literals"),
         ("toml", "toml-literals"),

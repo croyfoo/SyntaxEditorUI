@@ -31,15 +31,20 @@
 "volatile" @editor.syntax.objectivec.keyword
 "while" @editor.syntax.objectivec.keyword
 
-"#define" @editor.syntax.objectivec.keyword
-"#elif" @editor.syntax.objectivec.keyword
-"#else" @editor.syntax.objectivec.keyword
-"#endif" @editor.syntax.objectivec.keyword
-"#if" @editor.syntax.objectivec.keyword
-"#ifdef" @editor.syntax.objectivec.keyword
-"#ifndef" @editor.syntax.objectivec.keyword
-"#include" @editor.syntax.objectivec.keyword
-(preproc_directive) @editor.syntax.objectivec.keyword
+; BEGIN GENERATED EDITOR SYNTAX WORDS: objectivec-preprocessor-keywords
+[
+  "#define"
+  "#elif"
+  "#else"
+  "#endif"
+  "#if"
+  "#ifdef"
+  "#ifndef"
+  "#undef"
+] @editor.syntax.objectivec.preprocessor.keyword
+; END GENERATED EDITOR SYNTAX WORDS: objectivec-preprocessor-keywords
+
+(preproc_directive) @editor.syntax.objectivec.preprocessor.keyword
 
 "--" @editor.syntax.objectivec.plain
 "-" @editor.syntax.objectivec.plain
@@ -81,15 +86,29 @@
     field: (field_identifier) @editor.syntax.objectivec.identifier.function.system))
 (function_declarator
   declarator: (identifier) @editor.syntax.objectivec.identifier.function.system)
-(preproc_function_def
-  name: (identifier) @editor.syntax.objectivec.identifier.function.system)
 
 (comment) @editor.syntax.objectivec.comment
 
 ; Preprocs
 
+(preproc_def) @editor.syntax.objectivec.preprocessor
+(preproc_function_def) @editor.syntax.objectivec.preprocessor
+(preproc_call) @editor.syntax.objectivec.preprocessor
+(preproc_linemarker) @editor.syntax.objectivec.preprocessor
+
+(preproc_def
+  name: (identifier) @editor.syntax.objectivec.preprocessor.define)
+(preproc_function_def
+  name: (identifier) @editor.syntax.objectivec.preprocessor.define
+  parameters: (preproc_params) @editor.syntax.objectivec.preprocessor)
 (preproc_undef
-  name: (_) @editor.syntax.objectivec.identifier.constant) @editor.syntax.objectivec.preprocessor
+  name: (_) @editor.syntax.objectivec.preprocessor.identifier) @editor.syntax.objectivec.preprocessor
+(preproc_ifdef
+  name: (identifier) @editor.syntax.objectivec.preprocessor.identifier)
+(preproc_elifdef
+  name: (identifier) @editor.syntax.objectivec.preprocessor.identifier)
+(preproc_defined
+  (identifier) @editor.syntax.objectivec.preprocessor.identifier)
 
 ; BEGIN GENERATED EDITOR SYNTAX WORDS: objectivec-attributes
 [
@@ -119,8 +138,8 @@
 (module_import "@import" @editor.syntax.objectivec.preprocessor path: (identifier) @editor.syntax.objectivec.identifier.type.system)
 
 ((preproc_include
-  _ @editor.syntax.objectivec.preprocessor path: (_))
-  (#any-of? @editor.syntax.objectivec.preprocessor "#include" "#import"))
+  _ @editor.syntax.objectivec.preprocessor.include path: (_))
+  (#any-of? @editor.syntax.objectivec.preprocessor.include "#include" "#import"))
 
 ; Type Qualifiers
 

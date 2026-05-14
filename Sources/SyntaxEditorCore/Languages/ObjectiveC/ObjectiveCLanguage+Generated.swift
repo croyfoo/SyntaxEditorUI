@@ -240,6 +240,25 @@ extension ObjectiveCLanguage {
             "@throw",
             "@try",
         ]),
-        preprocessorWords: Set([])
+        preprocessorWords: Set([
+            "assert",
+            "define",
+            "defined",
+            "elif",
+            "else",
+            "endif",
+            "error",
+            "if",
+            "ifdef",
+            "ifndef",
+            "import",
+            "include",
+            "include_next",
+            "line",
+            "pragma",
+            "unassert",
+            "undef",
+            "warning",
+        ])
     )
 }
