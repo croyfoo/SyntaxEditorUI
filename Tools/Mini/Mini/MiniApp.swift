@@ -254,9 +254,8 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
 
     private func bindModel() {
         configurationObservations.update {
-            model.observe([\.currentPresetID, \.editorDocument, \.editorConfiguration]) { [weak self] in
+            model.observe(\.currentPresetID) { [weak self] _ in
                 self?.renderWindowState()
-                self?.bindEditorModel()
             }
             .store(in: configurationObservations)
         }

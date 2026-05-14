@@ -38,9 +38,8 @@ final class MiniSplitViewController: UISplitViewController {
 
     private func bindModel() {
         configurationObservations.update {
-            model.observe([\.currentPresetID, \.editorDocument, \.editorConfiguration]) { [weak self] in
+            model.observe(\.currentPresetID) { [weak self] _ in
                 self?.renderDetail()
-                self?.bindEditorModel()
             }
             .store(in: configurationObservations)
         }
@@ -208,7 +207,7 @@ final class MiniSplitViewController: NSSplitViewController {
 
     private func bindModel() {
         configurationObservations.update {
-            model.observe([\.currentPresetID, \.editorDocument, \.editorConfiguration]) { [weak self] in
+            model.observe(\.currentPresetID) { [weak self] _ in
                 self?.renderDetail()
             }
             .store(in: configurationObservations)
