@@ -2,11 +2,12 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterHTML
 
-struct HTMLLanguage {
+struct HTMLLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "html" }
+    var language: SyntaxLanguage { .html }
     var displayName: String { "HTML" }
+    var aliases: Set<String> { ["html", "htm"] }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "HTML",
@@ -112,14 +113,7 @@ struct HTMLLanguage {
 
 private extension HTMLLanguage {
     static var queryDirectories: [URL] {
-        guard let queriesURL = Bundle.module.resourceURL?.appendingPathComponent(
-            "HTMLQueries",
-            isDirectory: true
-        ) else {
-            return []
-        }
-
-        return [queriesURL]
+        BundledLanguageQueryResources.directories(named: "HTMLQueries")
     }
 }
 

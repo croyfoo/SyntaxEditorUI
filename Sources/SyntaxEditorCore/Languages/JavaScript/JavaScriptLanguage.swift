@@ -2,11 +2,12 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterJavaScript
 
-struct JavaScriptLanguage {
+struct JavaScriptLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "javascript" }
+    var language: SyntaxLanguage { .javascript }
     var displayName: String { "JavaScript" }
+    var aliases: Set<String> { ["javascript", "js"] }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "JavaScript",
@@ -34,8 +35,7 @@ struct JavaScriptLanguage {
 
 private extension JavaScriptLanguage {
     static var queryDirectories: [URL] {
-        guard let resourceURL = Bundle.module.resourceURL else { return [] }
-        return [resourceURL.appendingPathComponent("JavaScriptQueries", isDirectory: true)]
+        BundledLanguageQueryResources.directories(named: "JavaScriptQueries")
     }
 }
 

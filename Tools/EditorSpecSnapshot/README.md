@@ -31,18 +31,18 @@ python3 Tools/EditorSpecSnapshot/xclangspec_snapshot.py \
 
 Use `--all-languages` only when investigating unsupported languages.
 
-## Generate package highlight definitions
+## Generate package syntax vocabularies
 
 ```bash
 python3 Tools/EditorSpecSnapshot/generate_highlight_definitions.py
 ```
 
-This rewrites
-`Sources/SyntaxEditorCore/Highlighting/BuiltInEditorSourceSyntaxDefinitions+Generated.swift`
-from the local `.xclangspec` files and refreshes generated word-list blocks in
-the bundled `highlights.scm` resources. Package runtime code keeps only the
-SyntaxEditorUI-supported vocabulary and theme fallback metadata; Tree-sitter
-node matching stays in handwritten query patterns.
+This rewrites the `*Language+Generated.swift` files in each
+`Sources/SyntaxEditorCore/Languages/<Language>/` directory from the local
+`.xclangspec` files and refreshes generated word-list blocks in the bundled
+`highlights.scm` resources. Package runtime code keeps only the
+SyntaxEditorUI-supported vocabulary; theme fallback and Tree-sitter node
+matching stay in handwritten source.
 
 ## Extract SourceModel parse items
 

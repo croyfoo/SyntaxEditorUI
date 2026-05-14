@@ -422,7 +422,7 @@ package enum SyntaxEditorHighlightTheme {
         for syntaxID: EditorSourceSyntaxID,
         language: SyntaxLanguage? = nil
     ) -> [String]? {
-        BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(for: syntaxID, language: language)
+        SyntaxEditorThemeStyleFallbacks.styleKeys(for: syntaxID, language: language)
     }
 
     package static func semanticStyleKeys(

@@ -144,6 +144,27 @@ private func canonicalCaptureLanguageName(for language: SyntaxLanguage) -> Strin
     }
 }
 
+private func languageImplementationDirectoryName(for language: SyntaxLanguage) -> String {
+    switch language {
+    case .css:
+        "CSS"
+    case .html:
+        "HTML"
+    case .javascript:
+        "JavaScript"
+    case .json:
+        "JSON"
+    case .objectiveC:
+        "ObjectiveC"
+    case .swift:
+        "Swift"
+    case .toml:
+        "TOML"
+    case .xml:
+        "XML"
+    }
+}
+
 private func captureNames(inQuerySource source: String) -> [String] {
     var captures: [String] = []
     var index = source.startIndex
@@ -558,11 +579,16 @@ struct SyntaxEditorCoreTests {
         }
     }
 
-    @Test("Generated language syntax definitions cover supported languages")
-    func generatedLanguageSyntaxDefinitionsCoverSupportedLanguages() throws {
-        #expect(Set(BuiltInEditorSourceSyntaxDefinitions.all.keys) == Set(SyntaxLanguage.allCases))
+    @Test("Generated language syntax vocabularies cover supported languages")
+    func generatedLanguageSyntaxVocabulariesCoverSupportedLanguages() throws {
+        let vocabulariesByLanguage = Dictionary(
+            uniqueKeysWithValues: SyntaxLanguage.allCases.map {
+                ($0, $0.syntaxVocabulary)
+            }
+        )
+        #expect(Set(vocabulariesByLanguage.keys) == Set(SyntaxLanguage.allCases))
 
-        let swift = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.swift])
+        let swift = try #require(vocabulariesByLanguage[.swift])
         #expect(swift.fileExtensions.contains("swift"))
         #expect(swift.rootRuleIdentifier == "swift")
         #expect(swift.syntaxTypes.contains("declaration.precedencegroup"))
@@ -571,16 +597,16 @@ struct SyntaxEditorCoreTests {
         #expect(swift.attributeWords.contains("@available"))
         #expect(swift.attributeWords.contains("#sourceLocation"))
 
-        let html = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.html])
+        let html = try #require(vocabulariesByLanguage[.html])
         #expect(html.rootRuleIdentifier == "html")
         #expect(html.syntaxTypes.contains("definition.entity"))
         #expect(html.keywordWords.isEmpty == false)
 
-        let css = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.css])
+        let css = try #require(vocabulariesByLanguage[.css])
         #expect(css.syntaxTypes.contains("definition.style"))
         #expect(css.attributeWords.contains("@media"))
 
-        let objectiveC = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.objectiveC])
+        let objectiveC = try #require(vocabulariesByLanguage[.objectiveC])
         #expect(objectiveC.attributeWords.contains("@interface"))
         #expect(objectiveC.keywordWords.contains("typedef"))
 
@@ -590,9 +616,43 @@ struct SyntaxEditorCoreTests {
         #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "keyword", language: .html)?.first == "editor.syntax.keyword")
     }
 
+    @Test("Language source files live in language-specific directories")
+    func languageSourceFilesLiveInLanguageSpecificDirectories() {
+        let languagesURL = repositoryRootURL()
+            .appendingPathComponent("Sources/SyntaxEditorCore/Languages", isDirectory: true)
+        #expect(!FileManager.default.fileExists(atPath: languagesURL.appendingPathComponent("Builtin").path))
+        #expect(!FileManager.default.fileExists(atPath: languagesURL.appendingPathComponent("Generated").path))
+        #expect(!FileManager.default.fileExists(atPath: languagesURL.appendingPathComponent("Support").path))
+
+        for language in SyntaxLanguage.allCases {
+            let directoryName = languageImplementationDirectoryName(for: language)
+            let typeName = switch language {
+            case .css:
+                "CSSLanguage"
+            case .html:
+                "HTMLLanguage"
+            case .javascript:
+                "JavaScriptLanguage"
+            case .json:
+                "JSONLanguage"
+            case .objectiveC:
+                "ObjectiveCLanguage"
+            case .swift:
+                "SwiftLanguage"
+            case .toml:
+                "TOMLLanguage"
+            case .xml:
+                "XMLLanguage"
+            }
+            let languageDirectory = languagesURL.appendingPathComponent(directoryName, isDirectory: true)
+            #expect(FileManager.default.fileExists(atPath: languageDirectory.appendingPathComponent("\(typeName).swift").path))
+            #expect(FileManager.default.fileExists(atPath: languageDirectory.appendingPathComponent("\(typeName)+Generated.swift").path))
+        }
+    }
+
     @Test("Generated query word blocks stay in sync with generated vocabulary")
     func generatedQueryWordBlocksStayInSyncWithGeneratedVocabulary() throws {
-        let swift = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.swift])
+        let swift = SyntaxLanguage.swift.syntaxVocabulary
         let swiftAttributes = Set(swift.attributeWords.compactMap { word -> String? in
             guard word.hasPrefix("@") else { return nil }
             return String(word.dropFirst())
@@ -603,7 +663,7 @@ struct SyntaxEditorCoreTests {
         )
         #expect(generatedSwiftAttributeWords == swiftAttributes)
 
-        let objectiveC = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.objectiveC])
+        let objectiveC = SyntaxLanguage.objectiveC.syntaxVocabulary
         let stableObjectiveCAttributes: Set<String> = [
             "@autoreleasepool",
             "@catch",
@@ -627,12 +687,12 @@ struct SyntaxEditorCoreTests {
         let objectiveCAttributes = Set(objectiveC.attributeWords).intersection(stableObjectiveCAttributes)
         #expect(Set(quotedStrings(in: try generatedQueryBlock(named: "objectivec-attributes", language: .objectiveC))) == objectiveCAttributes)
 
-        let css = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.css])
+        let css = SyntaxLanguage.css.syntaxVocabulary
         let stableCSSAtRules: Set<String> = ["@keyframes", "@supports"]
         let cssAtRules = Set(css.attributeWords).union(["@keyframes", "@supports"]).intersection(stableCSSAtRules)
         #expect(Set(quotedStrings(in: try generatedQueryBlock(named: "css-at-rules", language: .css))) == cssAtRules)
 
-        let json = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.json])
+        let json = SyntaxLanguage.json.syntaxVocabulary
         let jsonBlock = try generatedQueryBlock(named: "json-literals", language: .json)
         for word in json.keywordWords {
             #expect(jsonBlock.contains("(\(word))"))
@@ -642,35 +702,35 @@ struct SyntaxEditorCoreTests {
         #expect(tomlBlock.contains("(boolean) @editor.syntax.toml.keyword"))
     }
 
-    @Test("Generated source syntax type resolver maps source syntax types")
-    func generatedSourceSyntaxTypeResolverMapsSourceSyntaxTypes() throws {
+    @Test("Theme style fallbacks map syntax vocabulary IDs")
+    func themeStyleFallbacksMapSyntaxVocabularyIDs() throws {
         #expect(
-            BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
+            SyntaxEditorThemeStyleFallbacks.styleKeys(
                 for: "xcode.syntax.keyword"
             )?.first == "editor.syntax.keyword"
         )
         #expect(
-            BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
+            SyntaxEditorThemeStyleFallbacks.styleKeys(
                 for: "xcode.syntax.preprocessor"
             )?.first == "editor.syntax.preprocessor"
         )
         #expect(
-            BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
+            SyntaxEditorThemeStyleFallbacks.styleKeys(
                 for: "xcode.syntax.declaration.precedencegroup"
             )?.first == "editor.syntax.declaration.type"
         )
         #expect(
-            BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
+            SyntaxEditorThemeStyleFallbacks.styleKeys(
                 for: "xcode.syntax.definition.style"
             )?.first == "editor.syntax.identifier.type"
         )
         #expect(
-            BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
+            SyntaxEditorThemeStyleFallbacks.styleKeys(
                 for: "xcode.syntax.entity"
             )?.first == "editor.syntax.identifier.type"
         )
         #expect(
-            BuiltInEditorSourceSyntaxStyleKeyResolver.styleKeys(
+            SyntaxEditorThemeStyleFallbacks.styleKeys(
                 for: "xcode.syntax.definition.property"
             )?.first == "editor.syntax.identifier.variable"
         )
@@ -5053,8 +5113,8 @@ struct SyntaxHighlighterEngineTests {
         })
     }
 
-    @Test("SyntaxHighlighterEngine maps TOML captures through generated editor syntax definitions")
-    func highlighterMapsTOMLCapturesToEditorSyntaxDefinitions() async throws {
+    @Test("SyntaxHighlighterEngine maps TOML captures through generated editor syntax vocabulary")
+    func highlighterMapsTOMLCapturesToEditorSyntaxVocabulary() async throws {
         let engine = sharedSyntaxHighlighterEngine
         let source = try referenceSampleText(named: "Reference.toml")
         let tokens = await engine.render(source: source, language: SyntaxLanguage.toml)

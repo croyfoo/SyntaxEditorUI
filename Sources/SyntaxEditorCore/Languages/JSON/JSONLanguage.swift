@@ -2,10 +2,10 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterJSON
 
-struct JSONLanguage {
+struct JSONLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "json" }
+    var language: SyntaxLanguage { .json }
     var displayName: String { "JSON" }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
@@ -32,7 +32,6 @@ struct JSONLanguage {
 
 private extension JSONLanguage {
     static var queryDirectories: [URL] {
-        guard let resourceURL = Bundle.module.resourceURL else { return [] }
-        return [resourceURL.appendingPathComponent("JSONQueries", isDirectory: true)]
+        BundledLanguageQueryResources.directories(named: "JSONQueries")
     }
 }

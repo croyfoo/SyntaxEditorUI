@@ -2,10 +2,10 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterCSS
 
-struct CSSLanguage {
+struct CSSLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "css" }
+    var language: SyntaxLanguage { .css }
     var displayName: String { "CSS" }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
@@ -35,14 +35,7 @@ struct CSSLanguage {
 
 private extension CSSLanguage {
     static var queryDirectories: [URL] {
-        guard let queriesURL = Bundle.module.resourceURL?.appendingPathComponent(
-            "CSSQueries",
-            isDirectory: true
-        ) else {
-            return []
-        }
-
-        return [queriesURL]
+        BundledLanguageQueryResources.directories(named: "CSSQueries")
     }
 }
 

@@ -9,12 +9,11 @@ import xclangspec_snapshot
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT = (
+DEFAULT_OUTPUT_DIRECTORY = (
     REPOSITORY_ROOT
     / "Sources"
     / "SyntaxEditorCore"
-    / "Highlighting"
-    / "BuiltInEditorSourceSyntaxDefinitions+Generated.swift"
+    / "Languages"
 )
 DEFAULT_QUERY_ROOT = REPOSITORY_ROOT / "Sources" / "SyntaxEditorCore" / "Resources"
 
@@ -38,6 +37,28 @@ QUERY_DIRECTORY_NAMES = {
     "swift": "SwiftQueries",
     "toml": "TOMLQueries",
     "xml": "XMLQueries",
+}
+
+LANGUAGE_TYPE_NAMES = {
+    "css": "CSSLanguage",
+    "html": "HTMLLanguage",
+    "javascript": "JavaScriptLanguage",
+    "json": "JSONLanguage",
+    "objectiveC": "ObjectiveCLanguage",
+    "swift": "SwiftLanguage",
+    "toml": "TOMLLanguage",
+    "xml": "XMLLanguage",
+}
+
+LANGUAGE_DIRECTORY_NAMES = {
+    "css": "CSS",
+    "html": "HTML",
+    "javascript": "JavaScript",
+    "json": "JSON",
+    "objectiveC": "ObjectiveC",
+    "swift": "Swift",
+    "toml": "TOML",
+    "xml": "XML",
 }
 
 GENERATED_BLOCK_BEGIN = "; BEGIN GENERATED EDITOR SYNTAX WORDS: {name}"
@@ -69,39 +90,9 @@ OBJECTIVEC_STABLE_ATTRIBUTE_WORDS = {
     "@try",
 }
 
-STYLE_KEY_FALLBACKS = {
-    "plain": ["editor.syntax.plain"],
-    "comment": ["editor.syntax.comment"],
-    "comment.doc": ["editor.syntax.comment.doc", "editor.syntax.comment"],
-    "comment.doc.keyword": ["editor.syntax.comment.doc.keyword", "editor.syntax.comment.doc", "editor.syntax.comment"],
-    "mark": ["editor.syntax.mark", "editor.syntax.comment"],
-    "string": ["editor.syntax.string", "editor.syntax.character"],
-    "character": ["editor.syntax.character", "editor.syntax.string"],
-    "number": ["editor.syntax.number"],
-    "keyword": ["editor.syntax.keyword"],
-    "preprocessor": ["editor.syntax.preprocessor", "editor.syntax.keyword"],
-    "url": ["editor.syntax.url", "editor.syntax.number"],
-    "attribute": ["editor.syntax.attribute", "editor.syntax.identifier.variable", "editor.syntax.plain"],
-    "declaration.other": ["editor.syntax.declaration.other", "editor.syntax.identifier.function", "editor.syntax.plain"],
-    "declaration.type": ["editor.syntax.declaration.type", "editor.syntax.identifier.type", "editor.syntax.plain"],
-    "identifier.type": ["editor.syntax.identifier.type", "editor.syntax.declaration.type", "editor.syntax.plain"],
-    "identifier.type.system": ["editor.syntax.identifier.type.system", "editor.syntax.identifier.type", "editor.syntax.plain"],
-    "identifier.class": ["editor.syntax.identifier.class", "editor.syntax.identifier.type", "editor.syntax.plain"],
-    "identifier.class.system": ["editor.syntax.identifier.class.system", "editor.syntax.identifier.class", "editor.syntax.plain"],
-    "identifier.function": ["editor.syntax.identifier.function", "editor.syntax.declaration.other", "editor.syntax.plain"],
-    "identifier.function.system": ["editor.syntax.identifier.function.system", "editor.syntax.identifier.function", "editor.syntax.plain"],
-    "identifier.macro": ["editor.syntax.identifier.macro", "editor.syntax.declaration.other", "editor.syntax.plain"],
-    "identifier.macro.system": ["editor.syntax.identifier.macro.system", "editor.syntax.identifier.macro", "editor.syntax.plain"],
-    "identifier.constant": ["editor.syntax.identifier.constant", "editor.syntax.plain"],
-    "identifier.constant.system": ["editor.syntax.identifier.constant.system", "editor.syntax.identifier.constant", "editor.syntax.plain"],
-    "identifier.variable": ["editor.syntax.identifier.variable", "editor.syntax.plain"],
-    "identifier.variable.system": ["editor.syntax.identifier.variable.system", "editor.syntax.identifier.variable", "editor.syntax.plain"],
-}
-
-
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate bundled editor source syntax definitions from local xclangspec files."
+        description="Generate bundled editor syntax vocabularies from local xclangspec files."
     )
     parser.add_argument(
         "--xcode",
@@ -109,9 +100,9 @@ def parse_arguments() -> argparse.Namespace:
         help="Path to the local developer tool app bundle.",
     )
     parser.add_argument(
-        "--output",
-        default=str(DEFAULT_OUTPUT),
-        help="Swift file to rewrite.",
+        "--output-directory",
+        default=str(DEFAULT_OUTPUT_DIRECTORY),
+        help="Directory where per-language generated Swift files are rewritten.",
     )
     parser.add_argument(
         "--query-root",
@@ -197,7 +188,7 @@ def rule_syntax_types(rule: dict[str, Any]) -> list[str]:
     return sorted(dict.fromkeys(values))
 
 
-def rule_definition(rule_identifier: str, rule: dict[str, Any]) -> dict[str, Any]:
+def rule_vocabulary(rule_identifier: str, rule: dict[str, Any]) -> dict[str, Any]:
     entry = rule_entry(rule)
     syntax = entry.get("Syntax")
     syntax = syntax if isinstance(syntax, dict) else {}
@@ -213,9 +204,9 @@ def rule_definition(rule_identifier: str, rule: dict[str, Any]) -> dict[str, Any
     }
 
 
-def language_words(rule_definitions: list[dict[str, Any]], syntax_filter: str | None = None) -> list[str]:
+def language_words(rule_vocabularies: list[dict[str, Any]], syntax_filter: str | None = None) -> list[str]:
     words: set[str] = set()
-    for rule in rule_definitions:
+    for rule in rule_vocabularies:
         syntax_types = set(rule["syntaxTypes"])
         if syntax_filter and syntax_filter not in syntax_types:
             continue
@@ -223,7 +214,7 @@ def language_words(rule_definitions: list[dict[str, Any]], syntax_filter: str | 
     return sorted(words)
 
 
-def supported_language_definitions(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+def supported_language_vocabularies(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     rule_index = snapshot["rulesByIdentifier"]
     languages = [
         language
@@ -232,11 +223,11 @@ def supported_language_definitions(snapshot: dict[str, Any]) -> list[dict[str, A
     ]
     languages.sort(key=language_sort_key)
 
-    definitions: list[dict[str, Any]] = []
+    vocabularies: list[dict[str, Any]] = []
     for language in languages:
         case_name = LANGUAGE_CASES[str(language["identifier"])]
-        rule_definitions = [
-            rule_definition(rule_identifier, rule_index[rule_identifier])
+        rule_vocabularies = [
+            rule_vocabulary(rule_identifier, rule_index[rule_identifier])
             for rule_identifier in language.get("ruleIdentifiers", [])
             if rule_identifier in rule_index
         ]
@@ -245,14 +236,14 @@ def supported_language_definitions(snapshot: dict[str, Any]) -> list[dict[str, A
             for value in language.get("syntaxTypes", [])
             if str(value).startswith("xcode.syntax.")
         })
-        keyword_words = language_words(rule_definitions, "keyword")
-        preprocessor_words = language_words(rule_definitions, "preprocessor")
+        keyword_words = language_words(rule_vocabularies, "keyword")
+        preprocessor_words = language_words(rule_vocabularies, "preprocessor")
         attribute_words = [
             word
             for word in keyword_words
             if word.startswith("@") or word.startswith("#")
         ]
-        definitions.append({
+        vocabularies.append({
             "caseName": case_name,
             "fileExtensions": sorted(map(str, language.get("fileExtensions", []))),
             "rootRuleIdentifier": rule_suffix(str(language.get("languageSpecification", ""))),
@@ -261,166 +252,44 @@ def supported_language_definitions(snapshot: dict[str, Any]) -> list[dict[str, A
             "attributeWords": attribute_words,
             "preprocessorWords": preprocessor_words,
         })
-    return definitions
+    return vocabularies
 
 
-def generate_swift(snapshot: dict[str, Any]) -> str:
-    languages = supported_language_definitions(snapshot)
-
+def generated_language_swift(language: dict[str, Any]) -> str:
+    type_name = LANGUAGE_TYPE_NAMES[language["caseName"]]
     lines: list[str] = [
         "// Generated from local xclangspec/xcsynspec language vocabulary. Do not edit by hand.",
         "",
-        "package struct EditorLanguageSyntaxDefinition: Sendable {",
-        "    package let fileExtensions: [String]",
-        "    package let rootRuleIdentifier: String",
-        "    package let syntaxTypes: [String]",
-        "    package let keywordWords: Set<String>",
-        "    package let attributeWords: Set<String>",
-        "    package let preprocessorWords: Set<String>",
+        f"extension {type_name} {{",
+        "    var syntaxVocabulary: EditorLanguageSyntaxVocabulary {",
+        "        Self.generatedSyntaxVocabulary",
+        "    }",
+        "",
+        "    private static let generatedSyntaxVocabulary = EditorLanguageSyntaxVocabulary(",
+        f"        fileExtensions: {swift_array(language['fileExtensions'], '        ')},",
+        f"        rootRuleIdentifier: {swift_string(language['rootRuleIdentifier'])},",
+        f"        syntaxTypes: {swift_array(language['syntaxTypes'], '        ')},",
+        f"        keywordWords: Set({swift_array(language['keywordWords'], '        ')}),",
+        f"        attributeWords: Set({swift_array(language['attributeWords'], '        ')}),",
+        f"        preprocessorWords: Set({swift_array(language['preprocessorWords'], '        ')})",
+        "    )",
         "}",
         "",
-        "package enum BuiltInEditorSourceSyntaxDefinitions {",
-        "    package static let all: [SyntaxLanguage: EditorLanguageSyntaxDefinition] = [",
     ]
-
-    for language in languages:
-        case_name = language["caseName"]
-        lines.append(f"        .{case_name}: EditorLanguageSyntaxDefinition(")
-        lines.append(f"            fileExtensions: {swift_array(language['fileExtensions'], '            ')},")
-        lines.append(f"            rootRuleIdentifier: {swift_string(language['rootRuleIdentifier'])},")
-        lines.append(f"            syntaxTypes: {swift_array(language['syntaxTypes'], '            ')},")
-        lines.append(f"            keywordWords: Set({swift_array(language['keywordWords'], '            ')}),")
-        lines.append(f"            attributeWords: Set({swift_array(language['attributeWords'], '            ')}),")
-        lines.append(f"            preprocessorWords: Set({swift_array(language['preprocessorWords'], '            ')})")
-        lines.append("        ),")
-
-    lines.extend(
-        [
-            "    ]",
-            "",
-            "    package static func definition(for language: SyntaxLanguage) -> EditorLanguageSyntaxDefinition? {",
-            "        all[language]",
-            "    }",
-            "}",
-            "",
-            "package enum BuiltInEditorSourceSyntaxStyleKeyResolver {",
-            "    package static func styleKeys(",
-            "        for syntaxID: EditorSourceSyntaxID,",
-            "        language: SyntaxLanguage? = nil",
-            "    ) -> [String]? {",
-            "        if let language,",
-            "           let languageFallbacks = styleKeyFallbacksByLanguage[language],",
-            "           let keys = languageFallbacks[syntaxID.rawValue] {",
-            "            return keys",
-            "        }",
-            "        if let keys = styleKeyFallbacks[syntaxID.rawValue] {",
-            "            return keys",
-            "        }",
-            "        if let keys = prefixStyleKeys(for: syntaxID.rawValue) {",
-            "            return keys",
-            "        }",
-            "        return styleKeyFallbacks[syntaxID.rawValue] ?? [syntaxID.styleKey, \"editor.syntax.plain\"]",
-            "    }",
-            "",
-            "    package static func styleKeys(",
-            "        for sourceSyntaxID: String,",
-            "        language: SyntaxLanguage? = nil",
-            "    ) -> [String]? {",
-            "        styleKeys(for: EditorSourceSyntaxID(sourceSyntaxID), language: language)",
-            "    }",
-            "",
-            "    private static let styleKeyFallbacks: [String: [String]] = [",
-        ]
-    )
-
-    for syntax_id, style_keys in sorted(STYLE_KEY_FALLBACKS.items()):
-        lines.append(f"        {swift_string(syntax_id)}: {swift_array(style_keys, '        ')},")
-
-    lines.extend(
-        [
-            "    ]",
-            "",
-            "    private static func prefixStyleKeys(for syntaxID: String) -> [String]? {",
-            "        if syntaxID == \"plain\" {",
-            "            return styleKeyFallbacks[\"plain\"]",
-            "        }",
-            "        if syntaxID == \"preprocessor\" || syntaxID.hasPrefix(\"preprocessor.\") {",
-            "            return styleKeyFallbacks[\"preprocessor\"]",
-            "        }",
-            "        if syntaxID == \"keyword\" || syntaxID.hasPrefix(\"keyword.\") {",
-            "            return styleKeyFallbacks[\"keyword\"]",
-            "        }",
-            "        if syntaxID == \"comment\" || syntaxID.hasPrefix(\"comment.\") {",
-            "            return styleKeyFallbacks[\"comment\"]",
-            "        }",
-            "        if syntaxID == \"string\" || syntaxID.hasPrefix(\"string.\") {",
-            "            return styleKeyFallbacks[\"string\"]",
-            "        }",
-            "        if syntaxID == \"character\" || syntaxID.hasPrefix(\"character.\") {",
-            "            return styleKeyFallbacks[\"character\"]",
-            "        }",
-            "        if syntaxID == \"number\" || syntaxID.hasPrefix(\"number.\") {",
-            "            return styleKeyFallbacks[\"number\"]",
-            "        }",
-            "        if syntaxID == \"url\" || syntaxID.hasPrefix(\"url.\") {",
-            "            return styleKeyFallbacks[\"url\"]",
-            "        }",
-            "        if syntaxID == \"attribute\" || syntaxID.hasPrefix(\"attribute.\") {",
-            "            return styleKeyFallbacks[\"attribute\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"declaration.type\") || syntaxID.hasPrefix(\"declaration.precedencegroup\") {",
-            "            return styleKeyFallbacks[\"declaration.type\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"declaration.\") {",
-            "            return styleKeyFallbacks[\"declaration.other\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"definition.macro\") {",
-            "            return styleKeyFallbacks[\"identifier.macro\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"definition.function\") || syntaxID.hasPrefix(\"definition.method\") {",
-            "            return styleKeyFallbacks[\"identifier.function\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"definition.property\") {",
-            "            return styleKeyFallbacks[\"identifier.variable\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"definition.class\")",
-            "            || syntaxID.hasPrefix(\"definition.type\")",
-            "            || syntaxID.hasPrefix(\"definition.entity\")",
-            "            || syntaxID.hasPrefix(\"definition.style\")",
-            "            || syntaxID == \"entity\"",
-            "            || syntaxID.hasPrefix(\"entity.\")",
-            "            || syntaxID == \"section\"",
-            "            || syntaxID.hasPrefix(\"section.\")",
-            "        {",
-            "            return styleKeyFallbacks[\"identifier.type\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"identifier.type\") {",
-            "            return styleKeyFallbacks[\"identifier.type\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"identifier.class\") {",
-            "            return styleKeyFallbacks[\"identifier.class\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"identifier.function\") || syntaxID.hasPrefix(\"identifier.method\") {",
-            "            return styleKeyFallbacks[\"identifier.function\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"identifier.macro\") {",
-            "            return styleKeyFallbacks[\"identifier.macro\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"identifier.constant\") {",
-            "            return styleKeyFallbacks[\"identifier.constant\"]",
-            "        }",
-            "        if syntaxID.hasPrefix(\"identifier.variable\") {",
-            "            return styleKeyFallbacks[\"identifier.variable\"]",
-            "        }",
-            "        return nil",
-            "    }",
-            "",
-            "    private static let styleKeyFallbacksByLanguage: [SyntaxLanguage: [String: [String]]] = [:]",
-            "}",
-            "",
-        ]
-    )
     return "\n".join(lines)
+
+
+def generated_language_filename(language_case: str) -> str:
+    return f"{LANGUAGE_TYPE_NAMES[language_case]}+Generated.swift"
+
+
+def write_generated_swift_files(snapshot: dict[str, Any], output_directory: Path) -> None:
+    output_directory.mkdir(parents=True, exist_ok=True)
+    for language in supported_language_vocabularies(snapshot):
+        language_directory = output_directory / LANGUAGE_DIRECTORY_NAMES[language["caseName"]]
+        language_directory.mkdir(parents=True, exist_ok=True)
+        output_path = language_directory / generated_language_filename(language["caseName"])
+        output_path.write_text(generated_language_swift(language), encoding="utf-8")
 
 
 def scm_string(value: str) -> str:
@@ -532,7 +401,7 @@ def rewrite_query_block(
 def update_query_blocks(snapshot: dict[str, Any], query_root: Path) -> None:
     languages = {
         language["caseName"]: language
-        for language in supported_language_definitions(snapshot)
+        for language in supported_language_vocabularies(snapshot)
     }
     for language_case, block_name in [
         ("swift", "swift-attributes"),
@@ -556,9 +425,10 @@ def main() -> None:
             pretty=False,
         )
     )
-    output = Path(args.output).expanduser()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(generate_swift(snapshot), encoding="utf-8")
+    write_generated_swift_files(
+        snapshot,
+        Path(args.output_directory).expanduser(),
+    )
     if not args.skip_query_update:
         update_query_blocks(snapshot, Path(args.query_root).expanduser())
 

@@ -2,11 +2,12 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterObjc
 
-struct ObjectiveCLanguage {
+struct ObjectiveCLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "objective-c" }
+    var language: SyntaxLanguage { .objectiveC }
     var displayName: String { "Objective-C" }
+    var aliases: Set<String> { ["objective-c", "objectivec", "objc"] }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "Objective-C",
@@ -34,14 +35,7 @@ struct ObjectiveCLanguage {
 
 private extension ObjectiveCLanguage {
     static var queryDirectories: [URL] {
-        guard let queriesURL = Bundle.module.resourceURL?.appendingPathComponent(
-            "ObjectiveCQueries",
-            isDirectory: true
-        ) else {
-            return []
-        }
-
-        return [queriesURL]
+        BundledLanguageQueryResources.directories(named: "ObjectiveCQueries")
     }
 
     struct PrefixAnalysis {

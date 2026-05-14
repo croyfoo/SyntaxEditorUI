@@ -2,10 +2,10 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterSwift
 
-struct SwiftLanguage {
+struct SwiftLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "swift" }
+    var language: SyntaxLanguage { .swift }
     var displayName: String { "Swift" }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
@@ -34,8 +34,7 @@ struct SwiftLanguage {
 
 private extension SwiftLanguage {
     static var queryDirectories: [URL] {
-        guard let resourceURL = Bundle.module.resourceURL else { return [] }
-        return [resourceURL.appendingPathComponent("SwiftQueries", isDirectory: true)]
+        BundledLanguageQueryResources.directories(named: "SwiftQueries")
     }
 }
 

@@ -2,10 +2,10 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterXML
 
-struct XMLLanguage {
+struct XMLLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "xml" }
+    var language: SyntaxLanguage { .xml }
     var displayName: String { "XML" }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
@@ -61,8 +61,7 @@ struct XMLLanguage {
 
 private extension XMLLanguage {
     static var queryDirectories: [URL] {
-        guard let resourceURL = Bundle.module.resourceURL else { return [] }
-        return [resourceURL.appendingPathComponent("XMLQueries", isDirectory: true)]
+        BundledLanguageQueryResources.directories(named: "XMLQueries")
     }
 }
 
