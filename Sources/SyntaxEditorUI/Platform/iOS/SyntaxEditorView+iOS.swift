@@ -25,6 +25,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findCoordinator: SyntaxEditorFindCoordinator?
     static let estimatedTabColumnWidth = 4
     static let defaultEditorFont = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+    static let immediateHighlightMaximumUTF16Length = 120_000
 
     let highlighter: any SyntaxHighlighting
     let commandEngine = EditorCommandEngine()
@@ -845,11 +846,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             updateTypingAttributes()
             updateTextContainerForCurrentWrappingMode()
             invalidateTextLayout()
+            let highlightMutation: SyntaxHighlightMutation? = if document.latestChange?.isWholeDocumentReplacement == true {
+                nil
+            } else {
+                document.latestChange.flatMap(Self.highlightMutation)
+            }
             scheduleHighlight(
                 source: nextText,
                 language: configuration.language,
                 revision: revision,
-                mutation: document.latestChange.flatMap(Self.highlightMutation),
+                mutation: highlightMutation,
                 refreshStartUTF16: 0
             )
         } else {
@@ -1446,6 +1452,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let expectedSource = source
 
         highlightTask?.cancel()
+        applyImmediateHighlightIfAvailable(
+            source: expectedSource,
+            language: language,
+            revision: revision,
+            mutation: mutation
+        )
 
         let highlighter = self.highlighter
         highlightTask = Task { [weak self] in
@@ -1471,6 +1483,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             guard self.document.revision == result.revision else {
                 return
             }
+            guard !self.isHighlightResultAlreadyApplied(result) else {
+                return
+            }
             let refreshRange = self.highlightApplicationRefreshRange(
                 for: result,
                 mutation: mutation
@@ -1486,6 +1501,43 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             self.lastHighlightRevision = result.revision
             self.lastHighlightLanguage = result.language
         }
+    }
+
+    private func applyImmediateHighlightIfAvailable(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int,
+        mutation: SyntaxHighlightMutation?
+    ) {
+        guard mutation == nil,
+              source.utf16.count <= Self.immediateHighlightMaximumUTF16Length,
+              let previewingHighlighter = highlighter as? any SyntaxHighlightPreviewing,
+              let result = previewingHighlighter.previewReset(
+                  source: source,
+                  language: language,
+                  revision: revision
+              )
+        else {
+            return
+        }
+
+        applyHighlight(
+            result.tokens,
+            expectedRevision: result.revision,
+            source: result.source,
+            refreshRange: result.refreshRange
+        )
+        lastHighlightTokens = result.tokens
+        lastHighlightSource = result.source
+        lastHighlightRevision = result.revision
+        lastHighlightLanguage = result.language
+    }
+
+    private func isHighlightResultAlreadyApplied(_ result: SyntaxHighlightResult) -> Bool {
+        lastHighlightRevision == result.revision
+            && lastHighlightLanguage == result.language
+            && lastHighlightSource == result.source
+            && lastHighlightTokens == result.tokens
     }
 
     func highlightApplicationRefreshRange(
@@ -1565,26 +1617,65 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         defer { isApplyingHighlight = false }
 
         storage.beginEditing()
-        storage.setAttributes(base, range: targetRange)
-
-        for token in tokens {
-            let clamped = SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: textLength)
-            let intersection = SyntaxEditorRangeUtilities.intersection(of: clamped, and: targetRange)
-            guard intersection.length > 0 else { continue }
-
-            var attributes = base
-            for (key, value) in styleAttributes(for: token.syntaxID, language: token.language) {
-                attributes[key] = value
-            }
-            storage.setAttributes(attributes, range: intersection)
-        }
-
+        applySyntaxHighlightAttributes(
+            tokens,
+            targetRange: targetRange,
+            textLength: textLength,
+            baseAttributes: base
+        )
         storage.endEditing()
         invalidateRenderingAttributes(for: targetRange)
         applyMarkedTextAttributes()
         updateTypingAttributes()
         applyMatchingBracketHighlight(force: true)
         setNeedsDisplayForVisibleTextFragments()
+    }
+
+    private func applySyntaxHighlightAttributes(
+        _ tokens: [SyntaxHighlightToken],
+        targetRange: NSRange,
+        textLength: Int,
+        baseAttributes: [NSAttributedString.Key: Any]
+    ) {
+        if let baseForeground = baseAttributes[.foregroundColor] {
+            storage.addAttribute(.foregroundColor, value: baseForeground, range: targetRange)
+        } else {
+            storage.removeAttribute(.foregroundColor, range: targetRange)
+        }
+
+        if let baseFont = baseAttributes[.font] as? UIFont {
+            restoreBaseFontForSyntaxOverrides(in: targetRange, baseFont: baseFont)
+        }
+
+        for token in tokens {
+            let clamped = SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: textLength)
+            let intersection = SyntaxEditorRangeUtilities.intersection(of: clamped, and: targetRange)
+            guard intersection.length > 0 else { continue }
+
+            let attributes = styleAttributes(for: token.syntaxID, language: token.language)
+            guard !attributes.isEmpty else { continue }
+            storage.addAttributes(attributes, range: intersection)
+        }
+    }
+
+    private func restoreBaseFontForSyntaxOverrides(
+        in targetRange: NSRange,
+        baseFont: UIFont
+    ) {
+        var restoreRanges: [NSRange] = []
+
+        unsafe storage.enumerateAttribute(.font, in: targetRange) { value, range, _ in
+            guard let font = value as? UIFont,
+                  !font.isEqual(baseFont)
+            else {
+                return
+            }
+            restoreRanges.append(range)
+        }
+
+        for range in restoreRanges {
+            storage.addAttribute(.font, value: baseFont, range: range)
+        }
     }
 
     func reapplyTextAttributes(in range: NSRange) {
@@ -1603,7 +1694,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             )
         } else {
             storage.beginEditing()
-            storage.setAttributes(baseAttributes(), range: targetRange)
+            storage.addAttributes(baseAttributes(), range: targetRange)
             storage.endEditing()
             invalidateRenderingAttributes(for: targetRange)
             setNeedsDisplayForVisibleTextFragments()
@@ -1618,6 +1709,19 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         storage.beginEditing()
         storage.addAttributes(markedTextAttributes(), range: targetRange)
+        storage.endEditing()
+        invalidateRenderingAttributes(for: targetRange)
+        setNeedsDisplayForVisibleTextFragments()
+    }
+
+    func clearMarkedTextAttributes(in range: NSRange) {
+        let textLength = text.utf16.count
+        let targetRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
+        guard targetRange.length > 0 else { return }
+
+        storage.beginEditing()
+        storage.removeAttribute(.underlineStyle, range: targetRange)
+        storage.removeAttribute(.underlineColor, range: targetRange)
         storage.endEditing()
         invalidateRenderingAttributes(for: targetRange)
         setNeedsDisplayForVisibleTextFragments()

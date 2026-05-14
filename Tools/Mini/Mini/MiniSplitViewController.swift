@@ -59,9 +59,11 @@ final class MiniSplitViewController: UISplitViewController {
     private func renderDetail() {
         let editorDocument = model.editorDocument
         let editorConfiguration = model.editorConfiguration
-        if let currentDocument = editorViewController?.document,
-           currentDocument === editorDocument
-        {
+        if let editorViewController {
+            editorViewController.update(
+                document: editorDocument,
+                configuration: editorConfiguration
+            )
             detailViewController?.title = model.currentPreset.title
             updateOverflowMenu()
             return
@@ -216,10 +218,12 @@ final class MiniSplitViewController: NSSplitViewController {
     private func renderDetail() {
         let editorDocument = model.editorDocument
         let editorConfiguration = model.editorConfiguration
-        if let currentDocument = editorViewController?.document,
-           currentDocument === editorDocument
-        {
-            editorViewController?.title = model.currentPreset.title
+        if let editorViewController {
+            editorViewController.update(
+                document: editorDocument,
+                configuration: editorConfiguration
+            )
+            editorViewController.title = model.currentPreset.title
             return
         }
 

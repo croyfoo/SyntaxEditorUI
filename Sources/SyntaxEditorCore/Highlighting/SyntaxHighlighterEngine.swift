@@ -120,12 +120,29 @@ package protocol SyntaxHighlighting: Sendable {
     ) async -> SyntaxHighlightResult
 }
 
-package actor SyntaxHighlighterEngine: SyntaxHighlighting {
+package protocol SyntaxHighlightPreviewing: SyntaxHighlighting {
+    nonisolated func previewReset(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxHighlightResult?
+}
+
+package actor SyntaxHighlighterEngine: SyntaxHighlighting, SyntaxHighlightPreviewing {
     private var session: SyntaxHighlightSession?
     private let registry: LanguageConfigurationRegistry
 
     package init() {
         self.registry = .shared
+    }
+
+    nonisolated package func previewReset(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) -> SyntaxHighlightResult? {
+        guard let setup = HighlightingSetup.resolved(for: language) else {
+            return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
+        }
+
+        let session = SyntaxHighlightSession(language: language, setup: setup)
+        return session.reset(source: source, revision: revision)
     }
 
     package func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
@@ -169,6 +186,44 @@ private struct HighlightingSetup: Sendable {
     let injectedLanguageProvider: InjectedLanguageProvider
     let supportsLayeredHighlighting: Bool
     let usesHTMLPreprocessing: Bool
+}
+
+private extension HighlightingSetup {
+    static func resolved(
+        for language: SyntaxLanguage,
+        resolver: LanguageConfigurationResolver = .shared
+    ) -> HighlightingSetup? {
+        guard let rootConfiguration = resolver.configuration(for: language) else {
+            return nil
+        }
+
+        let support = language.treeSitterSupport
+        let injectedAliases = resolver.supportedInjectedAliases(
+            for: support,
+            rootConfiguration: rootConfiguration
+        )
+        let injectedLanguageProvider = InjectedLanguageProvider(resolver: resolver)
+
+        if let injectedAliases {
+            for alias in injectedAliases {
+                guard injectedLanguageProvider.configuration(named: alias) != nil else {
+                    return HighlightingSetup(
+                        rootConfiguration: rootConfiguration,
+                        injectedLanguageProvider: injectedLanguageProvider,
+                        supportsLayeredHighlighting: false,
+                        usesHTMLPreprocessing: false
+                    )
+                }
+            }
+        }
+
+        return HighlightingSetup(
+            rootConfiguration: rootConfiguration,
+            injectedLanguageProvider: injectedLanguageProvider,
+            supportsLayeredHighlighting: injectedAliases?.isEmpty == false,
+            usesHTMLPreprocessing: resolver.supportsHTMLRawTextPreprocessing(for: rootConfiguration.language)
+        )
+    }
 }
 
 private enum CachedLanguageConfiguration {
@@ -953,39 +1008,10 @@ private actor LanguageConfigurationRegistry {
             return cached
         }
 
-        guard let rootConfiguration = resolver.configuration(for: language) else {
+        guard let setup = HighlightingSetup.resolved(for: language, resolver: resolver) else {
             layeredSetupCache[language] = nil
             return nil
         }
-
-        let support = language.treeSitterSupport
-        let injectedAliases = resolver.supportedInjectedAliases(
-            for: support,
-            rootConfiguration: rootConfiguration
-        )
-        let injectedLanguageProvider = InjectedLanguageProvider(resolver: resolver)
-
-        if let injectedAliases {
-            for alias in injectedAliases {
-                guard injectedLanguageProvider.configuration(named: alias) != nil else {
-                    let setup = HighlightingSetup(
-                        rootConfiguration: rootConfiguration,
-                        injectedLanguageProvider: injectedLanguageProvider,
-                        supportsLayeredHighlighting: false,
-                        usesHTMLPreprocessing: false
-                    )
-                    layeredSetupCache[language] = setup
-                    return setup
-                }
-            }
-        }
-
-        let setup = HighlightingSetup(
-            rootConfiguration: rootConfiguration,
-            injectedLanguageProvider: injectedLanguageProvider,
-            supportsLayeredHighlighting: injectedAliases?.isEmpty == false,
-            usesHTMLPreprocessing: resolver.supportsHTMLRawTextPreprocessing(for: rootConfiguration.language)
-        )
         layeredSetupCache[language] = setup
         return setup
     }
