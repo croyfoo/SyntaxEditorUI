@@ -44,6 +44,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 import AppKit
 import ObservationBridge
 
+@objc
+private protocol MiniUndoRedoMenuActions: AnyObject {
+    func undo(_ sender: Any?)
+    func redo(_ sender: Any?)
+}
+
 @main
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -117,8 +123,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(withTitle: "Undo", action: #selector(MiniUndoRedoMenuActions.undo(_:)), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: #selector(MiniUndoRedoMenuActions.redo(_:)), keyEquivalent: "Z")
         editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
