@@ -16,6 +16,7 @@ struct MiniPreviewPreset {
         case html
         case javascript
         case json
+        case objectiveCHeader = "objective-c-header"
         case objectiveC = "objective-c"
         case swift
         case toml
@@ -23,16 +24,27 @@ struct MiniPreviewPreset {
     }
 
     let id: ID
+    let title: String
     let sampleFilename: String
     let fallbackSampleText: String
     let language: SyntaxLanguage
 
-    var sampleText: String {
-        Self.sampleText(named: sampleFilename) ?? fallbackSampleText
+    init(
+        id: ID,
+        title: String? = nil,
+        sampleFilename: String,
+        fallbackSampleText: String,
+        language: SyntaxLanguage
+    ) {
+        self.id = id
+        self.title = title ?? language.displayName
+        self.sampleFilename = sampleFilename
+        self.fallbackSampleText = fallbackSampleText
+        self.language = language
     }
 
-    var title: String {
-        language.displayName
+    var sampleText: String {
+        Self.sampleText(named: sampleFilename) ?? fallbackSampleText
     }
 
     var accessibilityIdentifier: String {
@@ -93,12 +105,27 @@ struct MiniPreviewPreset {
         language: SyntaxLanguage.json
     )
 
-    static let objectiveC = MiniPreviewPreset(
-        id: .objectiveC,
-        sampleFilename: "Reference.m",
+    static let objectiveCHeader = MiniPreviewPreset(
+        id: .objectiveCHeader,
+        title: "Objective-C Header",
+        sampleFilename: "Reference.h",
         fallbackSampleText: """
         #import <Foundation/Foundation.h>
+
         @interface Sample : NSObject
+        @end
+        """,
+        language: SyntaxLanguage.objectiveC
+    )
+
+    static let objectiveC = MiniPreviewPreset(
+        id: .objectiveC,
+        title: "Objective-C Implementation",
+        sampleFilename: "Reference.m",
+        fallbackSampleText: """
+        #import "Sample.h"
+
+        @implementation Sample
         @end
         """,
         language: SyntaxLanguage.objectiveC
@@ -141,6 +168,7 @@ struct MiniPreviewPreset {
         html,
         javascript,
         json,
+        objectiveCHeader,
         objectiveC,
         swift,
         toml,
