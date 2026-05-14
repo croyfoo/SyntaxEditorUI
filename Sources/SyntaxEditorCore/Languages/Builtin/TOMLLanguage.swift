@@ -11,6 +11,7 @@ struct TOMLLanguage {
         SyntaxTreeSitterSupport(
             name: "TOML",
             bundleName: "TreeSitterTOML_TreeSitterTOML",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_toml()) }
         )
     }
@@ -32,6 +33,11 @@ struct TOMLLanguage {
 }
 
 private extension TOMLLanguage {
+    static var queryDirectories: [URL] {
+        guard let resourceURL = Bundle.module.resourceURL else { return [] }
+        return [resourceURL.appendingPathComponent("TOMLQueries", isDirectory: true)]
+    }
+
     struct PrefixAnalysis {
         var inLineComment = false
         var inBasicString = false

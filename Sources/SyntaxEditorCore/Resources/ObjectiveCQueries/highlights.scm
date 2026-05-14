@@ -4,100 +4,100 @@
 ; - tree-sitter/tree-sitter-c @ ae19b676b13bdcc13b7665397e6d9b14975473dd
 ; - tree-sitter-grammars/tree-sitter-objc @ 181a81b8f23a2d593e7ab4259981f50122909fda
 
-(identifier) @variable
+(identifier) @editor.syntax.objectivec.plain
 
-((identifier) @constant
- (#match? @constant "^[A-Z][A-Z\\d_]*$"))
+((identifier) @editor.syntax.objectivec.identifier.constant
+ (#match? @editor.syntax.objectivec.identifier.constant "^[A-Z][A-Z\\d_]*$"))
 
-"break" @keyword
-"case" @keyword
-"const" @keyword
-"continue" @keyword
-"default" @keyword
-"do" @keyword
-"else" @keyword
-"enum" @keyword
-"extern" @keyword
-"for" @keyword
-"if" @keyword
-"inline" @keyword
-"return" @keyword
-"sizeof" @keyword
-"static" @keyword
-"struct" @keyword
-"switch" @keyword
-"typedef" @keyword
-"union" @keyword
-"volatile" @keyword
-"while" @keyword
+"break" @editor.syntax.objectivec.keyword
+"case" @editor.syntax.objectivec.keyword
+"const" @editor.syntax.objectivec.keyword
+"continue" @editor.syntax.objectivec.keyword
+"default" @editor.syntax.objectivec.keyword
+"do" @editor.syntax.objectivec.keyword
+"else" @editor.syntax.objectivec.keyword
+"enum" @editor.syntax.objectivec.keyword
+"extern" @editor.syntax.objectivec.keyword
+"for" @editor.syntax.objectivec.keyword
+"if" @editor.syntax.objectivec.keyword
+"inline" @editor.syntax.objectivec.keyword
+"return" @editor.syntax.objectivec.keyword
+"sizeof" @editor.syntax.objectivec.keyword
+"static" @editor.syntax.objectivec.keyword
+"struct" @editor.syntax.objectivec.keyword
+"switch" @editor.syntax.objectivec.keyword
+"typedef" @editor.syntax.objectivec.keyword
+"union" @editor.syntax.objectivec.keyword
+"volatile" @editor.syntax.objectivec.keyword
+"while" @editor.syntax.objectivec.keyword
 
-"#define" @keyword
-"#elif" @keyword
-"#else" @keyword
-"#endif" @keyword
-"#if" @keyword
-"#ifdef" @keyword
-"#ifndef" @keyword
-"#include" @keyword
-(preproc_directive) @keyword
+"#define" @editor.syntax.objectivec.keyword
+"#elif" @editor.syntax.objectivec.keyword
+"#else" @editor.syntax.objectivec.keyword
+"#endif" @editor.syntax.objectivec.keyword
+"#if" @editor.syntax.objectivec.keyword
+"#ifdef" @editor.syntax.objectivec.keyword
+"#ifndef" @editor.syntax.objectivec.keyword
+"#include" @editor.syntax.objectivec.keyword
+(preproc_directive) @editor.syntax.objectivec.keyword
 
-"--" @operator
-"-" @operator
-"-=" @operator
-"->" @operator
-"=" @operator
-"!=" @operator
-"*" @operator
-"&" @operator
-"&&" @operator
-"+" @operator
-"++" @operator
-"+=" @operator
-"<" @operator
-"==" @operator
-">" @operator
-"||" @operator
+"--" @editor.syntax.objectivec.plain
+"-" @editor.syntax.objectivec.plain
+"-=" @editor.syntax.objectivec.plain
+"->" @editor.syntax.objectivec.plain
+"=" @editor.syntax.objectivec.plain
+"!=" @editor.syntax.objectivec.plain
+"*" @editor.syntax.objectivec.plain
+"&" @editor.syntax.objectivec.plain
+"&&" @editor.syntax.objectivec.plain
+"+" @editor.syntax.objectivec.plain
+"++" @editor.syntax.objectivec.plain
+"+=" @editor.syntax.objectivec.plain
+"<" @editor.syntax.objectivec.plain
+"==" @editor.syntax.objectivec.plain
+">" @editor.syntax.objectivec.plain
+"||" @editor.syntax.objectivec.plain
 
-"." @delimiter
-";" @delimiter
+"." @editor.syntax.objectivec.plain
+";" @editor.syntax.objectivec.plain
 
-(string_literal) @string
-(system_lib_string) @string
+(string_literal) @editor.syntax.objectivec.string
+(system_lib_string) @editor.syntax.objectivec.string
 
-(null) @constant
-(number_literal) @number
-(char_literal) @number
+(null) @editor.syntax.objectivec.identifier.constant
+(number_literal) @editor.syntax.objectivec.number
+(char_literal) @editor.syntax.objectivec.number
 
-(field_identifier) @property
-(statement_identifier) @label
-(type_identifier) @type
-(primitive_type) @type
-(sized_type_specifier) @type
+(field_identifier) @editor.syntax.objectivec.attribute
+(statement_identifier) @editor.syntax.objectivec.plain
+(type_identifier) @editor.syntax.objectivec.identifier.type.system
+(primitive_type) @editor.syntax.objectivec.identifier.type.system
+(sized_type_specifier) @editor.syntax.objectivec.identifier.type.system
 
 (call_expression
-  function: (identifier) @function)
+  function: (identifier) @editor.syntax.objectivec.identifier.function.system)
 (call_expression
   function: (field_expression
-    field: (field_identifier) @function))
+    field: (field_identifier) @editor.syntax.objectivec.identifier.function.system))
 (function_declarator
-  declarator: (identifier) @function)
+  declarator: (identifier) @editor.syntax.objectivec.identifier.function.system)
 (preproc_function_def
-  name: (identifier) @function.special)
+  name: (identifier) @editor.syntax.objectivec.identifier.function.system)
 
-(comment) @comment
+(comment) @editor.syntax.objectivec.comment
 
 ; Preprocs
 
 (preproc_undef
-  name: (_) @constant) @preproc
+  name: (_) @editor.syntax.objectivec.identifier.constant) @editor.syntax.objectivec.preprocessor
 
 ; Includes
 
-(module_import "@import" @include path: (identifier) @namespace)
+(module_import "@import" @editor.syntax.objectivec.preprocessor path: (identifier) @editor.syntax.objectivec.identifier.type.system)
 
 ((preproc_include
-  _ @include path: (_))
-  (#any-of? @include "#include" "#import"))
+  _ @editor.syntax.objectivec.preprocessor path: (_))
+  (#any-of? @editor.syntax.objectivec.preprocessor "#include" "#import"))
 
 ; Type Qualifiers
 
@@ -107,7 +107,7 @@
   "__covariant"
   "__contravariant"
   (visibility_specification)
-] @type.qualifier
+] @editor.syntax.objectivec.keyword
 
 ; Storageclasses
 
@@ -117,7 +117,7 @@
   "@dynamic"
   "volatile"
   (protocol_qualifier)
-] @storageclass
+] @editor.syntax.objectivec.keyword
 
 ; Keywords
 
@@ -131,24 +131,24 @@
   "@defs"
   "availability"
   "@end"
-] @keyword
+] @editor.syntax.objectivec.keyword
 
-(class_declaration "@" @keyword "class" @keyword)
+(class_declaration "@" @editor.syntax.objectivec.keyword "class" @editor.syntax.objectivec.keyword)
 
-(method_definition ["+" "-"] @keyword.function)
-(method_declaration ["+" "-"] @keyword.function)
+(method_definition ["+" "-"] @editor.syntax.objectivec.identifier.function.system)
+(method_declaration ["+" "-"] @editor.syntax.objectivec.identifier.function.system)
 
 [
   "__typeof__"
   "__typeof"
   "typeof"
   "in"
-] @keyword.operator
+] @editor.syntax.objectivec.keyword
 
 [
   "@synchronized"
   "oneway"
-] @keyword.coroutine
+] @editor.syntax.objectivec.keyword
 
 ; Exceptions
 
@@ -160,12 +160,12 @@
   "@finally"
   "__finally"
   "@throw"
-] @exception
+] @editor.syntax.objectivec.keyword
 
 ; Variables
 
-((identifier) @variable.builtin
-  (#any-of? @variable.builtin "self" "super"))
+((identifier) @editor.syntax.objectivec.plain
+  (#any-of? @editor.syntax.objectivec.plain "self" "super"))
 
 ; Functions & Methods
 
@@ -175,20 +175,20 @@
   "__builtin_available"
   "va_arg"
   "asm"
-] @function.builtin
+] @editor.syntax.objectivec.identifier.function.system
 
-(method_definition (identifier) @method)
+(method_definition (identifier) @editor.syntax.objectivec.identifier.function.system)
 
-(method_declaration (identifier) @method)
+(method_declaration (identifier) @editor.syntax.objectivec.identifier.function.system)
 
-(method_identifier (identifier)? @method ":" @method (identifier)? @method)
+(method_identifier (identifier)? @editor.syntax.objectivec.identifier.function.system ":" @editor.syntax.objectivec.identifier.function.system (identifier)? @editor.syntax.objectivec.identifier.function.system)
 
-(message_expression method: (identifier) @method.call)
+(message_expression method: (identifier) @editor.syntax.objectivec.identifier.function.system)
 
 ; Constructors
 
-((message_expression method: (identifier) @constructor)
-  (#eq? @constructor "init"))
+((message_expression method: (identifier) @editor.syntax.objectivec.identifier.function.system)
+  (#eq? @editor.syntax.objectivec.identifier.function.system "init"))
 
 ; Attributes
 
@@ -201,7 +201,7 @@
     "NS_EXTENSION_UNAVAILABLE_IOS" "NS_CLASS_AVAILABLE_IOS" "NS_CLASS_DEPRECATED_IOS" "__OSX_AVAILABLE_STARTING"
     "NS_ROOT_CLASS" "NS_UNAVAILABLE" "NS_REQUIRES_NIL_TERMINATION" "CF_RETURNS_RETAINED"
     "CF_RETURNS_NOT_RETAINED" "DEPRECATED_ATTRIBUTE" "UI_APPEARANCE_SELECTOR" "UNAVAILABLE_ATTRIBUTE"
-  ]) @attribute
+  ]) @editor.syntax.objectivec.attribute
 
 ; Macros
 
@@ -229,24 +229,24 @@
     "__unsafe_unretained"
     "__unused"
     "__weak"
-  ]) @function.macro.builtin
+  ]) @editor.syntax.objectivec.preprocessor
 
-[ "__real" "__imag" ] @function.macro.builtin
+[ "__real" "__imag" ] @editor.syntax.objectivec.preprocessor
 
-((call_expression function: (identifier) @function.macro)
-  (#eq? @function.macro "testassert"))
+((call_expression function: (identifier) @editor.syntax.objectivec.preprocessor)
+  (#eq? @editor.syntax.objectivec.preprocessor "testassert"))
 
 ; Types
 
-(class_declaration (identifier) @type)
+(class_declaration (identifier) @editor.syntax.objectivec.identifier.type.system)
 
-(class_interface "@interface" . (identifier) @type superclass: _? @type category: _? @namespace)
+(class_interface "@interface" . (identifier) @editor.syntax.objectivec.identifier.type.system superclass: _? @editor.syntax.objectivec.identifier.type.system category: _? @editor.syntax.objectivec.identifier.type.system)
 
-(class_implementation "@implementation" . (identifier) @type superclass: _? @type category: _? @namespace)
+(class_implementation "@implementation" . (identifier) @editor.syntax.objectivec.identifier.type.system superclass: _? @editor.syntax.objectivec.identifier.type.system category: _? @editor.syntax.objectivec.identifier.type.system)
 
-(protocol_forward_declaration (identifier) @type)
+(protocol_forward_declaration (identifier) @editor.syntax.objectivec.identifier.type.system)
 
-(protocol_reference_list (identifier) @type)
+(protocol_reference_list (identifier) @editor.syntax.objectivec.identifier.type.system)
 
 [
   "BOOL"
@@ -254,49 +254,49 @@
   "SEL"
   "Class"
   "id"
-] @type.builtin
+] @editor.syntax.objectivec.identifier.type.system
 
 ; Constants
 
-(property_attribute (identifier) @constant "="?)
+(property_attribute (identifier) @editor.syntax.objectivec.identifier.constant "="?)
 
-[ "__asm" "__asm__" ] @constant.macro
+[ "__asm" "__asm__" ] @editor.syntax.objectivec.preprocessor
 
 ; Properties
 
-(property_implementation "@synthesize" (identifier) @property)
+(property_implementation "@synthesize" (identifier) @editor.syntax.objectivec.attribute)
 
-((identifier) @property
-  (#has-ancestor? @property struct_declaration))
+((identifier) @editor.syntax.objectivec.attribute
+  (#has-ancestor? @editor.syntax.objectivec.attribute struct_declaration))
 
 ; Parameters
 
-(method_parameter ":" @method (identifier) @parameter)
+(method_parameter ":" @editor.syntax.objectivec.identifier.function.system (identifier) @editor.syntax.objectivec.plain)
 
-(method_parameter declarator: (identifier) @parameter)
+(method_parameter declarator: (identifier) @editor.syntax.objectivec.plain)
 
 (parameter_declaration
   declarator: (function_declarator
                 declarator: (parenthesized_declarator
                               (block_pointer_declarator
-                                declarator: (identifier) @parameter))))
+                                declarator: (identifier) @editor.syntax.objectivec.plain))))
 
-"..." @parameter.builtin
+"..." @editor.syntax.objectivec.plain
 
 ; Operators
 
 [
   "^"
-] @operator
+] @editor.syntax.objectivec.plain
 
 ; Literals
 
-(platform) @string.special
+(platform) @editor.syntax.objectivec.string
 
-(version_number) @text.uri @number
+(version_number) @editor.syntax.objectivec.url @editor.syntax.objectivec.number
 
 ; Punctuation
 
-"@" @punctuation.special
+"@" @editor.syntax.objectivec.plain
 
-[ "<" ">" ] @punctuation.bracket
+[ "<" ">" ] @editor.syntax.objectivec.plain

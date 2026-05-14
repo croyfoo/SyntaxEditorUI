@@ -793,7 +793,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             delayNanoseconds: 30_000_000
@@ -1695,7 +1695,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ]
         )
@@ -1736,7 +1736,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ]
         )
@@ -1772,7 +1772,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             delayNanoseconds: 1_000_000
@@ -1808,11 +1808,11 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
                 SyntaxHighlightToken(
                     range: NSRange(location: firstPaste.utf16.count, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             delayNanoseconds: 20_000_000,
@@ -4600,7 +4600,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ]
         )
@@ -4676,7 +4676,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             updateRefreshRange: NSRange(location: source.utf16.count, length: 2)
@@ -4737,7 +4737,7 @@ struct SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(range: NSRange(location: 0, length: 3), rawCaptureName: "keyword"),
+                SyntaxHighlightToken(range: NSRange(location: 0, length: 3), rawCaptureName: "editor.syntax.swift.keyword"),
             ],
             updateRefreshRange: NSRange(location: source.utf16.count, length: appendedText.utf16.count)
         )
@@ -4780,11 +4780,11 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
                 SyntaxHighlightToken(
                     range: NSRange(location: firstPaste.utf16.count, length: 3),
-                    rawCaptureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             delayNanoseconds: 20_000_000,

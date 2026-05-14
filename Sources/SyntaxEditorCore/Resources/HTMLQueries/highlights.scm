@@ -1,14 +1,14 @@
-(doctype) @constant.html.doctype
-(tag_name) @tag.html.name
-(erroneous_end_tag_name) @tag.html.error
-(attribute_name) @attribute.html.name
-(quoted_attribute_value) @string.html.attributeValue
-(attribute_value) @string.html.attributeValue
-(comment) @comment
+(doctype) @editor.syntax.html.keyword
+(tag_name) @editor.syntax.html.keyword
+(erroneous_end_tag_name) @editor.syntax.html.keyword
+(attribute_name) @editor.syntax.html.attribute
+(quoted_attribute_value) @editor.syntax.html.string
+(attribute_value) @editor.syntax.html.string
+(comment) @editor.syntax.html.comment
 
 [
   "<"
   ">"
   "</"
   "/>"
-] @punctuation.html.bracket
+] @editor.syntax.html.keyword

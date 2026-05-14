@@ -44,8 +44,12 @@ let package = Package(
             resources: [
                 .copy("Resources/CSSQueries"),
                 .copy("Resources/HTMLQueries"),
+                .copy("Resources/JavaScriptQueries"),
+                .copy("Resources/JSONQueries"),
                 .copy("Resources/ObjectiveCQueries"),
                 .copy("Resources/SwiftQueries"),
+                .copy("Resources/TOMLQueries"),
+                .copy("Resources/XMLQueries"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

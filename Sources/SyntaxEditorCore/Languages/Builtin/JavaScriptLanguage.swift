@@ -11,6 +11,7 @@ struct JavaScriptLanguage {
         SyntaxTreeSitterSupport(
             name: "JavaScript",
             bundleName: "TreeSitterJavaScript_TreeSitterJavaScript",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_javascript()) }
         )
     }
@@ -28,6 +29,13 @@ struct JavaScriptLanguage {
         let clampedLocation = max(0, min(location, nsSource.length))
         let prefix = nsSource.substring(to: clampedLocation)
         return PrefixAnalyzer(text: prefix).analysis.isInsideLiteralOrComment
+    }
+}
+
+private extension JavaScriptLanguage {
+    static var queryDirectories: [URL] {
+        guard let resourceURL = Bundle.module.resourceURL else { return [] }
+        return [resourceURL.appendingPathComponent("JavaScriptQueries", isDirectory: true)]
     }
 }
 

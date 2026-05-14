@@ -70,6 +70,101 @@ package struct EditorSourceSyntaxClassification: Equatable, Sendable {
     }
 }
 
+package enum EditorSyntaxCapture {
+    private static let canonicalPrefix = "editor.syntax."
+
+    package static func parse(
+        rawCaptureName: String,
+        rootLanguage: SyntaxLanguage
+    ) -> EditorSourceSyntaxClassification {
+        let normalized = normalizedCaptureName(rawCaptureName)
+        guard normalized.hasPrefix(canonicalPrefix) else {
+            return EditorSourceSyntaxClassification(syntaxID: .plain, language: rootLanguage)
+        }
+
+        let payload = normalized.dropFirst(canonicalPrefix.count)
+        guard let separator = payload.firstIndex(of: ".") else {
+            return EditorSourceSyntaxClassification(syntaxID: .plain, language: rootLanguage)
+        }
+
+        let languageName = String(payload[..<separator])
+        let syntaxID = String(payload[payload.index(after: separator)...])
+        guard syntaxID.isEmpty == false,
+              let language = SyntaxLanguage.editorSyntaxCaptureLanguage(named: languageName)
+        else {
+            return EditorSourceSyntaxClassification(syntaxID: .plain, language: rootLanguage)
+        }
+
+        return EditorSourceSyntaxClassification(
+            syntaxID: EditorSourceSyntaxID(syntaxID),
+            language: language
+        )
+    }
+
+    package static func rawCaptureName(
+        syntaxID: EditorSourceSyntaxID,
+        language: SyntaxLanguage
+    ) -> String {
+        "\(canonicalPrefix)\(language.editorSyntaxCaptureIdentifier).\(syntaxID.rawValue)"
+    }
+
+    private static func normalizedCaptureName(_ rawCaptureName: String) -> String {
+        var name = rawCaptureName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if name.hasPrefix("@") {
+            name.removeFirst()
+        }
+        return name
+    }
+}
+
+private extension SyntaxLanguage {
+    var editorSyntaxCaptureIdentifier: String {
+        switch self {
+        case .css:
+            "css"
+        case .html:
+            "html"
+        case .javascript:
+            "javascript"
+        case .json:
+            "json"
+        case .objectiveC:
+            "objectivec"
+        case .swift:
+            "swift"
+        case .toml:
+            "toml"
+        case .xml:
+            "xml"
+        }
+    }
+
+    static func editorSyntaxCaptureLanguage(named rawName: String) -> SyntaxLanguage? {
+        switch rawName {
+        case "css":
+            .css
+        case "html":
+            .html
+        case "javascript":
+            .javascript
+        case "json":
+            .json
+        case "objectivec":
+            .objectiveC
+        case "swift":
+            .swift
+        case "toml":
+            .toml
+        case "xml":
+            .xml
+        default:
+            nil
+        }
+    }
+}
+
 package enum EditorSourceSyntaxCategory {
     case comment
     case string

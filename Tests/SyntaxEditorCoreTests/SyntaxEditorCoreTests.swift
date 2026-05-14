@@ -51,6 +51,27 @@ private func sortHighlightTokens(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHig
     }
 }
 
+private func tokenIntersects(
+    _ token: SyntaxHighlightToken,
+    range: NSRange,
+    syntaxID: EditorSourceSyntaxID? = nil,
+    language: SyntaxLanguage? = nil
+) -> Bool {
+    if let syntaxID, token.syntaxID != syntaxID {
+        return false
+    }
+    if let language, token.language != language {
+        return false
+    }
+    return SyntaxEditorRangeUtilities.intersection(of: token.range, and: range).length > 0
+}
+
+private func tokenIsInjectedKeyword(_ token: SyntaxHighlightToken, in range: NSRange) -> Bool {
+    (token.language == .javascript || token.language == .json)
+        && token.syntaxID == .keyword
+        && SyntaxEditorRangeUtilities.intersection(of: token.range, and: range).length > 0
+}
+
 private struct HighlightSemanticSnapshot {
     let text: String
     let rawCaptureName: String
@@ -70,27 +91,126 @@ private func referenceSampleText(named filename: String) throws -> String {
     return try String(contentsOf: sampleURL, encoding: .utf8)
 }
 
-private func semanticStyleKeysForCapture(
-    _ captureName: String,
-    tokenText: String = "",
-    language: SyntaxLanguage
-) -> [String]? {
-    let classification = TreeSitterCaptureClassifier.classify(
-        rawCaptureName: captureName,
-        tokenText: tokenText,
-        rootLanguage: language
-    )
-    return SyntaxEditorHighlightTheme.semanticStyleKeys(
-        for: classification.syntaxID,
-        language: classification.language ?? language
-    )
+private func repositoryRootURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+}
+
+private func highlightQueryURL(language: SyntaxLanguage) -> URL {
+    let directoryName = switch language {
+    case .css:
+        "CSSQueries"
+    case .html:
+        "HTMLQueries"
+    case .javascript:
+        "JavaScriptQueries"
+    case .json:
+        "JSONQueries"
+    case .objectiveC:
+        "ObjectiveCQueries"
+    case .swift:
+        "SwiftQueries"
+    case .toml:
+        "TOMLQueries"
+    case .xml:
+        "XMLQueries"
+    }
+    return repositoryRootURL()
+        .appendingPathComponent("Sources/SyntaxEditorCore/Resources", isDirectory: true)
+        .appendingPathComponent(directoryName, isDirectory: true)
+        .appendingPathComponent("highlights.scm")
+}
+
+private func canonicalCaptureLanguageName(for language: SyntaxLanguage) -> String {
+    switch language {
+    case .css:
+        "css"
+    case .html:
+        "html"
+    case .javascript:
+        "javascript"
+    case .json:
+        "json"
+    case .objectiveC:
+        "objectivec"
+    case .swift:
+        "swift"
+    case .toml:
+        "toml"
+    case .xml:
+        "xml"
+    }
+}
+
+private func captureNames(inQuerySource source: String) -> [String] {
+    var captures: [String] = []
+    var index = source.startIndex
+    var isInString = false
+    var isEscaped = false
+    var isInLineComment = false
+
+    while index < source.endIndex {
+        let character = source[index]
+
+        if isInLineComment {
+            if character == "\n" {
+                isInLineComment = false
+            }
+            index = source.index(after: index)
+            continue
+        }
+
+        if isInString {
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == "\"" {
+                isInString = false
+            }
+            index = source.index(after: index)
+            continue
+        }
+
+        if character == ";" {
+            isInLineComment = true
+            index = source.index(after: index)
+            continue
+        }
+        if character == "\"" {
+            isInString = true
+            index = source.index(after: index)
+            continue
+        }
+        guard character == "@" else {
+            index = source.index(after: index)
+            continue
+        }
+
+        var end = source.index(after: index)
+        while end < source.endIndex {
+            let next = source[end]
+            guard next.isLetter || next.isNumber || next == "." || next == "_" || next == "-" else {
+                break
+            }
+            end = source.index(after: end)
+        }
+        if end > source.index(after: index) {
+            captures.append(String(source[source.index(after: index)..<end]))
+        }
+        index = end
+    }
+
+    return captures
 }
 
 private func semanticSnapshot(
     in tokens: [SyntaxHighlightToken],
     source: String,
     text: String,
-    captureName: String,
+    syntaxID: EditorSourceSyntaxID,
     language: SyntaxLanguage,
     inOccurrenceOf containingText: String? = nil
 ) throws -> HighlightSemanticSnapshot {
@@ -105,7 +225,7 @@ private func semanticSnapshot(
     let expectedRange = nsSource.range(of: text, options: [], range: searchRange)
     #expect(expectedRange.location != NSNotFound)
     let matchedToken = tokens.first {
-        $0.rawCaptureName == captureName
+        $0.syntaxID == syntaxID
             && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0
     }
     if matchedToken == nil {
@@ -115,7 +235,7 @@ private func semanticSnapshot(
                 "\(nsSource.substring(with: token.range)):\(token.rawCaptureName)"
             }
             .joined(separator: ", ")
-        Issue.record("Could not find \(captureName) for \(text) in \(containingText ?? source). Nearby: \(nearby)")
+        Issue.record("Could not find \(syntaxID.rawValue) for \(text) in \(containingText ?? source). Nearby: \(nearby)")
     }
     let token = try #require(matchedToken)
     let tokenText = nsSource.substring(with: token.range)
@@ -138,12 +258,12 @@ private func semanticSnapshot(
     )
 }
 
-private func captureNames(
+private func syntaxIDs(
     in tokens: [SyntaxHighlightToken],
     source: String,
     text: String,
     inOccurrenceOf containingText: String
-) -> [String] {
+) -> [EditorSourceSyntaxID] {
     let nsSource = source as NSString
     let searchRange = nsSource.range(of: containingText)
     #expect(searchRange.location != NSNotFound)
@@ -152,13 +272,14 @@ private func captureNames(
 
     return tokens
         .filter { SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0 }
-        .map(\.rawCaptureName)
+        .map(\.syntaxID)
 }
 
 private func effectiveSemanticSnapshot(
     in tokens: [SyntaxHighlightToken],
     source: String,
     text: String,
+    syntaxID: EditorSourceSyntaxID,
     language: SyntaxLanguage,
     inOccurrenceOf containingText: String
 ) throws -> HighlightSemanticSnapshot {
@@ -169,7 +290,8 @@ private func effectiveSemanticSnapshot(
     #expect(expectedRange.location != NSNotFound)
 
     let matchedToken = tokens.last {
-        SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0
+        $0.syntaxID == syntaxID
+            && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0
     }
     if matchedToken == nil {
         let nearby = tokens
@@ -178,7 +300,7 @@ private func effectiveSemanticSnapshot(
                 "\(nsSource.substring(with: token.range)):\(token.rawCaptureName)"
             }
             .joined(separator: ", ")
-        Issue.record("Could not find effective token for \(text) in \(containingText). Nearby: \(nearby)")
+        Issue.record("Could not find effective \(syntaxID.rawValue) token for \(text) in \(containingText). Nearby: \(nearby)")
     }
 
     let token = try #require(matchedToken)
@@ -340,137 +462,54 @@ struct SyntaxEditorCoreTests {
         #expect(objectiveCStyle?.foreground == objectiveCResolved.baseForeground)
     }
 
-    @Test("SyntaxEditorHighlightTheme resolves semantic keys for language-specific captures")
-    func syntaxEditorHighlightThemeSemanticStyleKeys() throws {
-        #expect(
-            semanticStyleKeysForCapture("property.css.name", language: .css)?.first
-                == "editor.syntax.keyword"
+    @Test("EditorSyntaxCapture parses canonical captures and falls back for non-canonical names")
+    func editorSyntaxCaptureParser() {
+        let swiftKeyword = EditorSyntaxCapture.parse(
+            rawCaptureName: "editor.syntax.swift.keyword",
+            rootLanguage: .html
         )
-        #expect(
-            semanticStyleKeysForCapture("tag.html.name", language: .html)?.first
-                == "editor.syntax.keyword"
+        #expect(swiftKeyword.syntaxID == .keyword)
+        #expect(swiftKeyword.language == .swift)
+
+        let objectiveCType = EditorSyntaxCapture.parse(
+            rawCaptureName: "@editor.syntax.objectivec.identifier.type.system",
+            rootLanguage: .swift
         )
-        #expect(
-            semanticStyleKeysForCapture("function.swift.macro", language: .swift)?.first
-                == "editor.syntax.identifier.macro.system"
-        )
-        #expect(
-            semanticStyleKeysForCapture("constant.macro", language: .swift)?.first
-                == "editor.syntax.identifier.macro.system"
-        )
-        #expect(
-            semanticStyleKeysForCapture("declaration.swift.type.name", language: .swift)?.first
-                == "editor.syntax.declaration.type"
-        )
-        #expect(
-            semanticStyleKeysForCapture("identifier.swift.project.type", language: .swift)?.first
-                == "editor.syntax.identifier.type.system"
-        )
-        #expect(
-            semanticStyleKeysForCapture("identifier.swift.other.type", language: .swift)?.first
-                == "editor.syntax.identifier.type.system"
-        )
-        #expect(
-            semanticStyleKeysForCapture("comment.documentation.keyword", language: .swift)?.first
-                == "editor.syntax.comment.doc.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("comment.documentation", language: .javascript)?.first
-                == "editor.syntax.comment.doc"
-        )
-        #expect(
-            semanticStyleKeysForCapture("comment.doc", language: .json)?.first
-                == "editor.syntax.comment.doc"
-        )
-        #expect(
-            semanticStyleKeysForCapture("comment.mark", language: .swift)?.first
-                == "editor.syntax.mark"
-        )
-        #expect(
-            semanticStyleKeysForCapture("keyword.directive", language: .swift)?.first
-                == "editor.syntax.preprocessor"
-        )
-        #expect(
-            semanticStyleKeysForCapture("keyword.directive.condition.swift", language: .swift)?.first
-                == "editor.syntax.preprocessor"
-        )
-        #expect(
-            semanticStyleKeysForCapture("keyword.swift.availability", language: .swift)?.first
-                == "editor.syntax.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("constructor", language: .swift)?.first
-                == "editor.syntax.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("attribute.swift.punctuation", language: .swift)?.first
-                == "editor.syntax.identifier.type.system"
-        )
-        #expect(
-            semanticStyleKeysForCapture("constant.builtin", language: .swift)?.first
-                == "editor.syntax.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("constant.builtin", language: .json)?.first
-                == "editor.syntax.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("boolean", language: .javascript)?.first
-                == "editor.syntax.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("variable.builtin", language: .html)?.first
-                == "editor.syntax.plain"
-        )
-        #expect(
-            semanticStyleKeysForCapture("property.identifier", language: .html)?.first
-                == "editor.syntax.plain"
-        )
-        #expect(
-            semanticStyleKeysForCapture("boolean", language: .objectiveC)?.first
-                == "editor.syntax.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("type.qualifier", language: .objectiveC)?.first
-                == "editor.syntax.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("exception", language: .objectiveC)?.first
-                == "editor.syntax.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("variable", language: .objectiveC)?.first
-                == "editor.syntax.plain"
-        )
-        #expect(
-            semanticStyleKeysForCapture("markup.raw", language: .xml)?.first
-                == "editor.syntax.string"
-        )
-        #expect(
-            semanticStyleKeysForCapture("markup.heading", language: .xml)?.first
-                == "editor.syntax.keyword"
-        )
-        #expect(
-            semanticStyleKeysForCapture("markup.link", language: .xml)?.first
-                == "editor.syntax.url"
-        )
-        #expect(
-            semanticStyleKeysForCapture("escape", language: .json)?.first
-                == "editor.syntax.character"
-        )
-        #expect(
-            semanticStyleKeysForCapture("character.special", language: .swift)?.first
-                == "editor.syntax.character"
-        )
-        #expect(
-            semanticStyleKeysForCapture("operator", language: .javascript)?.first
-                == "editor.syntax.plain"
-        )
-        #expect(
-            semanticStyleKeysForCapture("operator", language: .swift)?.first
-                == "editor.syntax.plain"
-        )
-        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: EditorSourceSyntaxID("unknown.capture"), language: .css)?.last == "editor.syntax.plain")
+        #expect(objectiveCType.syntaxID == .identifierTypeSystem)
+        #expect(objectiveCType.language == .objectiveC)
+
+        let fallback = EditorSyntaxCapture.parse(rawCaptureName: "keyword", rootLanguage: .swift)
+        #expect(fallback.syntaxID == .plain)
+        #expect(fallback.language == .swift)
+    }
+
+    @Test("Built-in highlight queries use canonical editor syntax captures")
+    func builtInHighlightQueriesUseCanonicalCaptures() throws {
+        for language in SyntaxLanguage.allCases {
+            let source = try String(contentsOf: highlightQueryURL(language: language), encoding: .utf8)
+            let captures = captureNames(inQuerySource: source)
+            let prefix = "editor.syntax.\(canonicalCaptureLanguageName(for: language))."
+            #expect(captures.isEmpty == false, "No captures found for \(language.rawValue)")
+
+            for capture in captures {
+                #expect(capture.hasPrefix(prefix), "Non-canonical capture @\(capture) in \(language.rawValue)")
+                let classification = EditorSyntaxCapture.parse(
+                    rawCaptureName: capture,
+                    rootLanguage: language
+                )
+                #expect(classification.language == language)
+                #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(
+                    for: classification.syntaxID,
+                    language: classification.language
+                )?.isEmpty == false)
+                #expect(SyntaxEditorHighlightTheme.style(
+                    for: classification.syntaxID,
+                    in: .default,
+                    language: classification.language,
+                    appearance: .dark
+                ) != nil)
+            }
+        }
     }
 
     @Test("Generated language syntax definitions cover supported languages")
@@ -498,11 +537,10 @@ struct SyntaxEditorCoreTests {
         let cssRules = Dictionary(uniqueKeysWithValues: css.rules.map { ($0.identifier, $0) })
         #expect(cssRules["css.style"]?.syntaxTypes == ["definition.style"])
 
-        #expect(semanticStyleKeysForCapture("property", language: .toml)?.first == "editor.syntax.attribute")
-        #expect(semanticStyleKeysForCapture("type", language: .toml)?.first == "editor.syntax.plain")
-        #expect(semanticStyleKeysForCapture("operator", language: .toml)?.first == "editor.syntax.plain")
-        #expect(semanticStyleKeysForCapture("property.css.name", language: .css)?.first == "editor.syntax.keyword")
-        #expect(semanticStyleKeysForCapture("tag.html.name", language: .html)?.first == "editor.syntax.keyword")
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "attribute", language: .toml)?.first == "editor.syntax.attribute")
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "plain", language: .toml)?.first == "editor.syntax.plain")
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "keyword", language: .css)?.first == "editor.syntax.keyword")
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "keyword", language: .html)?.first == "editor.syntax.keyword")
     }
 
     @Test("Generated source syntax type resolver maps source syntax types")
@@ -3734,11 +3772,17 @@ struct SyntaxHighlighterEngineTests {
         for testCase in cases {
             let source = try referenceSampleText(named: testCase.filename)
             let tokens = await engine.render(source: source, language: testCase.language)
-            let auxiliaryCaptures = Set(["spell"])
+            let nonCanonicalCaptures = tokens
+                .filter { $0.rawCaptureName.hasPrefix("editor.syntax.") == false }
+                .map(\.rawCaptureName)
+                .sorted()
+            #expect(
+                nonCanonicalCaptures.isEmpty,
+                "Non-canonical captures for \(testCase.language.rawValue): \(nonCanonicalCaptures.joined(separator: ", "))"
+            )
+
             let unresolvedTokens = tokens
                 .filter {
-                    auxiliaryCaptures.contains($0.rawCaptureName.lowercased()) == false
-                        &&
                     SyntaxEditorHighlightTheme.semanticStyleKeys(
                         for: $0.syntaxID,
                         language: $0.language ?? testCase.language
@@ -3760,73 +3804,73 @@ struct SyntaxHighlighterEngineTests {
         let source = try referenceSampleText(named: "Reference.swift")
         let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
 
-        let expectations: [(text: String, capture: String, styleKey: String, occurrence: String)] = [
-            ("MARK:", "comment.mark", "editor.syntax.mark", "// MARK: - Reference highlighting surface"),
-            ("Foundation", "identifier.swift.import.name", "editor.syntax.plain", "import Foundation"),
-            ("Observation", "identifier.swift.import.name", "editor.syntax.plain", "import Observation"),
+        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+            ("MARK:", "mark", "editor.syntax.mark", "// MARK: - Reference highlighting surface"),
+            ("Foundation", "plain", "editor.syntax.plain", "import Foundation"),
+            ("Observation", "plain", "editor.syntax.plain", "import Observation"),
             ("Reference highlighting surface", "comment", "editor.syntax.comment", "// MARK: - Reference highlighting surface"),
-            ("Renders a compact reference model.", "comment.documentation", "editor.syntax.comment.doc", "/// Renders a compact reference model."),
-            ("Parameters", "comment.documentation.keyword", "editor.syntax.comment.doc.keyword", "/// - Parameters:"),
-            ("https://example.invalid/reference.", "text.uri", "editor.syntax.url", "https://example.invalid/reference."),
-            ("associatedtype", "keyword.function", "editor.syntax.keyword", "associatedtype Output"),
-            ("ReferenceID", "declaration.swift.other.name", "editor.syntax.declaration.other", "typealias ReferenceID = UUID"),
-            ("macro", "keyword.function", "editor.syntax.keyword", "macro localized"),
-            ("localized", "declaration.swift.macro.name", "editor.syntax.identifier.macro", "macro localized"),
-            ("attached", "keyword.swift.attribute.builtin", "editor.syntax.keyword", "@attached(member"),
-            ("member", "identifier.swift.argument.label", "editor.syntax.plain", "@attached(member"),
-            ("names", "identifier.swift.argument.label", "editor.syntax.plain", "names: named(CodingKeys)"),
-            ("named", "identifier.swift.argument.label", "editor.syntax.plain", "names: named(CodingKeys)"),
-            ("CodingKeys", "identifier.swift.argument.label", "editor.syntax.plain", "names: named(CodingKeys)"),
-            ("conformances", "identifier.swift.argument.label", "editor.syntax.plain", "conformances: Codable"),
-            ("Codable", "identifier.swift.argument.label", "editor.syntax.plain", "conformances: Codable"),
-            ("module", "identifier.swift.argument.label", "editor.syntax.plain", #"#externalMacro(module: "ReferenceMacros""#),
-            ("type", "identifier.swift.argument.label", "editor.syntax.plain", #"type: "AutoCodableMacro""#),
-            ("freestanding", "keyword.swift.attribute.builtin", "editor.syntax.keyword", "@freestanding(expression)"),
-            ("propertyWrapper", "keyword.swift.attribute.builtin", "editor.syntax.keyword", "@propertyWrapper"),
-            ("precedencegroup", "keyword.function", "editor.syntax.keyword", "precedencegroup ReferencePrecedence"),
-            ("ReferencePrecedence", "declaration.swift.type.name", "editor.syntax.declaration.type", "precedencegroup ReferencePrecedence"),
+            ("Renders a compact reference model.", "comment.doc", "editor.syntax.comment.doc", "/// Renders a compact reference model."),
+            ("Parameters", "comment.doc.keyword", "editor.syntax.comment.doc.keyword", "/// - Parameters:"),
+            ("https://example.invalid/reference.", "url", "editor.syntax.url", "https://example.invalid/reference."),
+            ("associatedtype", "keyword", "editor.syntax.keyword", "associatedtype Output"),
+            ("ReferenceID", "declaration.other", "editor.syntax.declaration.other", "typealias ReferenceID = UUID"),
+            ("macro", "keyword", "editor.syntax.keyword", "macro localized"),
+            ("localized", "identifier.macro", "editor.syntax.identifier.macro", "macro localized"),
+            ("attached", "keyword", "editor.syntax.keyword", "@attached(member"),
+            ("member", "plain", "editor.syntax.plain", "@attached(member"),
+            ("names", "plain", "editor.syntax.plain", "names: named(CodingKeys)"),
+            ("named", "plain", "editor.syntax.plain", "names: named(CodingKeys)"),
+            ("CodingKeys", "plain", "editor.syntax.plain", "names: named(CodingKeys)"),
+            ("conformances", "plain", "editor.syntax.plain", "conformances: Codable"),
+            ("Codable", "plain", "editor.syntax.plain", "conformances: Codable"),
+            ("module", "plain", "editor.syntax.plain", #"#externalMacro(module: "ReferenceMacros""#),
+            ("type", "plain", "editor.syntax.plain", #"type: "AutoCodableMacro""#),
+            ("freestanding", "keyword", "editor.syntax.keyword", "@freestanding(expression)"),
+            ("propertyWrapper", "keyword", "editor.syntax.keyword", "@propertyWrapper"),
+            ("precedencegroup", "keyword", "editor.syntax.keyword", "precedencegroup ReferencePrecedence"),
+            ("ReferencePrecedence", "declaration.type", "editor.syntax.declaration.type", "precedencegroup ReferencePrecedence"),
             ("associativity", "keyword", "editor.syntax.keyword", "associativity: left"),
             ("left", "keyword", "editor.syntax.keyword", "associativity: left"),
             ("higherThan", "keyword", "editor.syntax.keyword", "higherThan: AdditionPrecedence"),
-            ("AdditionPrecedence", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "higherThan: AdditionPrecedence"),
+            ("AdditionPrecedence", "identifier.type.system", "editor.syntax.identifier.type.system", "higherThan: AdditionPrecedence"),
             ("assignment", "keyword", "editor.syntax.keyword", "assignment: false"),
-            ("infix", "keyword.modifier", "editor.syntax.keyword", "infix operator <+>"),
-            ("init", "constructor", "editor.syntax.keyword", "init(wrappedValue: Value"),
-            ("ReferenceStore", "declaration.swift.type.name", "editor.syntax.declaration.type", "final class ReferenceStore"),
-            ("OpenReferenceBase", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "OpenReferenceBase, @unchecked"),
-            ("ReferenceRenderable", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "any ReferenceRenderable"),
-            ("ReferenceID", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "Item<ReferenceID>"),
-            ("UUID", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "typealias ReferenceID = UUID"),
-            ("Value", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "Clamped<Value: Comparable>"),
-            ("ID", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "struct Item<ID: Hashable>"),
-            ("load", "identifier.swift.other.function", "editor.syntax.identifier.function.system", "try await load().map"),
-            ("min", "identifier.swift.other.function", "editor.syntax.identifier.function.system", "min(max"),
-            ("items", "variable", "editor.syntax.plain", "items.first"),
-            ("ready", "variable", "editor.syntax.plain", "state: State = .ready"),
-            ("rawValue", "identifier.swift.other.property", "editor.syntax.identifier.variable.system", "state.rawValue"),
-            ("@", "attribute.swift.punctuation", "editor.syntax.identifier.type.system", "@AutoCodable"),
-            ("AutoCodable", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "@AutoCodable"),
-            ("Observable", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "@Observable"),
-            ("Clamped", "identifier.swift.other.type", "editor.syntax.identifier.type.system", "@Clamped(0...globalLimit)"),
-            ("sourceLocation", "identifier.swift.other.macro", "editor.syntax.identifier.macro.system", "#sourceLocation(file:"),
-            ("wrappedValue", "variable", "editor.syntax.plain", "max(wrappedValue"),
-            ("range", "variable", "editor.syntax.plain", "range.lowerBound"),
-            ("rows", "variable", "editor.syntax.plain", "{ rows }"),
-            ("platform", "variable", "editor.syntax.plain", #"let platform = "iOS""#),
-            ("=", "operator", "editor.syntax.plain", "progress = 42"),
-            ("->", "operator", "editor.syntax.plain", "render() async throws -> [String]"),
-            ("<+>", "operator", "editor.syntax.plain", "infix operator <+>"),
-            ("#if", "keyword.directive", "editor.syntax.preprocessor", "#if os(iOS)"),
-            ("iOS", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if os(iOS)"),
-            ("#available", "keyword.swift.availability", "editor.syntax.keyword", "if #available(macOS"),
+            ("infix", "keyword", "editor.syntax.keyword", "infix operator <+>"),
+            ("init", "keyword", "editor.syntax.keyword", "init(wrappedValue: Value"),
+            ("ReferenceStore", "declaration.type", "editor.syntax.declaration.type", "final class ReferenceStore"),
+            ("OpenReferenceBase", "identifier.type.system", "editor.syntax.identifier.type.system", "OpenReferenceBase, @unchecked"),
+            ("ReferenceRenderable", "identifier.type.system", "editor.syntax.identifier.type.system", "any ReferenceRenderable"),
+            ("ReferenceID", "identifier.type.system", "editor.syntax.identifier.type.system", "Item<ReferenceID>"),
+            ("UUID", "identifier.type.system", "editor.syntax.identifier.type.system", "typealias ReferenceID = UUID"),
+            ("Value", "identifier.type.system", "editor.syntax.identifier.type.system", "Clamped<Value: Comparable>"),
+            ("ID", "identifier.type.system", "editor.syntax.identifier.type.system", "struct Item<ID: Hashable>"),
+            ("load", "identifier.function.system", "editor.syntax.identifier.function.system", "try await load().map"),
+            ("min", "identifier.function.system", "editor.syntax.identifier.function.system", "min(max"),
+            ("items", "plain", "editor.syntax.plain", "items.first"),
+            ("ready", "plain", "editor.syntax.plain", "state: State = .ready"),
+            ("rawValue", "identifier.variable.system", "editor.syntax.identifier.variable.system", "state.rawValue"),
+            ("@", "identifier.type.system", "editor.syntax.identifier.type.system", "@AutoCodable"),
+            ("AutoCodable", "identifier.type.system", "editor.syntax.identifier.type.system", "@AutoCodable"),
+            ("Observable", "identifier.type.system", "editor.syntax.identifier.type.system", "@Observable"),
+            ("Clamped", "identifier.type.system", "editor.syntax.identifier.type.system", "@Clamped(0...globalLimit)"),
+            ("sourceLocation", "identifier.macro.system", "editor.syntax.identifier.macro.system", "#sourceLocation(file:"),
+            ("wrappedValue", "plain", "editor.syntax.plain", "max(wrappedValue"),
+            ("range", "plain", "editor.syntax.plain", "range.lowerBound"),
+            ("rows", "plain", "editor.syntax.plain", "{ rows }"),
+            ("platform", "plain", "editor.syntax.plain", #"let platform = "iOS""#),
+            ("=", "plain", "editor.syntax.plain", "progress = 42"),
+            ("->", "plain", "editor.syntax.plain", "render() async throws -> [String]"),
+            ("<+>", "plain", "editor.syntax.plain", "infix operator <+>"),
+            ("#if", "preprocessor", "editor.syntax.preprocessor", "#if os(iOS)"),
+            ("iOS", "preprocessor", "editor.syntax.preprocessor", "#if os(iOS)"),
+            ("#available", "keyword", "editor.syntax.keyword", "if #available(macOS"),
             ("self", "keyword", "editor.syntax.keyword", "self.items = value.items"),
-            ("Any", "keyword.swift.type.builtin", "editor.syntax.keyword", "sourceLocationCheck: Any?"),
-            ("nil", "constant.builtin", "editor.syntax.keyword", "Any? = nil"),
-            ("false", "boolean", "editor.syntax.keyword", "assignment: false"),
-            ("item-(?<number>\\d+)-(?<kind>[A-Z]+)", "string.regexp", "editor.syntax.string", #"let pattern = #/item-(?<number>\d+)-(?<kind>[A-Z]+)/#"#),
+            ("Any", "keyword", "editor.syntax.keyword", "sourceLocationCheck: Any?"),
+            ("nil", "keyword", "editor.syntax.keyword", "Any? = nil"),
+            ("false", "keyword", "editor.syntax.keyword", "assignment: false"),
+            ("item-(?<number>\\d+)-(?<kind>[A-Z]+)", "string", "editor.syntax.string", #"let pattern = #/item-(?<number>\d+)-(?<kind>[A-Z]+)/#"#),
             ("42", "number", "editor.syntax.number", "progress = 42"),
             ("reference.title", "string", "editor.syntax.string", #"#localized("reference.title")"#),
-            ("AutoCodable", "declaration.swift.macro.name", "editor.syntax.identifier.macro", "macro AutoCodable()"),
+            ("AutoCodable", "identifier.macro", "editor.syntax.identifier.macro", "macro AutoCodable()"),
         ]
 
         for expectation in expectations {
@@ -3834,30 +3878,30 @@ struct SyntaxHighlighterEngineTests {
                 in: tokens,
                 source: source,
                 text: expectation.text,
-                captureName: expectation.capture,
+                syntaxID: expectation.syntaxID,
                 language: .swift,
                 inOccurrenceOf: expectation.occurrence
             )
             #expect(snapshot.styleKeys.first == expectation.styleKey)
         }
 
-        let effectiveExpectations: [(text: String, capture: String, styleKey: String, occurrence: String)] = [
-            ("isolated", "keyword.swift.modifier.contextual", "editor.syntax.keyword", "isolated deinit"),
-            ("defer", "keyword.swift.statement.reserved", "editor.syntax.keyword", "defer { state = .ready }"),
-            ("#if", "keyword.directive", "editor.syntax.preprocessor", "#if os(iOS)"),
-            ("iOS", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if os(iOS)"),
-            ("macOS", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif os(macOS)"),
-            ("#else", "keyword.directive", "editor.syntax.preprocessor", "#else"),
-            ("#endif", "keyword.directive", "editor.syntax.preprocessor", "#endif"),
-            ("swift", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
-            (">=", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
-            ("5.9", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
-            ("&&", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
-            ("compiler", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
-            ("6.0", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
-            ("#if", "keyword.directive", "editor.syntax.preprocessor", "#if canImport(UIKit"),
-            ("#", "keyword.swift.availability.punctuation", "editor.syntax.keyword", "if #available(macOS"),
-            ("#available", "keyword.swift.availability", "editor.syntax.keyword", "if #available(macOS"),
+        let effectiveExpectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+            ("isolated", "keyword", "editor.syntax.keyword", "isolated deinit"),
+            ("defer", "keyword", "editor.syntax.keyword", "defer { state = .ready }"),
+            ("#if", "preprocessor", "editor.syntax.preprocessor", "#if os(iOS)"),
+            ("iOS", "preprocessor", "editor.syntax.preprocessor", "#if os(iOS)"),
+            ("macOS", "preprocessor", "editor.syntax.preprocessor", "#elseif os(macOS)"),
+            ("#else", "preprocessor", "editor.syntax.preprocessor", "#else"),
+            ("#endif", "preprocessor", "editor.syntax.preprocessor", "#endif"),
+            ("swift", "preprocessor", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
+            (">=", "preprocessor", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
+            ("5.9", "preprocessor", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
+            ("&&", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("compiler", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("6.0", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("#if", "preprocessor", "editor.syntax.preprocessor", "#if canImport(UIKit"),
+            ("#", "keyword", "editor.syntax.keyword", "if #available(macOS"),
+            ("#available", "keyword", "editor.syntax.keyword", "if #available(macOS"),
         ]
 
         for expectation in effectiveExpectations {
@@ -3865,10 +3909,11 @@ struct SyntaxHighlighterEngineTests {
                 in: tokens,
                 source: source,
                 text: expectation.text,
+                syntaxID: expectation.syntaxID,
                 language: .swift,
                 inOccurrenceOf: expectation.occurrence
             )
-            #expect(snapshot.rawCaptureName == expectation.capture)
+            #expect(snapshot.syntaxID == expectation.syntaxID)
             #expect(snapshot.styleKeys.first == expectation.styleKey)
         }
 
@@ -3897,21 +3942,21 @@ struct SyntaxHighlighterEngineTests {
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
 
-        let expectations: [(text: String, capture: String, styleKey: String, occurrence: String)] = [
-            ("#if", "keyword.directive", "editor.syntax.preprocessor", "#if !DEBUG"),
-            ("!", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if !DEBUG"),
-            ("DEBUG", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#if !DEBUG"),
-            ("#elseif", "keyword.directive", "editor.syntax.preprocessor", "#elseif canImport(UIKit"),
-            ("canImport", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif canImport(UIKit"),
-            ("_version", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "_version: 17.0"),
-            (":", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "_version: 17.0"),
-            ("17.0", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "_version: 17.0"),
-            ("#elseif", "keyword.directive", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
-            (">=", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
-            ("5.9", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
-            ("&&", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
-            ("6.0", "keyword.directive.condition.swift", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
-            ("#endif", "keyword.directive", "editor.syntax.preprocessor", "#endif"),
+        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+            ("#if", "preprocessor", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("!", "preprocessor", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("DEBUG", "preprocessor", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("#elseif", "preprocessor", "editor.syntax.preprocessor", "#elseif canImport(UIKit"),
+            ("canImport", "preprocessor", "editor.syntax.preprocessor", "#elseif canImport(UIKit"),
+            ("_version", "preprocessor", "editor.syntax.preprocessor", "_version: 17.0"),
+            (":", "preprocessor", "editor.syntax.preprocessor", "_version: 17.0"),
+            ("17.0", "preprocessor", "editor.syntax.preprocessor", "_version: 17.0"),
+            ("#elseif", "preprocessor", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
+            (">=", "preprocessor", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
+            ("5.9", "preprocessor", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
+            ("&&", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("6.0", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("#endif", "preprocessor", "editor.syntax.preprocessor", "#endif"),
         ]
 
         for expectation in expectations {
@@ -3919,10 +3964,11 @@ struct SyntaxHighlighterEngineTests {
                 in: tokens,
                 source: source,
                 text: expectation.text,
+                syntaxID: expectation.syntaxID,
                 language: .swift,
                 inOccurrenceOf: expectation.occurrence
             )
-            #expect(snapshot.rawCaptureName == expectation.capture)
+            #expect(snapshot.syntaxID == expectation.syntaxID)
             #expect(snapshot.styleKeys.first == expectation.styleKey)
         }
     }
@@ -3962,21 +4008,21 @@ struct SyntaxHighlighterEngineTests {
             ("defer", "let `defer` = 4"),
             ("defer", "value.defer"),
         ] {
-            let names = captureNames(
+            let ids = syntaxIDs(
                 in: tokens,
                 source: source,
                 text: text,
                 inOccurrenceOf: occurrence
             )
-            #expect(names.contains { $0.hasPrefix("keyword") } == false)
-            #expect(names.contains("variable"))
+            #expect(ids.contains(.keyword) == false)
+            #expect(ids.contains(.plain))
         }
 
         let precedenceLeft = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "left",
-            captureName: "keyword",
+            syntaxID: "keyword",
             language: .swift,
             inOccurrenceOf: "associativity: left"
         )
@@ -4005,7 +4051,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "id",
-            captureName: "identifier.swift.other.property",
+            syntaxID: "identifier.variable.system",
             language: .swift,
             inOccurrenceOf: "self.id = id"
         )
@@ -4015,7 +4061,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "id",
-            captureName: "variable",
+            syntaxID: "plain",
             language: .swift,
             inOccurrenceOf: "return id"
         )
@@ -4056,56 +4102,56 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "body",
-            captureName: "selector.css.element",
+            syntaxID: "declaration.other",
             language: .css
         )
         let classSelector = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "page",
-            captureName: "selector.css.class",
+            syntaxID: "declaration.other",
             language: .css
         )
         let idSelector = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "hero",
-            captureName: "selector.css.id",
+            syntaxID: "declaration.other",
             language: .css
         )
         let property = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "min-height",
-            captureName: "property.css.name",
+            syntaxID: "keyword",
             language: .css
         )
         let customProperty = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "--brand-accent",
-            captureName: "variable.css.customProperty",
+            syntaxID: "plain",
             language: .css
         )
         let function = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "linear-gradient",
-            captureName: "function.css.name",
+            syntaxID: "plain",
             language: .css
         )
         let attributeValue = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "\"page\"",
-            captureName: "string.css.attributeValue",
+            syntaxID: "string",
             language: .css
         )
         let attributeName = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "aria-current",
-            captureName: "attribute.css.name",
+            syntaxID: "plain",
             language: .css,
             inOccurrenceOf: #"nav a[aria-current="page"]"#
         )
@@ -4113,7 +4159,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: ">",
-            captureName: "operator.css",
+            syntaxID: "plain",
             language: .css,
             inOccurrenceOf: "main > section"
         )
@@ -4121,28 +4167,28 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "rgba",
-            captureName: "function.css.name.keyword",
+            syntaxID: "keyword",
             language: .css
         )
         let repeatFunction = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "repeat",
-            captureName: "function.css.name.keyword",
+            syntaxID: "keyword",
             language: .css
         )
         let supportsAtRule = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "@supports",
-            captureName: "keyword.css.supports",
+            syntaxID: "declaration.other",
             language: .css
         )
         let supportsFeature = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "backdrop-filter",
-            captureName: "property.css.feature.supports",
+            syntaxID: "plain",
             language: .css,
             inOccurrenceOf: "@supports (backdrop-filter: blur(12px))"
         )
@@ -4150,35 +4196,35 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "min-width",
-            captureName: "property.css.feature",
+            syntaxID: "keyword",
             language: .css
         )
         let keyframesAtRule = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "@keyframes",
-            captureName: "keyword.css.keyframes",
+            syntaxID: "declaration.other",
             language: .css
         )
         let keyframesName = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "reveal",
-            captureName: "selector.css.keyframesName",
+            syntaxID: "declaration.other",
             language: .css
         )
         let atRule = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "@media",
-            captureName: "keyword.css.atRule",
+            syntaxID: "keyword",
             language: .css
         )
         let unit = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "vh",
-            captureName: "type.css.unit",
+            syntaxID: "keyword",
             language: .css
         )
 
@@ -4226,35 +4272,35 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "<!DOCTYPE html>",
-            captureName: "constant.html.doctype",
+            syntaxID: "keyword",
             language: .html
         )
         let tag = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "main",
-            captureName: "tag.html.name",
+            syntaxID: "keyword",
             language: .html
         )
         let attribute = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "data-state",
-            captureName: "attribute.html.name",
+            syntaxID: "attribute",
             language: .html
         )
         let attributeValue = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "\"ready\"",
-            captureName: "string.html.attributeValue",
+            syntaxID: "string",
             language: .html
         )
         let bracket = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "<",
-            captureName: "punctuation.html.bracket",
+            syntaxID: "keyword",
             language: .html,
             inOccurrenceOf: #"<main class="page" id="hero">"#
         )
@@ -4262,7 +4308,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "margin",
-            captureName: "property.css.name",
+            syntaxID: "keyword",
             language: .html,
             inOccurrenceOf: "margin: 0;"
         )
@@ -4270,14 +4316,14 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "#007aff",
-            captureName: "string.css.color",
+            syntaxID: "number",
             language: .html
         )
         let embeddedCSSAttributeValue = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "\"page\"",
-            captureName: "string.css.attributeValue",
+            syntaxID: "string",
             language: .html,
             inOccurrenceOf: #"nav a[aria-current="page"]"#
         )
@@ -4285,14 +4331,14 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "--brand-accent",
-            captureName: "variable.css.customProperty",
+            syntaxID: "plain",
             language: .html
         )
         let embeddedJavaScript = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "const",
-            captureName: "keyword",
+            syntaxID: "keyword",
             language: .html
         )
 
@@ -4309,7 +4355,8 @@ struct SyntaxHighlighterEngineTests {
         #expect(embeddedJavaScript.styleKeys.first == "editor.syntax.keyword")
         let nsSource = source as NSString
         #expect(tokens.contains {
-            $0.rawCaptureName == "string.html.attributeValue"
+            $0.syntaxID == .string
+                && $0.language == .html
                 && nsSource.substring(with: $0.range) == "\"ready\""
         })
         let theme = SyntaxEditorColorTheme.default.resolved(for: .html, appearance: .dark)
@@ -4487,12 +4534,10 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(incremental.tokens == full.tokens)
         #expect(incremental.tokens.contains {
-            $0.rawCaptureName.hasPrefix("property") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
+            tokenIntersects($0, range: stylePropertyRange, syntaxID: .keyword, language: .css)
         })
         #expect(incremental.tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
+            tokenIntersects($0, range: scriptKeywordRange, syntaxID: .keyword, language: .javascript)
         })
     }
 
@@ -4725,8 +4770,8 @@ struct SyntaxHighlighterEngineTests {
             language: SyntaxLanguage.swift
         ).tokens
 
-        #expect(javascriptTokens.contains { $0.rawCaptureName.hasPrefix("keyword") })
-        #expect(swiftTokens.contains { $0.rawCaptureName.hasPrefix("keyword") })
+        #expect(javascriptTokens.contains { $0.syntaxID == .keyword })
+        #expect(swiftTokens.contains { $0.syntaxID == .keyword })
     }
 
     @Test("SyntaxHighlighterEngine returns UTF-16-safe ranges for non-ASCII source")
@@ -4772,24 +4817,20 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            ($0.rawCaptureName.hasPrefix("include") || $0.rawCaptureName.hasPrefix("preproc"))
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: importRange).length > 0
+            ($0.syntaxID == .preprocessor || $0.syntaxID == .keyword)
+                && tokenIntersects($0, range: importRange, language: .objectiveC)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword")
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: interfaceRange).length > 0
+            tokenIntersects($0, range: interfaceRange, syntaxID: .keyword, language: .objectiveC)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("method")
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: methodRange).length > 0
+            tokenIntersects($0, range: methodRange, syntaxID: .identifierFunctionSystem, language: .objectiveC)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("comment")
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: commentRange).length > 0
+            tokenIntersects($0, range: commentRange, syntaxID: .comment, language: .objectiveC)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("string")
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stringRange).length > 0
+            tokenIntersects($0, range: stringRange, syntaxID: .string, language: .objectiveC)
         })
     }
 
@@ -4810,16 +4851,14 @@ struct SyntaxHighlighterEngineTests {
         let scriptKeywordRange = nsSource.range(of: "const")
 
         #expect(tokens.isEmpty == false)
-        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("comment") })
-        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("tag") })
-        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("attribute") })
+        #expect(tokens.contains { $0.syntaxID == .comment && $0.language == .html })
+        #expect(tokens.contains { $0.syntaxID == .keyword && $0.language == .html })
+        #expect(tokens.contains { $0.syntaxID == .attribute && $0.language == .html })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("property") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
+            tokenIntersects($0, range: stylePropertyRange, syntaxID: .keyword, language: .css)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
+            tokenIntersects($0, range: scriptKeywordRange, syntaxID: .keyword, language: .javascript)
         })
     }
 
@@ -4838,12 +4877,10 @@ struct SyntaxHighlighterEngineTests {
         let nestedAttributeRange = nsSource.range(of: "class")
 
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("tag") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: nestedTagRange).length > 0
+            tokenIntersects($0, range: nestedTagRange, syntaxID: .keyword, language: .html)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("attribute") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: nestedAttributeRange).length > 0
+            tokenIntersects($0, range: nestedAttributeRange, syntaxID: .attribute, language: .html)
         })
     }
 
@@ -4861,10 +4898,9 @@ struct SyntaxHighlighterEngineTests {
         let tokens = await engine.render(source: source, language: SyntaxLanguage.xml)
 
         #expect(tokens.isEmpty == false)
-        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("keyword") })
-        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("tag") })
-        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("property") })
-        #expect(tokens.contains { $0.rawCaptureName.hasPrefix("comment") })
+        #expect(tokens.contains { $0.syntaxID == .keyword })
+        #expect(tokens.contains { $0.syntaxID == .attribute })
+        #expect(tokens.contains { $0.syntaxID == .comment })
     }
 
     @Test("SyntaxHighlighterEngine highlights TOML structures")
@@ -4888,24 +4924,19 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("comment") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: commentRange).length > 0
+            tokenIntersects($0, range: commentRange, syntaxID: .comment, language: .toml)
         })
         #expect(tokens.contains {
-            ($0.rawCaptureName.hasPrefix("property") || $0.rawCaptureName.hasPrefix("type")) &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: propertyRange).length > 0
+            tokenIntersects($0, range: propertyRange, syntaxID: .attribute, language: .toml)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("string") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stringRange).length > 0
+            tokenIntersects($0, range: stringRange, syntaxID: .string, language: .toml)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("boolean") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: booleanRange).length > 0
+            tokenIntersects($0, range: booleanRange, syntaxID: .keyword, language: .toml)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("number") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: numberRange).length > 0
+            tokenIntersects($0, range: numberRange, syntaxID: .number, language: .toml)
         })
     }
 
@@ -4919,7 +4950,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "package",
-            captureName: "type",
+            syntaxID: "plain",
             language: .toml,
             inOccurrenceOf: "[package]"
         )
@@ -4927,7 +4958,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "name",
-            captureName: "property",
+            syntaxID: "attribute",
             language: .toml,
             inOccurrenceOf: #"name = "ReferencePreview""#
         )
@@ -4935,7 +4966,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "=",
-            captureName: "operator",
+            syntaxID: "plain",
             language: .toml,
             inOccurrenceOf: #"name = "ReferencePreview""#
         )
@@ -4943,14 +4974,14 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: #""ReferencePreview""#,
-            captureName: "string",
+            syntaxID: "string",
             language: .toml
         )
         let boolean = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "true",
-            captureName: "boolean",
+            syntaxID: "keyword",
             language: .toml,
             inOccurrenceOf: "enabled = true"
         )
@@ -4958,7 +4989,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "2",
-            captureName: "number",
+            syntaxID: "number",
             language: .toml,
             inOccurrenceOf: "count = 2"
         )
@@ -4980,11 +5011,10 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("tag") || $0.rawCaptureName.hasPrefix("attribute")
+            $0.language == .html && ($0.syntaxID == .keyword || $0.syntaxID == .attribute)
         })
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -4998,12 +5028,10 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
+            tokenIsInjectedKeyword($0, in: constRange)
         } == false)
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -5016,8 +5044,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -5029,8 +5056,7 @@ struct SyntaxHighlighterEngineTests {
         let answerConstRange = (source as NSString).range(of: "const answer")
 
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: answerConstRange).length > 0
+            tokenIntersects($0, range: answerConstRange, syntaxID: .keyword, language: .javascript)
         })
     }
 
@@ -5042,8 +5068,7 @@ struct SyntaxHighlighterEngineTests {
         let answerConstRange = (source as NSString).range(of: "const answer")
 
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: answerConstRange).length > 0
+            tokenIntersects($0, range: answerConstRange, syntaxID: .keyword, language: .javascript)
         })
     }
 
@@ -5058,8 +5083,7 @@ struct SyntaxHighlighterEngineTests {
         let divRange = (source as NSString).range(of: "<div")
 
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("tag") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: divRange).length > 0
+            tokenIntersects($0, range: divRange, syntaxID: .keyword, language: .html)
         })
     }
 
@@ -5072,8 +5096,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -5086,8 +5109,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -5102,8 +5124,7 @@ struct SyntaxHighlighterEngineTests {
         let spanRange = (source as NSString).range(of: "<span")
 
         #expect(tokens.contains {
-            $0.rawCaptureName.hasPrefix("tag") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: spanRange).length > 0
+            tokenIntersects($0, range: spanRange, syntaxID: .keyword, language: .html)
         })
     }
 
@@ -5126,9 +5147,8 @@ struct SyntaxHighlighterEngineTests {
 
             #expect(tokens.isEmpty == false)
             #expect(tokens.contains {
-                $0.rawCaptureName.hasPrefix("keyword") &&
-                    SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
-            } == false)
+                tokenIsInjectedKeyword($0, in: trueRange)
+            } == false, "Unexpected injected keyword in unsupported script case: \(source)")
         }
     }
 
@@ -5146,8 +5166,7 @@ struct SyntaxHighlighterEngineTests {
             let constRange = (source as NSString).range(of: "const")
 
             #expect(tokens.contains {
-                $0.rawCaptureName.hasPrefix("keyword") &&
-                    SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
+                tokenIntersects($0, range: constRange, syntaxID: .keyword, language: .javascript)
             })
         }
     }
@@ -5165,8 +5184,7 @@ struct SyntaxHighlighterEngineTests {
             let constRange = (source as NSString).range(of: "const")
 
             #expect(tokens.contains {
-                $0.rawCaptureName.hasPrefix("keyword") &&
-                    SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
+                tokenIsInjectedKeyword($0, in: constRange)
             } == false)
         }
     }

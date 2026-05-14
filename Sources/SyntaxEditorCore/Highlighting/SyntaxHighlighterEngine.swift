@@ -11,12 +11,10 @@ package struct SyntaxHighlightToken: Equatable, Sendable {
     package init(
         range: NSRange,
         rawCaptureName: String,
-        language: SyntaxLanguage = .swift,
-        tokenText: String = ""
+        language: SyntaxLanguage = .swift
     ) {
-        let classification = TreeSitterCaptureClassifier.classify(
+        let classification = EditorSyntaxCapture.parse(
             rawCaptureName: rawCaptureName,
-            tokenText: tokenText,
             rootLanguage: language
         )
         self.init(
@@ -354,7 +352,6 @@ private extension SyntaxHighlightSession {
 
         do {
             let sourceUTF16Length = source.utf16.count
-            let nsSource = source as NSString
             return try layer.highlights(
                 in: range,
                 provider: source.predicateTextProvider
@@ -367,10 +364,8 @@ private extension SyntaxHighlightSession {
                 else {
                     return nil
                 }
-                let tokenText = nsSource.substring(with: range)
-                let classification = TreeSitterCaptureClassifier.classify(
+                let classification = EditorSyntaxCapture.parse(
                     rawCaptureName: $0.name,
-                    tokenText: tokenText,
                     rootLanguage: language
                 )
                 return SyntaxHighlightToken(
@@ -523,7 +518,7 @@ private extension SyntaxHighlightSession {
             return
         }
 
-        tokens = SwiftSyntaxOverlayClassifier.classify(
+        tokens = SwiftSyntaxOverlayTokenProvider.mergingOverlayTokens(
             tokens: tokens,
             source: source,
             refreshRange: refreshRange

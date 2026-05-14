@@ -1,52 +1,54 @@
-(comment) @comment
+(comment) @editor.syntax.css.comment
 
-(tag_name) @selector.css.element
-(nesting_selector) @selector.css.nesting
-(universal_selector) @selector.css.universal
-(class_name) @selector.css.class
-(id_name) @selector.css.id
-(namespace_name) @selector.css.namespace
+(tag_name) @editor.syntax.css.declaration.other
+(nesting_selector) @editor.syntax.css.declaration.other
+(universal_selector) @editor.syntax.css.declaration.other
+(class_name) @editor.syntax.css.declaration.other
+(id_name) @editor.syntax.css.declaration.other
+(namespace_name) @editor.syntax.css.declaration.other
 
-(property_name) @property.css.name
-(feature_name) @property.css.feature
-(attribute_name) @attribute.css.name
-(supports_statement (feature_query (feature_name) @property.css.feature.supports))
+((property_name) @editor.syntax.css.keyword
+ (#not-match? @editor.syntax.css.keyword "^--"))
+(media_statement
+  (feature_query
+    (feature_name) @editor.syntax.css.keyword))
+(attribute_name) @editor.syntax.css.plain
+(supports_statement (feature_query (feature_name) @editor.syntax.css.plain))
 
-(pseudo_element_selector (tag_name) @selector.css.pseudoElement)
-(pseudo_class_selector (class_name) @selector.css.pseudoClass)
-(attribute_selector (string_value) @string.css.attributeValue)
-(attribute_selector (plain_value) @string.css.attributeValue)
+(pseudo_element_selector (tag_name) @editor.syntax.css.declaration.other)
+(pseudo_class_selector (class_name) @editor.syntax.css.declaration.other)
+(attribute_selector (string_value) @editor.syntax.css.string)
+(attribute_selector (plain_value) @editor.syntax.css.string)
 
-((function_name) @function.css.name.keyword
- (#match? @function.css.name.keyword "^(rgba?|hsla?|repeat)$"))
-(function_name) @function.css.name
+((function_name) @editor.syntax.css.keyword
+ (#match? @editor.syntax.css.keyword "^(rgba?|hsla?|repeat)$"))
+(function_name) @editor.syntax.css.plain
 
-((property_name) @variable.css.customProperty
- (#match? @variable.css.customProperty "^--"))
-((plain_value) @variable.css.customProperty
- (#match? @variable.css.customProperty "^--"))
+((property_name) @editor.syntax.css.plain
+ (#match? @editor.syntax.css.plain "^--"))
+((plain_value) @editor.syntax.css.plain
+ (#match? @editor.syntax.css.plain "^--"))
 
 [
   "@media"
   "@import"
   "@charset"
-  "@namespace"
   "@supports"
   "@keyframes"
-] @keyword.css.atRule
-"@supports" @keyword.css.supports
-"@keyframes" @keyword.css.keyframes
-(at_keyword) @keyword.css.atRule
-(keyframes_name) @selector.css.keyframesName
-(to) @keyword.css.keyframe
-(from) @keyword.css.keyframe
-(important) @keyword.css.important
+] @editor.syntax.css.keyword
+"@supports" @editor.syntax.css.declaration.other
+"@keyframes" @editor.syntax.css.declaration.other
+(at_keyword) @editor.syntax.css.keyword
+(keyframes_name) @editor.syntax.css.declaration.other
+(to) @editor.syntax.css.keyword
+(from) @editor.syntax.css.keyword
+(important) @editor.syntax.css.keyword
 
-(string_value) @string.css.value
-(color_value) @string.css.color
-(integer_value) @number.css.value
-(float_value) @number.css.value
-(unit) @type.css.unit
+(string_value) @editor.syntax.css.string
+(color_value) @editor.syntax.css.number
+(integer_value) @editor.syntax.css.number
+(float_value) @editor.syntax.css.number
+(unit) @editor.syntax.css.keyword
 
 [
   "~"
@@ -65,10 +67,10 @@
   "or"
   "not"
   "only"
-] @operator.css
+] @editor.syntax.css.plain
 
 [
   "#"
   ","
   ":"
-] @punctuation.delimiter
+] @editor.syntax.css.plain
