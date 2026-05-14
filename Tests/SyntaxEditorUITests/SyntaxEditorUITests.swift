@@ -226,10 +226,9 @@ private func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: Syn
         && abs(lhsAlpha - rhsAlpha) < 0.002
 }
 
-private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting, SyntaxHighlightPreviewing {
+private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     private let tokens: [SyntaxHighlightToken]
     private let updateTokens: [SyntaxHighlightToken]?
-    private let previewTokens: [SyntaxHighlightToken]?
     private let delayNanoseconds: UInt64
     private let updateRefreshRange: NSRange?
     private var resetCount = 0
@@ -238,30 +237,13 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting, SyntaxHighlight
     init(
         tokens: [SyntaxHighlightToken] = [],
         updateTokens: [SyntaxHighlightToken]? = nil,
-        previewTokens: [SyntaxHighlightToken]? = nil,
         delayNanoseconds: UInt64 = 0,
         updateRefreshRange: NSRange? = nil
     ) {
         self.tokens = tokens
         self.updateTokens = updateTokens
-        self.previewTokens = previewTokens
         self.delayNanoseconds = delayNanoseconds
         self.updateRefreshRange = updateRefreshRange
-    }
-
-    nonisolated func previewReset(
-        source: String,
-        language: SyntaxLanguage,
-        revision: Int
-    ) -> SyntaxHighlightResult? {
-        guard let previewTokens else { return nil }
-        return SyntaxHighlightResult(
-            tokens: previewTokens,
-            source: source,
-            language: language,
-            revision: revision,
-            refreshRange: NSRange(location: 0, length: source.utf16.count)
-        )
     }
 
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
@@ -1959,37 +1941,6 @@ struct SyntaxEditorUITests {
 
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(iOSEditorLineBreakMode(editorView) == .byCharWrapping)
-    }
-
-    @Test("SyntaxEditorView applies iOS preview highlight before delayed reset")
-    @MainActor
-    func syntaxEditorViewIOSAppliesPreviewHighlightBeforeDelayedReset() async {
-        let source = "let value = 1"
-        let theme = syntaxEditorUITestColorTheme(
-            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
-            keyword: syntaxEditorUITestColor(hex: 0x654321)
-        )
-        let token = SyntaxHighlightToken(
-            range: NSRange(location: 0, length: 3),
-            rawCaptureName: "editor.syntax.swift.keyword"
-        )
-        let highlighter = SyntaxEditorUITestHighlighter(
-            tokens: [token],
-            previewTokens: [token],
-            delayNanoseconds: 20_000_000
-        )
-        let model = SyntaxEditorTestContext(
-            text: source,
-            language: SyntaxLanguage.swift,
-            colorTheme: theme
-        )
-        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
-
-        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
-
-        await editorView.waitForPendingHighlightForTesting()
-
-        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
     @Test("SyntaxEditorView applies iOS base attributes to inserted text before delayed update highlight")
@@ -5071,37 +5022,6 @@ struct SyntaxEditorUITests {
 
         #expect(syntaxEditorUITestFontsEqual(macEditorFont(editorView, at: 0), baseFont))
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
-
-        await editorView.waitForPendingHighlightForTesting()
-
-        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
-    }
-
-    @Test("SyntaxEditorView applies macOS preview highlight before delayed reset")
-    @MainActor
-    func syntaxEditorViewMacAppliesPreviewHighlightBeforeDelayedReset() async {
-        let source = "let value = 1"
-        let theme = syntaxEditorUITestColorTheme(
-            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
-            keyword: syntaxEditorUITestColor(hex: 0x654321)
-        )
-        let token = SyntaxHighlightToken(
-            range: NSRange(location: 0, length: 3),
-            rawCaptureName: "editor.syntax.swift.keyword"
-        )
-        let highlighter = SyntaxEditorUITestHighlighter(
-            tokens: [token],
-            previewTokens: [token],
-            delayNanoseconds: 20_000_000
-        )
-        let model = SyntaxEditorTestContext(
-            text: source,
-            language: SyntaxLanguage.swift,
-            colorTheme: theme
-        )
-        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
-
-        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         await editorView.waitForPendingHighlightForTesting()
 

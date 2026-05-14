@@ -25,7 +25,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findCoordinator: SyntaxEditorFindCoordinator?
     static let estimatedTabColumnWidth = 4
     static let defaultEditorFont = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
-    static let immediateHighlightMaximumUTF16Length = 120_000
 
     let highlighter: any SyntaxHighlighting
     let commandEngine = EditorCommandEngine()
@@ -1452,15 +1451,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let expectedSource = source
 
         highlightTask?.cancel()
-        applyImmediateHighlightIfAvailable(
-            source: expectedSource,
-            language: language,
-            revision: revision,
-            mutation: mutation
-        )
 
         let highlighter = self.highlighter
         highlightTask = Task { [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled else {
+                return
+            }
+
             let result: SyntaxHighlightResult
             if let mutation {
                 result = await highlighter.update(
@@ -1483,9 +1481,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             guard self.document.revision == result.revision else {
                 return
             }
-            guard !self.isHighlightResultAlreadyApplied(result) else {
-                return
-            }
             let refreshRange = self.highlightApplicationRefreshRange(
                 for: result,
                 mutation: mutation
@@ -1501,43 +1496,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             self.lastHighlightRevision = result.revision
             self.lastHighlightLanguage = result.language
         }
-    }
-
-    private func applyImmediateHighlightIfAvailable(
-        source: String,
-        language: SyntaxLanguage,
-        revision: Int,
-        mutation: SyntaxHighlightMutation?
-    ) {
-        guard mutation == nil,
-              source.utf16.count <= Self.immediateHighlightMaximumUTF16Length,
-              let previewingHighlighter = highlighter as? any SyntaxHighlightPreviewing,
-              let result = previewingHighlighter.previewReset(
-                  source: source,
-                  language: language,
-                  revision: revision
-              )
-        else {
-            return
-        }
-
-        applyHighlight(
-            result.tokens,
-            expectedRevision: result.revision,
-            source: result.source,
-            refreshRange: result.refreshRange
-        )
-        lastHighlightTokens = result.tokens
-        lastHighlightSource = result.source
-        lastHighlightRevision = result.revision
-        lastHighlightLanguage = result.language
-    }
-
-    private func isHighlightResultAlreadyApplied(_ result: SyntaxHighlightResult) -> Bool {
-        lastHighlightRevision == result.revision
-            && lastHighlightLanguage == result.language
-            && lastHighlightSource == result.source
-            && lastHighlightTokens == result.tokens
     }
 
     func highlightApplicationRefreshRange(

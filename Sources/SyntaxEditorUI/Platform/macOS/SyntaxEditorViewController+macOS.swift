@@ -126,8 +126,6 @@ private final class SyntaxEditorNativeTextView: NSTextView {
 @MainActor
 @Observable
 public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
-    private static let immediateHighlightMaximumUTF16Length = 120_000
-
     public private(set) var document: SyntaxEditorDocument
     public private(set) var configuration: SyntaxEditorConfiguration
     public let textView: NSTextView
@@ -931,15 +929,14 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         highlightTask?.cancel()
         pendingHighlightApplication = nil
-        applyImmediateHighlightIfAvailable(
-            source: expectedSource,
-            language: language,
-            revision: revision,
-            mutation: mutation
-        )
 
         let highlighter = self.highlighter
         highlightTask = Task { [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled else {
+                return
+            }
+
             let result: SyntaxHighlightResult
             if let mutation {
                 result = await highlighter.update(
@@ -958,9 +955,6 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             guard !Task.isCancelled else { return }
             guard let self else { return }
             guard self.document.revision == result.revision else { return }
-            guard !self.isHighlightResultAlreadyApplied(result) else {
-                return
-            }
             let refreshRange = self.highlightApplicationRefreshRange(
                 for: result,
                 mutation: mutation
@@ -973,40 +967,6 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
                 refreshRange: refreshRange
             )
         }
-    }
-
-    private func applyImmediateHighlightIfAvailable(
-        source: String,
-        language: SyntaxLanguage,
-        revision: Int,
-        mutation: SyntaxHighlightMutation?
-    ) {
-        guard mutation == nil,
-              source.utf16.count <= Self.immediateHighlightMaximumUTF16Length,
-              let previewingHighlighter = highlighter as? any SyntaxHighlightPreviewing,
-              let result = previewingHighlighter.previewReset(
-                  source: source,
-                  language: language,
-                  revision: revision
-              )
-        else {
-            return
-        }
-
-        _ = applyHighlight(
-            result.tokens,
-            expectedRevision: result.revision,
-            source: result.source,
-            language: result.language,
-            refreshRange: result.refreshRange
-        )
-    }
-
-    private func isHighlightResultAlreadyApplied(_ result: SyntaxHighlightResult) -> Bool {
-        lastHighlightRevision == result.revision
-            && lastHighlightLanguage == result.language
-            && lastHighlightSource == result.source
-            && lastHighlightTokens == result.tokens
     }
 
     private func highlightApplicationRefreshRange(

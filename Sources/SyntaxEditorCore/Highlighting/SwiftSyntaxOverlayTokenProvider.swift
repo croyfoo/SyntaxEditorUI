@@ -44,7 +44,17 @@ enum SwiftSyntaxOverlayTokenProvider {
             return []
         }
 
+        let commentRanges = commentTokenRanges(
+            overlapping: searchRange,
+            existingTokens: existingTokens
+        )
+        guard !commentRanges.isEmpty else {
+            return []
+        }
+
+        let sourceString = source as String
         var tokens: [SyntaxHighlightToken] = []
+        var commentRangeIndex = 0
         var location = searchRange.location
         while location < searchRange.upperBound {
             let remainingRange = NSRange(location: location, length: searchRange.upperBound - location)
@@ -52,7 +62,14 @@ enum SwiftSyntaxOverlayTokenProvider {
             let clampedLineRange = NSIntersectionRange(lineRange, remainingRange)
             guard clampedLineRange.length > 0 else { break }
 
-            guard lineContainsCommentToken(lineRange: clampedLineRange, existingTokens: existingTokens) else {
+            while commentRangeIndex < commentRanges.count,
+                  commentRanges[commentRangeIndex].upperBound <= clampedLineRange.location {
+                commentRangeIndex += 1
+            }
+
+            guard commentRangeIndex < commentRanges.count,
+                  rangesIntersect(commentRanges[commentRangeIndex], clampedLineRange)
+            else {
                 location = clampedLineRange.upperBound
                 continue
             }
@@ -77,7 +94,7 @@ enum SwiftSyntaxOverlayTokenProvider {
                 }
             }
 
-            tokens.append(contentsOf: urlTokens(in: source, lineRange: clampedLineRange))
+            tokens.append(contentsOf: urlTokens(in: sourceString, lineRange: clampedLineRange))
             location = clampedLineRange.upperBound
         }
 
@@ -92,14 +109,11 @@ enum SwiftSyntaxOverlayTokenProvider {
         let searchRange = targetRange.map {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: source.length)
         } ?? fullRange
-        guard searchRange.length > 0,
-              let versionRegex = try? NSRegularExpression(
-                  pattern: #"_version\s*:\s*([0-9]+(?:\.[0-9]+)+)"#
-              )
-        else {
+        guard searchRange.length > 0 else {
             return []
         }
 
+        let sourceString = source as String
         var tokens: [SyntaxHighlightToken] = []
         var location = searchRange.location
         while location < searchRange.upperBound {
@@ -115,7 +129,7 @@ enum SwiftSyntaxOverlayTokenProvider {
                 continue
             }
 
-            let matches = versionRegex.matches(in: source as String, range: clampedLineRange)
+            let matches = directiveVersionRegex.matches(in: sourceString, range: clampedLineRange)
             for match in matches where match.numberOfRanges > 1 {
                 tokens.append(canonicalToken(range: match.range(at: 1), syntaxID: .preprocessor))
             }
@@ -137,19 +151,53 @@ enum SwiftSyntaxOverlayTokenProvider {
         )
     }
 
-    private static func lineContainsCommentToken(
-        lineRange: NSRange,
+    private static func commentTokenRanges(
+        overlapping targetRange: NSRange,
         existingTokens: [SyntaxHighlightToken]
-    ) -> Bool {
-        existingTokens.contains { token in
+    ) -> [NSRange] {
+        let ranges = existingTokens.compactMap { token -> NSRange? in
             guard token.language == .swift || token.language == nil,
                   token.syntaxID.rawValue == "comment" || token.syntaxID.rawValue.hasPrefix("comment.")
             else {
-                return false
+                return nil
             }
 
-            return SyntaxEditorRangeUtilities.intersection(of: token.range, and: lineRange).length > 0
+            let range = SyntaxEditorRangeUtilities.intersection(of: token.range, and: targetRange)
+            return range.length > 0 ? range : nil
         }
+        .sorted { lhs, rhs in
+            if lhs.location != rhs.location {
+                return lhs.location < rhs.location
+            }
+            return lhs.length < rhs.length
+        }
+
+        return mergedRanges(ranges)
+    }
+
+    private static func mergedRanges(_ ranges: [NSRange]) -> [NSRange] {
+        guard var current = ranges.first else {
+            return []
+        }
+
+        var merged: [NSRange] = []
+        merged.reserveCapacity(ranges.count)
+        for range in ranges.dropFirst() {
+            guard range.location <= current.upperBound else {
+                merged.append(current)
+                current = range
+                continue
+            }
+
+            let upperBound = max(current.upperBound, range.upperBound)
+            current = NSRange(location: current.location, length: upperBound - current.location)
+        }
+        merged.append(current)
+        return merged
+    }
+
+    private static func rangesIntersect(_ lhs: NSRange, _ rhs: NSRange) -> Bool {
+        max(lhs.location, rhs.location) < min(lhs.upperBound, rhs.upperBound)
     }
 
     private static func rangeKey(_ range: NSRange) -> String {
@@ -222,12 +270,14 @@ enum SwiftSyntaxOverlayTokenProvider {
         return range.location == NSNotFound ? nil : range
     }
 
-    private static func urlTokens(in source: NSString, lineRange: NSRange) -> [SyntaxHighlightToken] {
-        guard let regex = try? NSRegularExpression(pattern: #"https?://[^\s\])>"]+"#) else {
-            return []
-        }
+    private static let urlRegex = try! NSRegularExpression(pattern: #"https?://[^\s\])>"]+"#)
 
-        return regex.matches(in: source as String, range: lineRange).map {
+    private static let directiveVersionRegex = try! NSRegularExpression(
+        pattern: #"_version\s*:\s*([0-9]+(?:\.[0-9]+)+)"#
+    )
+
+    private static func urlTokens(in source: String, lineRange: NSRange) -> [SyntaxHighlightToken] {
+        urlRegex.matches(in: source, range: lineRange).map {
             canonicalToken(range: $0.range, syntaxID: .url)
         }
     }

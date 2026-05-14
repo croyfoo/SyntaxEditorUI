@@ -120,29 +120,12 @@ package protocol SyntaxHighlighting: Sendable {
     ) async -> SyntaxHighlightResult
 }
 
-package protocol SyntaxHighlightPreviewing: SyntaxHighlighting {
-    nonisolated func previewReset(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxHighlightResult?
-}
-
-package actor SyntaxHighlighterEngine: SyntaxHighlighting, SyntaxHighlightPreviewing {
+package actor SyntaxHighlighterEngine: SyntaxHighlighting {
     private var session: SyntaxHighlightSession?
     private let registry: LanguageConfigurationRegistry
 
     package init() {
         self.registry = .shared
-    }
-
-    nonisolated package func previewReset(
-        source: String,
-        language: SyntaxLanguage,
-        revision: Int
-    ) -> SyntaxHighlightResult? {
-        guard let setup = HighlightingSetup.resolved(for: language) else {
-            return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
-        }
-
-        let session = SyntaxHighlightSession(language: language, setup: setup)
-        return session.reset(source: source, revision: revision)
     }
 
     package func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
@@ -260,8 +243,13 @@ private final class SyntaxHighlightSession {
             let layer = try makeLayer()
             layer.replaceContent(with: layeredSource)
             self.layer = layer
-            tokens = highlightTokens(in: fullRange(for: layeredSource), source: layeredSource)
-            classifySwiftTokensIfNeeded(source: layeredSource)
+            let highlightTokens = highlightTokens(in: fullRange(for: layeredSource), source: layeredSource)
+            let classifiedTokens = swiftClassifiedTokensIfNeeded(
+                highlightTokens,
+                source: layeredSource
+            )
+
+            tokens = classifiedTokens
         } catch {
             layer = nil
             tokens = []
@@ -362,15 +350,17 @@ private final class SyntaxHighlightSession {
             previousSourceUTF16Length: previousLayeredSource.utf16.count,
             nextSourceUTF16Length: nextSourceLength
         )
+        let refreshRange = mergedHighlight.refreshRange
+        let classifiedTokens = swiftClassifiedTokensIfNeeded(
+            mergedHighlight.tokens,
+            source: nextLayeredSource,
+            refreshRange: refreshRange
+        )
 
         source = nextSource
         layeredSource = nextLayeredSource
         lineIndex.apply(mutation: layeredMutation, previousSource: previousLayeredSource)
-        tokens = mergedHighlight.tokens
-        let refreshRange = mergedHighlight.refreshRange
-        if language == .swift {
-            classifySwiftTokensIfNeeded(source: nextLayeredSource, refreshRange: refreshRange)
-        }
+        tokens = classifiedTokens
 
         return SyntaxHighlightResult(
             tokens: tokens,
@@ -568,12 +558,16 @@ private extension SyntaxHighlightSession {
         return ((before + replacementTokens + after).sorted(by: SyntaxHighlightTokenOrdering.displayOrder), refreshRange)
     }
 
-    func classifySwiftTokensIfNeeded(source: String, refreshRange: NSRange? = nil) {
+    func swiftClassifiedTokensIfNeeded(
+        _ tokens: [SyntaxHighlightToken],
+        source: String,
+        refreshRange: NSRange? = nil
+    ) -> [SyntaxHighlightToken] {
         guard language == .swift else {
-            return
+            return tokens
         }
 
-        tokens = SwiftSyntaxOverlayTokenProvider.mergingOverlayTokens(
+        return SwiftSyntaxOverlayTokenProvider.mergingOverlayTokens(
             tokens: tokens,
             source: source,
             refreshRange: refreshRange

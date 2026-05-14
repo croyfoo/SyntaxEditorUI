@@ -4258,6 +4258,31 @@ struct SyntaxHighlighterEngineTests {
         #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
     }
 
+    @Test("SyntaxHighlighterEngine keeps Swift comment overlays in large comment ranges")
+    func highlighterKeepsSwiftCommentOverlaysInLargeCommentRanges() async {
+        let lines = (0..<400).map { index in
+            switch index {
+            case 24:
+                return "// MARK: - Batched paste surface"
+            case 120:
+                return "/// - Warning: See https://example.invalid/paste/\(index)."
+            default:
+                return "/// Documentation line \(index)"
+            }
+        }
+        let source = lines.joined(separator: "\n")
+        let nsSource = source as NSString
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: SyntaxLanguage.swift)
+
+        let markRange = nsSource.range(of: "MARK:")
+        let warningRange = nsSource.range(of: "Warning:")
+        let urlRange = nsSource.range(of: "https://example.invalid/paste/120.")
+
+        #expect(tokens.contains { tokenIntersects($0, range: markRange, syntaxID: .mark, language: .swift) })
+        #expect(tokens.contains { tokenIntersects($0, range: warningRange, syntaxID: .documentationCommentKeyword, language: .swift) })
+        #expect(tokens.contains { tokenIntersects($0, range: urlRange, syntaxID: .url, language: .swift) })
+    }
+
     @Test("SyntaxHighlighterEngine emits semantic CSS captures for the reference sample")
     func highlighterEmitsSemanticCSSCapturesForReferenceSample() async throws {
         let engine = sharedSyntaxHighlighterEngine
