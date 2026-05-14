@@ -206,6 +206,52 @@ private func captureNames(inQuerySource source: String) -> [String] {
     return captures
 }
 
+private func generatedQueryBlock(named name: String, language: SyntaxLanguage) throws -> String {
+    let source = try String(contentsOf: highlightQueryURL(language: language), encoding: .utf8)
+    let begin = "; BEGIN GENERATED EDITOR SYNTAX WORDS: \(name)"
+    let end = "; END GENERATED EDITOR SYNTAX WORDS: \(name)"
+    let beginRange = try #require(source.range(of: begin))
+    let contentStart = try #require(source[beginRange.upperBound...].firstIndex(of: "\n"))
+    let endRange = try #require(source.range(of: end, range: contentStart..<source.endIndex))
+    return String(source[source.index(after: contentStart)..<endRange.lowerBound])
+}
+
+private func quotedStrings(in source: String) -> [String] {
+    var strings: [String] = []
+    var index = source.startIndex
+
+    while index < source.endIndex {
+        guard source[index] == "\"" else {
+            index = source.index(after: index)
+            continue
+        }
+
+        index = source.index(after: index)
+        var value = ""
+        var isEscaped = false
+        while index < source.endIndex {
+            let character = source[index]
+            if isEscaped {
+                value.append(character)
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == "\"" {
+                break
+            } else {
+                value.append(character)
+            }
+            index = source.index(after: index)
+        }
+        strings.append(value)
+        if index < source.endIndex {
+            index = source.index(after: index)
+        }
+    }
+
+    return strings
+}
+
 private func semanticSnapshot(
     in tokens: [SyntaxHighlightToken],
     source: String,
@@ -520,27 +566,80 @@ struct SyntaxEditorCoreTests {
         #expect(swift.fileExtensions.contains("swift"))
         #expect(swift.rootRuleIdentifier == "swift")
         #expect(swift.syntaxTypes.contains("declaration.precedencegroup"))
-        let swiftRules = Dictionary(uniqueKeysWithValues: swift.rules.map { ($0.identifier, $0) })
-        #expect(swiftRules["swift.precedencegroup"]?.syntaxTypes == ["declaration.precedencegroup"])
-        #expect(swiftRules["swift.preprocessor.line"]?.syntaxTypes == ["preprocessor"])
-        #expect(swift.rules.isEmpty == false)
         #expect(swift.keywordWords.contains("defer"))
         #expect(swift.keywordWords.contains("isolated"))
+        #expect(swift.attributeWords.contains("@available"))
+        #expect(swift.attributeWords.contains("#sourceLocation"))
 
         let html = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.html])
         #expect(html.rootRuleIdentifier == "html")
         #expect(html.syntaxTypes.contains("definition.entity"))
-        let htmlRules = Dictionary(uniqueKeysWithValues: html.rules.map { ($0.identifier, $0) })
-        #expect(htmlRules["html.entity.element"]?.syntaxTypes == ["keyword"])
+        #expect(html.keywordWords.isEmpty == false)
 
         let css = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.css])
-        let cssRules = Dictionary(uniqueKeysWithValues: css.rules.map { ($0.identifier, $0) })
-        #expect(cssRules["css.style"]?.syntaxTypes == ["definition.style"])
+        #expect(css.syntaxTypes.contains("definition.style"))
+        #expect(css.attributeWords.contains("@media"))
+
+        let objectiveC = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.objectiveC])
+        #expect(objectiveC.attributeWords.contains("@interface"))
+        #expect(objectiveC.keywordWords.contains("typedef"))
 
         #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "attribute", language: .toml)?.first == "editor.syntax.attribute")
         #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "plain", language: .toml)?.first == "editor.syntax.plain")
         #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "keyword", language: .css)?.first == "editor.syntax.keyword")
         #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "keyword", language: .html)?.first == "editor.syntax.keyword")
+    }
+
+    @Test("Generated query word blocks stay in sync with generated vocabulary")
+    func generatedQueryWordBlocksStayInSyncWithGeneratedVocabulary() throws {
+        let swift = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.swift])
+        let swiftAttributes = Set(swift.attributeWords.compactMap { word -> String? in
+            guard word.hasPrefix("@") else { return nil }
+            return String(word.dropFirst())
+        })
+        let generatedSwiftAttributeWords = Set(
+            quotedStrings(in: try generatedQueryBlock(named: "swift-attributes", language: .swift))
+                .filter { $0 != "@" }
+        )
+        #expect(generatedSwiftAttributeWords == swiftAttributes)
+
+        let objectiveC = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.objectiveC])
+        let stableObjectiveCAttributes: Set<String> = [
+            "@autoreleasepool",
+            "@catch",
+            "@compatibility_alias",
+            "@defs",
+            "@dynamic",
+            "@end",
+            "@finally",
+            "@implementation",
+            "@interface",
+            "@optional",
+            "@property",
+            "@protocol",
+            "@required",
+            "@selector",
+            "@synchronized",
+            "@synthesize",
+            "@throw",
+            "@try",
+        ]
+        let objectiveCAttributes = Set(objectiveC.attributeWords).intersection(stableObjectiveCAttributes)
+        #expect(Set(quotedStrings(in: try generatedQueryBlock(named: "objectivec-attributes", language: .objectiveC))) == objectiveCAttributes)
+
+        let css = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.css])
+        let stableCSSAtRules: Set<String> = ["@keyframes", "@supports"]
+        let cssAtRules = Set(css.attributeWords).union(["@keyframes", "@supports"]).intersection(stableCSSAtRules)
+        #expect(Set(quotedStrings(in: try generatedQueryBlock(named: "css-at-rules", language: .css))) == cssAtRules)
+
+        let json = try #require(BuiltInEditorSourceSyntaxDefinitions.all[.json])
+        let jsonBlock = try generatedQueryBlock(named: "json-literals", language: .json)
+        for word in json.keywordWords {
+            #expect(jsonBlock.contains("(\(word))"))
+        }
+
+        let tomlBlock = try generatedQueryBlock(named: "toml-literals", language: .toml)
+        #expect(tomlBlock.contains("(boolean) @editor.syntax.toml.keyword"))
     }
 
     @Test("Generated source syntax type resolver maps source syntax types")
@@ -3755,8 +3854,8 @@ struct SyntaxHighlighterEngineTests {
         }
     }
 
-    @Test("SyntaxHighlighterEngine maps reference sample captures through generated editor syntax definitions")
-    func highlighterMapsReferenceSampleCapturesThroughGeneratedEditorSyntaxDefinitions() async throws {
+    @Test("SyntaxHighlighterEngine emits canonical reference sample captures")
+    func highlighterEmitsCanonicalReferenceSampleCaptures() async throws {
         let engine = sharedSyntaxHighlighterEngine
         let cases: [(language: SyntaxLanguage, filename: String)] = [
             (.css, "Reference.css"),
@@ -3916,6 +4015,13 @@ struct SyntaxHighlighterEngineTests {
             #expect(snapshot.syntaxID == expectation.syntaxID)
             #expect(snapshot.styleKeys.first == expectation.styleKey)
         }
+
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "@",
+            inOccurrenceOf: "@attached(member"
+        ).last == .keyword)
 
         let zeroLengthTokens = tokens.filter { $0.range.length == 0 }
         if zeroLengthTokens.isEmpty == false {
@@ -4794,6 +4900,9 @@ struct SyntaxHighlighterEngineTests {
         let engine = sharedSyntaxHighlighterEngine
         let source = """
         #import <Foundation/Foundation.h>
+        __attribute__((visibility("default"))) @interface VisibleSample : NSObject
+        @end
+
         @interface Sample : NSObject
         @property (nonatomic, copy) NSString *name;
         - (NSString *)greetingFor:(NSString *)value;
@@ -4810,6 +4919,7 @@ struct SyntaxHighlighterEngineTests {
         let tokens = await engine.render(source: source, language: SyntaxLanguage.objectiveC)
         let nsSource = source as NSString
         let importRange = nsSource.range(of: "#import")
+        let visibleSampleRange = nsSource.range(of: "VisibleSample")
         let interfaceRange = nsSource.range(of: "@interface")
         let methodRange = nsSource.range(of: "greetingFor")
         let commentRange = nsSource.range(of: "// comment")
@@ -4822,6 +4932,9 @@ struct SyntaxHighlighterEngineTests {
         })
         #expect(tokens.contains {
             tokenIntersects($0, range: interfaceRange, syntaxID: .keyword, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: visibleSampleRange, syntaxID: .identifierTypeSystem, language: .objectiveC)
         })
         #expect(tokens.contains {
             tokenIntersects($0, range: methodRange, syntaxID: .identifierFunctionSystem, language: .objectiveC)

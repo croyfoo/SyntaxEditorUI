@@ -91,6 +91,29 @@
 (preproc_undef
   name: (_) @editor.syntax.objectivec.identifier.constant) @editor.syntax.objectivec.preprocessor
 
+; BEGIN GENERATED EDITOR SYNTAX WORDS: objectivec-attributes
+[
+  "@autoreleasepool"
+  "@catch"
+  "@compatibility_alias"
+  "@defs"
+  "@dynamic"
+  "@end"
+  "@finally"
+  "@implementation"
+  "@interface"
+  "@optional"
+  "@property"
+  "@protocol"
+  "@required"
+  "@selector"
+  "@synchronized"
+  "@synthesize"
+  "@throw"
+  "@try"
+] @editor.syntax.objectivec.keyword
+; END GENERATED EDITOR SYNTAX WORDS: objectivec-attributes
+
 ; Includes
 
 (module_import "@import" @editor.syntax.objectivec.preprocessor path: (identifier) @editor.syntax.objectivec.identifier.type.system)
@@ -102,8 +125,6 @@
 ; Type Qualifiers
 
 [
-  "@optional"
-  "@required"
   "__covariant"
   "__contravariant"
   (visibility_specification)
@@ -112,9 +133,6 @@
 ; Storageclasses
 
 [
-  "@autoreleasepool"
-  "@synthesize"
-  "@dynamic"
   "volatile"
   (protocol_qualifier)
 ] @editor.syntax.objectivec.keyword
@@ -122,15 +140,7 @@
 ; Keywords
 
 [
-  "@protocol"
-  "@interface"
-  "@implementation"
-  "@compatibility_alias"
-  "@property"
-  "@selector"
-  "@defs"
   "availability"
-  "@end"
 ] @editor.syntax.objectivec.keyword
 
 (class_declaration "@" @editor.syntax.objectivec.keyword "class" @editor.syntax.objectivec.keyword)
@@ -146,20 +156,15 @@
 ] @editor.syntax.objectivec.keyword
 
 [
-  "@synchronized"
   "oneway"
 ] @editor.syntax.objectivec.keyword
 
 ; Exceptions
 
 [
-  "@try"
   "__try"
-  "@catch"
   "__catch"
-  "@finally"
   "__finally"
-  "@throw"
 ] @editor.syntax.objectivec.keyword
 
 ; Variables

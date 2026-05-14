@@ -5,11 +5,13 @@
 
 (number) @editor.syntax.json.number
 
+; BEGIN GENERATED EDITOR SYNTAX WORDS: json-literals
 [
+  (false)
   (null)
   (true)
-  (false)
 ] @editor.syntax.json.keyword
+; END GENERATED EDITOR SYNTAX WORDS: json-literals
 
 (escape_sequence) @editor.syntax.json.character
 

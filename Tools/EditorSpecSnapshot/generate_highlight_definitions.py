@@ -16,6 +16,7 @@ DEFAULT_OUTPUT = (
     / "Highlighting"
     / "BuiltInEditorSourceSyntaxDefinitions+Generated.swift"
 )
+DEFAULT_QUERY_ROOT = REPOSITORY_ROOT / "Sources" / "SyntaxEditorCore" / "Resources"
 
 LANGUAGE_CASES = {
     "Xcode.SourceCodeLanguage.CSS": "css",
@@ -26,6 +27,46 @@ LANGUAGE_CASES = {
     "Xcode.SourceCodeLanguage.Swift": "swift",
     "Xcode.SourceCodeLanguage.TOML_INI": "toml",
     "Xcode.SourceCodeLanguage.XML": "xml",
+}
+
+QUERY_DIRECTORY_NAMES = {
+    "css": "CSSQueries",
+    "html": "HTMLQueries",
+    "javascript": "JavaScriptQueries",
+    "json": "JSONQueries",
+    "objectiveC": "ObjectiveCQueries",
+    "swift": "SwiftQueries",
+    "toml": "TOMLQueries",
+    "xml": "XMLQueries",
+}
+
+GENERATED_BLOCK_BEGIN = "; BEGIN GENERATED EDITOR SYNTAX WORDS: {name}"
+GENERATED_BLOCK_END = "; END GENERATED EDITOR SYNTAX WORDS: {name}"
+
+CSS_STABLE_AT_RULE_WORDS = {
+    "@keyframes",
+    "@supports",
+}
+
+OBJECTIVEC_STABLE_ATTRIBUTE_WORDS = {
+    "@autoreleasepool",
+    "@catch",
+    "@compatibility_alias",
+    "@defs",
+    "@dynamic",
+    "@end",
+    "@finally",
+    "@implementation",
+    "@interface",
+    "@optional",
+    "@property",
+    "@protocol",
+    "@required",
+    "@selector",
+    "@synchronized",
+    "@synthesize",
+    "@throw",
+    "@try",
 }
 
 STYLE_KEY_FALLBACKS = {
@@ -71,6 +112,16 @@ def parse_arguments() -> argparse.Namespace:
         "--output",
         default=str(DEFAULT_OUTPUT),
         help="Swift file to rewrite.",
+    )
+    parser.add_argument(
+        "--query-root",
+        default=str(DEFAULT_QUERY_ROOT),
+        help="Root directory containing bundled query resources.",
+    )
+    parser.add_argument(
+        "--skip-query-update",
+        action="store_true",
+        help="Only rewrite the generated Swift vocabulary file.",
     )
     return parser.parse_args()
 
@@ -172,21 +223,7 @@ def language_words(rule_definitions: list[dict[str, Any]], syntax_filter: str | 
     return sorted(words)
 
 
-def swift_rule_definition(rule: dict[str, Any], indent: str) -> list[str]:
-    lines = [f"{indent}EditorLanguageRuleDefinition("]
-    lines.append(f"{indent}    identifier: {swift_string(rule['identifier'])},")
-    lines.append(f"{indent}    basedOn: {swift_array(rule['basedOn'], indent + '    ')},")
-    lines.append(f"{indent}    syntaxTypes: {swift_array(rule['syntaxTypes'], indent + '    ')},")
-    lines.append(f"{indent}    words: {swift_array(rule['words'], indent + '    ', max_inline=120)},")
-    lines.append(f"{indent}    start: {swift_string(rule['start']) if rule['start'] is not None else 'nil'},")
-    lines.append(f"{indent}    end: {swift_string(rule['end']) if rule['end'] is not None else 'nil'},")
-    lines.append(f"{indent}    includeRules: {swift_array(rule['includeRules'], indent + '    ')},")
-    lines.append(f"{indent}    tokenizer: {swift_string(rule['tokenizer']) if rule['tokenizer'] is not None else 'nil'}")
-    lines.append(f"{indent})")
-    return lines
-
-
-def generate_swift(snapshot: dict[str, Any]) -> str:
+def supported_language_definitions(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     rule_index = snapshot["rulesByIdentifier"]
     languages = [
         language
@@ -195,34 +232,7 @@ def generate_swift(snapshot: dict[str, Any]) -> str:
     ]
     languages.sort(key=language_sort_key)
 
-    lines: list[str] = [
-        "// Generated from local xclangspec/xcsynspec language definitions. Do not edit by hand.",
-        "",
-        "package struct EditorLanguageRuleDefinition: Sendable {",
-        "    package let identifier: String",
-        "    package let basedOn: [String]",
-        "    package let syntaxTypes: [String]",
-        "    package let words: [String]",
-        "    package let start: String?",
-        "    package let end: String?",
-        "    package let includeRules: [String]",
-        "    package let tokenizer: String?",
-        "}",
-        "",
-        "package struct EditorLanguageSyntaxDefinition: Sendable {",
-        "    package let fileExtensions: [String]",
-        "    package let rootRuleIdentifier: String",
-        "    package let syntaxTypes: [String]",
-        "    package let rules: [EditorLanguageRuleDefinition]",
-        "    package let keywordWords: Set<String>",
-        "    package let attributeWords: Set<String>",
-        "    package let preprocessorWords: Set<String>",
-        "}",
-        "",
-        "package enum BuiltInEditorSourceSyntaxDefinitions {",
-        "    package static let all: [SyntaxLanguage: EditorLanguageSyntaxDefinition] = [",
-    ]
-
+    definitions: list[dict[str, Any]] = []
     for language in languages:
         case_name = LANGUAGE_CASES[str(language["identifier"])]
         rule_definitions = [
@@ -242,21 +252,46 @@ def generate_swift(snapshot: dict[str, Any]) -> str:
             for word in keyword_words
             if word.startswith("@") or word.startswith("#")
         ]
-        root_rule = rule_suffix(str(language.get("languageSpecification", "")))
+        definitions.append({
+            "caseName": case_name,
+            "fileExtensions": sorted(map(str, language.get("fileExtensions", []))),
+            "rootRuleIdentifier": rule_suffix(str(language.get("languageSpecification", ""))),
+            "syntaxTypes": syntax_types,
+            "keywordWords": keyword_words,
+            "attributeWords": attribute_words,
+            "preprocessorWords": preprocessor_words,
+        })
+    return definitions
 
+
+def generate_swift(snapshot: dict[str, Any]) -> str:
+    languages = supported_language_definitions(snapshot)
+
+    lines: list[str] = [
+        "// Generated from local xclangspec/xcsynspec language vocabulary. Do not edit by hand.",
+        "",
+        "package struct EditorLanguageSyntaxDefinition: Sendable {",
+        "    package let fileExtensions: [String]",
+        "    package let rootRuleIdentifier: String",
+        "    package let syntaxTypes: [String]",
+        "    package let keywordWords: Set<String>",
+        "    package let attributeWords: Set<String>",
+        "    package let preprocessorWords: Set<String>",
+        "}",
+        "",
+        "package enum BuiltInEditorSourceSyntaxDefinitions {",
+        "    package static let all: [SyntaxLanguage: EditorLanguageSyntaxDefinition] = [",
+    ]
+
+    for language in languages:
+        case_name = language["caseName"]
         lines.append(f"        .{case_name}: EditorLanguageSyntaxDefinition(")
-        lines.append(f"            fileExtensions: {swift_array(sorted(map(str, language.get('fileExtensions', []))), '            ')},")
-        lines.append(f"            rootRuleIdentifier: {swift_string(root_rule)},")
-        lines.append(f"            syntaxTypes: {swift_array(syntax_types, '            ')},")
-        lines.append("            rules: [")
-        for rule in rule_definitions:
-            rule_lines = swift_rule_definition(rule, "                ")
-            lines.extend(rule_lines[:-1])
-            lines.append(rule_lines[-1] + ",")
-        lines.append("            ],")
-        lines.append(f"            keywordWords: Set({swift_array(keyword_words, '            ')}),")
-        lines.append(f"            attributeWords: Set({swift_array(attribute_words, '            ')}),")
-        lines.append(f"            preprocessorWords: Set({swift_array(preprocessor_words, '            ')})")
+        lines.append(f"            fileExtensions: {swift_array(language['fileExtensions'], '            ')},")
+        lines.append(f"            rootRuleIdentifier: {swift_string(language['rootRuleIdentifier'])},")
+        lines.append(f"            syntaxTypes: {swift_array(language['syntaxTypes'], '            ')},")
+        lines.append(f"            keywordWords: Set({swift_array(language['keywordWords'], '            ')}),")
+        lines.append(f"            attributeWords: Set({swift_array(language['attributeWords'], '            ')}),")
+        lines.append(f"            preprocessorWords: Set({swift_array(language['preprocessorWords'], '            ')})")
         lines.append("        ),")
 
     lines.extend(
@@ -388,6 +423,127 @@ def generate_swift(snapshot: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def scm_string(value: str) -> str:
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+
+def scm_string_lines(values: list[str], indent: str) -> list[str]:
+    return [f"{indent}{scm_string(value)}" for value in values]
+
+
+def generated_block_body(name: str, languages: dict[str, dict[str, Any]]) -> str:
+    if name == "swift-attributes":
+        values = sorted({
+            word[1:]
+            for word in languages["swift"]["attributeWords"]
+            if word.startswith("@") and len(word) > 1
+        })
+        predicate_values = ["@", *values]
+        lines = [
+            "((modifiers",
+            "  (attribute",
+            "    \"@\" @editor.syntax.swift.keyword",
+            "    (user_type",
+            "      (type_identifier) @editor.syntax.swift.keyword)))",
+            "  (#any-of? @editor.syntax.swift.keyword",
+            *scm_string_lines(predicate_values, "    "),
+            "  ))",
+            "",
+            "((attribute",
+            "  \"@\" @editor.syntax.swift.keyword",
+            "  (user_type",
+            "    (type_identifier) @editor.syntax.swift.keyword))",
+            "  (#any-of? @editor.syntax.swift.keyword",
+            *scm_string_lines(predicate_values, "    "),
+            "  ))",
+        ]
+        return "\n".join(lines)
+
+    if name == "objectivec-attributes":
+        values = sorted({
+            word
+            for word in languages["objectiveC"]["attributeWords"]
+            if word in OBJECTIVEC_STABLE_ATTRIBUTE_WORDS
+        })
+        lines = [
+            "[",
+            *scm_string_lines(values, "  "),
+            "] @editor.syntax.objectivec.keyword",
+        ]
+        return "\n".join(lines)
+
+    if name == "css-at-rules":
+        css_words = set(languages["css"]["attributeWords"]) | {"@keyframes", "@supports"}
+        values = sorted(css_words.intersection(CSS_STABLE_AT_RULE_WORDS))
+        lines = [
+            "[",
+            *scm_string_lines(values, "  "),
+            "] @editor.syntax.css.declaration.other",
+        ]
+        return "\n".join(lines)
+
+    if name == "json-literals":
+        values = sorted(languages["json"]["keywordWords"])
+        lines = [
+            "[",
+            *[f"  ({value})" for value in values],
+            "] @editor.syntax.json.keyword",
+        ]
+        return "\n".join(lines)
+
+    if name == "toml-literals":
+        return "(boolean) @editor.syntax.toml.keyword"
+
+    raise KeyError(f"Unknown generated query block: {name}")
+
+
+def replace_generated_block(source: str, name: str, body: str) -> str:
+    begin = GENERATED_BLOCK_BEGIN.format(name=name)
+    end = GENERATED_BLOCK_END.format(name=name)
+    begin_index = source.find(begin)
+    if begin_index == -1:
+        raise ValueError(f"Missing generated block begin marker: {begin}")
+    content_start = source.find("\n", begin_index)
+    if content_start == -1:
+        raise ValueError(f"Malformed generated block begin marker: {begin}")
+    content_start += 1
+    end_index = source.find(end, content_start)
+    if end_index == -1:
+        raise ValueError(f"Missing generated block end marker: {end}")
+    return source[:content_start] + body.rstrip() + "\n" + source[end_index:]
+
+
+def rewrite_query_block(
+    query_root: Path,
+    language_case: str,
+    block_name: str,
+    languages: dict[str, dict[str, Any]],
+) -> None:
+    query_path = query_root / QUERY_DIRECTORY_NAMES[language_case] / "highlights.scm"
+    source = query_path.read_text(encoding="utf-8")
+    updated = replace_generated_block(
+        source,
+        block_name,
+        generated_block_body(block_name, languages),
+    )
+    query_path.write_text(updated, encoding="utf-8")
+
+
+def update_query_blocks(snapshot: dict[str, Any], query_root: Path) -> None:
+    languages = {
+        language["caseName"]: language
+        for language in supported_language_definitions(snapshot)
+    }
+    for language_case, block_name in [
+        ("swift", "swift-attributes"),
+        ("objectiveC", "objectivec-attributes"),
+        ("css", "css-at-rules"),
+        ("json", "json-literals"),
+        ("toml", "toml-literals"),
+    ]:
+        rewrite_query_block(query_root, language_case, block_name, languages)
+
+
 def main() -> None:
     args = parse_arguments()
     snapshot = xclangspec_snapshot.build_snapshot(
@@ -403,6 +559,8 @@ def main() -> None:
     output = Path(args.output).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(generate_swift(snapshot), encoding="utf-8")
+    if not args.skip_query_update:
+        update_query_blocks(snapshot, Path(args.query_root).expanduser())
 
 
 if __name__ == "__main__":

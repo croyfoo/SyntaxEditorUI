@@ -39,8 +39,10 @@ python3 Tools/EditorSpecSnapshot/generate_highlight_definitions.py
 
 This rewrites
 `Sources/SyntaxEditorCore/Highlighting/BuiltInEditorSourceSyntaxDefinitions+Generated.swift`
-from the local `.xclangspec` files. It keeps only the SyntaxEditorUI-supported
-languages in package code.
+from the local `.xclangspec` files and refreshes generated word-list blocks in
+the bundled `highlights.scm` resources. Package runtime code keeps only the
+SyntaxEditorUI-supported vocabulary and theme fallback metadata; Tree-sitter
+node matching stays in handwritten query patterns.
 
 ## Extract SourceModel parse items
 

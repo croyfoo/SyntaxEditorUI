@@ -36,8 +36,12 @@
   "@supports"
   "@keyframes"
 ] @editor.syntax.css.keyword
-"@supports" @editor.syntax.css.declaration.other
-"@keyframes" @editor.syntax.css.declaration.other
+; BEGIN GENERATED EDITOR SYNTAX WORDS: css-at-rules
+[
+  "@keyframes"
+  "@supports"
+] @editor.syntax.css.declaration.other
+; END GENERATED EDITOR SYNTAX WORDS: css-at-rules
 (at_keyword) @editor.syntax.css.keyword
 (keyframes_name) @editor.syntax.css.declaration.other
 (to) @editor.syntax.css.keyword

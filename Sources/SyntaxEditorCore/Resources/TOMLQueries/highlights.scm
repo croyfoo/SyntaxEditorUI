@@ -20,7 +20,9 @@
 ; Literals
 ;---------
 
+; BEGIN GENERATED EDITOR SYNTAX WORDS: toml-literals
 (boolean) @editor.syntax.toml.keyword
+; END GENERATED EDITOR SYNTAX WORDS: toml-literals
 
 (comment) @editor.syntax.toml.comment
 
