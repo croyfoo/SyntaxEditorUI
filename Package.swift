@@ -28,6 +28,14 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "XclangSpecSyntax",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+            ]
+        ),
+        .target(
             name: "SyntaxEditorCore",
             dependencies: [
                 .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
@@ -72,6 +80,10 @@ let package = Package(
         .testTarget(
             name: "SyntaxEditorCoreTests",
             dependencies: ["SyntaxEditorCore"]
+        ),
+        .testTarget(
+            name: "XclangSpecSyntaxTests",
+            dependencies: ["XclangSpecSyntax"]
         ),
         .testTarget(
             name: "SyntaxEditorCorePlatformTests",

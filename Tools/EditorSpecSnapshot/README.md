@@ -66,3 +66,16 @@ Run it against a sample file:
 The output is a JSON list of flattened source model items with source ranges,
 matched rule identifiers, token names, and `xcode.syntax.*` node type names.
 It uses private framework APIs and is not suitable for app or package runtime.
+
+## Swift rule model target
+
+`XclangSpecSyntax` is a package-internal Swift target for modeling
+`.xclangspec` / `.xcsynspec` rule files. It parses plist documents, preserves
+unknown rule fields, and builds rule-reference closures from `BasedOn`,
+`Tokenizer`, `IncludeRules`, `Rules`, `Start`, `End`, `Until`, `AltUntil`,
+`AltEnd`, `AltToken`, `EntityNameMap`, and `LanguageEmbeddings`. It also exposes
+the installed `Syntax` metadata keys used by Xcode 26.5 specs, including
+word scanners, regex matches, capture types, source scanner names, traversal
+flags, and indentation/folding flags. Keep private-framework probes in this
+tool directory; package runtime code should depend on generated data or the
+`XclangSpecSyntax` model, not on Xcode frameworks.
