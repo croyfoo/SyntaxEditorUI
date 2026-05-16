@@ -23,7 +23,7 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-objc", from: "3.0.2"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-toml", exact: "0.7.0"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-xml", exact: "0.7.0"),
-        .package(url: "https://github.com/alex-pinkus/tree-sitter-swift", exact: "0.7.1-with-generated-files"),
+        .package(path: "/Users/kn/Dev/checkout/tree-sitter-swift"),
         .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.8.0"),
     ],
     targets: [
@@ -33,6 +33,46 @@ let package = Package(
                 .swiftLanguageMode(.v6),
                 .defaultIsolation(nil),
                 .strictMemorySafety(),
+            ]
+        ),
+        .target(
+            name: "SourceModelBridge",
+            path: "Sources/SourceModelBridge",
+            publicHeadersPath: "include",
+            linkerSettings: [
+                .linkedFramework("AppKit", .when(platforms: [.macOS])),
+                .linkedFramework("Foundation"),
+            ]
+        ),
+        .executableTarget(
+            name: "EditorSpecTool",
+            dependencies: [
+                "SourceModelBridge",
+                "SyntaxEditorCore",
+            ],
+            path: "Tools/EditorSpecSnapshot/EditorSpecTool",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+                .unsafeFlags([
+                    "-I", "Tools/EditorSpecSnapshot/PrivateInterfaces",
+                    "-F", "/Applications/Xcode.app/Contents/SharedFrameworks",
+                ], .when(platforms: [.macOS])),
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-F", "/Applications/Xcode.app/Contents/SharedFrameworks",
+                    "-framework", "SourceEditor",
+                    "-framework", "SymbolCache",
+                    "-framework", "SymbolCacheIndexing",
+                    "-framework", "SymbolCacheSupport",
+                    "/Applications/Xcode.app/Contents/SharedFrameworks/SymbolCache.framework/Versions/A/SymbolCache",
+                    "/Applications/Xcode.app/Contents/SharedFrameworks/SymbolCacheIndexing.framework/Versions/A/SymbolCacheIndexing",
+                    "/Applications/Xcode.app/Contents/SharedFrameworks/SymbolCacheSupport.framework/Versions/A/SymbolCacheSupport",
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "/Applications/Xcode.app/Contents/SharedFrameworks",
+                ], .when(platforms: [.macOS])),
             ]
         ),
         .target(

@@ -98,10 +98,6 @@ extension SyntaxLanguage {
         identifier
     }
 
-    package var syntaxVocabulary: EditorLanguageSyntaxVocabulary {
-        support.syntaxVocabulary
-    }
-
     var treeSitterSupport: SyntaxTreeSitterSupport {
         support.treeSitterSupport
     }

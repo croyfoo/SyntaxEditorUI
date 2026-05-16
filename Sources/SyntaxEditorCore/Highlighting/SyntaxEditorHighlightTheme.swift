@@ -387,7 +387,10 @@ package enum SyntaxEditorHighlightTheme {
         language: SyntaxLanguage? = nil,
         appearance: SyntaxEditorThemeAppearance? = nil
     ) -> SyntaxEditorResolvedTextStyle? {
-        theme.style(for: syntaxID, language: language, appearance: appearance)
+        guard isKnownSemanticSyntaxID(syntaxID, language: language) else {
+            return nil
+        }
+        return theme.style(for: syntaxID, language: language, appearance: appearance)
     }
 
     package static func color(
@@ -422,7 +425,10 @@ package enum SyntaxEditorHighlightTheme {
         for syntaxID: EditorSourceSyntaxID,
         language: SyntaxLanguage? = nil
     ) -> [String]? {
-        SyntaxEditorThemeStyleFallbacks.styleKeys(for: syntaxID, language: language)
+        guard isKnownSemanticSyntaxID(syntaxID, language: language) else {
+            return nil
+        }
+        return [syntaxID.styleKey]
     }
 
     package static func semanticStyleKeys(
@@ -430,6 +436,25 @@ package enum SyntaxEditorHighlightTheme {
         language: SyntaxLanguage? = nil
     ) -> [String]? {
         semanticStyleKeys(for: EditorSourceSyntaxID(sourceSyntaxID), language: language)
+    }
+
+    private static func isKnownSemanticSyntaxID(
+        _ syntaxID: EditorSourceSyntaxID,
+        language: SyntaxLanguage?
+    ) -> Bool {
+        BuiltInEditorColorThemeDefinitions.containsStyle(for: syntaxID)
+            || EditorSourceSyntaxCategory.category(for: syntaxID) != nil
+            || syntaxID == .plain
+            || syntaxID == .identifier
+    }
+}
+
+private extension BuiltInEditorColorThemeDefinitions {
+    static func containsStyle(for syntaxID: EditorSourceSyntaxID) -> Bool {
+        let key = syntaxID.styleKey
+        return all.values.contains { definition in
+            definition.styles[key] != nil
+        }
     }
 }
 
@@ -463,14 +488,12 @@ enum BuiltInEditorColorThemeStore {
         appearance: SyntaxEditorThemeAppearance?
     ) -> SyntaxEditorResolvedTextStyle? {
         let pair = pair(for: preset)
-        guard let styleKeys = SyntaxEditorHighlightTheme.semanticStyleKeys(
-            for: syntaxID,
-            language: language
-        ) else {
-            return nil
+        if let exactStyle = pair.styleIfPresent(for: [syntaxID.styleKey], appearance: appearance) {
+            return exactStyle
         }
         return pair.style(
-            for: styleKeys,
+            for: BuiltInEditorThemeSlot(syntaxID: syntaxID),
+            language: language,
             appearance: appearance
         )
     }
@@ -553,6 +576,32 @@ private struct BuiltInEditorColorThemePair {
         }
     }
 
+    func styleIfPresent(
+        for styleKeys: [String],
+        appearance: SyntaxEditorThemeAppearance?
+    ) -> SyntaxEditorResolvedTextStyle? {
+        switch appearance {
+        case .light:
+            return light.styleIfPresent(for: styleKeys)?.resolvedStyle()
+        case .dark:
+            return dark.styleIfPresent(for: styleKeys)?.resolvedStyle()
+        case .none:
+            guard let lightStyle = light.styleIfPresent(for: styleKeys),
+                  let darkStyle = dark.styleIfPresent(for: styleKeys)
+            else {
+                return nil
+            }
+            return SyntaxEditorResolvedTextStyle(
+                foreground: BuiltInEditorColorThemeStore.color(
+                    light: lightStyle.color,
+                    dark: darkStyle.color,
+                    appearance: nil
+                ),
+                font: lightStyle.font
+            )
+        }
+    }
+
     private func styleKeys(for slot: BuiltInEditorThemeSlot, language: SyntaxLanguage?) -> [String] {
         switch slot {
         case .base:
@@ -562,7 +611,9 @@ private struct BuiltInEditorColorThemePair {
         case .string:
             ["editor.syntax.string", "editor.syntax.character"]
         case .keyword:
-            ["editor.syntax.keyword", "editor.syntax.preprocessor"]
+            ["editor.syntax.keyword"]
+        case .preprocessor:
+            ["editor.syntax.preprocessor", "editor.syntax.keyword"]
         case .number:
             ["editor.syntax.number"]
         case .function:
@@ -590,12 +641,44 @@ private enum BuiltInEditorThemeSlot {
     case comment
     case string
     case keyword
+    case preprocessor
     case number
     case function
     case type
     case constant
     case variable
     case punctuation
+
+    init(syntaxID: EditorSourceSyntaxID) {
+        let value = syntaxID.rawValue
+        if value == "preprocessor" || value.hasPrefix("preprocessor.") {
+            self = .preprocessor
+            return
+        }
+
+        switch EditorSourceSyntaxCategory.category(for: syntaxID) {
+        case .comment:
+            self = .comment
+        case .string:
+            self = .string
+        case .keyword:
+            self = .keyword
+        case .number:
+            self = .number
+        case .function:
+            self = .function
+        case .type:
+            self = .type
+        case .constant:
+            self = .constant
+        case .variable:
+            self = .variable
+        case .punctuation:
+            self = .punctuation
+        case .none:
+            self = .base
+        }
+    }
 }
 
 struct BuiltInEditorColorThemeDefinition {
@@ -614,6 +697,15 @@ struct BuiltInEditorColorThemeDefinition {
             color: backgroundColor,
             font: nil
         )
+    }
+
+    func styleIfPresent(for keys: [String]) -> BuiltInEditorTextStyleDefinition? {
+        for key in keys {
+            if let style = styles[key] {
+                return style
+            }
+        }
+        return nil
     }
 }
 

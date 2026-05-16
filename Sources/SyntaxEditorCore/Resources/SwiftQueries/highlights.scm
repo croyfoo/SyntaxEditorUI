@@ -15,7 +15,7 @@
 ] @editor.syntax.swift.plain
 
 ; Identifiers
-(type_identifier) @editor.syntax.swift.identifier.type.system
+(type_identifier) @editor.syntax.swift.plain
 
 [
   (self_expression)
@@ -54,16 +54,10 @@
   name: (type_identifier) @editor.syntax.swift.declaration.type)
 
 (typealias_declaration
-  name: (type_identifier) @editor.syntax.swift.declaration.other)
-
-(typealias_declaration
-  (type_identifier) @editor.syntax.swift.declaration.other)
+  name: (type_identifier) @editor.syntax.swift.declaration.type)
 
 (associatedtype_declaration
-  name: (type_identifier) @editor.syntax.swift.declaration.other)
-
-(associatedtype_declaration
-  (type_identifier) @editor.syntax.swift.declaration.other)
+  name: (type_identifier) @editor.syntax.swift.plain)
 
 (class_declaration
   "extension"
@@ -77,7 +71,7 @@
   name: (simple_identifier) @editor.syntax.swift.declaration.other)
 
 (macro_declaration
-  (simple_identifier) @editor.syntax.swift.identifier.macro)
+  (simple_identifier) @editor.syntax.swift.declaration.other)
 
 (source_file
   (property_declaration
@@ -135,10 +129,11 @@
   "init" @editor.syntax.swift.keyword)
 
 (parameter
-  external_name: (simple_identifier) @editor.syntax.swift.plain)
+  external_name: (simple_identifier) @editor.syntax.swift.declaration.other)
 
 (parameter
-  name: (simple_identifier) @editor.syntax.swift.plain)
+  !external_name
+  name: (simple_identifier) @editor.syntax.swift.declaration.other)
 
 (type_parameter
   (type_identifier) @editor.syntax.swift.plain)
@@ -203,10 +198,6 @@
    "none"
    "right"))
 
-((precedence_group_attribute
-  (simple_identifier) @editor.syntax.swift.identifier.type.system)
- (#match? @editor.syntax.swift.identifier.type.system "^[A-Z]"))
-
 (class_declaration
   declaration_kind: "actor" @editor.syntax.swift.keyword)
 
@@ -245,9 +236,6 @@
 (await_expression
   "await" @editor.syntax.swift.keyword)
 
-((simple_identifier) @editor.syntax.swift.keyword
- (#eq? @editor.syntax.swift.keyword "isolated"))
-
 ((call_expression
   (simple_identifier) @editor.syntax.swift.keyword)
  (#eq? @editor.syntax.swift.keyword "defer"))
@@ -256,11 +244,68 @@
 
 (navigation_expression
   (navigation_suffix
-    (simple_identifier) @editor.syntax.swift.identifier.variable.system))
+    (simple_identifier) @editor.syntax.swift.plain))
 
 (value_argument
   name: (value_argument_label
     (simple_identifier) @editor.syntax.swift.plain))
+
+(function_declaration
+  [
+    "("
+    ")"
+  ] @editor.syntax.swift.plain)
+
+(protocol_function_declaration
+  [
+    "("
+    ")"
+  ] @editor.syntax.swift.plain)
+
+(init_declaration
+  [
+    "("
+    ")"
+  ] @editor.syntax.swift.plain)
+
+(subscript_declaration
+  [
+    "("
+    ")"
+  ] @editor.syntax.swift.plain)
+
+(macro_declaration
+  [
+    "("
+    ")"
+  ] @editor.syntax.swift.plain)
+
+(operator_declaration
+  (custom_operator) @editor.syntax.swift.plain)
+
+(function_declaration
+  name: (custom_operator) @editor.syntax.swift.plain)
+
+((simple_identifier) @editor.syntax.swift.keyword
+ (#any-of? @editor.syntax.swift.keyword
+   "extension"))
+
+(function_declaration
+  (attribute
+    (user_type
+      (type_identifier) @editor.syntax.swift.plain)))
+
+(property_declaration
+  [
+    "{"
+    "}"
+  ] @editor.syntax.swift.plain)
+
+(willset_didset_block
+  [
+    "{"
+    "}"
+  ] @editor.syntax.swift.plain)
 
 (import_declaration
   "import" @editor.syntax.swift.keyword)
@@ -388,34 +433,29 @@
 
 (modifiers
   (attribute
-    "@" @editor.syntax.swift.identifier.type.system
+    "@" @editor.syntax.swift.plain))
+
+(attribute
+  "@" @editor.syntax.swift.plain)
+
+(modifiers
+  (attribute
+    "@" @editor.syntax.swift.plain
     (user_type
-      (type_identifier) @editor.syntax.swift.identifier.type.system)))
+      (type_identifier) @editor.syntax.swift.plain)))
 
 (macro_invocation
-  "#" @editor.syntax.swift.identifier.macro.system
-  (simple_identifier) @editor.syntax.swift.identifier.macro.system)
+  "#" @editor.syntax.swift.plain
+  (simple_identifier) @editor.syntax.swift.plain)
 
-(external_macro_definition) @editor.syntax.swift.identifier.macro.system
+(external_macro_definition
+  "#" @editor.syntax.swift.keyword
+  "externalMacro" @editor.syntax.swift.keyword)
 
 ; Function calls
-(call_expression
-  (simple_identifier) @editor.syntax.swift.identifier.function.system)
-
-(call_expression
-  (navigation_expression
-    (navigation_suffix
-      (simple_identifier) @editor.syntax.swift.identifier.function.system)))
-
-(call_expression
-  (prefix_expression
-    (simple_identifier) @editor.syntax.swift.identifier.function.system))
-
 ((navigation_expression
-  (simple_identifier) @editor.syntax.swift.identifier.type.system)
-  (#match? @editor.syntax.swift.identifier.type.system "^[A-Z]"))
-
-(directive) @editor.syntax.swift.preprocessor
+  (simple_identifier) @editor.syntax.swift.plain)
+  (#match? @editor.syntax.swift.plain "^[A-Z]"))
 
 (directive
   [
@@ -423,7 +463,7 @@
     "#elseif"
     "#else"
     "#endif"
-  ] @editor.syntax.swift.preprocessor)
+  ] @editor.syntax.swift.keyword)
 
 (directive
   [
@@ -436,28 +476,39 @@
     "<"
     "&&"
     "||"
-    "."
-    ":"
     "("
     ")"
     ","
+    ":"
+  ] @editor.syntax.swift.preprocessor)
+
+(directive
+  "." @editor.syntax.swift.number)
+
+(directive
+  [
+    "."
+  ] @editor.syntax.swift.plain)
+
+(directive
+  [
     "swift"
     "compiler"
     "os"
     "canImport"
-  ] @editor.syntax.swift.preprocessor)
+  ] @editor.syntax.swift.plain)
 
 (directive
-  (simple_identifier) @editor.syntax.swift.preprocessor)
+  (simple_identifier) @editor.syntax.swift.plain)
 
 (directive
-  (integer_literal) @editor.syntax.swift.preprocessor)
+  (integer_literal) @editor.syntax.swift.number)
 
 (directive
-  (real_literal) @editor.syntax.swift.preprocessor)
+  (real_literal) @editor.syntax.swift.number)
 
 (directive
-  (wildcard_pattern) @editor.syntax.swift.preprocessor)
+  (wildcard_pattern) @editor.syntax.swift.plain)
 
 (ERROR
   [
@@ -465,6 +516,16 @@
     "#elseif"
     "#else"
     "#endif"
+  ] @editor.syntax.swift.keyword)
+
+(ERROR
+  [
+    "#if"
+    "#elseif"
+    "#else"
+    "#endif"
+  ]
+  [
     "!"
     ">="
     "<="
@@ -474,28 +535,61 @@
     "<"
     "&&"
     "||"
-    "."
-    ":"
     "("
     ")"
     ","
+    ":"
+  ] @editor.syntax.swift.preprocessor)
+
+(ERROR
+  [
+    "#if"
+    "#elseif"
+    "#else"
+    "#endif"
+  ]
+  [
     "swift"
     "compiler"
     "os"
     "canImport"
-  ] @editor.syntax.swift.preprocessor)
+  ] @editor.syntax.swift.plain)
 
 (ERROR
-  (simple_identifier) @editor.syntax.swift.preprocessor)
+  [
+    "#if"
+    "#elseif"
+    "#else"
+    "#endif"
+  ]
+  (simple_identifier) @editor.syntax.swift.plain)
 
 (ERROR
-  (integer_literal) @editor.syntax.swift.preprocessor)
+  [
+    "#if"
+    "#elseif"
+    "#else"
+    "#endif"
+  ]
+  (integer_literal) @editor.syntax.swift.number)
 
 (ERROR
-  (real_literal) @editor.syntax.swift.preprocessor)
+  [
+    "#if"
+    "#elseif"
+    "#else"
+    "#endif"
+  ]
+  (real_literal) @editor.syntax.swift.number)
 
 (ERROR
-  (wildcard_pattern) @editor.syntax.swift.preprocessor)
+  [
+    "#if"
+    "#elseif"
+    "#else"
+    "#endif"
+  ]
+  (wildcard_pattern) @editor.syntax.swift.plain)
 
 (availability_condition
   "#" @editor.syntax.swift.keyword)
@@ -506,15 +600,33 @@
     "unavailable"
   ] @editor.syntax.swift.keyword)
 
+(availability_condition
+  "." @editor.syntax.swift.number)
+
 [
-  (diagnostic)
   (availability_condition)
   (playground_literal)
   (key_path_string_expression)
   (selector_expression)
 ] @editor.syntax.swift.identifier.macro.system
 
-(special_literal) @editor.syntax.swift.identifier.macro.system
+(diagnostic
+  "#" @editor.syntax.swift.keyword)
+
+(diagnostic
+  [
+    "error"
+    "warning"
+    "sourceLocation"
+  ] @editor.syntax.swift.keyword)
+
+(diagnostic
+  (value_arguments
+    (value_argument
+      (value_argument_label
+        (simple_identifier) @editor.syntax.swift.plain))))
+
+(special_literal) @editor.syntax.swift.keyword
 
 ; Statements
 (for_statement
@@ -632,14 +744,12 @@
 
 "nil" @editor.syntax.swift.keyword
 
-(wildcard_pattern) @editor.syntax.swift.character
+(wildcard_pattern) @editor.syntax.swift.plain
 
 ; Regex literals
 (regex_literal) @editor.syntax.swift.string
 
 ; Operators
-(custom_operator) @editor.syntax.swift.plain
-
 [
   "+"
   "-"

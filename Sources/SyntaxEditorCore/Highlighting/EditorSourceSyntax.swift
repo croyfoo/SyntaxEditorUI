@@ -39,13 +39,21 @@ package extension EditorSourceSyntaxID {
     static let mark: Self = "mark"
     static let string: Self = "string"
     static let character: Self = "character"
+    static let pattern: Self = "pattern"
     static let number: Self = "number"
     static let keyword: Self = "keyword"
     static let preprocessor: Self = "preprocessor"
     static let url: Self = "url"
     static let attribute: Self = "attribute"
+    static let identifier: Self = "identifier"
+    static let name: Self = "name"
+    static let nameOther: Self = "name.other"
+    static let namePartial: Self = "name.partial"
+    static let nameType: Self = "name.type"
+    static let nameTree: Self = "name.tree"
     static let declarationOther: Self = "declaration.other"
     static let declarationType: Self = "declaration.type"
+    static let declarationEnumCase: Self = "declaration.enum.case"
     static let identifierType: Self = "identifier.type"
     static let identifierTypeSystem: Self = "identifier.type.system"
     static let identifierClass: Self = "identifier.class"
@@ -181,33 +189,36 @@ package enum EditorSourceSyntaxCategory {
         if value == "comment" || value.hasPrefix("comment.") || value == "mark" {
             return .comment
         }
-        if value == "string" || value == "character" || value.hasPrefix("markup.code") {
+        if value == "string" || value == "character" || value == "pattern" || value.hasPrefix("markup.code") {
             return .string
         }
-        if value == "keyword" || value == "preprocessor" {
+        if value == "keyword" || value.hasPrefix("keyword.") || value == "preprocessor" || value.hasPrefix("preprocessor.") {
             return .keyword
         }
         if value == "number" || value == "url" {
             return .number
         }
-        if value.contains(".function") || value.contains(".method") || value == "identifier.macro" || value == "identifier.macro.system" {
+        if value == "name" || value == "name.other" || value.contains(".function") || value.contains(".method") || value == "identifier.macro" || value == "identifier.macro.system" {
             return .function
         }
-        if value.contains(".type") || value.contains(".class") || value == "declaration.type" {
+        if value == "name.partial" || value == "name.tree" || value.contains(".type") || value.contains(".class") || value == "declaration.type" || value.hasPrefix("definition.") || value == "typedef" || value == "associatedtype" {
             return .type
         }
         if value.contains(".constant") {
             return .constant
         }
-        if value == "declaration.other" {
+        if value == "declaration.other" || value == "declaration.enum.case" {
             return .function
         }
         if value == "attribute" || value.contains(".variable") {
             return .variable
         }
-        if value == "plain" {
+        if value == "plain" || value == "identifier" {
             return nil
         }
-        return .punctuation
+        if value == "punctuation" || value == "operator" {
+            return .punctuation
+        }
+        return nil
     }
 }

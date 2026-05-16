@@ -9,12 +9,6 @@ import xclangspec_snapshot
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT_DIRECTORY = (
-    REPOSITORY_ROOT
-    / "Sources"
-    / "SyntaxEditorCore"
-    / "Languages"
-)
 DEFAULT_QUERY_ROOT = REPOSITORY_ROOT / "Sources" / "SyntaxEditorCore" / "Resources"
 
 LANGUAGE_CASES = {
@@ -37,28 +31,6 @@ QUERY_DIRECTORY_NAMES = {
     "swift": "SwiftQueries",
     "toml": "TOMLQueries",
     "xml": "XMLQueries",
-}
-
-LANGUAGE_TYPE_NAMES = {
-    "css": "CSSLanguage",
-    "html": "HTMLLanguage",
-    "javascript": "JavaScriptLanguage",
-    "json": "JSONLanguage",
-    "objectiveC": "ObjectiveCLanguage",
-    "swift": "SwiftLanguage",
-    "toml": "TOMLLanguage",
-    "xml": "XMLLanguage",
-}
-
-LANGUAGE_DIRECTORY_NAMES = {
-    "css": "CSS",
-    "html": "HTML",
-    "javascript": "JavaScript",
-    "json": "JSON",
-    "objectiveC": "ObjectiveC",
-    "swift": "Swift",
-    "toml": "TOML",
-    "xml": "XML",
 }
 
 GENERATED_BLOCK_BEGIN = "; BEGIN GENERATED EDITOR SYNTAX WORDS: {name}"
@@ -103,7 +75,7 @@ OBJECTIVEC_STABLE_PREPROCESSOR_WORDS = {
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate bundled editor syntax vocabularies from local xclangspec files."
+        description="Generate bundled editor syntax query blocks from local xclangspec files."
     )
     parser.add_argument(
         "--xcode",
@@ -111,39 +83,11 @@ def parse_arguments() -> argparse.Namespace:
         help="Path to the local developer tool app bundle.",
     )
     parser.add_argument(
-        "--output-directory",
-        default=str(DEFAULT_OUTPUT_DIRECTORY),
-        help="Directory where per-language generated Swift files are rewritten.",
-    )
-    parser.add_argument(
         "--query-root",
         default=str(DEFAULT_QUERY_ROOT),
         help="Root directory containing bundled query resources.",
     )
-    parser.add_argument(
-        "--skip-query-update",
-        action="store_true",
-        help="Only rewrite the generated Swift vocabulary file.",
-    )
     return parser.parse_args()
-
-
-def swift_string(value: str) -> str:
-    return (
-        "\""
-        + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-        + "\""
-    )
-
-
-def swift_array(values: list[str], indent: str, max_inline: int = 96) -> str:
-    if not values:
-        return "[]"
-    joined = ", ".join(swift_string(value) for value in values)
-    if len(joined) <= max_inline:
-        return f"[{joined}]"
-    inner = ",\n".join(f"{indent}    {swift_string(value)}" for value in values)
-    return f"[\n{inner},\n{indent}]"
 
 
 def syntax_suffix(value: str) -> str:
@@ -196,10 +140,13 @@ def rule_syntax_types(rule: dict[str, Any]) -> list[str]:
         value = syntax.get(key)
         if isinstance(value, str) and value.startswith("xcode.syntax."):
             values.append(syntax_suffix(value))
+    for value in as_list(syntax.get("CaptureTypes")):
+        if isinstance(value, str) and value.startswith("xcode.syntax."):
+            values.append(syntax_suffix(value))
     return sorted(dict.fromkeys(values))
 
 
-def rule_vocabulary(rule_identifier: str, rule: dict[str, Any]) -> dict[str, Any]:
+def rule_word_list(rule_identifier: str, rule: dict[str, Any]) -> dict[str, Any]:
     entry = rule_entry(rule)
     syntax = entry.get("Syntax")
     syntax = syntax if isinstance(syntax, dict) else {}
@@ -215,9 +162,9 @@ def rule_vocabulary(rule_identifier: str, rule: dict[str, Any]) -> dict[str, Any
     }
 
 
-def language_words(rule_vocabularies: list[dict[str, Any]], syntax_filter: str | None = None) -> list[str]:
+def language_words(rule_word_lists: list[dict[str, Any]], syntax_filter: str | None = None) -> list[str]:
     words: set[str] = set()
-    for rule in rule_vocabularies:
+    for rule in rule_word_lists:
         syntax_types = set(rule["syntaxTypes"])
         if syntax_filter:
             if syntax_filter == "preprocessor":
@@ -229,7 +176,7 @@ def language_words(rule_vocabularies: list[dict[str, Any]], syntax_filter: str |
     return sorted(words)
 
 
-def supported_language_vocabularies(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+def supported_language_word_lists(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     rule_index = snapshot["rulesByIdentifier"]
     languages = [
         language
@@ -238,73 +185,28 @@ def supported_language_vocabularies(snapshot: dict[str, Any]) -> list[dict[str, 
     ]
     languages.sort(key=language_sort_key)
 
-    vocabularies: list[dict[str, Any]] = []
+    word_lists: list[dict[str, Any]] = []
     for language in languages:
         case_name = LANGUAGE_CASES[str(language["identifier"])]
-        rule_vocabularies = [
-            rule_vocabulary(rule_identifier, rule_index[rule_identifier])
+        rule_word_lists = [
+            rule_word_list(rule_identifier, rule_index[rule_identifier])
             for rule_identifier in language.get("ruleIdentifiers", [])
             if rule_identifier in rule_index
         ]
-        syntax_types = sorted({
-            syntax_suffix(str(value))
-            for value in language.get("syntaxTypes", [])
-            if str(value).startswith("xcode.syntax.")
-        })
-        keyword_words = language_words(rule_vocabularies, "keyword")
-        preprocessor_words = language_words(rule_vocabularies, "preprocessor")
+        keyword_words = language_words(rule_word_lists, "keyword")
+        preprocessor_words = language_words(rule_word_lists, "preprocessor")
         attribute_words = [
             word
             for word in keyword_words
             if word.startswith("@") or word.startswith("#")
         ]
-        vocabularies.append({
+        word_lists.append({
             "caseName": case_name,
-            "fileExtensions": sorted(map(str, language.get("fileExtensions", []))),
-            "rootRuleIdentifier": rule_suffix(str(language.get("languageSpecification", ""))),
-            "syntaxTypes": syntax_types,
             "keywordWords": keyword_words,
             "attributeWords": attribute_words,
             "preprocessorWords": preprocessor_words,
         })
-    return vocabularies
-
-
-def generated_language_swift(language: dict[str, Any]) -> str:
-    type_name = LANGUAGE_TYPE_NAMES[language["caseName"]]
-    lines: list[str] = [
-        "// Generated from local xclangspec/xcsynspec language vocabulary. Do not edit by hand.",
-        "",
-        f"extension {type_name} {{",
-        "    var syntaxVocabulary: EditorLanguageSyntaxVocabulary {",
-        "        Self.generatedSyntaxVocabulary",
-        "    }",
-        "",
-        "    private static let generatedSyntaxVocabulary = EditorLanguageSyntaxVocabulary(",
-        f"        fileExtensions: {swift_array(language['fileExtensions'], '        ')},",
-        f"        rootRuleIdentifier: {swift_string(language['rootRuleIdentifier'])},",
-        f"        syntaxTypes: {swift_array(language['syntaxTypes'], '        ')},",
-        f"        keywordWords: Set({swift_array(language['keywordWords'], '        ')}),",
-        f"        attributeWords: Set({swift_array(language['attributeWords'], '        ')}),",
-        f"        preprocessorWords: Set({swift_array(language['preprocessorWords'], '        ')})",
-        "    )",
-        "}",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def generated_language_filename(language_case: str) -> str:
-    return f"{LANGUAGE_TYPE_NAMES[language_case]}+Generated.swift"
-
-
-def write_generated_swift_files(snapshot: dict[str, Any], output_directory: Path) -> None:
-    output_directory.mkdir(parents=True, exist_ok=True)
-    for language in supported_language_vocabularies(snapshot):
-        language_directory = output_directory / LANGUAGE_DIRECTORY_NAMES[language["caseName"]]
-        language_directory.mkdir(parents=True, exist_ok=True)
-        output_path = language_directory / generated_language_filename(language["caseName"])
-        output_path.write_text(generated_language_swift(language), encoding="utf-8")
+    return word_lists
 
 
 def scm_string(value: str) -> str:
@@ -429,7 +331,7 @@ def rewrite_query_block(
 def update_query_blocks(snapshot: dict[str, Any], query_root: Path) -> None:
     languages = {
         language["caseName"]: language
-        for language in supported_language_vocabularies(snapshot)
+        for language in supported_language_word_lists(snapshot)
     }
     for language_case, block_name in [
         ("swift", "swift-attributes"),
@@ -454,12 +356,7 @@ def main() -> None:
             pretty=False,
         )
     )
-    write_generated_swift_files(
-        snapshot,
-        Path(args.output_directory).expanduser(),
-    )
-    if not args.skip_query_update:
-        update_query_blocks(snapshot, Path(args.query_root).expanduser())
+    update_query_blocks(snapshot, Path(args.query_root).expanduser())
 
 
 if __name__ == "__main__":

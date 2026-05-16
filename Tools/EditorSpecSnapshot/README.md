@@ -31,41 +31,106 @@ python3 Tools/EditorSpecSnapshot/xclangspec_snapshot.py \
 
 Use `--all-languages` only when investigating unsupported languages.
 
-## Generate package syntax vocabularies
+## Generate query word lists
 
 ```bash
 python3 Tools/EditorSpecSnapshot/generate_highlight_definitions.py
 ```
 
-This rewrites the `*Language+Generated.swift` files in each
-`Sources/SyntaxEditorCore/Languages/<Language>/` directory from the local
-`.xclangspec` files and refreshes generated word-list blocks in the bundled
-`highlights.scm` resources. Package runtime code keeps only the
-SyntaxEditorUI-supported vocabulary; theme fallback and Tree-sitter node
-matching stay in handwritten source.
+This reads the local `.xclangspec` / `.xcsynspec` files and refreshes generated
+word-list blocks in the bundled `highlights.scm` resources. Package runtime code
+does not carry generated Xcode vocabulary; grammar and query captures own token
+classification, while theme code only resolves known editor syntax families.
 
-## Extract SourceModel parse items
+## Compare Swift highlighting with Xcode
 
-Build the private-framework probe:
+`EditorSpecTool` is a SwiftPM executable that uses `SyntaxEditorCore` for editor
+tokens and Xcode-installed tooling for reference tokens. It is the mechanical
+verification path for syntax-color alignment; do not use screenshots or manual
+eyeballing as the oracle.
+
+Use `classification-diff` as the primary Swift signal when changing
+`highlights.scm` or the Swift grammar fork. It compares
+`SyntaxHighlighterEngine` tokens against Xcode's own `SourceEditor.framework`
+syntax token provider, backed by `SymbolCacheSupport.framework`, and normalizes
+`SourceEditorTokenType.UIKind` values into editor syntax buckets:
 
 ```bash
-clang -fobjc-arc -framework Foundation \
-  Tools/EditorSpecSnapshot/source_model_snapshot.m \
-  -o /tmp/source_model_snapshot
+swift run EditorSpecTool classification-diff \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
 ```
 
-Run it against a sample file:
+The classification output compares normalized token classifications, not colors. Each
+difference includes the Xcode-side raw `tokenType` / `uiKind` and the
+SyntaxEditorUI-side raw capture name. This is the closest direct mechanical
+oracle found so far; it avoids screenshot color sampling and avoids
+SourceKit-LSP semantic-token overreach.
+
+For separate classification snapshots:
 
 ```bash
-/tmp/source_model_snapshot \
-  --language html \
-  --file Tools/Mini/Mini/ReferenceSamples/Reference.html \
-  --pretty
+swift run EditorSpecTool editor-tokens \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+
+swift run EditorSpecTool xcode-classification-tokens \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
 ```
 
-The output is a JSON list of flattened source model items with source ranges,
-matched rule identifiers, token names, and `xcode.syntax.*` node type names.
-It uses private framework APIs and is not suitable for app or package runtime.
+Rendered-color comparison is still available, but it is secondary and intended
+for theme/color regressions. For Swift it maps the same SourceEditor
+classification tokens through `SourceEditor.framework/.../Default
+(Dark).xccolortheme` or `Default (Light).xccolortheme`:
+
+```bash
+swift run EditorSpecTool rendered-diff \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+```
+
+The SourceEditor token route is used by `xcode-classification-tokens`,
+`classification-diff`, `xcode-rendered-tokens`, and `rendered-diff` for Swift
+files. It intentionally stays in this local tool and does not expose private
+framework details through package runtime APIs. The tool-only Swift interfaces
+under `PrivateInterfaces/` were derived from the installed Xcode frameworks
+with `MachOSwiftSection`; regenerate them if the local Xcode build changes the
+private ABI enough to break compilation.
+
+`source-model-tokens` is useful for inspecting SourceModel rule closures and
+non-rendered syntax items:
+
+```bash
+swift run EditorSpecTool source-model-tokens \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+
+```
+
+The SourceModel snapshot output is a JSON list of flattened source model items
+with source ranges, matched rule identifiers, token names, and
+`xcode.syntax.*` node type names. It uses private framework APIs through the
+tool-only `SourceModelBridge` target. Keep it as an xclangspec/rule inspection
+aid and for non-Swift investigations; Swift alignment should use
+`classification-diff` because SourceEditor exposes the same token taxonomy used
+by Xcode's editor.
+
+Focused Swift fixtures live in `Tools/EditorSpecSnapshot/Fixtures/` for
+attribute and preprocessor/macro alignment checks.
+
+Some Swift differences are grammar-boundary differences, not query differences.
+The package currently points at the local fork in
+`/Users/kn/Dev/checkout/tree-sitter-swift` so grammar-level fixes can be tested
+before publishing a pinned remote fork. For example, the fork parses
+`#sourceLocation(file:..., line:...)` as `diagnostic` plus nested
+`value_arguments`, allowing the query to color the directive keyword, labels,
+string, and number separately. Query captures cannot currently address every
+punctuation range in the diagnostic node, so the Swift overlay adds
+SourceEditor-compatible preprocessor punctuation for directive/source-location
+lines. Keep token-boundary fixes in the Swift grammar fork where practical and
+use `EditorSpecTool classification-diff` to decide which remaining differences
+are worth moving into grammar.
 
 ## Swift rule model target
 

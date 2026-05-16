@@ -23,9 +23,6 @@ struct Clamped<Value: Comparable> {
     }
     let range: ClosedRange<Value>
 
-    isolated deinit {
-    }
-
     init(wrappedValue: Value, _ range: ClosedRange<Value>) {
         self.range = range
         self.wrappedValue = min(max(wrappedValue, range.lowerBound), range.upperBound)
@@ -80,6 +77,8 @@ final class ReferenceStore: OpenReferenceBase, @unchecked Sendable, ReferenceRen
 
     subscript(item id: ReferenceID) -> Item<ReferenceID>? {
         items.first { $0.id == id }
+    }
+    isolated deinit {
     }
 
     func render() async throws -> [String] {

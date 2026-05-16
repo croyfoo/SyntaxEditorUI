@@ -34,6 +34,8 @@ REFERENCE_KEYS = {
     "Rules",
     "Start",
     "End",
+    "Until",
+    "AltUntil",
     "AltEnd",
     "AltToken",
     "EntityNameMap",
@@ -130,6 +132,47 @@ def reference_values(value: Any) -> list[str]:
     return []
 
 
+def identifiers_in_rule_expression(expression: str, rule_index: dict[str, dict[str, Any]]) -> list[str]:
+    if expression in rule_index:
+        return [expression]
+
+    identifiers: list[str] = []
+    seen: set[str] = set()
+    current: list[str] = []
+
+    def flush() -> None:
+        if not current:
+            return
+        identifier = "".join(current)
+        current.clear()
+        if identifier in rule_index and identifier not in seen:
+            seen.add(identifier)
+            identifiers.append(identifier)
+
+    for character in expression:
+        if character.isascii() and (character.isalnum() or character in ".-_"):
+            current.append(character)
+        else:
+            flush()
+    flush()
+
+    return identifiers
+
+
+def append_reference_expressions(
+    references: list[str],
+    expressions: list[str],
+    rule_index: dict[str, dict[str, Any]],
+) -> None:
+    seen = set(references)
+    for expression in expressions:
+        for identifier in identifiers_in_rule_expression(expression, rule_index):
+            if identifier in seen:
+                continue
+            seen.add(identifier)
+            references.append(identifier)
+
+
 def rule_entry(rule_record: dict[str, Any]) -> dict[str, Any]:
     entry = rule_record.get("entry")
     return entry if isinstance(entry, dict) else rule_record
@@ -140,9 +183,7 @@ def direct_rule_references(rule_record: dict[str, Any], rule_index: dict[str, di
     rule = rule_entry(rule_record)
 
     for key in ("BasedOn",):
-        for value in reference_values(rule.get(key)):
-            if value in rule_index:
-                references.append(value)
+        append_reference_expressions(references, reference_values(rule.get(key)), rule_index)
 
     syntax = rule.get("Syntax")
     if not isinstance(syntax, dict):
@@ -151,9 +192,11 @@ def direct_rule_references(rule_record: dict[str, Any], rule_index: dict[str, di
     for key in REFERENCE_KEYS:
         if key not in syntax:
             continue
-        for value in reference_values(syntax.get(key)):
-            if value in rule_index:
-                references.append(value)
+        append_reference_expressions(references, reference_values(syntax.get(key)), rule_index)
+
+    language_embeddings = syntax.get("LanguageEmbeddings")
+    if isinstance(language_embeddings, dict):
+        append_reference_expressions(references, sorted(map(str, language_embeddings.keys())), rule_index)
 
     return references
 
@@ -187,6 +230,9 @@ def syntax_types_for_rules(rule_identifiers: list[str], rule_index: dict[str, di
             continue
         for key in ("Type", "AltType"):
             value = syntax.get(key)
+            if isinstance(value, str) and value.startswith("xcode.syntax."):
+                syntax_types.add(value)
+        for value in as_list(syntax.get("CaptureTypes")):
             if isinstance(value, str) and value.startswith("xcode.syntax."):
                 syntax_types.add(value)
     return sorted(syntax_types)

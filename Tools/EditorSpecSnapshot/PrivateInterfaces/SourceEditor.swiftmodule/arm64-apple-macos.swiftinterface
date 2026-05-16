@@ -1,0 +1,241 @@
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version 6.3.2 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)
+// swift-module-flags: -target arm64-apple-macosx26.0 -enable-objc-interop -enable-library-evolution -swift-version 6 -module-name SourceEditor
+import AppKit
+import Foundation
+import Swift
+
+public struct SourceEditorPosition: Hashable, Comparable, Codable, CustomStringConvertible {
+    public enum CodingKeys: CodingKey {
+        case line
+        case col
+    }
+
+    public var line: Swift.Int
+    public var col: Swift.Int
+
+    public init(line: Swift.Int, col: Swift.Int)
+
+    public var description: Swift.String { get }
+
+    public static func < (_: SourceEditor.SourceEditorPosition, _: SourceEditor.SourceEditorPosition) -> Swift.Bool
+}
+
+public enum SourceEditorLineEndingStyle {
+    case lf
+    case cr
+    case crlf
+}
+
+public struct SourceEditorFormattingOptions {
+    public enum TabIndentBehavior {
+        case always
+        case never
+        case inLeadingWhitespace
+    }
+
+    public enum LineEndingAtEndOfFileBehavior {
+        case optional
+        case mandatory
+    }
+
+    public var lineEndingStyle: SourceEditor.SourceEditorLineEndingStyle
+    public var lineEndingAtEndOfFileBehavior: SourceEditor.SourceEditorFormattingOptions.LineEndingAtEndOfFileBehavior
+    public var useTabs: Swift.Bool
+    public var tabWidth: Swift.Int
+    public var tabIndentBehavior: SourceEditor.SourceEditorFormattingOptions.TabIndentBehavior
+    public var indentWidth: Swift.Int
+    public var reformattingWidth: Swift.Int
+    public var reformatGeneratedCode: Swift.Bool
+    public var syntaxAwareIndent: Swift.Bool
+    public var syntaxAwareAutoIndentStrings: Swift.Set<Swift.String>
+    public var indentOnPaste: Swift.Bool
+    public var soloBraceIndentWidth: Swift.Int
+    public var indentSlashSlashComments: Swift.Bool
+    public var alignConsecutiveSlashSlashComments: Swift.Bool
+    public var indentCase: Swift.Bool
+    public var indentInsideTopLevelBlocks: Swift.Bool
+    public var indentBlocksInMethodCalls: Swift.Bool
+    public var indentUnderParens: Swift.Bool
+    public var indentRelative: Swift.Bool
+
+    public init()
+}
+
+public protocol SourceEditorTokenData {
+    var fontTraits: SourceEditor.SourceEditorTokenType.FontTraits { get }
+    var uiKind: SourceEditor.SourceEditorTokenType.UIKind? { get }
+}
+
+public protocol SourceEditorTokenIdentifierData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenKeywordData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenNumberData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenBooleanData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenStringData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenObjectLiteralData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenCommentData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenURLData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenPlaceholderData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenCharacterData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenPreprocessorStatementData: SourceEditor.SourceEditorTokenData {}
+public protocol SourceEditorTokenLanguageSpecificData: SourceEditor.SourceEditorTokenData {}
+
+public enum SourceEditorTokenType: Equatable {
+    public enum UIKind: Equatable {
+        public enum Scope: Hashable {
+            case external
+            case project
+        }
+
+        case className(SourceEditor.SourceEditorTokenType.UIKind.Scope)
+        case typeName(SourceEditor.SourceEditorTokenType.UIKind.Scope)
+        case functionMethodName(SourceEditor.SourceEditorTokenType.UIKind.Scope)
+        case constant(SourceEditor.SourceEditorTokenType.UIKind.Scope)
+        case instanceGlobalVariable(SourceEditor.SourceEditorTokenType.UIKind.Scope)
+        case preprocessorMacro(SourceEditor.SourceEditorTokenType.UIKind.Scope)
+        case markdownHeader(level: Swift.Int)
+        case typeDeclaration
+        case otherDeclaration
+        case attribute
+        case keyword
+        case comment
+        case documentationComment
+        case documentationCommentKeyword
+        case mark
+        case markupCode
+        case markupAside
+        case disabled
+    }
+
+    public struct FontTraits: OptionSet, ExpressibleByArrayLiteral {
+        public let rawValue: Swift.Int
+
+        public init(rawValue: Swift.Int)
+
+        public static var italic: SourceEditor.SourceEditorTokenType.FontTraits { get }
+        public static var strikethrough: SourceEditor.SourceEditorTokenType.FontTraits { get }
+        public static var strong: SourceEditor.SourceEditorTokenType.FontTraits { get }
+    }
+
+    case identifier(SourceEditor.SourceEditorTokenIdentifierData?)
+    case keyword(SourceEditor.SourceEditorTokenKeywordData?)
+    case number(SourceEditor.SourceEditorTokenNumberData?)
+    case boolean(SourceEditor.SourceEditorTokenBooleanData?)
+    case string(SourceEditor.SourceEditorTokenStringData?)
+    case objectLiteral(SourceEditor.SourceEditorTokenObjectLiteralData?)
+    case comment(SourceEditor.SourceEditorTokenCommentData?)
+    case url(SourceEditor.SourceEditorTokenURLData?)
+    case placeholder(SourceEditor.SourceEditorTokenPlaceholderData?)
+    case character(SourceEditor.SourceEditorTokenCharacterData?)
+    case preprocessorStatement(SourceEditor.SourceEditorTokenPreprocessorStatementData?)
+    case languageSpecific(SourceEditor.SourceEditorTokenLanguageSpecificData?)
+}
+
+public class SourceEditorLineData {
+    public init()
+}
+
+public protocol SourceEditorLineDataFactory {
+    var lineDataClass: SourceEditor.SourceEditorLineData.Type { get }
+
+    func makeLineData() -> SourceEditor.SourceEditorLineData
+    func lineDataForString(_: Foundation.NSString) -> (Swift.ContiguousArray<SourceEditor.SourceEditorLineData>, Swift.Bool)
+}
+
+public struct DefaultSourceEditorLineDataFactory: SourceEditor.SourceEditorLineDataFactory {
+    public init()
+
+    public var lineDataClass: SourceEditor.SourceEditorLineData.Type { get }
+
+    public func makeLineData() -> SourceEditor.SourceEditorLineData
+    public func lineDataForString(_: Foundation.NSString) -> (Swift.ContiguousArray<SourceEditor.SourceEditorLineData>, Swift.Bool)
+}
+
+public protocol ContentGeneratingLanguageService: SourceEditor.SourceEditorLanguageService {}
+public protocol EditableRangeSnapshot {}
+
+public protocol SourceEditorSyntaxTokenProvider {
+    func syntaxTypeAtPosition(_: SourceEditor.SourceEditorPosition) -> (SourceEditor.SourceEditorTokenType?, Swift.Range<SourceEditor.SourceEditorPosition>)?
+    func syntaxTypeAtPosition(_: SourceEditor.SourceEditorPosition, includingSemanticsAndDocumentation: Swift.Bool) -> (SourceEditor.SourceEditorTokenType?, Swift.Range<SourceEditor.SourceEditorPosition>)?
+    func enumerateSyntaxTokensOnLine(_: Swift.Int, handler: (SourceEditor.SourceEditorTokenType, Swift.Range<Swift.Int>) -> ())
+}
+
+public protocol SourceEditorDocumentSettings {}
+
+public protocol SourceEditorBuffer: AnyObject {
+    var documentSettings: SourceEditor.SourceEditorDocumentSettings? { get }
+    var formattingOptions: SourceEditor.SourceEditorFormattingOptions { get }
+    var lineCount: Swift.Int { get }
+    var nsString: Foundation.NSString { get }
+    var string: Swift.String { get }
+
+    func textInRange(_: Swift.Range<SourceEditor.SourceEditorPosition>) -> Swift.String
+    func textInRange(_: Foundation.NSRange) -> Swift.String
+    func lineContentForLine(_: Swift.Int) -> Swift.String
+    func contentRangeForLine(_: Swift.Int) -> Swift.Range<SourceEditor.SourceEditorPosition>
+}
+
+public protocol SourceEditorLanguage {
+    var contentGeneratingLangServiceClass: SourceEditor.ContentGeneratingLanguageService.Type? { get }
+    var editableRangeSnapshotType: SourceEditor.EditableRangeSnapshot.Type? { get }
+    var identifier: Swift.String { get }
+    var langServiceClass: SourceEditor.SourceEditorLanguageService.Type { get }
+    var lineDataFactory: SourceEditor.SourceEditorLineDataFactory { get }
+    var name: Swift.String { get }
+}
+
+public protocol SourceEditorLanguageService: AnyObject, SourceEditor.SourceEditorSyntaxTokenProvider {
+    init(language: SourceEditor.SourceEditorLanguage, buffer: SourceEditor.SourceEditorBuffer)
+}
+
+public final class GenericLanguage: SourceEditor.SourceEditorLanguage {
+    public init(
+        name: Swift.String,
+        identifier: Swift.String,
+        languageService: SourceEditor.SourceEditorLanguageService.Type,
+        lineDataFactory: SourceEditor.SourceEditorLineDataFactory,
+        editableRangeSnapshot: SourceEditor.EditableRangeSnapshot.Type?
+    )
+
+    public var name: Swift.String { get }
+    public var identifier: Swift.String { get }
+    public var langServiceClass: SourceEditor.SourceEditorLanguageService.Type { get }
+    public var contentGeneratingLangServiceClass: SourceEditor.ContentGeneratingLanguageService.Type? { get }
+    public var lineDataFactory: SourceEditor.SourceEditorLineDataFactory { get }
+    public var editableRangeSnapshotType: SourceEditor.EditableRangeSnapshot.Type? { get }
+}
+
+public final class SourceEditorDataSource: SourceEditor.SourceEditorBuffer {
+    public init(
+        usingMutableString: Foundation.NSMutableString,
+        language: SourceEditor.SourceEditorLanguage?,
+        formattingOptions: SourceEditor.SourceEditorFormattingOptions
+    )
+
+    public init(
+        name: Swift.String,
+        language: SourceEditor.SourceEditorLanguage?,
+        usingMutableString: Foundation.NSMutableString,
+        formattingOptions: SourceEditor.SourceEditorFormattingOptions,
+        documentSettings: SourceEditor.SourceEditorDocumentSettings?
+    )
+
+    public var documentSettings: SourceEditor.SourceEditorDocumentSettings? { get set }
+    public var formattingOptions: SourceEditor.SourceEditorFormattingOptions { get set }
+    public var journal: SourceEditor.SourceEditorJournal { get }
+    public var language: SourceEditor.SourceEditorLanguage? { get set }
+    public var languageService: SourceEditor.SourceEditorLanguageService { get }
+    public var lineCount: Swift.Int { get }
+    public var nsString: Foundation.NSString { get }
+    public var string: Swift.String { get set }
+
+    public func textInRange(_: Swift.Range<SourceEditor.SourceEditorPosition>) -> Swift.String
+    public func textInRange(_: Foundation.NSRange) -> Swift.String
+    public func lineContentForLine(_: Swift.Int) -> Swift.String
+    public func contentRangeForLine(_: Swift.Int) -> Swift.Range<SourceEditor.SourceEditorPosition>
+}
+
+public final class SourceEditorJournal {
+    public init(dataSource: SourceEditor.SourceEditorDataSource)
+    public func startObserving(dataSource: SourceEditor.SourceEditorDataSource)
+}
