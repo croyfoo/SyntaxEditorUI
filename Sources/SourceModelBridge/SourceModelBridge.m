@@ -1,5 +1,6 @@
 #import "SourceModelBridge.h"
 #import <AppKit/AppKit.h>
+#import <dlfcn.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 
@@ -115,6 +116,17 @@ static void CallVoidBool(id object, NSString *selectorName, BOOL argument)
 static void CallVoidRange(id object, NSString *selectorName, NSRange argument)
 {
     ((void (*)(id, SEL, NSRange))objc_msgSend)(object, NSSelectorFromString(selectorName), argument);
+}
+
+static void CallVoidObjectBoolObject(id object, NSString *selectorName, id firstArgument, BOOL secondArgument, id thirdArgument)
+{
+    ((void (*)(id, SEL, id, BOOL, id))objc_msgSend)(
+        object,
+        NSSelectorFromString(selectorName),
+        firstArgument,
+        secondArgument,
+        thirdArgument
+    );
 }
 
 static NSRange CallRange(id object, NSString *selectorName)
@@ -256,6 +268,31 @@ static void InitializeDVTSourceSpecifications(void)
     });
 }
 
+static void RegisterDVTSourceModelSpecifications(NSString *toolchainAppPath)
+{
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        Class specificationClass = NSClassFromString(@"DVTSourceSpecification");
+        SEL selector = NSSelectorFromString(@"registerSpecificationProxiesFromPropertyListsInDirectory:recursively:inBundle:");
+        if (specificationClass == Nil || ![specificationClass respondsToSelector:selector]) {
+            return;
+        }
+
+        NSString *sourceModelPath = [toolchainAppPath stringByAppendingPathComponent:
+            @"Contents/SharedFrameworks/SourceModel.framework"];
+        NSBundle *sourceModelBundle = [NSBundle bundleWithPath:sourceModelPath];
+        NSString *specificationsPath = [sourceModelPath stringByAppendingPathComponent:
+            @"Versions/A/Resources/LanguageSpecifications"];
+        CallVoidObjectBoolObject(
+            specificationClass,
+            @"registerSpecificationProxiesFromPropertyListsInDirectory:recursively:inBundle:",
+            specificationsPath,
+            NO,
+            sourceModelBundle
+        );
+    });
+}
+
 static id SourceCodeLanguageForInput(NSString *languageInput, NSString *filePath)
 {
     Class languageClass = NSClassFromString(@"SMSourceCodeLanguage");
@@ -311,7 +348,176 @@ static id DVTSourceCodeLanguageForInput(NSString *languageInput, NSString *fileP
     if (extension.length == 0) {
         return nil;
     }
-    return CallObject1(languageClass, @"_sourceCodeLanguageForExtension:", extension);
+
+    NSDictionary<NSString *, NSString *> *extensionSelectors = @{
+        @"c": @"cSourceCodeLanguage",
+        @"cc": @"cPlusPlusSourceCodeLanguage",
+        @"cpp": @"cPlusPlusSourceCodeLanguage",
+        @"cxx": @"cPlusPlusSourceCodeLanguage",
+        @"h": @"objectiveCSourceCodeLanguage",
+        @"m": @"objectiveCSourceCodeLanguage",
+        @"mm": @"objectiveCPlusPlusSourceCodeLanguage",
+        @"swift": @"swiftSourceCodeLanguage",
+    };
+    NSString *selectorName = extensionSelectors[extension.lowercaseString];
+    if (selectorName != nil && [languageClass respondsToSelector:NSSelectorFromString(selectorName)]) {
+        return CallObject(languageClass, selectorName);
+    }
+    return nil;
+}
+
+static NSString *StringDescription(id object)
+{
+    if (object == nil) {
+        return @"";
+    }
+    if ([object isKindOfClass:NSString.class]) {
+        return object;
+    }
+    return [object description] ?: @"";
+}
+
+static id ObjectValueIfResponds(id object, NSString *selectorName)
+{
+    SEL selector = NSSelectorFromString(selectorName);
+    if (object == nil || ![object respondsToSelector:selector]) {
+        return nil;
+    }
+    return CallObject(object, selectorName);
+}
+
+static NSNumber *CountIfResponds(id object)
+{
+    if (object == nil || ![object respondsToSelector:@selector(count)]) {
+        return nil;
+    }
+    NSUInteger count = ((NSUInteger (*)(id, SEL))objc_msgSend)(object, @selector(count));
+    return @(count);
+}
+
+static NSArray<NSString *> *ObjectDescriptionsFromCollection(id collection, NSUInteger limit)
+{
+    if (collection == nil || ![collection respondsToSelector:@selector(objectEnumerator)]) {
+        return @[];
+    }
+
+    NSMutableArray<NSString *> *descriptions = [NSMutableArray array];
+    NSEnumerator *enumerator = [collection objectEnumerator];
+    id object = nil;
+    while ((object = [enumerator nextObject]) != nil && descriptions.count < limit) {
+        [descriptions addObject:StringDescription(object)];
+    }
+    return descriptions;
+}
+
+static NSDictionary *LanguageSpecificationDiagnostics(id specification)
+{
+    if (specification == nil) {
+        return @{
+            @"exists": @NO,
+        };
+    }
+
+    NSMutableDictionary *dictionary = [@{
+        @"exists": @YES,
+        @"class": NSStringFromClass([specification class]) ?: @"",
+        @"description": StringDescription(specification),
+    } mutableCopy];
+
+    id identifier = ObjectValueIfResponds(specification, @"identifier");
+    if (identifier != nil) {
+        dictionary[@"identifier"] = StringDescription(identifier);
+    }
+
+    id name = ObjectValueIfResponds(specification, @"name");
+    if (name != nil) {
+        dictionary[@"name"] = StringDescription(name);
+    }
+
+    id superSpecification = ObjectValueIfResponds(specification, @"superSpecification");
+    if (superSpecification != nil) {
+        dictionary[@"superSpecification"] = LanguageSpecificationDiagnostics(superSpecification);
+    }
+
+    return dictionary;
+}
+
+static NSDictionary *DVTLanguageDiagnosticsRecord(NSString *strategy, NSString *argument, id language)
+{
+    NSMutableDictionary *dictionary = [@{
+        @"strategy": strategy ?: @"",
+        @"argument": argument ?: @"",
+        @"exists": @(language != nil),
+    } mutableCopy];
+
+    if (language == nil) {
+        return dictionary;
+    }
+
+    dictionary[@"class"] = NSStringFromClass([language class]) ?: @"";
+    dictionary[@"description"] = StringDescription(language);
+
+    id identifier = ObjectValueIfResponds(language, @"identifier");
+    if (identifier != nil) {
+        dictionary[@"identifier"] = StringDescription(identifier);
+    }
+
+    id languageName = ObjectValueIfResponds(language, @"languageName");
+    if (languageName != nil) {
+        dictionary[@"languageName"] = StringDescription(languageName);
+    }
+
+    id languageSpecification = ObjectValueIfResponds(language, @"languageSpecification");
+    dictionary[@"languageSpecification"] = LanguageSpecificationDiagnostics(languageSpecification);
+
+    id fileDataTypes = ObjectValueIfResponds(language, @"fileDataTypes");
+    NSNumber *fileDataTypesCount = CountIfResponds(fileDataTypes);
+    if (fileDataTypesCount != nil) {
+        dictionary[@"fileDataTypesCount"] = fileDataTypesCount;
+        dictionary[@"fileDataTypesSample"] = ObjectDescriptionsFromCollection(fileDataTypes, 8);
+    }
+
+    id conformedToLanguages = ObjectValueIfResponds(language, @"conformedToLanguages");
+    NSNumber *conformedToLanguagesCount = CountIfResponds(conformedToLanguages);
+    if (conformedToLanguagesCount != nil) {
+        dictionary[@"conformedToLanguagesCount"] = conformedToLanguagesCount;
+        dictionary[@"conformedToLanguagesSample"] = ObjectDescriptionsFromCollection(conformedToLanguages, 8);
+    }
+
+    return dictionary;
+}
+
+static NSDictionary *RuntimeClassDiagnostic(NSString *name)
+{
+    Class runtimeClass = NSClassFromString(name);
+    Class superclass = runtimeClass == Nil ? Nil : class_getSuperclass(runtimeClass);
+    return @{
+        @"name": name ?: @"",
+        @"exists": @(runtimeClass != Nil),
+        @"resolvedName": runtimeClass == Nil ? @"" : NSStringFromClass(runtimeClass),
+        @"superclassName": superclass == Nil ? @"" : NSStringFromClass(superclass),
+    };
+}
+
+static NSDictionary *RuntimeSelectorDiagnostic(id object, NSString *selectorName)
+{
+    return @{
+        @"selector": selectorName ?: @"",
+        @"responds": @(object != nil && [object respondsToSelector:NSSelectorFromString(selectorName)]),
+    };
+}
+
+static NSDictionary *RuntimeSymbolDiagnostic(void *handle, NSString *symbolName)
+{
+    NSString *lookupName = [symbolName hasPrefix:@"_"]
+        ? [symbolName substringFromIndex:1]
+        : symbolName;
+    void *symbol = handle == NULL ? NULL : dlsym(handle, lookupName.UTF8String);
+    return @{
+        @"symbol": symbolName ?: @"",
+        @"lookupName": lookupName ?: @"",
+        @"exists": @(symbol != NULL),
+    };
 }
 
 static NSString *TokenNameForToken(NSInteger token)
@@ -539,6 +745,202 @@ static NSDictionary *ColorDictionary(NSColor *color)
             @"languageSpecificationName": languageSpecificationName ?: @"",
         },
         @"items": items,
+    };
+}
+
++ (nullable NSDictionary<NSString *, id> *)sourceEditorViewDiagnosticsForFileAtPath:(NSString *)filePath
+                                                                            language:(nullable NSString *)languageInput
+                                                                        toolchainApp:(NSString *)toolchainAppPath
+                                                                               error:(NSError **)error
+{
+    if (!LoadFramework(toolchainAppPath, @"Contents/SharedFrameworks/SourceEditor.framework", error, 13)) {
+        return nil;
+    }
+
+    NSString *frameworkPath = [toolchainAppPath stringByAppendingPathComponent:
+        @"Contents/SharedFrameworks/SourceEditor.framework/Versions/A/SourceEditor"];
+    void *handle = dlopen(frameworkPath.fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL);
+    const char *rawError = handle == NULL ? dlerror() : NULL;
+    NSString *dlopenError = rawError == NULL ? @"" : [NSString stringWithUTF8String:rawError];
+
+    NSArray<NSString *> *classNames = @[
+        @"SourceEditor.SourceEditorView",
+        @"_TtC12SourceEditor16SourceEditorView",
+        @"_TtC12SourceEditor24SnapshotSourceEditorView",
+    ];
+    NSMutableArray<NSDictionary *> *classDiagnostics = [NSMutableArray arrayWithCapacity:classNames.count];
+    for (NSString *className in classNames) {
+        [classDiagnostics addObject:RuntimeClassDiagnostic(className)];
+    }
+
+    Class viewClass = NSClassFromString(@"_TtC12SourceEditor16SourceEditorView");
+    id view = viewClass == Nil ? nil : [[viewClass alloc] initWithFrame:NSZeroRect];
+
+    NSArray<NSString *> *selectorNames = @[
+        @"dataSource",
+        @"setDataSource:",
+        @"contentView",
+        @"scrollView",
+        @"replaceScrollViewWith:",
+        @"attributedSubstringForProposedRange:actualRange:",
+    ];
+    NSMutableArray<NSDictionary *> *selectorDiagnostics = [NSMutableArray arrayWithCapacity:selectorNames.count];
+    for (NSString *selectorName in selectorNames) {
+        [selectorDiagnostics addObject:RuntimeSelectorDiagnostic(view, selectorName)];
+    }
+
+    NSArray<NSString *> *symbolNames = @[
+        @"_$s12SourceEditor0aB4ViewC10syntaxType8location14effectiveRangeSo06SyntaxE0VSu_SpySo8_NSRangeVGSgtF",
+        @"_$s12SourceEditor0aB4ViewC04dataA0AA0ab4DataA0CvgTj",
+        @"_$s12SourceEditor0aB4ViewC04dataA0AA0ab4DataA0CvsTj",
+        @"_$s12SourceEditor0aB4ViewC5frameACSo6CGRectV_tcfC",
+    ];
+    NSMutableArray<NSDictionary *> *symbolDiagnostics = [NSMutableArray arrayWithCapacity:symbolNames.count];
+    for (NSString *symbolName in symbolNames) {
+        [symbolDiagnostics addObject:RuntimeSymbolDiagnostic(handle, symbolName)];
+    }
+
+    if (handle != NULL) {
+        dlclose(handle);
+    }
+
+    return @{
+        @"source": @{
+            @"file": filePath,
+            @"languageInput": languageInput ?: @"",
+            @"normalizedLanguage": languageInput.length > 0 ? NormalizedLanguageInput(languageInput) : @"",
+            @"xcode": toolchainAppPath,
+        },
+        @"framework": frameworkPath,
+        @"dlopen": @{
+            @"success": @(handle != NULL),
+            @"error": dlopenError ?: @"",
+        },
+        @"classes": classDiagnostics,
+        @"instance": @{
+            @"created": @(view != nil),
+            @"className": view == nil ? @"" : NSStringFromClass([view class]),
+            @"description": view == nil ? @"" : StringDescription(view),
+        },
+        @"selectors": selectorDiagnostics,
+        @"symbols": symbolDiagnostics,
+        @"notes": @[
+            @"SourceEditorView.syntaxType is a Swift-only direct symbol, not an Objective-C selector.",
+            @"A normal Swift interface call currently links through a missing dispatch thunk, so this command only records the runtime surface.",
+            @"A token oracle based on this path should call the direct symbol only after the dataSource setter ABI is proven safe.",
+        ],
+    };
+}
+
++ (nullable NSDictionary<NSString *, id> *)languageDiagnosticsForFileAtPath:(NSString *)filePath
+                                                                   language:(nullable NSString *)languageInput
+                                                               toolchainApp:(NSString *)toolchainAppPath
+                                                                      error:(NSError **)error
+{
+    if (!LoadFramework(toolchainAppPath, @"Contents/SharedFrameworks/DVTFoundation.framework", error, 10)) {
+        return nil;
+    }
+    InitializeDVTApplicationDirectoryName();
+    if (!LoadFramework(toolchainAppPath, @"Contents/SharedFrameworks/SourceModel.framework", error, 11)) {
+        return nil;
+    }
+    if (!LoadFramework(toolchainAppPath, @"Contents/SharedFrameworks/DVTKit.framework", error, 12)) {
+        return nil;
+    }
+
+    NSError *plugInError = nil;
+    BOOL didScanPlugIns = InitializeDVTPlugIns(&plugInError);
+    InitializeDVTSourceSpecifications();
+    RegisterDVTSourceModelSpecifications(toolchainAppPath);
+
+    NSString *normalizedLanguage = languageInput.length > 0 ? NormalizedLanguageInput(languageInput) : @"";
+    NSString *fileExtension = filePath.pathExtension ?: @"";
+    NSMutableArray<NSDictionary *> *resolutions = [NSMutableArray array];
+
+    Class languageClass = NSClassFromString(@"DVTSourceCodeLanguage");
+    if (languageClass != Nil) {
+        void (^appendResolution)(NSString *, NSString *, id) = ^(NSString *strategy, NSString *argument, id language) {
+            [resolutions addObject:DVTLanguageDiagnosticsRecord(strategy, argument, language)];
+        };
+
+        if ([languageClass respondsToSelector:NSSelectorFromString(@"swiftSourceCodeLanguage")]) {
+            appendResolution(@"swiftSourceCodeLanguage", @"", CallObject(languageClass, @"swiftSourceCodeLanguage"));
+        }
+        if ([languageClass respondsToSelector:NSSelectorFromString(@"sourceCodeLanguageWithIdentifier:")]) {
+            appendResolution(
+                @"sourceCodeLanguageWithIdentifier:",
+                @"Xcode.SourceCodeLanguage.Swift",
+                CallObject1(languageClass, @"sourceCodeLanguageWithIdentifier:", @"Xcode.SourceCodeLanguage.Swift")
+            );
+        }
+        if ([languageClass respondsToSelector:NSSelectorFromString(@"sourceCodeLanguageForLanguageSpecificationIdentifier:")]) {
+            appendResolution(
+                @"sourceCodeLanguageForLanguageSpecificationIdentifier:",
+                @"xcode.lang.swift",
+                CallObject1(languageClass, @"sourceCodeLanguageForLanguageSpecificationIdentifier:", @"xcode.lang.swift")
+            );
+            if (normalizedLanguage.length > 0 && ![normalizedLanguage isEqualToString:@"xcode.lang.swift"]) {
+                appendResolution(
+                    @"sourceCodeLanguageForLanguageSpecificationIdentifier:",
+                    normalizedLanguage,
+                    CallObject1(languageClass, @"sourceCodeLanguageForLanguageSpecificationIdentifier:", normalizedLanguage)
+                );
+            }
+        }
+        if ([languageClass respondsToSelector:NSSelectorFromString(@"sourceCodeLanguageForLanguageName:")]) {
+            appendResolution(
+                @"sourceCodeLanguageForLanguageName:",
+                @"Swift",
+                CallObject1(languageClass, @"sourceCodeLanguageForLanguageName:", @"Swift")
+            );
+        }
+        if ([languageClass respondsToSelector:NSSelectorFromString(@"sourceCodeLanguageForFileDataTypeIdentifier:")]) {
+            appendResolution(
+                @"sourceCodeLanguageForFileDataTypeIdentifier:",
+                @"public.swift-source",
+                CallObject1(languageClass, @"sourceCodeLanguageForFileDataTypeIdentifier:", @"public.swift-source")
+            );
+            appendResolution(
+                @"sourceCodeLanguageForFileDataTypeIdentifier:",
+                @"public.generated-swift-interface",
+                CallObject1(languageClass, @"sourceCodeLanguageForFileDataTypeIdentifier:", @"public.generated-swift-interface")
+            );
+        }
+    }
+
+    NSMutableDictionary *specificationDiagnostics = [NSMutableDictionary dictionary];
+    Class specificationClass = NSClassFromString(@"DVTSourceSpecification");
+    specificationDiagnostics[@"classExists"] = @(specificationClass != Nil);
+    if (specificationClass != Nil) {
+        if ([specificationClass respondsToSelector:NSSelectorFromString(@"registeredSpecifications")]) {
+            id registeredSpecifications = CallObject(specificationClass, @"registeredSpecifications");
+            NSNumber *registeredCount = CountIfResponds(registeredSpecifications);
+            if (registeredCount != nil) {
+                specificationDiagnostics[@"registeredSpecificationsCount"] = registeredCount;
+            }
+        }
+        if ([specificationClass respondsToSelector:NSSelectorFromString(@"specificationForIdentifier:")]) {
+            id swiftSpecification = CallObject1(specificationClass, @"specificationForIdentifier:", @"xcode.lang.swift");
+            specificationDiagnostics[@"swiftSpecification"] = LanguageSpecificationDiagnostics(swiftSpecification);
+        }
+    }
+
+    return @{
+        @"source": @{
+            @"framework": [toolchainAppPath stringByAppendingPathComponent:@"Contents/SharedFrameworks/DVTFoundation.framework"],
+            @"file": filePath,
+            @"languageInput": languageInput ?: @"",
+            @"normalizedLanguage": normalizedLanguage,
+            @"fileExtension": fileExtension,
+            @"xcode": toolchainAppPath,
+        },
+        @"initialization": @{
+            @"didScanPlugIns": @(didScanPlugIns),
+            @"plugInError": plugInError.localizedDescription ?: @"",
+        },
+        @"languageClassExists": @(languageClass != Nil),
+        @"resolutions": resolutions,
+        @"sourceSpecifications": specificationDiagnostics,
     };
 }
 

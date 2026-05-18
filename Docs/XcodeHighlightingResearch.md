@@ -51,6 +51,14 @@ swift run EditorSpecTool xcode-dvt-rendered-tokens \
   --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
   --language swift --pretty
 
+swift run EditorSpecTool xcode-dvt-language-diagnostics \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+
+swift run EditorSpecTool xcode-source-editor-view-diagnostics \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+
 swift run EditorSpecTool classification-diff \
   --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
   --language swift --pretty
@@ -400,12 +408,47 @@ Additional observations:
   header snapshot, so this path still needs runtime probing rather than header-
   guided implementation.
 
-Current interpretation: the DVT text-storage route is not yet initialized the
-same way Xcode initializes its editor process. The file-level language
-identifier resolves far enough to produce a Swift `DVTSourceCodeLanguage`, but
-that object cannot load its language spec in this standalone tool process.
-Before treating DVT output as a failed oracle, try a dedicated DVT language
-diagnostic command that reports:
+Diagnostic command:
+
+```sh
+swift run EditorSpecTool xcode-dvt-language-diagnostics \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+```
+
+Observed diagnostic result on 2026-05-18:
+
+- `DVTPlugInManager.scanForPlugIns:` succeeds.
+- `swiftSourceCodeLanguage`, `sourceCodeLanguageWithIdentifier:`,
+  `sourceCodeLanguageForLanguageSpecificationIdentifier:`, and
+  `sourceCodeLanguageForLanguageName:` all resolve Swift.
+- Before explicit SourceModel spec registration, Swift's
+  `languageSpecification` is a `MISSING` proxy for `xcode.lang.swift`.
+- After explicitly registering SourceModel's `LanguageSpecifications`
+  directory through
+  `DVTSourceSpecification.registerSpecificationProxiesFromPropertyListsInDirectory:recursively:inBundle:`,
+  Swift's `languageSpecification` becomes a real `DVTLanguageSpecification`
+  named `Swift`, with `xcode.lang.simpleColoring` as its super specification.
+- `DVTSourceSpecification.specificationForIdentifier:@"xcode.lang.swift"`
+  still returns a `DVTSourceSpecification` missing proxy, while the language
+  object itself returns a real `DVTLanguageSpecification`; these are related but
+  not the same runtime class.
+- Calling `_sourceCodeLanguageForExtension:` with a plain string is unsafe. The
+  selector expects an internal object that responds to `identifier`, despite
+  the selector name. `SourceModelBridge` therefore avoids this selector for
+  file-extension fallback and maps known extensions to safe language class
+  methods instead.
+- Applying the explicit SourceModel spec registration to `DVTTextStorage`
+  rendering makes this standalone process terminate during Swift coloring, so
+  `xcode-dvt-rendered-tokens` currently leaves that registration disabled.
+
+Current interpretation: DVT language resolution itself is now understood well
+enough to diagnose. The remaining gap is not "Swift language cannot be found";
+it is that the standalone `DVTTextStorage` coloring path either needs more of
+Xcode's editor process initialization, or it is the wrong layer for the delayed
+semantic state seen in the live editor UI.
+
+The diagnostic command reports:
 
 - `DVTSourceCodeLanguage.identifier`
 - `DVTSourceCodeLanguage.languageName`
@@ -415,7 +458,7 @@ diagnostic command that reports:
   - `swiftSourceCodeLanguage`
   - `sourceCodeLanguageForLanguageSpecificationIdentifier:@"xcode.lang.swift"`
   - `sourceCodeLanguageForLanguageName:@"Swift"`
-  - `_sourceCodeLanguageForExtension:@"swift"`
+  - `sourceCodeLanguageWithIdentifier:@"Xcode.SourceCodeLanguage.Swift"`
 
 Risk:
 
@@ -437,6 +480,55 @@ Work:
   - `SourceEditorView.syntaxType(location:effectiveRange:)`, or
   - line layer attributed data if accessible.
 
+Observed result on 2026-05-18:
+
+- `SourceEditorView` is present in `SourceEditor.framework` as
+  `_TtC12SourceEditor16SourceEditorView`.
+- `nm | swift-demangle` shows a direct method symbol for
+  `SourceEditor.SourceEditorView.syntaxType(location:effectiveRange:)`.
+- The current generated `SourceEditor.swiftinterface` does not include
+  `SourceEditorView`.
+- A minimal manual interface declaration compiles far enough to type-check, but
+  Swift resolves the method call through a dispatch thunk:
+  `dispatch thunk of SourceEditor.SourceEditorView.syntaxType(...)`.
+- That dispatch thunk is not exported, so the tool fails to link. Do not keep a
+  half-working `xcode-source-editor-view-*` command in tree.
+
+Runtime diagnostic command:
+
+```sh
+swift run EditorSpecTool xcode-source-editor-view-diagnostics \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+```
+
+Observed diagnostic result on 2026-05-18:
+
+- `SourceEditor.SourceEditorView`,
+  `_TtC12SourceEditor16SourceEditorView`, and
+  `_TtC12SourceEditor24SnapshotSourceEditorView` all resolve as runtime
+  classes.
+- A zero-sized `SourceEditorView` can be instantiated in the standalone tool.
+- `contentView`, `scrollView`, `replaceScrollViewWith:`, and
+  `attributedSubstringForProposedRange:actualRange:` are Objective-C-visible
+  selectors.
+- `dataSource` / `setDataSource:` are not Objective-C selectors; they are
+  Swift-only property accessors.
+- `dlsym` can resolve the direct Swift symbols for:
+  - `SourceEditorView.syntaxType(location:effectiveRange:)`
+  - `SourceEditorView.dataSource` getter / setter dispatch thunks
+  - `SourceEditorView.init(frame:)`
+
+Current interpretation: Probe B is still viable, but it needs a lower-level
+entry point than a normal Swift interface call. The likely options are:
+
+- regenerate a fuller private Swift interface and confirm whether the method
+  dispatch form changes;
+- call the direct mangled symbols through `dlsym` / `unsafeBitCast`, starting
+  with the `dataSource` setter and only then `syntaxType`;
+- use Objective-C runtime only for selectors that are actually exposed, not for
+  `dataSource` or `syntaxType`.
+
 Risk:
 
 - UI classes may require more Xcode IDE initialization than the CLI tool
@@ -455,11 +547,108 @@ Work:
 - Provide those providers through `SymbolCacheProviderTokenStore`.
 - Re-run `syntaxTypeAtPosition(... includingSemanticsAndDocumentation: true)`.
 
+Observed result on 2026-05-18:
+
+- The generated private interface currently checked in at
+  `Tools/EditorSpecSnapshot/PrivateInterfaces/SymbolCacheIndexing.swiftmodule/arm64-apple-macos.swiftinterface`
+  only exposes:
+
+```swift
+extension SymbolCache.FileParsingSymbolCache {
+    public static func makeDefaultSymbolCache(
+        name: Swift.String?,
+        basePath: Swift.String?
+    ) -> Self
+}
+```
+
+- The framework binary exports substantially more SDK/module loading surface
+  than that interface exposes. `nm | swift-demangle` shows:
+  - `SDKModulesSymbolCache : SymbolCacheProvider`
+  - `SDKSymbolCache : ModuleNameSymbolCacheProvider`
+  - `SDKSymbolCache : LanguageSpecificSymbolCacheProvider`
+  - `SDKSymbolCache.moduleName`
+  - `SDKSymbolCache.isSwiftModule`
+  - `SDKSymbolCache.visibleDependencies`
+  - `SwiftImportedSDKSymbolCache`
+  - `SymbolCacheSDKStorage.init(ioManager:)`
+  - `SymbolCacheSDKIOManager.init(baseURL:onlySerializeSwift:)`
+  - `SymbolCacheFrameworksIndex.init()`
+  - `SymbolCacheFrameworksIndex.modulesSymbolCache`
+  - `SymbolCacheFrameworksIndex.swiftCrossImportsIndex`
+  - `SymbolCacheFrameworksIndex.addFrameworkSearchPath(_:)`
+  - `SymbolCacheSystemIncludeIndex.init(url:modulesSymbolCache:)`
+  - `SymbolCacheSDKImporter.init(sdkURL:toolchainModulesURL:storage:frameworksIndex:systemIncludeIndex:onlyLoadFromCache:useRelativePaths:)`
+  - `SymbolCacheSDKImporter.implicitlyLoadedSwiftModules`
+  - `SymbolCacheSDKLoadType.module(String)`
+  - `SymbolCacheSDKLoadType.systemHeader(String)`
+  - `SymbolCacheSDKLoadType.stdLib`
+  - `SymbolCacheSDKLoader.init(sdkURL:toolchainModulesURL:variantName:storage:onlyLoadFromCache:useRelativePaths:)`
+  - `SymbolCacheSDKLoader.modulesSymbolCache`
+  - `SymbolCacheSDKLoader.frameworkTypes`
+  - `SymbolCacheSDKRequestHandler.init(sdkLoader:frameworksToAlwaysLoad:)`
+  - `SymbolCacheSDKRequestHandler.setModulesToLoad(_:addSDKSymbolCacheCallback:completionHandler:)`
+  - `SymbolCacheSDKRequestHandler.setSdkFrameworksToLoad(_:addSDKSymbolCacheCallback:completionHandler:)`
+
+- `SymbolCache.framework` also exports the provider plumbing needed to attach
+  those caches:
+  - `SymbolCacheProviderTokenStore.init(providers:)`
+  - `SymbolCacheProviderTokenStore.addProvider(_:)`
+  - `SymbolCacheProviderTokenStore.tokens`
+  - `SymbolCacheComposite.providers`
+  - `SymbolCacheComposite.symbolCaches`
+  - `FileParsingSymbolCache.importsInFile(_:)`
+  - `ProjectModulesSymbolCache`
+  - `ModuleNameSymbolCacheProvider`
+  - `LanguageSpecificSymbolCacheProvider`
+
+- `SymbolCacheSupport.framework` confirms that the current path has the right
+  high-level service object, but is likely underfed:
+  - `SymbolCacheLanguageService.semanticServiceHelper`
+  - `SymbolCacheLanguageService.typedSwiftTree()`
+  - `SymbolCacheLanguageService.sourceModel`
+  - `SymbolCacheDocumentSettings.shouldUseSemanticServiceHelper`
+  - `SwiftTypeResolver.init(symbolCacheComposite:filePath:)`
+  - `SwiftTypeResolver.resolve(scopedType:)`
+  - `SwiftTypeResolver.scopeID(name:fileElement:lineHint:)`
+  - `DataSourceObservingSymbolCache.startObserving(...)`
+
+Current interpretation: Probe C is now the most likely next verification route
+for `min`, `max`, `lowerBound`, and `upperBound`. The existing
+`xcode-classification-tokens` command feeds `SourceEditor` only a current-file
+`FileParsingSymbolCache.snapshot()`. It does not attach stdlib, SDK, imported
+module, or project module providers. If Xcode's live editor has a delayed pass
+that colors those names through standard-library or SDK providers, the current
+CLI oracle cannot observe it.
+
+Concrete next step:
+
+1. Extend the tool-only generated Swift interfaces just enough to expose
+   `SymbolCacheSDKLoader`, `SymbolCacheSDKRequestHandler`,
+   `SymbolCacheSDKLoadType`, `SDKSymbolCache`, `SDKModulesSymbolCache`,
+   `SymbolCacheFrameworksIndex`, `SymbolCacheSystemIncludeIndex`,
+   `SymbolCacheSDKStorage`, and `SymbolCacheSDKIOManager`.
+2. Locate the active macOS SDK URL and Swift toolchain module URL from Xcode.
+3. Create an SDK loader with `.stdLib` and imported modules from
+   `FileParsingSymbolCache.importsInFile(_:)`.
+4. Add returned `SDKSymbolCache` providers, plus `modulesSymbolCache`, into
+   the same `SymbolCacheProviderTokenStore` used by
+   `ToolSymbolCacheComposite`.
+5. Re-run `xcode-classification-tokens` and focused inspection for
+   `min/max/lowerBound/upperBound`.
+
+Do this before pursuing the lower-level `SourceEditorView` ABI call. The
+`SourceEditorView` path may still be necessary later, but it will remain
+underfed if the `SymbolCacheComposite` does not contain SDK/module providers.
+
 Risk:
 
 - The API surface is mostly not in the current generated Swift interface.
 - This may need regenerated private interfaces with MachOSwiftSection, or
   Objective-C/runtime calls where possible.
+- Loading SDK caches may be slow or may require Xcode-specific storage paths.
+- Some member coloring may still require a semantic service helper or typed
+  Swift tree, even after SDK providers are present.
 
 ### Probe D: SourceKit/IndexStore Semantic Tokens
 
@@ -524,6 +713,10 @@ the grammar or query.
   oracle?
 - Do `min/max` and `ClosedRange.lowerBound/upperBound` become typed/system
   tokens if the SDK/module symbol caches are present?
+- What exact URL does Xcode use for Swift toolchain modules when constructing
+  `SymbolCacheSDKLoader`?
+- Which providers are present in Xcode's live `SymbolCacheProviderTokenStore`
+  after the delayed semantic pass?
 
 ## Useful Commands
 
@@ -540,7 +733,11 @@ xcrun nm -gU /Applications/Xcode.app/Contents/SharedFrameworks/SourceEditor.fram
 
 xcrun nm -gU /Applications/Xcode.app/Contents/SharedFrameworks/SymbolCacheIndexing.framework/Versions/A/SymbolCacheIndexing \
   | xcrun swift-demangle \
-  | rg "SymbolCacheSDK|SwiftSourceModel|SwiftModule|SDKModulesSymbolCache"
+  | rg "SDKModulesSymbolCache|SwiftImportedSDKSymbolCache|SDKSymbolCache|SymbolCacheSDK(Importer|LoadType|IOManager|LoaderManager|RequestHandler|Storage)|SymbolCacheFrameworksIndex"
+
+xcrun nm -gU /Applications/Xcode.app/Contents/SharedFrameworks/SymbolCache.framework/Versions/A/SymbolCache \
+  | xcrun swift-demangle \
+  | rg "ModuleNameSymbolCacheProvider|LanguageSpecificSymbolCacheProvider|SymbolCacheProviderTokenStore|FileParsingSymbolCache.importsInFile|ProjectModulesSymbolCache|SymbolCacheComposite"
 ```
 
 Inspect Xcode spec files:
@@ -575,6 +772,14 @@ swift run EditorSpecTool xcode-dvt-rendered-tokens \
   --language swift --pretty \
   | rg -n -C 5 '"text" : "(min|max|lowerBound|upperBound|range|wrappedValue)"'
 
+swift run EditorSpecTool xcode-dvt-language-diagnostics \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+
+swift run EditorSpecTool xcode-source-editor-view-diagnostics \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+
 swift run EditorSpecTool editor-tokens \
   --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
   --language swift --pretty \
@@ -588,5 +793,13 @@ The current structured oracle says they are plain, while the screenshot suggests
 the oracle is incomplete. First add a new tool-only verification route that can
 observe the Xcode.app framework path closer to the real editor UI.
 
-Start with Probe A because it is the smallest change. If DVTTextStorage does not
-show the mismatch, move to Probe B or C.
+Probe A has now shown that DVT language resolution can be diagnosed, but the
+standalone DVT coloring path is still not a useful Swift oracle. Probe B has a
+runtime entry point, but needs unsafe direct Swift ABI calls and still depends
+on having a rich symbol cache.
+
+The next implementation step should therefore be Probe C: enrich the
+`SourceEditor + SymbolCache` oracle with stdlib/SDK/imported-module providers
+from `SymbolCacheIndexing`, then re-check the current mismatch terms. Only move
+to direct `SourceEditorView.syntaxType` calls if the enriched composite still
+does not expose the live Xcode behavior.

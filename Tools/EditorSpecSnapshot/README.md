@@ -111,6 +111,31 @@ swift run EditorSpecTool xcode-dvt-rendered-tokens \
   --language swift --pretty
 ```
 
+`xcode-dvt-language-diagnostics` inspects how DVT resolves Swift source
+languages and language specifications in this standalone tool process. Use it
+before changing the DVT rendered probe: it currently shows that Swift language
+resolution succeeds, but SourceModel's language specifications have to be
+registered explicitly before `DVTSourceCodeLanguage.languageSpecification`
+stops returning a missing proxy.
+
+```bash
+swift run EditorSpecTool xcode-dvt-language-diagnostics \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+```
+
+`xcode-source-editor-view-diagnostics` checks the runtime surface of
+`SourceEditor.SourceEditorView`. It does not call `syntaxType` yet; it verifies
+that the class can be instantiated, which Objective-C selectors are exposed,
+and whether the Swift-only direct symbols needed for a lower-level probe are
+available through `dlsym`.
+
+```bash
+swift run EditorSpecTool xcode-source-editor-view-diagnostics \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+```
+
 `source-model-tokens` is useful for inspecting SourceModel rule closures and
 non-rendered syntax items:
 

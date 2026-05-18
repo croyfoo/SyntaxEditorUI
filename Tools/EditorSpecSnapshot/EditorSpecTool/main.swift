@@ -185,6 +185,8 @@ private enum ToolError: Error, CustomStringConvertible {
               swift run EditorSpecTool xcode-semantic-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-dvt-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--pretty] [--no-text]
+              swift run EditorSpecTool xcode-dvt-language-diagnostics --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty]
+              swift run EditorSpecTool xcode-source-editor-view-diagnostics --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty]
               swift run EditorSpecTool diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--include-matches]
               swift run EditorSpecTool classification-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--include-matches]
               swift run EditorSpecTool rendered-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--include-matches]
@@ -227,6 +229,10 @@ private enum EditorSpecTool {
                 try await writeJSON(xcodeRenderedTokenOutput(options: options), pretty: options.pretty)
             case "xcode-dvt-rendered-tokens":
                 try writeJSON(xcodeDVTRenderedTokenOutput(options: options), pretty: options.pretty)
+            case "xcode-dvt-language-diagnostics":
+                try writeLanguageDiagnostics(options: options)
+            case "xcode-source-editor-view-diagnostics":
+                try writeSourceEditorViewDiagnostics(options: options)
             case "diff":
                 try await writeJSON(diffOutput(options: options), pretty: options.pretty)
             case "classification-diff":
@@ -328,6 +334,34 @@ private enum EditorSpecTool {
             ? [.prettyPrinted, .sortedKeys]
             : [.sortedKeys]
         let data = try JSONSerialization.data(withJSONObject: snapshot, options: writingOptions)
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data("\n".utf8))
+    }
+
+    private static func writeSourceEditorViewDiagnostics(options: Options) throws {
+        let diagnostics = try SourceModelBridge.sourceEditorViewDiagnostics(
+            filePath: options.filePath,
+            language: options.language.identifier,
+            toolchainAppPath: options.xcodePath
+        )
+        let writingOptions: JSONSerialization.WritingOptions = options.pretty
+            ? [.prettyPrinted, .sortedKeys]
+            : [.sortedKeys]
+        let data = try JSONSerialization.data(withJSONObject: diagnostics, options: writingOptions)
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data("\n".utf8))
+    }
+
+    private static func writeLanguageDiagnostics(options: Options) throws {
+        let diagnostics = try SourceModelBridge.languageDiagnostics(
+            filePath: options.filePath,
+            language: options.language.identifier,
+            toolchainAppPath: options.xcodePath
+        )
+        let writingOptions: JSONSerialization.WritingOptions = options.pretty
+            ? [.prettyPrinted, .sortedKeys]
+            : [.sortedKeys]
+        let data = try JSONSerialization.data(withJSONObject: diagnostics, options: writingOptions)
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data("\n".utf8))
     }

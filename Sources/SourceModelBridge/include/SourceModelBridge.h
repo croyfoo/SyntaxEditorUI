@@ -19,6 +19,18 @@ NS_ASSUME_NONNULL_BEGIN
                                                                     error:(NSError **)error
     NS_SWIFT_NAME(renderedSnapshot(filePath:language:toolchainAppPath:themeName:includeText:));
 
++ (nullable NSDictionary<NSString *, id> *)languageDiagnosticsForFileAtPath:(NSString *)filePath
+                                                                   language:(nullable NSString *)languageInput
+                                                               toolchainApp:(NSString *)toolchainAppPath
+                                                                      error:(NSError **)error
+    NS_SWIFT_NAME(languageDiagnostics(filePath:language:toolchainAppPath:));
+
++ (nullable NSDictionary<NSString *, id> *)sourceEditorViewDiagnosticsForFileAtPath:(NSString *)filePath
+                                                                            language:(nullable NSString *)languageInput
+                                                                        toolchainApp:(NSString *)toolchainAppPath
+                                                                               error:(NSError **)error
+    NS_SWIFT_NAME(sourceEditorViewDiagnostics(filePath:language:toolchainAppPath:));
+
 @end
 
 NS_ASSUME_NONNULL_END
