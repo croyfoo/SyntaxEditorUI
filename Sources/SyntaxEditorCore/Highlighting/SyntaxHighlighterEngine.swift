@@ -356,6 +356,9 @@ private final class SyntaxHighlightSession {
             source: nextLayeredSource,
             refreshRange: refreshRange
         )
+        let resultRefreshRange = language == .swift
+            ? fullRange(for: nextLayeredSource)
+            : refreshRange
 
         source = nextSource
         layeredSource = nextLayeredSource
@@ -367,7 +370,7 @@ private final class SyntaxHighlightSession {
             source: nextSource,
             language: language,
             revision: revision,
-            refreshRange: refreshRange
+            refreshRange: resultRefreshRange
         )
     }
 }

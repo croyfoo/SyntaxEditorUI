@@ -117,11 +117,15 @@ aid and for non-Swift investigations; Swift alignment should use
 by Xcode's editor.
 
 Focused Swift fixtures live in `Tools/EditorSpecSnapshot/Fixtures/` for
-attribute and preprocessor/macro alignment checks.
+attribute, preprocessor/macro, and file-local semantic alignment checks. The
+current SourceEditor probe reports project-scoped Swift variables for selected
+file/member references and external scopes for known type names, but leaves
+same-file type/function/macro references plain; keep runtime overlays equally
+conservative unless the probe starts reporting those `uiKind` scopes.
 
 Some Swift differences are grammar-boundary differences, not query differences.
 The package currently points at the local fork in
-`/Users/kn/Dev/checkout/tree-sitter-swift` so grammar-level fixes can be tested
+`dependencies/tree-sitter-swift` so grammar-level fixes can be tested
 before publishing a pinned remote fork. For example, the fork parses
 `#sourceLocation(file:..., line:...)` as `diagnostic` plus nested
 `value_arguments`, allowing the query to color the directive keyword, labels,

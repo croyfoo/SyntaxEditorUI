@@ -23,7 +23,7 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-objc", from: "3.0.2"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-toml", exact: "0.7.0"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-xml", exact: "0.7.0"),
-        .package(path: "/Users/kn/Dev/checkout/tree-sitter-swift"),
+        .package(path: "dependencies/tree-sitter-swift"),
         .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.8.0"),
     ],
     targets: [
