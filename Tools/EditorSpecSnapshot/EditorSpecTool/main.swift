@@ -184,6 +184,7 @@ private enum ToolError: Error, CustomStringConvertible {
               swift run EditorSpecTool xcode-classification-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-semantic-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--pretty] [--no-text]
+              swift run EditorSpecTool xcode-dvt-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--pretty] [--no-text]
               swift run EditorSpecTool diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--include-matches]
               swift run EditorSpecTool classification-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--include-matches]
               swift run EditorSpecTool rendered-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--include-matches]
@@ -224,6 +225,8 @@ private enum EditorSpecTool {
                 try await writeJSON(xcodeSemanticTokenOutput(options: options), pretty: options.pretty)
             case "xcode-rendered-tokens":
                 try await writeJSON(xcodeRenderedTokenOutput(options: options), pretty: options.pretty)
+            case "xcode-dvt-rendered-tokens":
+                try writeJSON(xcodeDVTRenderedTokenOutput(options: options), pretty: options.pretty)
             case "diff":
                 try await writeJSON(diffOutput(options: options), pretty: options.pretty)
             case "classification-diff":
@@ -264,6 +267,22 @@ private enum EditorSpecTool {
                 appearance: options.appearanceName
             ),
             tokens: try await xcodeRenderedTokens(options: options, source: source, includeText: options.includeText)
+        )
+    }
+
+    @MainActor
+    private static func xcodeDVTRenderedTokenOutput(options: Options) throws -> XcodeRenderedTokenOutput {
+        let source = try sourceText(options.filePath)
+        let snapshot = try xcodeRenderedSnapshot(options: options, includeText: options.includeText)
+        return XcodeRenderedTokenOutput(
+            source: sourceMetadata(
+                filePath: options.filePath,
+                language: options.language,
+                xcodePath: options.xcodePath,
+                xcodeThemeName: options.xcodeThemeName,
+                appearance: options.appearanceName
+            ),
+            tokens: xcodeRenderedTokens(from: snapshot, source: source)
         )
     }
 

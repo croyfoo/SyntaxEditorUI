@@ -98,6 +98,19 @@ under `PrivateInterfaces/` were derived from the installed Xcode frameworks
 with `MachOSwiftSection`; regenerate them if the local Xcode build changes the
 private ABI enough to break compilation.
 
+`xcode-dvt-rendered-tokens` forces the older DVT text-storage color route even
+for Swift. Use it when investigating whether a live Xcode editor screenshot is
+showing a rendered-color state that the SourceEditor/SymbolCache token route is
+not exposing. On the current Xcode 26.5 install this command runs for Swift,
+but DVT logs that it cannot load the Swift language spec and returns broad
+plain ranges, so it is an investigation probe rather than a trusted oracle:
+
+```bash
+swift run EditorSpecTool xcode-dvt-rendered-tokens \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.swift \
+  --language swift --pretty
+```
+
 `source-model-tokens` is useful for inspecting SourceModel rule closures and
 non-rendered syntax items:
 
