@@ -6476,6 +6476,21 @@ struct SyntaxHighlighterEngineTests {
         #define ReferenceEnabled 1
         #endif
 
+        typedef void (^ReferenceCompletion)(id object, NSError **error);
+
+        static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
+        {
+            return @{
+                @"objc": @"xcode.lang.objc",
+                @"swift": @"xcode.lang.swift",
+            };
+        }
+
+        static id ReferenceCallObject(id object, NSString *selectorName)
+        {
+            return ((id (*)(id, SEL))objc_msgSend)(object, NSSelectorFromString(selectorName));
+        }
+
         __attribute__((visibility("default"))) @interface VisibleSample : NSObject
         @end
 
@@ -6487,6 +6502,7 @@ struct SyntaxHighlighterEngineTests {
         @implementation Sample
         - (NSString *)greetingFor:(NSString *)value {
             // comment
+            self.name = ReferenceLanguageAliases()[@"objc"] ?: value;
             return [NSString stringWithFormat:@"Hello, %@", value];
         }
         @end
@@ -6501,12 +6517,18 @@ struct SyntaxHighlighterEngineTests {
         let visibleSampleRange = nsSource.range(of: "VisibleSample")
         let interfaceRange = nsSource.range(of: "@interface")
         let methodRange = nsSource.range(of: "greetingFor")
+        let selfRange = nsSource.range(of: "self")
+        let propertyAttributeRange = nsSource.range(of: "nonatomic")
+        let dictionaryStringRange = nsSource.range(of: "@\"objc\"")
+        let typedefRange = nsSource.range(of: "typedef")
+        let idRange = nsSource.range(of: "id object")
+        let selectorRange = nsSource.range(of: "SEL")
         let commentRange = nsSource.range(of: "// comment")
         let stringRange = nsSource.range(of: "@\"Hello, %@\"")
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            tokenIntersects($0, range: importRange, syntaxID: "preprocessor.include", language: .objectiveC)
+            tokenIntersects($0, range: importRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         #expect(tokens.contains {
             tokenIntersects($0, range: defineRange, syntaxID: "preprocessor.keyword", language: .objectiveC)
@@ -6544,10 +6566,28 @@ struct SyntaxHighlighterEngineTests {
             tokenIntersects($0, range: interfaceRange, syntaxID: .keyword, language: .objectiveC)
         })
         #expect(tokens.contains {
-            tokenIntersects($0, range: visibleSampleRange, syntaxID: .identifierTypeSystem, language: .objectiveC)
+            tokenIntersects($0, range: visibleSampleRange, syntaxID: .identifier, language: .objectiveC)
         })
         #expect(tokens.contains {
-            tokenIntersects($0, range: methodRange, syntaxID: .identifierFunctionSystem, language: .objectiveC)
+            tokenIntersects($0, range: methodRange, syntaxID: .identifier, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: selfRange, syntaxID: .keyword, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: propertyAttributeRange, syntaxID: .keyword, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: dictionaryStringRange, syntaxID: .string, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: typedefRange, syntaxID: .keyword, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: idRange, syntaxID: .keyword, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: selectorRange, syntaxID: .keyword, language: .objectiveC)
         })
         #expect(tokens.contains {
             tokenIntersects($0, range: commentRange, syntaxID: .comment, language: .objectiveC)

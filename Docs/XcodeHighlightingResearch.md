@@ -4,6 +4,24 @@ This is a running research note for Xcode-aligned syntax highlighting in
 SyntaxEditorUI. It is intentionally written as durable context for future
 compaction and handoff, not as final user-facing documentation.
 
+## Current Documentation Map
+
+The active, organized notes are split by concern:
+
+- [Highlighting/XcodeOracle.md](Highlighting/XcodeOracle.md): the shared Xcode
+  oracle routes, what each route can prove, and the commands used to compare
+  SyntaxEditorUI with Xcode.
+- [Highlighting/SwiftAlignment.md](Highlighting/SwiftAlignment.md): Swift
+  grammar/query/semantic-overlay findings and the known limits of the current
+  SourceEditor + SymbolCache probe.
+- [Highlighting/ObjectiveCAlignment.md](Highlighting/ObjectiveCAlignment.md):
+  Objective-C xclangspec/DVT findings, current query policy, and grammar
+  limitations.
+
+This file remains the longer chronological research log. When new findings are
+stable enough to guide implementation, copy the distilled result into the
+language-specific files above.
+
 ## Goal
 
 Make Swift highlighting mechanically verifiable against Xcode.app behavior.

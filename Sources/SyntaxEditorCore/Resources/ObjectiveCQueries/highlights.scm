@@ -4,10 +4,7 @@
 ; - tree-sitter/tree-sitter-c @ ae19b676b13bdcc13b7665397e6d9b14975473dd
 ; - tree-sitter-grammars/tree-sitter-objc @ 181a81b8f23a2d593e7ab4259981f50122909fda
 
-(identifier) @editor.syntax.objectivec.plain
-
-((identifier) @editor.syntax.objectivec.identifier.constant
- (#match? @editor.syntax.objectivec.identifier.constant "^[A-Z][A-Z\\d_]*$"))
+(identifier) @editor.syntax.objectivec.identifier
 
 "break" @editor.syntax.objectivec.keyword
 "case" @editor.syntax.objectivec.keyword
@@ -30,6 +27,30 @@
 "union" @editor.syntax.objectivec.keyword
 "volatile" @editor.syntax.objectivec.keyword
 "while" @editor.syntax.objectivec.keyword
+
+((identifier) @editor.syntax.objectivec.keyword
+  (#any-of? @editor.syntax.objectivec.keyword
+    "BOOL"
+    "Class"
+    "FALSE"
+    "IMP"
+    "NO"
+    "NULL"
+    "SEL"
+    "TRUE"
+    "YES"
+    "_cmd"
+    "bycopy"
+    "byref"
+    "id"
+    "inout"
+    "instancetype"
+    "nonnull"
+    "nullable"
+    "null_unspecified"
+    "out"
+    "self"
+    "super"))
 
 ; BEGIN GENERATED EDITOR SYNTAX WORDS: objectivec-preprocessor-keywords
 [
@@ -69,23 +90,21 @@
 (string_literal) @editor.syntax.objectivec.string
 (system_lib_string) @editor.syntax.objectivec.string
 
-(null) @editor.syntax.objectivec.identifier.constant
+(null) @editor.syntax.objectivec.keyword
 (number_literal) @editor.syntax.objectivec.number
 (char_literal) @editor.syntax.objectivec.number
 
-(field_identifier) @editor.syntax.objectivec.attribute
-(statement_identifier) @editor.syntax.objectivec.plain
-(type_identifier) @editor.syntax.objectivec.identifier.type.system
-(primitive_type) @editor.syntax.objectivec.identifier.type.system
-(sized_type_specifier) @editor.syntax.objectivec.identifier.type.system
+(field_identifier) @editor.syntax.objectivec.identifier
+(statement_identifier) @editor.syntax.objectivec.identifier
+(type_identifier) @editor.syntax.objectivec.identifier
+(primitive_type) @editor.syntax.objectivec.keyword
+(sized_type_specifier) @editor.syntax.objectivec.keyword
+(storage_class_specifier) @editor.syntax.objectivec.keyword
+(typedefed_specifier) @editor.syntax.objectivec.keyword
 
-(call_expression
-  function: (identifier) @editor.syntax.objectivec.identifier.function.system)
-(call_expression
-  function: (field_expression
-    field: (field_identifier) @editor.syntax.objectivec.identifier.function.system))
-(function_declarator
-  declarator: (identifier) @editor.syntax.objectivec.identifier.function.system)
+((function_definition
+  type: (type_identifier) @editor.syntax.objectivec.keyword)
+  (#eq? @editor.syntax.objectivec.keyword "typedef"))
 
 (comment) @editor.syntax.objectivec.comment
 
@@ -135,11 +154,11 @@
 
 ; Includes
 
-(module_import "@import" @editor.syntax.objectivec.preprocessor path: (identifier) @editor.syntax.objectivec.identifier.type.system)
+(module_import "@import" @editor.syntax.objectivec.preprocessor path: (identifier) @editor.syntax.objectivec.identifier)
 
 ((preproc_include
-  _ @editor.syntax.objectivec.preprocessor.include path: (_))
-  (#any-of? @editor.syntax.objectivec.preprocessor.include "#include" "#import"))
+  _ @editor.syntax.objectivec.preprocessor path: (_))
+  (#any-of? @editor.syntax.objectivec.preprocessor "#include" "#import"))
 
 ; Type Qualifiers
 
@@ -164,8 +183,8 @@
 
 (class_declaration "@" @editor.syntax.objectivec.keyword "class" @editor.syntax.objectivec.keyword)
 
-(method_definition ["+" "-"] @editor.syntax.objectivec.identifier.function.system)
-(method_declaration ["+" "-"] @editor.syntax.objectivec.identifier.function.system)
+(method_definition ["+" "-"] @editor.syntax.objectivec.plain)
+(method_declaration ["+" "-"] @editor.syntax.objectivec.plain)
 
 [
   "__typeof__"
@@ -186,11 +205,6 @@
   "__finally"
 ] @editor.syntax.objectivec.keyword
 
-; Variables
-
-((identifier) @editor.syntax.objectivec.plain
-  (#any-of? @editor.syntax.objectivec.plain "self" "super"))
-
 ; Functions & Methods
 
 [
@@ -199,20 +213,15 @@
   "__builtin_available"
   "va_arg"
   "asm"
-] @editor.syntax.objectivec.identifier.function.system
+] @editor.syntax.objectivec.identifier
 
-(method_definition (identifier) @editor.syntax.objectivec.identifier.function.system)
+(method_definition (identifier) @editor.syntax.objectivec.identifier)
 
-(method_declaration (identifier) @editor.syntax.objectivec.identifier.function.system)
+(method_declaration (identifier) @editor.syntax.objectivec.identifier)
 
-(method_identifier (identifier)? @editor.syntax.objectivec.identifier.function.system ":" @editor.syntax.objectivec.identifier.function.system (identifier)? @editor.syntax.objectivec.identifier.function.system)
+(method_identifier (identifier)? @editor.syntax.objectivec.identifier ":" @editor.syntax.objectivec.plain (identifier)? @editor.syntax.objectivec.identifier)
 
-(message_expression method: (identifier) @editor.syntax.objectivec.identifier.function.system)
-
-; Constructors
-
-((message_expression method: (identifier) @editor.syntax.objectivec.identifier.function.system)
-  (#eq? @editor.syntax.objectivec.identifier.function.system "init"))
+(message_expression method: (identifier) @editor.syntax.objectivec.identifier)
 
 ; Attributes
 
@@ -225,7 +234,7 @@
     "NS_EXTENSION_UNAVAILABLE_IOS" "NS_CLASS_AVAILABLE_IOS" "NS_CLASS_DEPRECATED_IOS" "__OSX_AVAILABLE_STARTING"
     "NS_ROOT_CLASS" "NS_UNAVAILABLE" "NS_REQUIRES_NIL_TERMINATION" "CF_RETURNS_RETAINED"
     "CF_RETURNS_NOT_RETAINED" "DEPRECATED_ATTRIBUTE" "UI_APPEARANCE_SELECTOR" "UNAVAILABLE_ATTRIBUTE"
-  ]) @editor.syntax.objectivec.attribute
+  ] @editor.syntax.objectivec.identifier)
 
 ; Macros
 
@@ -262,48 +271,37 @@
 
 ; Types
 
-(class_declaration (identifier) @editor.syntax.objectivec.identifier.type.system)
+(class_declaration (identifier) @editor.syntax.objectivec.identifier)
 
-(class_interface "@interface" . (identifier) @editor.syntax.objectivec.identifier.type.system superclass: _? @editor.syntax.objectivec.identifier.type.system category: _? @editor.syntax.objectivec.identifier.type.system)
+(class_interface "@interface" . (identifier) @editor.syntax.objectivec.identifier superclass: _? @editor.syntax.objectivec.identifier category: _? @editor.syntax.objectivec.identifier)
 
-(class_implementation "@implementation" . (identifier) @editor.syntax.objectivec.identifier.type.system superclass: _? @editor.syntax.objectivec.identifier.type.system category: _? @editor.syntax.objectivec.identifier.type.system)
+(class_implementation "@implementation" . (identifier) @editor.syntax.objectivec.identifier superclass: _? @editor.syntax.objectivec.identifier category: _? @editor.syntax.objectivec.identifier)
 
-(protocol_forward_declaration (identifier) @editor.syntax.objectivec.identifier.type.system)
+(protocol_forward_declaration (identifier) @editor.syntax.objectivec.identifier)
 
-(protocol_reference_list (identifier) @editor.syntax.objectivec.identifier.type.system)
-
-[
-  "BOOL"
-  "IMP"
-  "SEL"
-  "Class"
-  "id"
-] @editor.syntax.objectivec.identifier.type.system
+(protocol_reference_list (identifier) @editor.syntax.objectivec.identifier)
 
 ; Constants
 
-(property_attribute (identifier) @editor.syntax.objectivec.identifier.constant "="?)
+(property_attribute . (identifier) @editor.syntax.objectivec.keyword)
 
 [ "__asm" "__asm__" ] @editor.syntax.objectivec.preprocessor
 
 ; Properties
 
-(property_implementation "@synthesize" (identifier) @editor.syntax.objectivec.attribute)
-
-((identifier) @editor.syntax.objectivec.attribute
-  (#has-ancestor? @editor.syntax.objectivec.attribute struct_declaration))
+(property_implementation "@synthesize" (identifier) @editor.syntax.objectivec.identifier)
 
 ; Parameters
 
-(method_parameter ":" @editor.syntax.objectivec.identifier.function.system (identifier) @editor.syntax.objectivec.plain)
+(method_parameter ":" @editor.syntax.objectivec.plain (identifier) @editor.syntax.objectivec.identifier)
 
-(method_parameter declarator: (identifier) @editor.syntax.objectivec.plain)
+(method_parameter declarator: (identifier) @editor.syntax.objectivec.identifier)
 
 (parameter_declaration
   declarator: (function_declarator
                 declarator: (parenthesized_declarator
                               (block_pointer_declarator
-                                declarator: (identifier) @editor.syntax.objectivec.plain))))
+                                declarator: (identifier) @editor.syntax.objectivec.identifier))))
 
 "..." @editor.syntax.objectivec.plain
 
@@ -318,9 +316,5 @@
 (platform) @editor.syntax.objectivec.string
 
 (version_number) @editor.syntax.objectivec.url @editor.syntax.objectivec.number
-
-; Punctuation
-
-"@" @editor.syntax.objectivec.plain
 
 [ "<" ">" ] @editor.syntax.objectivec.plain
