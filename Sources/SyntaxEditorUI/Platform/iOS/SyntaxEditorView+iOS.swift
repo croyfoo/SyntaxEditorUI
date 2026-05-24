@@ -128,9 +128,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
     }
 
-    public var font: UIFont = SyntaxEditorView.defaultEditorFont {
-        didSet {
-            guard font != oldValue else { return }
+    private var customFont: UIFont?
+
+    public var font: UIFont {
+        get {
+            resolvedBaseFont()
+        }
+        set {
+            let oldFont = font
+            customFont = newValue
+            guard font != oldFont else { return }
             invalidateHorizontalMeasurement()
             updateTypingAttributes()
             applyBaseAttributesToExistingText()
@@ -1728,10 +1735,19 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func baseAttributes() -> [NSAttributedString.Key: Any] {
         let theme = resolvedColorTheme()
         return [
-            .font: font,
+            .font: resolvedBaseFont(for: theme),
             .foregroundColor: resolvedSyntaxColor(theme.baseForeground),
             .paragraphStyle: baseParagraphStyle(),
         ]
+    }
+
+    func resolvedBaseFont(for theme: SyntaxEditorResolvedColorTheme? = nil) -> UIFont {
+        if let customFont {
+            return customFont
+        }
+
+        let theme = theme ?? resolvedColorTheme()
+        return theme.base.font?.platformFont(fallback: Self.defaultEditorFont) ?? Self.defaultEditorFont
     }
 
     func baseParagraphStyle() -> NSParagraphStyle {
@@ -1781,7 +1797,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         var attributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: resolvedSyntaxColor(style.foreground),
         ]
-        if let tokenFont = style.font?.platformFont(fallback: font) {
+        if let tokenFont = style.font?.platformFont(fallback: resolvedBaseFont()) {
             attributes[.font] = tokenFont
         }
         return attributes
@@ -1863,7 +1879,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func updateContentSizeIfNeeded() {
         let estimatedLayoutSize = estimatedDocumentLayoutSize()
-        let lineHeight = font.lineHeight
+        let lineHeight = resolvedBaseFont().lineHeight
         let textHeight = max(lineHeight, ceil(estimatedLayoutSize.height))
         let targetWidth = lastAppliedLineWrappingEnabled
             ? bounds.width
@@ -1883,7 +1899,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             x: textContainerInset.left,
             y: textContainerInset.top,
             width: max(container.size.width, contentSize.width - textContainerInset.left - textContainerInset.right),
-            height: max(font.lineHeight, contentSize.height - textContainerInset.top - textContainerInset.bottom)
+            height: max(resolvedBaseFont().lineHeight, contentSize.height - textContainerInset.top - textContainerInset.bottom)
         )
 
         guard !textContentView.frame.isNearlyEqual(to: contentViewFrame) else { return }
@@ -1895,7 +1911,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             let horizontalInset = textContainerInset.left + textContainerInset.right
             return CGSize(
                 width: max(0, measuredHorizontalDocumentLayoutWidth() - horizontalInset),
-                height: CGFloat(lineMetricsIndex.lineCount) * font.lineHeight
+                height: CGFloat(lineMetricsIndex.lineCount) * resolvedBaseFont().lineHeight
             )
         }
 
@@ -2151,7 +2167,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return max(
             bounds.width,
             lineMetricsIndex.horizontalDocumentWidth(
-                columnWidth: Self.estimatedMonospacedColumnWidth(for: font),
+                columnWidth: Self.estimatedMonospacedColumnWidth(for: resolvedBaseFont()),
                 textContainerInset: textContainerInset.left + textContainerInset.right,
                 lineFragmentPadding: container.lineFragmentPadding
             )

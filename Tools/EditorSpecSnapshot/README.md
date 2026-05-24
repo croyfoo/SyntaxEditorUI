@@ -162,9 +162,8 @@ same-file type/function/macro references plain; keep runtime overlays equally
 conservative unless the probe starts reporting those `uiKind` scopes.
 
 Some Swift differences are grammar-boundary differences, not query differences.
-The package currently points at the local fork in
-`dependencies/tree-sitter-swift` so grammar-level fixes can be tested
-before publishing a pinned remote fork. For example, the fork parses
+The package points at a pinned remote `lynnswap/tree-sitter-swift` fork so
+grammar-level fixes are fetchable in fresh checkouts. For example, the fork parses
 `#sourceLocation(file:..., line:...)` as `diagnostic` plus nested
 `value_arguments`, allowing the query to color the directive keyword, labels,
 string, and number separately. Query captures cannot currently address every

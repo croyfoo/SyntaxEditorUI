@@ -326,7 +326,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateEditorBackgroundColor()
-        updateTypingAttributes()
+        updateTextViewFontAndTypingAttributes()
         reapplyCachedHighlight()
         applyMatchingBracketHighlight(force: true)
     }
@@ -545,6 +545,12 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         textView.typingAttributes = base
     }
 
+    private func updateTextViewFontAndTypingAttributes() {
+        let base = baseAttributes()
+        textView.font = base[.font] as? NSFont ?? textView.font
+        textView.typingAttributes = base
+    }
+
     private func updateTypingAttributes() {
         textView.typingAttributes = baseAttributes()
     }
@@ -641,6 +647,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             applyBaseForegroundColorChange(from: previousColorTheme, to: colorTheme)
         }
         lastAppliedColorTheme = colorTheme
+        updateTextViewFontAndTypingAttributes()
         updateEditorBackgroundColor()
 
         if textView.isEditable != isEditable {
@@ -652,7 +659,6 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         let languageChanged = forceLanguageRefresh || lastAppliedLanguageIdentifier != language.syntaxHighlightCacheKey
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
 
-        updateTypingAttributes()
         if languageChanged && schedulesHighlight {
             scheduleHighlight(
                 source: textView.string,
@@ -1266,12 +1272,17 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
-        let fallbackFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let theme = resolvedColorTheme()
         return [
-            .font: fallbackFont,
+            .font: resolvedBaseFont(for: theme),
             .foregroundColor: theme.baseForeground,
         ]
+    }
+
+    private func resolvedBaseFont(for theme: SyntaxEditorResolvedColorTheme? = nil) -> NSFont {
+        let fallbackFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let theme = theme ?? resolvedColorTheme()
+        return theme.base.font?.platformFont(fallback: fallbackFont) ?? fallbackFont
     }
 
     private func styleAttributes(
@@ -1290,7 +1301,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         var attributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: style.foreground,
         ]
-        if let tokenFont = style.font?.platformFont(fallback: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)) {
+        if let tokenFont = style.font?.platformFont(fallback: resolvedBaseFont()) {
             attributes[.font] = tokenFont
         }
         return attributes

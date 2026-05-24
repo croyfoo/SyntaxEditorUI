@@ -462,6 +462,16 @@ private func layoutIOSEditorView(
 }
 
 @MainActor
+private func iOSEditorStableHorizontalOffset(_ editorView: SyntaxEditorView) -> CGFloat {
+    max(0, (editorView.contentSize.width - editorView.bounds.width) * 0.25)
+}
+
+@MainActor
+private func iOSEditorLineMidY(_ editorView: SyntaxEditorView, lineIndex: Int) -> CGFloat {
+    editorView.textContainerInset.top + editorView.font.lineHeight * (CGFloat(lineIndex) + 0.5)
+}
+
+@MainActor
 private func iOSEditorHasHorizontalOverflow(_ editorView: SyntaxEditorView) -> Bool {
     layoutIOSEditorView(editorView)
     return !editorView.textContainer.widthTracksTextView
@@ -1908,6 +1918,33 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
 
+    @Test("SyntaxEditorView applies built-in iOS theme base font to plain and highlighted text")
+    @MainActor
+    func syntaxEditorViewIOSAppliesBuiltInThemeBaseFont() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
+        let plainFont = try #require(iOSEditorFont(editorView, at: 4))
+        #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
+        #expect(abs(plainFont.pointSize - 28) < 0.01)
+    }
+
     @Test("SyntaxEditorView applies iOS base attributes before delayed highlight")
     @MainActor
     func syntaxEditorViewIOSAppliesBaseAttributesBeforeDelayedHighlight() async throws {
@@ -1999,15 +2036,16 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
         await editorView.waitForPendingHighlightForTesting()
+        let baseFont = try #require(iOSEditorFont(editorView, at: 4))
         let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
-        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, editorView.font))
+        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, baseFont))
 
         editorView.selectedRange = NSRange(location: 0, length: 3)
         editorView.insertText("var")
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(editorView.text == "var value = 1")
-        #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: 0), editorView.font))
+        #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: 0), baseFont))
     }
 
     @Test("SyntaxEditorView restores shifted iOS syntax font after prefix edits")
@@ -2029,15 +2067,16 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
         await editorView.waitForPendingHighlightForTesting()
+        let baseFont = try #require(iOSEditorFont(editorView, at: 4))
         let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
-        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, editorView.font))
+        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, baseFont))
 
         editorView.selectedRange = NSRange(location: 0, length: 0)
         editorView.insertText(insertedPrefix)
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(editorView.text == insertedPrefix + source)
-        #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: insertedPrefix.utf16.count), editorView.font))
+        #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: insertedPrefix.utf16.count), baseFont))
     }
 
     @Test("SyntaxEditorView preserves iOS paragraph style while reapplying cached highlight")
@@ -2347,7 +2386,7 @@ struct SyntaxEditorUITests {
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
         #expect(editorView.textLayoutManager != nil)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         let visibleRightEdge = editorView.contentOffset.x + editorView.bounds.width
@@ -2423,7 +2462,7 @@ struct SyntaxEditorUITests {
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
         #expect(iOSEditorTextUsageHeight(editorView) <= 120)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         #expect(editorView.contentOffset.x > 0)
@@ -2446,11 +2485,13 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        let stableOffsetX: CGFloat = 240
+        let stableOffsetX = iOSEditorStableHorizontalOffset(editorView)
         editorView.setContentOffset(CGPoint(x: stableOffsetX, y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        guard let position = editorView.closestPosition(to: CGPoint(x: editorView.bounds.midX, y: 54)) else {
+        guard let position = editorView.closestPosition(
+            to: CGPoint(x: editorView.bounds.midX, y: iOSEditorLineMidY(editorView, lineIndex: 2))
+        ) else {
             Issue.record("SyntaxEditorView could not resolve a visible iOS text-input point")
             return
         }
@@ -3505,7 +3546,7 @@ struct SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         guard let offscreenStartRange = editorView.textRange(
@@ -3533,10 +3574,12 @@ struct SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        guard let visiblePosition = editorView.closestPosition(to: CGPoint(x: 240, y: 54)),
+        guard let visiblePosition = editorView.closestPosition(
+            to: CGPoint(x: 240, y: iOSEditorLineMidY(editorView, lineIndex: 0))
+        ),
               let visibleRange = editorView.textRange(from: visiblePosition, to: visiblePosition)
         else {
             Issue.record("SyntaxEditorView could not resolve a visible gesture selection range")
@@ -3911,7 +3954,7 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         let stableOffsetX = editorView.contentOffset.x
         #expect(stableOffsetX > 0)
 
@@ -3939,7 +3982,7 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         let visibleRect = CGRect(origin: editorView.contentOffset, size: editorView.bounds.size)
@@ -3948,7 +3991,10 @@ struct SyntaxEditorUITests {
         #expect(abs(visibleRect.width - editorView.bounds.width) <= 1)
         #expect(abs(visibleRect.height - editorView.bounds.height) <= 1)
 
-        let visibleMidPoint = CGPoint(x: editorView.bounds.midX, y: editorView.bounds.minY + 54)
+        let visibleMidPoint = CGPoint(
+            x: editorView.bounds.midX,
+            y: editorView.bounds.minY + iOSEditorLineMidY(editorView, lineIndex: 2)
+        )
         guard let position = editorView.closestPosition(to: visibleMidPoint) else {
             Issue.record("SyntaxEditorView could not resolve a scrolled visible text-input point")
             return
@@ -4262,11 +4308,11 @@ struct SyntaxEditorUITests {
 
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         let stableOffsetX = editorView.contentOffset.x
         #expect(stableOffsetX > 0)
 
-        let tapPoint = CGPoint(x: stableOffsetX + 200, y: 54)
+        let tapPoint = CGPoint(x: stableOffsetX + 200, y: iOSEditorLineMidY(editorView, lineIndex: 2))
         guard let position = editorView.closestPosition(to: tapPoint),
               let textRange = editorView.textRange(from: position, to: position)
         else {
@@ -4301,13 +4347,14 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         let stableOffsetX = editorView.contentOffset.x
         let visibleRect = editorView.bounds
-        let startPoint = CGPoint(x: visibleRect.minX + 120, y: visibleRect.minY + 54)
-        let endPoint = CGPoint(x: visibleRect.minX + 280, y: visibleRect.minY + 54)
+        let longLineMidY = iOSEditorLineMidY(editorView, lineIndex: 2)
+        let startPoint = CGPoint(x: visibleRect.minX + 120, y: visibleRect.minY + longLineMidY)
+        let endPoint = CGPoint(x: visibleRect.minX + 280, y: visibleRect.minY + longLineMidY)
 
         guard let startPosition = editorView.closestPosition(to: startPoint),
               let endPosition = editorView.closestPosition(to: endPoint),
@@ -4341,12 +4388,13 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        let viewportStartPoint = CGPoint(x: 120, y: 54)
-        let viewportEndPoint = CGPoint(x: 280, y: 54)
-        let extendedViewportEndPoint = CGPoint(x: 340, y: 54)
+        let longLineMidY = iOSEditorLineMidY(editorView, lineIndex: 2)
+        let viewportStartPoint = CGPoint(x: 120, y: longLineMidY)
+        let viewportEndPoint = CGPoint(x: 280, y: longLineMidY)
+        let extendedViewportEndPoint = CGPoint(x: 340, y: longLineMidY)
 
         guard let viewportStartPosition = editorView.closestPosition(to: viewportStartPoint),
               let viewportEndPosition = editorView.closestPosition(to: viewportEndPoint),
@@ -5026,6 +5074,33 @@ struct SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
+    @Test("SyntaxEditorView applies built-in macOS theme base font to plain and highlighted text")
+    @MainActor
+    func syntaxEditorViewMacAppliesBuiltInThemeBaseFont() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let plainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
+        #expect(abs(plainFont.pointSize - 28) < 0.01)
     }
 
     @Test("SyntaxEditorView applies macOS base attributes to inserted text before delayed update highlight")

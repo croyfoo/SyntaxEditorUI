@@ -706,7 +706,7 @@ Not allowed:
 Keep the current responsibility split unless evidence changes it:
 
 - `highlights.scm`: query-expressible lexical/syntactic classification
-- `dependencies/tree-sitter-swift`: parse-tree boundary fixes
+- pinned `lynnswap/tree-sitter-swift` fork: parse-tree boundary fixes
 - `SwiftSyntaxOverlayTokenProvider`: semantic-ish overlay that cannot be cleanly
   expressed in query
 - `SwiftFileSymbolIndex`: file-local project/external approximation

@@ -1,5 +1,5 @@
 {
-  "originHash" : "5ee36003b1188727ca4eaa6ab4835c3ba2b27b4ccd98d3b692c5e22584fb4cb1",
+  "originHash" : "013e6b0bb396c9a5d3eb1d61998acd7f4f8c2cf55c3507317b463269c59d67b6",
   "pins" : [
     {
       "identity" : "observationbridge",
@@ -89,6 +89,14 @@
       "state" : {
         "revision" : "18802acf31d0b5c1c1d50bdbc9eb0e1636cab9ed",
         "version" : "3.0.2"
+      }
+    },
+    {
+      "identity" : "tree-sitter-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/lynnswap/tree-sitter-swift",
+      "state" : {
+        "revision" : "60941d667d0bd58f7d5b83dcd59fe22a9865f200"
       }
     },
     {

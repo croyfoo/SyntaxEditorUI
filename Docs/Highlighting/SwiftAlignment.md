@@ -13,8 +13,8 @@ private framework details.
 - The overlay is internal to `SyntaxEditorCore` and is recalculated over the
   full token array after incremental edits so declaration changes do not leave
   stale distant references.
-- The local tree-sitter Swift grammar fork is referenced from
-  `dependencies/tree-sitter-swift`.
+- The tree-sitter Swift grammar fork is pinned as a fetchable SwiftPM
+  dependency.
 
 ## What We Learned
 
@@ -94,4 +94,3 @@ swift run EditorSpecTool rendered-diff \
 
 swift test --filter SyntaxHighlighterEngine
 ```
-
