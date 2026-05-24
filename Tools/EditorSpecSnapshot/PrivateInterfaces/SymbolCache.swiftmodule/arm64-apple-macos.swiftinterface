@@ -35,6 +35,14 @@ public protocol SymbolCacheProvider: AnyObject {
     func snapshot() -> SymbolCache.SymbolCacheProvider
 }
 
+public protocol LanguageSpecificSymbolCacheProvider: SymbolCache.SymbolCacheProvider {
+    var language: SymbolCache.SymbolCacheLanguage { get }
+}
+
+public protocol ModuleNameSymbolCacheProvider: SymbolCache.SymbolCacheProvider {
+    var moduleName: Swift.String { get }
+}
+
 public protocol SymbolCacheProjectController {
     var projectProviderSet: Swift.Set<Swift.UInt32>? { get }
     var projectStateCache: SymbolCache.SymbolCacheProjectStateCache? { get }
@@ -66,5 +74,6 @@ public class FileParsingSymbolCache {
         observer: @escaping (SymbolCache.FileParsingSymbolCache.ParsingProgress) -> ()
     )
 
+    public final func importsInFile(_: SymbolCache.SymbolCacheFilePath) -> [Swift.String]
     public func snapshot() -> SymbolCache.SymbolCacheProvider
 }

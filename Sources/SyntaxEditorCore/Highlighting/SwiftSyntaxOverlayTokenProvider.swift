@@ -161,48 +161,145 @@ enum SwiftSyntaxOverlayTokenProvider {
             }
 
             let text = source.substring(with: token.range)
-            guard isSwiftIdentifier(text),
-                  let syntaxID = semanticSyntaxID(
+            guard isSwiftIdentifier(text) else {
+                continue
+            }
+
+            let overlays = semanticOverlays(
                     for: text,
                     range: token.range,
                     in: source,
                     index: index
-                  )
-            else {
+            )
+            guard !overlays.isEmpty else {
                 continue
             }
-            tokens.append(canonicalToken(range: token.range, syntaxID: syntaxID))
+            tokens.append(contentsOf: overlays.map {
+                canonicalToken(range: $0.range, syntaxID: $0.syntaxID)
+            })
         }
 
         return tokens
     }
 
-    private static func semanticSyntaxID(
+    private struct SemanticOverlay {
+        let range: NSRange
+        let syntaxID: EditorSourceSyntaxID
+    }
+
+    private static func semanticOverlays(
         for text: String,
         range: NSRange,
         in source: NSString,
         index: SwiftFileSymbolIndex
-    ) -> EditorSourceSyntaxID? {
+    ) -> [SemanticOverlay] {
         let context = SwiftSemanticTokenContext(source: source, range: range, text: text)
+
+        if let sigilRange = context.attributeSigilRange {
+            if index.entry(
+                named: text,
+                at: range,
+                allowedKinds: [.macro, .type],
+                rolePredicate: { _ in true }
+            ) != nil {
+                return []
+            }
+
+            if knownExternalAttributeFunctionNames.contains(text) {
+                return [
+                    SemanticOverlay(range: sigilRange, syntaxID: .identifierFunctionSystem),
+                    SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem),
+                ]
+            }
+            if knownExternalAttributeClassNames.contains(text) {
+                return [
+                    SemanticOverlay(range: sigilRange, syntaxID: .identifierClassSystem),
+                    SemanticOverlay(range: range, syntaxID: .identifierClassSystem),
+                ]
+            }
+            let syntaxID: EditorSourceSyntaxID = context.startsLikeTypeName ? .identifierClassSystem : .identifierFunctionSystem
+            return [
+                SemanticOverlay(range: sigilRange, syntaxID: syntaxID),
+                SemanticOverlay(range: range, syntaxID: syntaxID),
+            ]
+        }
+
+        if let sigilRange = context.macroInvocationSigilRange {
+            if let localMacro = index.entry(
+                named: text,
+                at: range,
+                allowedKinds: [.macro],
+                rolePredicate: { _ in true }
+            ) {
+                return syntaxIDForLocalEntry(localMacro).map {
+                    [
+                        SemanticOverlay(range: sigilRange, syntaxID: $0),
+                        SemanticOverlay(range: range, syntaxID: $0),
+                    ]
+                } ?? []
+            }
+            return [
+                SemanticOverlay(range: sigilRange, syntaxID: .identifierMacroSystem),
+                SemanticOverlay(range: range, syntaxID: .identifierMacroSystem),
+            ]
+        }
+
         guard !context.isImportLine,
-              !context.isAttributeContext,
               !context.isLabel,
               !context.isDeclarationContext,
-              !context.isPatternBindingDeclarationContext
+              !context.isGenericParameterDeclarationContext,
+              !context.isPatternBindingDeclarationContext,
+              !context.isAttributeArgumentContext
         else {
-            return nil
-        }
-
-        if context.isMacroInvocation {
-            return nil
-        }
-
-        if context.isSelfMemberAccess {
-            return nil
+            return []
         }
 
         if context.isMemberAccess {
-            return nil
+            if let receiverName = context.memberReceiverName,
+               let receiverType = index.declaredTypeName(forValueNamed: receiverName, at: range),
+               knownExternalMemberVariablesByReceiverType[receiverType]?.contains(text) == true {
+                return [SemanticOverlay(range: range, syntaxID: .identifierVariableSystem)]
+            }
+
+            if let localMember = index.entry(
+                named: text,
+                at: range,
+                allowedKinds: [.function, .type, .variable],
+                rolePredicate: { $0 == .member }
+            ) {
+                if localMember.kind == .type {
+                    return syntaxIDForLocalEntry(localMember).map {
+                        [SemanticOverlay(range: range, syntaxID: $0)]
+                    } ?? []
+                }
+
+                if localMember.kind == .variable, text == "range" {
+                    return [SemanticOverlay(range: range, syntaxID: .identifierConstantSystem)]
+                }
+
+                let syntaxID: EditorSourceSyntaxID = localMember.kind == .function
+                    ? .identifierFunctionSystem
+                    : .identifierVariableSystem
+                return [SemanticOverlay(range: range, syntaxID: syntaxID)]
+            }
+
+            if let enumCase = index.enumCaseEntry(
+                named: text,
+                at: range,
+                receiverTypeName: context.memberReceiverTypeName
+            ) {
+                return syntaxIDForLocalEntry(enumCase).map {
+                    [SemanticOverlay(range: range, syntaxID: $0)]
+                } ?? []
+            }
+
+            if context.startsLikeTypeName {
+                return [SemanticOverlay(range: range, syntaxID: .identifierTypeSystem)]
+            }
+            if context.isFunctionCall || context.isTrailingClosureCall {
+                return [SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem)]
+            }
+            return [SemanticOverlay(range: range, syntaxID: .identifierVariableSystem)]
         }
 
         let localValueEntry = index.entry(
@@ -214,7 +311,7 @@ enum SwiftSyntaxOverlayTokenProvider {
         let isTypeContext = context.isTypeContext
 
         if localValueEntry != nil, !isTypeContext {
-            return nil
+            return []
         }
 
         if context.isAssignmentExpressionContext,
@@ -224,7 +321,9 @@ enum SwiftSyntaxOverlayTokenProvider {
             allowedKinds: [.variable],
             rolePredicate: { $0 == .file || $0 == .member }
            ) {
-            return syntaxIDForLocalEntry(projectVariable)
+            return syntaxIDForLocalEntry(projectVariable).map {
+                [SemanticOverlay(range: range, syntaxID: $0)]
+            } ?? []
         }
 
         if context.isCallArgumentValueContext,
@@ -234,31 +333,55 @@ enum SwiftSyntaxOverlayTokenProvider {
             allowedKinds: [.variable],
             rolePredicate: { $0 == .file || $0 == .member }
            ) {
-            return syntaxIDForLocalEntry(projectVariable)
+            return syntaxIDForLocalEntry(projectVariable).map {
+                [SemanticOverlay(range: range, syntaxID: $0)]
+            } ?? []
         }
 
         if isTypeContext {
             if localValueEntry != nil,
                context.isAssignmentExpressionContext || context.isCallArgumentValueContext {
-                return nil
+                return []
+            }
+
+            if index.isGenericParameter(named: text, at: range) {
+                return []
+            }
+
+            if let localType = index.entry(
+                named: text,
+                at: range,
+                allowedKinds: [.type],
+                rolePredicate: { _ in true }
+            ) {
+                return syntaxIDForLocalEntry(localType).map {
+                    [SemanticOverlay(range: range, syntaxID: $0)]
+                } ?? []
             }
 
             if context.isFunctionCall,
-               index.entry(
+               let localFunction = index.entry(
                 named: text,
                 at: range,
                 allowedKinds: [.function],
                 rolePredicate: { _ in true }
-               ) != nil {
-                return nil
+               ) {
+                return syntaxIDForLocalEntry(localFunction).map {
+                    [SemanticOverlay(range: range, syntaxID: $0)]
+                } ?? []
             }
-            return knownExternalTypeNames.contains(text) && !index.hasLocalType(named: text, at: range)
-                ? .identifierTypeSystem
-                : nil
+
+            if let syntaxID = syntaxIDForKnownExternalType(named: text) {
+                return [SemanticOverlay(range: range, syntaxID: syntaxID)]
+            }
+
+            return context.startsLikeTypeName
+                ? [SemanticOverlay(range: range, syntaxID: .identifierTypeSystem)]
+                : []
         }
 
         if context.isInsideStringInterpolation {
-            return nil
+            return []
         }
 
         if let local = index.entry(
@@ -267,13 +390,39 @@ enum SwiftSyntaxOverlayTokenProvider {
             allowedKinds: [.variable],
             rolePredicate: { $0 == .file || $0 == .member }
         ) {
-            return syntaxIDForLocalEntry(local)
+            return syntaxIDForLocalEntry(local).map {
+                [SemanticOverlay(range: range, syntaxID: $0)]
+            } ?? []
         }
 
         if context.isFunctionCall {
-            return nil
+            if knownExternalFunctionNames.contains(text) {
+                return [SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem)]
+            }
+
+            guard let localFunction = index.entry(
+                named: text,
+                at: range,
+                allowedKinds: [.function],
+                rolePredicate: { _ in true }
+            ) else {
+                return [SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem)]
+            }
+            return syntaxIDForLocalEntry(localFunction).map {
+                [SemanticOverlay(range: range, syntaxID: $0)]
+            } ?? []
         }
 
+        return []
+    }
+
+    private static func syntaxIDForKnownExternalType(named name: String) -> EditorSourceSyntaxID? {
+        if knownExternalClassNames.contains(name) {
+            return .identifierClassSystem
+        }
+        if knownExternalTypeNames.contains(name) {
+            return .identifierTypeSystem
+        }
         return nil
     }
 
@@ -477,10 +626,15 @@ enum SwiftSyntaxOverlayTokenProvider {
         switch token.syntaxID {
         case .identifierType,
              .identifierTypeSystem,
+             .identifierClass,
+             .identifierClassSystem,
              .identifierFunction,
+             .identifierFunctionSystem,
              .identifierMacro,
              .identifierConstant,
-             .identifierVariable:
+             .identifierConstantSystem,
+             .identifierVariable,
+             .identifierVariableSystem:
             return true
         default:
             return false
@@ -492,7 +646,27 @@ enum SwiftSyntaxOverlayTokenProvider {
     )
 
     private static let knownExternalTypeNames: Set<String> = [
-        "Bool", "ClosedRange", "Double", "Float", "Int", "StaticString", "String", "UInt"
+        "AdditionPrecedence", "Bool", "ClosedRange", "Double", "Float", "Int", "StaticString", "String", "UInt", "UUID"
+    ]
+
+    private static let knownExternalClassNames: Set<String> = [
+        "CaseIterable", "Comparable", "Hashable", "Identifiable", "MainActor", "Sendable", "Sequence"
+    ]
+
+    private static let knownExternalFunctionNames: Set<String> = [
+        "max", "min"
+    ]
+
+    private static let knownExternalAttributeFunctionNames: Set<String> = [
+        "Observable"
+    ]
+
+    private static let knownExternalAttributeClassNames: Set<String> = [
+        "MainActor"
+    ]
+
+    private static let knownExternalMemberVariablesByReceiverType: [String: Set<String>] = [
+        "ClosedRange": ["lowerBound", "upperBound"]
     ]
 }
 
@@ -548,6 +722,21 @@ private struct SwiftSemanticTokenContext {
         ) != nil
     }
 
+    var isGenericParameterDeclarationContext: Bool {
+        let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
+        guard trimmedBefore.contains("<"),
+              !trimmedBefore.hasSuffix(":"),
+              !trimmedBefore.contains("=")
+        else {
+            return false
+        }
+
+        return Self.genericParameterDeclarationPrefixRegex.firstMatch(
+            in: trimmedBefore,
+            range: NSRange(location: 0, length: (trimmedBefore as NSString).length)
+        ) != nil
+    }
+
     var isPatternBindingDeclarationContext: Bool {
         Self.patternBindingDeclarationPrefixRegex.firstMatch(
             in: before,
@@ -584,8 +773,42 @@ private struct SwiftSemanticTokenContext {
         previousNonWhitespace == "#"
     }
 
+    var attributeSigilRange: NSRange? {
+        sigilRangeImmediatelyBeforeToken("@")
+    }
+
+    var macroInvocationSigilRange: NSRange? {
+        sigilRangeImmediatelyBeforeToken("#")
+    }
+
     var isMemberAccess: Bool {
-        previousNonWhitespace == "."
+        let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
+        return trimmedBefore.hasSuffix(".") && !trimmedBefore.hasSuffix("..")
+    }
+
+    var memberReceiverTypeName: String? {
+        memberReceiverName
+    }
+
+    var memberReceiverName: String? {
+        guard isMemberAccess else {
+            return nil
+        }
+
+        let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
+        guard trimmedBefore.hasSuffix(".") else {
+            return nil
+        }
+
+        let receiverText = String(trimmedBefore.dropLast())
+        guard let match = Self.memberReceiverRegex.matches(
+            in: receiverText,
+            range: NSRange(location: 0, length: (receiverText as NSString).length)
+        ).last else {
+            return nil
+        }
+
+        return (receiverText as NSString).substring(with: match.range)
     }
 
     var isSelfMemberAccess: Bool {
@@ -594,6 +817,34 @@ private struct SwiftSemanticTokenContext {
 
     var isFunctionCall: Bool {
         after.trimmingCharacters(in: .whitespaces).hasPrefix("(")
+    }
+
+    var isAttributeArgumentContext: Bool {
+        guard let atIndex = before.lastIndex(of: "@") else {
+            return false
+        }
+        let suffix = before[atIndex...]
+        return suffix.contains("(") && !suffix.contains(")")
+    }
+
+    var isTrailingClosureCall: Bool {
+        after.trimmingCharacters(in: .whitespaces).hasPrefix("{")
+    }
+
+    var isTypeInheritanceClause: Bool {
+        let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
+        return Self.typeInheritancePrefixRegex.firstMatch(
+            in: trimmedBefore,
+            range: NSRange(location: 0, length: (trimmedBefore as NSString).length)
+        ) != nil
+    }
+
+    var isOperatorPrecedenceReference: Bool {
+        let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
+        return Self.operatorPrecedencePrefixRegex.firstMatch(
+            in: trimmedBefore,
+            range: NSRange(location: 0, length: (trimmedBefore as NSString).length)
+        ) != nil
     }
 
     var isAssignmentExpressionContext: Bool {
@@ -701,7 +952,19 @@ private struct SwiftSemanticTokenContext {
             return true
         }
 
+        if startsLikeTypeName && (isTypeInheritanceClause || isOperatorPrecedenceReference) {
+            return true
+        }
+
         let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
+        if startsLikeTypeName,
+           Self.opaqueExistentialTypePrefixRegex.firstMatch(
+            in: trimmedBefore,
+            range: NSRange(location: 0, length: (trimmedBefore as NSString).length)
+           ) != nil {
+            return true
+        }
+
         if trimmedBefore.hasSuffix(":")
             || trimmedBefore.hasSuffix("=")
             || trimmedBefore.hasSuffix("->")
@@ -742,8 +1005,36 @@ private struct SwiftSemanticTokenContext {
         before.reversed().first { !$0.isWhitespace }
     }
 
+    private func sigilRangeImmediatelyBeforeToken(_ sigil: String) -> NSRange? {
+        let sigilLength = (sigil as NSString).length
+        guard sigilLength > 0,
+              range.location >= sigilLength
+        else {
+            return nil
+        }
+
+        let sigilRange = NSRange(location: range.location - sigilLength, length: sigilLength)
+        guard source.substring(with: sigilRange) == sigil else {
+            return nil
+        }
+
+        if sigilRange.location > 0 {
+            let previousRange = NSRange(location: sigilRange.location - 1, length: 1)
+            let previous = source.substring(with: previousRange)
+            guard previous.range(of: #"^[A-Za-z0-9_#@]$"#, options: .regularExpression) == nil else {
+                return nil
+            }
+        }
+
+        return sigilRange
+    }
+
     private static let declarationPrefixRegex = try! NSRegularExpression(
         pattern: #"\b(?:let|var|func|macro|class|struct|enum|actor|protocol|typealias|associatedtype)\s+$"#
+    )
+
+    private static let genericParameterDeclarationPrefixRegex = try! NSRegularExpression(
+        pattern: #"\b(?:class|struct|enum|actor|protocol|func)\s+[A-Za-z_][A-Za-z0-9_]*[^\n<]*<[^=\n{}()]*$"#
     )
 
     private static let declarationKeywordAfterAttributeRegex = try! NSRegularExpression(
@@ -763,6 +1054,22 @@ private struct SwiftSemanticTokenContext {
 
     private static let castTypePrefixRegex = try! NSRegularExpression(
         pattern: #"\b(?:as\?|as!|as|is)$"#
+    )
+
+    private static let opaqueExistentialTypePrefixRegex = try! NSRegularExpression(
+        pattern: #"\b(?:some|any)$"#
+    )
+
+    private static let typeInheritancePrefixRegex = try! NSRegularExpression(
+        pattern: #"\b(?:class|struct|enum|actor|protocol)\s+[A-Za-z_][A-Za-z0-9_]*(?:<[^=\n{}()]*>)?\s*:\s*[^=\n{}()]*$"#
+    )
+
+    private static let operatorPrecedencePrefixRegex = try! NSRegularExpression(
+        pattern: #"\b(?:prefix|infix|postfix)\s+operator\b[^:\n]*:\s*$"#
+    )
+
+    private static let memberReceiverRegex = try! NSRegularExpression(
+        pattern: #"[A-Za-z_][A-Za-z0-9_]*$"#
     )
 }
 

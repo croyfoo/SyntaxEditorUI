@@ -2,8 +2,98 @@
 // swift-compiler-version: Apple Swift version 6.3.2 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)
 // swift-module-flags: -target arm64-apple-macosx26.0 -enable-objc-interop -enable-library-evolution -swift-version 6 -module-name SymbolCacheIndexing
 import SymbolCache
+import Foundation
 import Swift
 
 extension SymbolCache.FileParsingSymbolCache {
     public static func makeDefaultSymbolCache(name: Swift.String?, basePath: Swift.String?) -> Self
+}
+
+public class SDKModulesSymbolCache: SymbolCache.SymbolCacheProvider {
+    public var basePath: SymbolCache.SymbolCacheFilePath? { get }
+    public var elementStore: SymbolCache.SymbolCacheElementStore { get }
+    public var indexRegistry: SymbolCache.SymbolCacheIndexRegistry { get set }
+    public var name: Swift.String? { get }
+
+    public func line(for: SymbolCache.SymbolCacheElement) -> Swift.Int?
+    public func filePath(for: SymbolCache.SymbolID) -> Swift.String?
+    public func snapshot() -> SymbolCache.SymbolCacheProvider
+}
+
+public class SDKSymbolCache: SymbolCache.LanguageSpecificSymbolCacheProvider, SymbolCache.ModuleNameSymbolCacheProvider {
+    public var basePath: SymbolCache.SymbolCacheFilePath? { get }
+    public var elementStore: SymbolCache.SymbolCacheElementStore { get }
+    public var indexRegistry: SymbolCache.SymbolCacheIndexRegistry { get set }
+    public var name: Swift.String? { get }
+    public var language: SymbolCache.SymbolCacheLanguage { get }
+    public var moduleName: Swift.String { get }
+    public var isSwiftModule: Swift.Bool { get }
+    public var visibleDependencies: Swift.Set<Swift.String> { get }
+
+    public func line(for: SymbolCache.SymbolCacheElement) -> Swift.Int?
+    public func filePath(for: SymbolCache.SymbolID) -> Swift.String?
+    public func snapshot() -> SymbolCache.SymbolCacheProvider
+}
+
+public enum SymbolCacheSDKLoadType: Swift.Hashable, Swift.CustomDebugStringConvertible {
+    case module(Swift.String)
+    case systemHeader(Swift.String)
+
+    public static var stdLib: SymbolCacheIndexing.SymbolCacheSDKLoadType { get }
+    public var debugDescription: Swift.String { get }
+}
+
+public struct SDKLoadingRequest: Swift.Hashable {
+    public let type: SymbolCacheIndexing.SymbolCacheSDKLoadType
+
+    public init(type: SymbolCacheIndexing.SymbolCacheSDKLoadType)
+}
+
+public struct SDKFrameworkLoadResponse {
+    public var symbolCaches: [SymbolCacheIndexing.SDKSymbolCache] { get }
+}
+
+public class SymbolCacheSDKIOManager {
+    public init(baseURL: Foundation.URL, onlySerializeSwift: Swift.Bool)
+}
+
+public class SymbolCacheSDKStorage {
+    public init(ioManager: SymbolCacheIndexing.SymbolCacheSDKIOManager?)
+}
+
+public class SymbolCacheFrameworksIndex {
+    public init()
+
+    public var modulesSymbolCache: SymbolCacheIndexing.SDKModulesSymbolCache { get }
+    public func addFrameworkSearchPath(_: Foundation.URL)
+}
+
+public class SymbolCacheSystemIncludeIndex {
+    public init(url: Foundation.URL, modulesSymbolCache: SymbolCacheIndexing.SDKModulesSymbolCache)
+
+    public var modulesSymbolCache: SymbolCacheIndexing.SDKModulesSymbolCache { get }
+    public func subModules(in: Swift.String) -> [Swift.String]?
+}
+
+public class SymbolCacheSDKLoader {
+    public init(
+        sdkURL: Foundation.URL,
+        toolchainModulesURL: Foundation.URL?,
+        variantName: Swift.String?,
+        storage: SymbolCacheIndexing.SymbolCacheSDKStorage,
+        onlyLoadFromCache: Swift.Bool,
+        useRelativePaths: Swift.Bool
+    )
+
+    public var modulesSymbolCache: SymbolCacheIndexing.SDKModulesSymbolCache { get }
+    public var frameworksIndex: SymbolCacheIndexing.SymbolCacheFrameworksIndex { get }
+    public var systemIncludeIndex: SymbolCacheIndexing.SymbolCacheSystemIncludeIndex { get }
+    public var frameworkTypes: Swift.Set<SymbolCacheIndexing.SymbolCacheSDKLoadType> { get set }
+
+    public func addFrameworkSearchPath(_: Foundation.URL)
+    public func addSwiftOverlaySearchPath(_: Foundation.URL)
+    public func addPlatformDeveloperSearchPaths(developerDirectory: Foundation.URL)
+    public func load(
+        request: SymbolCacheIndexing.SDKLoadingRequest
+    ) -> Swift.Result<SymbolCacheIndexing.SDKFrameworkLoadResponse, Swift.Error>
 }

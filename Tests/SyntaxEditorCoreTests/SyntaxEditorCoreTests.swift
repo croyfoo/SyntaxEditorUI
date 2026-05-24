@@ -3849,10 +3849,12 @@ struct SyntaxHighlighterEngineTests {
             ("externalMacro", "keyword", "editor.syntax.keyword", #"#externalMacro(module: "ReferenceMacros""#),
             ("freestanding", "keyword", "editor.syntax.keyword", "@freestanding(expression)"),
             ("propertyWrapper", "keyword", "editor.syntax.keyword", "@propertyWrapper"),
+            ("Comparable", "identifier.class.system", "editor.syntax.identifier.class.system", "Value: Comparable"),
             ("ReferenceStore", "declaration.type", "editor.syntax.declaration.type", "final class ReferenceStore"),
             ("OpenReferenceBase", "plain", "editor.syntax.plain", "OpenReferenceBase, @unchecked"),
-            ("UUID", "plain", "editor.syntax.plain", "typealias ReferenceID = UUID"),
-            ("load", "plain", "editor.syntax.plain", "try await load().map"),
+            ("UUID", "identifier.type.system", "editor.syntax.identifier.type.system", "typealias ReferenceID = UUID"),
+            ("load", "identifier.function", "editor.syntax.identifier.function", "try await load().map"),
+            ("Value", "plain", "editor.syntax.plain", "var wrappedValue: Value"),
             ("wrappedValue", "declaration.other", "editor.syntax.declaration.other", "init(wrappedValue: Value"),
             ("create", "declaration.other", "editor.syntax.declaration.other", "for key: Key, create: @Sendable"),
             ("content", "declaration.other", "editor.syntax.declaration.other", "@RowBuilder content:"),
@@ -3860,7 +3862,21 @@ struct SyntaxHighlighterEngineTests {
             ("rhs", "declaration.other", "editor.syntax.declaration.other", "rhs: ReferenceStore.State"),
             ("@", "plain", "editor.syntax.plain", "@AutoCodable"),
             ("AutoCodable", "plain", "editor.syntax.plain", "@AutoCodable"),
-            ("Observable", "plain", "editor.syntax.plain", "@Observable"),
+            ("Observable", "identifier.function.system", "editor.syntax.identifier.function.system", "@Observable"),
+            ("MainActor", "identifier.class.system", "editor.syntax.identifier.class.system", "@MainActor"),
+            ("Clamped", "plain", "editor.syntax.plain", "@Clamped(0...globalLimit)"),
+            ("RowBuilder", "plain", "editor.syntax.plain", "@RowBuilder content:"),
+            ("AdditionPrecedence", "identifier.type.system", "editor.syntax.identifier.type.system", "higherThan: AdditionPrecedence"),
+            ("ReferencePrecedence", "plain", "editor.syntax.plain", "operator <+>: ReferencePrecedence"),
+            ("Sendable", "identifier.class.system", "editor.syntax.identifier.class.system", "@unchecked Sendable"),
+            ("ReferenceRenderable", "plain", "editor.syntax.plain", "@unchecked Sendable, ReferenceRenderable"),
+            ("CaseIterable", "identifier.class.system", "editor.syntax.identifier.class.system", "String, CaseIterable"),
+            ("Hashable", "identifier.class.system", "editor.syntax.identifier.class.system", "ID: Hashable"),
+            ("Identifiable", "identifier.class.system", "editor.syntax.identifier.class.system", "Identifiable {"),
+            ("State", "identifier.type", "editor.syntax.identifier.type", "var state: State = .ready"),
+            ("range", "identifier.constant.system", "editor.syntax.identifier.constant.system", "self.range = range"),
+            ("Item", "identifier.type", "editor.syntax.identifier.type", "Item(id: UUID()"),
+            ("ReferenceID", "identifier.type", "editor.syntax.identifier.type", "[Item<ReferenceID>]"),
             ("sourceLocation", "keyword", "editor.syntax.keyword", "#sourceLocation(file:"),
             ("sourceLocationCheck", "declaration.other", "editor.syntax.declaration.other", "let sourceLocationCheck: Any?"),
             ("=", "plain", "editor.syntax.plain", "progress = 42"),
@@ -3945,8 +3961,12 @@ struct SyntaxHighlighterEngineTests {
         let source = """
         @attached(member, names: named(FixtureCodingKeys))
         @freestanding(expression)
+        macro LocalAttribute() = #externalMacro(module: "FixtureMacros", type: "LocalAttribute")
+        @propertyWrapper struct LocalWrapper { var wrappedValue: Int }
+        @LocalAttribute
         @UnknownFixture
         struct SwiftAttributesFixture {
+            @LocalWrapper var localValue: Int
             @UnknownFixture var value: Int
         }
         """
@@ -3955,8 +3975,12 @@ struct SyntaxHighlighterEngineTests {
         let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
             ("attached", "keyword", "editor.syntax.keyword", "@attached(member"),
             ("freestanding", "keyword", "editor.syntax.keyword", "@freestanding(expression)"),
-            ("@", "plain", "editor.syntax.plain", "@UnknownFixture"),
-            ("UnknownFixture", "plain", "editor.syntax.plain", "@UnknownFixture"),
+            ("@", "plain", "editor.syntax.plain", "@LocalAttribute"),
+            ("LocalAttribute", "plain", "editor.syntax.plain", "@LocalAttribute"),
+            ("@", "plain", "editor.syntax.plain", "@LocalWrapper"),
+            ("LocalWrapper", "plain", "editor.syntax.plain", "@LocalWrapper"),
+            ("@", "identifier.class.system", "editor.syntax.identifier.class.system", "@UnknownFixture"),
+            ("UnknownFixture", "identifier.class.system", "editor.syntax.identifier.class.system", "@UnknownFixture"),
         ]
 
         for expectation in expectations {
@@ -3989,7 +4013,7 @@ struct SyntaxHighlighterEngineTests {
         let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
             ("externalMacro", "keyword", "editor.syntax.keyword", "#externalMacro(module:"),
             ("sourceLocation", "preprocessor", "editor.syntax.preprocessor", "#sourceLocation(file:"),
-            ("FixtureMacro", "plain", "editor.syntax.plain", "#FixtureMacro()"),
+            ("FixtureMacro", "identifier.macro", "editor.syntax.identifier.macro", "#FixtureMacro()"),
             ("selector", "identifier.macro.system", "editor.syntax.identifier.macro.system", "#selector(runFixture)"),
         ]
 
@@ -4047,7 +4071,7 @@ struct SyntaxHighlighterEngineTests {
         let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
 
         let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
-            ("LocalModel", "plain", "editor.syntax.plain", "_ model: LocalModel"),
+            ("LocalModel", "identifier.type", "editor.syntax.identifier.type", "_ model: LocalModel"),
             ("Int", "identifier.type.system", "editor.syntax.identifier.type.system", "value: Int"),
             ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "title: String"),
             ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "String(describing: title)"),
@@ -4057,15 +4081,17 @@ struct SyntaxHighlighterEngineTests {
             ("Double", "identifier.type.system", "editor.syntax.identifier.type.system", "= Double"),
             ("UInt", "identifier.type.system", "editor.syntax.identifier.type.system", "== UInt"),
             ("handler", "identifier.variable", "editor.syntax.identifier.variable", "handler()"),
-            ("localFunction", "plain", "editor.syntax.plain", "localFunction(model"),
-            ("print", "plain", "editor.syntax.plain", "print(localValue)"),
+            ("localFunction", "identifier.function", "editor.syntax.identifier.function", "localFunction(model"),
+            ("print", "identifier.function.system", "editor.syntax.identifier.function.system", "print(localValue)"),
             ("model", "identifier.variable", "editor.syntax.identifier.variable", "localFunction(model"),
             ("localValue", "plain", "editor.syntax.plain", "print(localValue)"),
-            ("String", "plain", "editor.syntax.plain", "Namespace.String"),
-            ("String", "plain", "editor.syntax.plain", "Namespace.String()"),
-            ("ready", "plain", "editor.syntax.plain", "LocalState.ready"),
-            ("LocalMacro", "plain", "editor.syntax.plain", "#LocalMacro()"),
-            ("ExternalMacro", "plain", "editor.syntax.plain", "#ExternalMacro()"),
+            ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "Namespace.String"),
+            ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "Namespace.String()"),
+            ("LocalState", "identifier.type", "editor.syntax.identifier.type", "LocalState.ready"),
+            ("ready", "identifier.constant", "editor.syntax.identifier.constant", "LocalState.ready"),
+            ("LocalModel", "identifier.type", "editor.syntax.identifier.type", "LocalModel(value: 1)"),
+            ("LocalMacro", "identifier.macro", "editor.syntax.identifier.macro", "#LocalMacro()"),
+            ("ExternalMacro", "identifier.macro.system", "editor.syntax.identifier.macro.system", "#ExternalMacro()"),
         ]
 
         for expectation in expectations {
@@ -4085,7 +4111,6 @@ struct SyntaxHighlighterEngineTests {
             ("value", "LocalModel(value: 1)"),
             ("module", #"#externalMacro(module: "FixtureMacros""#),
             ("type", #"type: "LocalMacro""#),
-            ("UnknownFixture", "@UnknownFixture"),
         ] {
             let snapshot = try effectiveSemanticSnapshot(
                 in: tokens,
@@ -4114,11 +4139,11 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "String",
-            syntaxID: .plain,
+            syntaxID: .identifierFunction,
             language: .swift,
             inOccurrenceOf: "value = String()"
         )
-        #expect(call.styleKeys.first == "editor.syntax.plain")
+        #expect(call.styleKeys.first == "editor.syntax.identifier.function")
     }
 
     @Test("SyntaxHighlighterEngine limits block-local functions named like system types")
@@ -4148,11 +4173,11 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "String",
-            syntaxID: .plain,
+            syntaxID: .identifierFunction,
             language: .swift,
             inOccurrenceOf: "local = String()"
         )
-        #expect(localCall.styleKeys.first == "editor.syntax.plain")
+        #expect(localCall.styleKeys.first == "editor.syntax.identifier.function")
 
         let siblingCall = try effectiveSemanticSnapshot(
             in: tokens,
@@ -4190,11 +4215,11 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "String",
-            syntaxID: .plain,
+            syntaxID: .identifierType,
             language: .swift,
             inOccurrenceOf: "shadow: String?"
         )
-        #expect(shadow.styleKeys.first == "editor.syntax.plain")
+        #expect(shadow.styleKeys.first == "editor.syntax.identifier.type")
 
         let int = try effectiveSemanticSnapshot(
             in: tokens,
@@ -4257,11 +4282,11 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "String",
-            syntaxID: .plain,
+            syntaxID: .identifierType,
             language: .swift,
             inOccurrenceOf: "local: String?"
         )
-        #expect(localShadow.styleKeys.first == "editor.syntax.plain")
+        #expect(localShadow.styleKeys.first == "editor.syntax.identifier.type")
 
         let outsideSystem = try effectiveSemanticSnapshot(
             in: tokens,
@@ -4291,11 +4316,11 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "String",
-            syntaxID: .plain,
+            syntaxID: .identifierType,
             language: .swift,
             inOccurrenceOf: "local: String?"
         )
-        #expect(localShadow.styleKeys.first == "editor.syntax.plain")
+        #expect(localShadow.styleKeys.first == "editor.syntax.identifier.type")
 
         let siblingSystem = try effectiveSemanticSnapshot(
             in: tokens,
@@ -4382,11 +4407,11 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "String",
-            syntaxID: .plain,
+            syntaxID: .identifierType,
             language: .swift,
             inOccurrenceOf: "title: String"
         )
-        #expect(fileAlias.styleKeys.first == "editor.syntax.plain")
+        #expect(fileAlias.styleKeys.first == "editor.syntax.identifier.type")
 
         let systemType = try effectiveSemanticSnapshot(
             in: tokens,
@@ -4402,11 +4427,11 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "Int",
-            syntaxID: .plain,
+            syntaxID: .identifierType,
             language: .swift,
             inOccurrenceOf: "load() -> Int"
         )
-        #expect(associatedType.styleKeys.first == "editor.syntax.plain")
+        #expect(associatedType.styleKeys.first == "editor.syntax.identifier.type")
     }
 
     @Test("SyntaxHighlighterEngine limits generic type shadowing to the active scope")
@@ -4459,11 +4484,11 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "String",
-            syntaxID: .plain,
+            syntaxID: .identifierType,
             language: .swift,
             inOccurrenceOf: "nested: String"
         )
-        #expect(nestedType.styleKeys.first == "editor.syntax.plain")
+        #expect(nestedType.styleKeys.first == "editor.syntax.identifier.type")
 
         let standardType = try effectiveSemanticSnapshot(
             in: tokens,
@@ -4479,21 +4504,21 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "String",
-            syntaxID: .plain,
+            syntaxID: .identifierType,
             language: .swift,
-            inOccurrenceOf: "_ value: String"
+            inOccurrenceOf: "read(_ value: String)"
         )
-        #expect(nestedTypeInExtension.styleKeys.first == "editor.syntax.plain")
+        #expect(nestedTypeInExtension.styleKeys.first == "editor.syntax.identifier.type")
 
         let localFunctionType = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
             text: "String",
-            syntaxID: .plain,
+            syntaxID: .identifierType,
             language: .swift,
             inOccurrenceOf: "local: String"
         )
-        #expect(localFunctionType.styleKeys.first == "editor.syntax.plain")
+        #expect(localFunctionType.styleKeys.first == "editor.syntax.identifier.type")
     }
 
     @Test("SyntaxHighlighterEngine preserves Swift semantic scopes around casts and requirements")
@@ -5082,11 +5107,11 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "id",
-            syntaxID: .plain,
+            syntaxID: .identifierVariableSystem,
             language: .swift,
             inOccurrenceOf: "self.id = id"
         )
-        #expect(memberID.styleKeys.first == "editor.syntax.plain")
+        #expect(memberID.styleKeys.first == "editor.syntax.identifier.variable.system")
 
         let propertyID = try effectiveSemanticSnapshot(
             in: tokens,

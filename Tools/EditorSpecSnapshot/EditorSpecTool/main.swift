@@ -15,6 +15,11 @@ import SymbolCacheSupport
 
 private let defaultToolchainAppPath = "/Applications/Xcode.app"
 
+private enum SemanticDepth: String, Sendable {
+    case currentFile = "current-file"
+    case sdk
+}
+
 private struct SnapshotRange: Codable, Hashable, Sendable {
     let location: Int
     let length: Int
@@ -181,15 +186,15 @@ private enum ToolError: Error, CustomStringConvertible {
             Usage:
               swift run EditorSpecTool editor-tokens --file <path> [--language swift] [--pretty]
               swift run EditorSpecTool source-model-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--no-text]
-              swift run EditorSpecTool xcode-classification-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--no-text]
+              swift run EditorSpecTool xcode-classification-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-semantic-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--no-text]
-              swift run EditorSpecTool xcode-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--pretty] [--no-text]
+              swift run EditorSpecTool xcode-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-dvt-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-dvt-language-diagnostics --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty]
               swift run EditorSpecTool xcode-source-editor-view-diagnostics --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty]
               swift run EditorSpecTool diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--include-matches]
-              swift run EditorSpecTool classification-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--include-matches]
-              swift run EditorSpecTool rendered-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--include-matches]
+              swift run EditorSpecTool classification-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--include-matches]
+              swift run EditorSpecTool rendered-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--include-matches]
             """
         case let .missingArgument(argument):
             "Missing value for \(argument)"
@@ -270,7 +275,8 @@ private enum EditorSpecTool {
                 language: options.language,
                 xcodePath: options.xcodePath,
                 xcodeThemeName: options.xcodeThemeName,
-                appearance: options.appearanceName
+                appearance: options.appearanceName,
+                semanticDepth: options.semanticDepth
             ),
             tokens: try await xcodeRenderedTokens(options: options, source: source, includeText: options.includeText)
         )
@@ -286,7 +292,8 @@ private enum EditorSpecTool {
                 language: options.language,
                 xcodePath: options.xcodePath,
                 xcodeThemeName: options.xcodeThemeName,
-                appearance: options.appearanceName
+                appearance: options.appearanceName,
+                semanticDepth: options.semanticDepth
             ),
             tokens: xcodeRenderedTokens(from: snapshot, source: source)
         )
@@ -304,7 +311,8 @@ private enum EditorSpecTool {
                 language: options.language,
                 xcodePath: options.xcodePath,
                 xcodeThemeName: options.xcodeThemeName,
-                appearance: options.appearanceName
+                appearance: options.appearanceName,
+                semanticDepth: options.semanticDepth
             ),
             tokens: try await xcodeSwiftSemanticTokens(options: options, source: source, includeText: options.includeText)
         )
@@ -322,7 +330,8 @@ private enum EditorSpecTool {
                 language: options.language,
                 xcodePath: options.xcodePath,
                 xcodeThemeName: options.xcodeThemeName,
-                appearance: options.appearanceName
+                appearance: options.appearanceName,
+                semanticDepth: options.semanticDepth
             ),
             tokens: try await xcodeSwiftClassificationTokens(options: options, source: source, includeText: options.includeText)
         )
@@ -426,7 +435,8 @@ private enum EditorSpecTool {
                 language: options.language,
                 xcodePath: options.xcodePath,
                 xcodeThemeName: options.xcodeThemeName,
-                appearance: options.appearanceName
+                appearance: options.appearanceName,
+                semanticDepth: options.semanticDepth
             ),
             summary: DiffSummary(
                 comparedSegments: comparedSegments,
@@ -499,7 +509,8 @@ private enum EditorSpecTool {
                 language: options.language,
                 xcodePath: options.xcodePath,
                 xcodeThemeName: options.xcodeThemeName,
-                appearance: options.appearanceName
+                appearance: options.appearanceName,
+                semanticDepth: options.semanticDepth
             ),
             summary: DiffSummary(
                 comparedSegments: comparedSegments,
@@ -783,7 +794,116 @@ private enum EditorSpecTool {
             basePath: nil
         )
         symbolCache.parse(fileURLs: [fileURL], canceled: { false }) { _ in }
-        return ToolSymbolCacheComposite(providers: [symbolCache.snapshot()])
+        var providers: [SymbolCacheProvider] = [symbolCache.snapshot()]
+        if options.semanticDepth == .sdk {
+            providers.append(contentsOf: sdkSymbolCacheProviders(options: options, fileSymbolCache: symbolCache))
+        }
+        return ToolSymbolCacheComposite(providers: providers)
+    }
+
+    private static func sdkSymbolCacheProviders(
+        options: Options,
+        fileSymbolCache: FileParsingSymbolCache
+    ) -> [SymbolCacheProvider] {
+        do {
+            let sdkURL = try macOSSDKURL()
+            let storage = SymbolCacheSDKStorage(
+                ioManager: SymbolCacheSDKIOManager(
+                    baseURL: sdkCacheBaseURL(),
+                    onlySerializeSwift: true
+                )
+            )
+            let loader = SymbolCacheSDKLoader(
+                sdkURL: sdkURL,
+                toolchainModulesURL: swiftToolchainModulesURL(xcodePath: options.xcodePath),
+                variantName: nil,
+                storage: storage,
+                onlyLoadFromCache: false,
+                useRelativePaths: false
+            )
+            loader.addPlatformDeveloperSearchPaths(
+                developerDirectory: URL(fileURLWithPath: options.xcodePath)
+                    .appendingPathComponent("Contents/Developer", isDirectory: true)
+            )
+
+            var imports = Set((try? swiftImports(in: sourceText(options.filePath))) ?? [])
+            imports.insert("_Concurrency")
+            let loadTypes = [SymbolCacheSDKLoadType.stdLib]
+                + imports.sorted().map(SymbolCacheSDKLoadType.module)
+            var providers: [SymbolCacheProvider] = [loader.modulesSymbolCache]
+            for loadType in loadTypes {
+                switch loader.load(request: SDKLoadingRequest(type: loadType)) {
+                case let .success(response):
+                    providers.append(contentsOf: response.symbolCaches)
+                case .failure:
+                    continue
+                }
+            }
+            return providers
+        } catch {
+            return []
+        }
+    }
+
+    private static func macOSSDKURL() throws -> URL {
+        URL(fileURLWithPath: try xcrunOutput(arguments: ["--sdk", "macosx", "--show-sdk-path"]), isDirectory: true)
+    }
+
+    private static func swiftToolchainModulesURL(xcodePath: String) -> URL? {
+        if let swiftPath = try? xcrunOutput(arguments: ["--toolchain", "XcodeDefault", "--find", "swift"]) {
+            let usrURL = URL(fileURLWithPath: swiftPath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+            let modulesURL = usrURL.appendingPathComponent("lib/swift/macosx", isDirectory: true)
+            if FileManager.default.fileExists(atPath: modulesURL.path) {
+                return modulesURL
+            }
+        }
+
+        let fallback = URL(fileURLWithPath: xcodePath)
+            .appendingPathComponent("Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx", isDirectory: true)
+        return FileManager.default.fileExists(atPath: fallback.path) ? fallback : nil
+    }
+
+    private static func sdkCacheBaseURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("SyntaxEditorUI-EditorSpecTool-SDKSymbolCache", isDirectory: true)
+    }
+
+    private static func swiftImports(in source: String) -> [String] {
+        let pattern = #"(?m)^\s*import\s+(?:(?:class|struct|enum|protocol|func|let|var)\s+)?([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return []
+        }
+        let nsSource = source as NSString
+        return regex.matches(in: source, range: NSRange(location: 0, length: nsSource.length))
+            .compactMap { match in
+                guard match.numberOfRanges > 1 else { return nil }
+                return nsSource.substring(with: match.range(at: 1)).split(separator: ".").first.map(String.init)
+            }
+    }
+
+    private static func xcrunOutput(arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = arguments
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        try process.run()
+        process.waitUntilExit()
+
+        let output = String(decoding: outputPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if process.terminationStatus == 0, !output.isEmpty {
+            return output
+        }
+
+        let error = String(decoding: errorPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        throw ToolError.xcodeTool(error.isEmpty ? "xcrun \(arguments.joined(separator: " ")) failed." : error)
     }
 
     private final class ToolSymbolCacheComposite: SymbolCacheComposite {
@@ -1187,15 +1307,20 @@ private enum EditorSpecTool {
         language: SyntaxLanguage,
         xcodePath: String,
         xcodeThemeName: String,
-        appearance: String
+        appearance: String,
+        semanticDepth: SemanticDepth? = nil
     ) -> [String: String] {
-        [
+        var metadata = [
             "file": filePath,
             "language": language.identifier,
             "xcode": xcodePath,
             "xcodeTheme": xcodeThemeName,
             "appearance": appearance,
         ]
+        if let semanticDepth {
+            metadata["semanticDepth"] = semanticDepth.rawValue
+        }
+        return metadata
     }
 
     private static func renderedColorRecord(from dictionary: NSDictionary) -> RenderedColorRecord? {
@@ -1384,6 +1509,7 @@ private struct Options: Sendable {
     let filePath: String
     let language: SyntaxLanguage
     let xcodePath: String
+    let semanticDepth: SemanticDepth
     let xcodeThemeName: String
     let appearance: SyntaxEditorThemeAppearance
     let appearanceName: String
@@ -1395,6 +1521,7 @@ private struct Options: Sendable {
         var filePath: String?
         var language = SyntaxLanguage.swift
         var xcodePath = defaultToolchainAppPath
+        var semanticDepth = SemanticDepth.currentFile
         var xcodeThemeName: String?
         var appearanceName = "dark"
         var pretty = false
@@ -1426,6 +1553,15 @@ private struct Options: Sendable {
                     throw ToolError.missingArgument(argument)
                 }
                 xcodePath = rawArguments[index]
+            case "--semantic-depth":
+                index += 1
+                guard index < rawArguments.count else {
+                    throw ToolError.missingArgument(argument)
+                }
+                guard let resolved = SemanticDepth(rawValue: rawArguments[index]) else {
+                    throw ToolError.missingArgument("--semantic-depth current-file|sdk")
+                }
+                semanticDepth = resolved
             case "--xcode-theme":
                 index += 1
                 guard index < rawArguments.count else {
@@ -1461,6 +1597,7 @@ private struct Options: Sendable {
         self.filePath = filePath
         self.language = language
         self.xcodePath = xcodePath
+        self.semanticDepth = semanticDepth
         self.xcodeThemeName = xcodeThemeName ?? (appearanceName == "light" ? "default-light" : "default-dark")
         self.appearance = appearanceName == "light" ? .light : .dark
         self.appearanceName = appearanceName

@@ -13,6 +13,7 @@ struct SwiftFileSymbolIndex {
         case file
         case member
         case local
+        case genericParameter
     }
 
     struct Entry {
@@ -69,6 +70,13 @@ struct SwiftFileSymbolIndex {
         let startLocation: Int
     }
 
+    private struct TypedValue {
+        let name: String
+        let typeName: String
+        let scopeRange: NSRange
+        let declarationRange: NSRange
+    }
+
     private let source: NSString
     private let maskedSource: NSString
     private(set) var entries: [Entry] = []
@@ -76,6 +84,7 @@ struct SwiftFileSymbolIndex {
     private var functionDeclarations: [FunctionDeclaration] = []
     private var typeScopes: [TypeScope] = []
     private var functionScopes: [FunctionScope] = []
+    private var typedValues: [TypedValue] = []
 
     init(source: NSString, tokens: [SyntaxHighlightToken]) {
         self.source = source
@@ -129,6 +138,72 @@ struct SwiftFileSymbolIndex {
                 && Self.range($0.scopeRange, contains: range)
                 && !(Self.range($0.declarationRange, contains: range))
         }
+    }
+
+    func isGenericParameter(named name: String, at range: NSRange) -> Bool {
+        entries.contains {
+            $0.name == name
+                && $0.kind == .type
+                && $0.role == .genericParameter
+                && Self.range($0.scopeRange, contains: range)
+                && !(Self.range($0.declarationRange, contains: range))
+        }
+    }
+
+    func enumCaseEntry(named name: String, at range: NSRange, receiverTypeName: String?) -> Entry? {
+        let candidates = entries.filter {
+            $0.name == name
+                && $0.kind == .constant
+                && Self.range($0.scopeRange, contains: range)
+                && !(Self.range($0.declarationRange, contains: range))
+        }
+
+        if let receiverTypeName {
+            return candidates
+                .filter {
+                    guard let ownerName = $0.ownerQualifiedName?.split(separator: ".").last.map(String.init) else {
+                        return false
+                    }
+                    return ownerName == receiverTypeName
+                }
+                .sorted { lhs, rhs in
+                    if lhs.scopeRange.length != rhs.scopeRange.length {
+                        return lhs.scopeRange.length < rhs.scopeRange.length
+                    }
+                    return lhs.declarationRange.location > rhs.declarationRange.location
+                }
+                .first
+        }
+
+        let uniqueByOwner = Dictionary(grouping: candidates) { $0.ownerQualifiedName ?? "" }
+        guard uniqueByOwner.count == 1 else {
+            return nil
+        }
+        return candidates
+            .sorted { lhs, rhs in
+                if lhs.scopeRange.length != rhs.scopeRange.length {
+                    return lhs.scopeRange.length < rhs.scopeRange.length
+                }
+                return lhs.declarationRange.location > rhs.declarationRange.location
+            }
+            .first
+    }
+
+    func declaredTypeName(forValueNamed name: String, at range: NSRange) -> String? {
+        typedValues
+            .filter {
+                $0.name == name
+                    && Self.range($0.scopeRange, contains: range)
+                    && !(Self.range($0.declarationRange, contains: range))
+            }
+            .sorted { lhs, rhs in
+                if lhs.scopeRange.length != rhs.scopeRange.length {
+                    return lhs.scopeRange.length < rhs.scopeRange.length
+                }
+                return lhs.declarationRange.location > rhs.declarationRange.location
+            }
+            .first?
+            .typeName
     }
 }
 
@@ -426,13 +501,13 @@ private extension SwiftFileSymbolIndex {
                 guard let parameter = parameterName(in: segment) else {
                     continue
                 }
-                entries.append(Entry(
+                appendVariableEntry(
                     name: parameter.name,
-                    kind: .variable,
                     role: .local,
                     declarationRange: parameter.range,
-                    scopeRange: functionScope.bodyRange
-                ))
+                    scopeRange: functionScope.bodyRange,
+                    typeName: declaredTypeName(in: segment)
+                )
             }
         }
     }
@@ -493,16 +568,16 @@ private extension SwiftFileSymbolIndex {
             )
             if !bindingScopes.isEmpty {
                 for bindingScope in bindingScopes {
-                    entries.append(Entry(
+                    appendVariableEntry(
                         name: name,
-                        kind: .variable,
                         role: .local,
                         declarationRange: nameRange,
                         scopeRange: NSRange(
                             location: bindingScope.startLocation,
                             length: max(0, bindingScope.range.upperBound - bindingScope.startLocation)
-                        )
-                    ))
+                        ),
+                        typeName: declaredTypeName(in: segmentRange)
+                    )
                 }
                 return
             }
@@ -517,16 +592,16 @@ private extension SwiftFileSymbolIndex {
                 declarationRange: declarationRange,
                 within: localScope
             )
-            entries.append(Entry(
+            appendVariableEntry(
                 name: name,
-                kind: .variable,
                 role: .local,
                 declarationRange: nameRange,
                 scopeRange: NSRange(
                     location: scopeStart,
                     length: max(0, localScope.upperBound - scopeStart)
-                )
-            ))
+                ),
+                typeName: declaredTypeName(in: segmentRange)
+            )
         } else if let typeScope {
             if let localScope = nestedLocalValueScope(containing: nameRange, within: typeScope.bodyRange) {
                 appendLocalVariable(
@@ -544,7 +619,8 @@ private extension SwiftFileSymbolIndex {
                     name: name,
                     kind: .variable,
                     declarationRange: nameRange,
-                    ownerTypeScope: typeScope
+                    ownerTypeScope: typeScope,
+                    typeName: declaredTypeName(in: segmentRange)
                 )
             }
         } else if let localScope = nestedLocalValueScope(containing: nameRange, within: fullRange) {
@@ -559,13 +635,13 @@ private extension SwiftFileSymbolIndex {
                 )
             )
         } else {
-            entries.append(Entry(
+            appendVariableEntry(
                 name: name,
-                kind: .variable,
                 role: .file,
                 declarationRange: nameRange,
-                scopeRange: fullRange
-            ))
+                scopeRange: fullRange,
+                typeName: declaredTypeName(in: segmentRange)
+            )
         }
     }
 
@@ -1019,7 +1095,8 @@ private extension SwiftFileSymbolIndex {
                     kind: .constant,
                     role: .member,
                     declarationRange: nameRange,
-                    scopeRange: fullRange
+                    scopeRange: fullRange,
+                    ownerQualifiedName: typeScope.qualifiedName
                 ))
             }
         }
@@ -1066,7 +1143,7 @@ private extension SwiftFileSymbolIndex {
             entries.append(Entry(
                 name: maskedSource.substring(with: parameterRange),
                 kind: .type,
-                role: .local,
+                role: .genericParameter,
                 declarationRange: parameterRange,
                 scopeRange: scope
             ))
@@ -1077,7 +1154,8 @@ private extension SwiftFileSymbolIndex {
         name: String,
         kind: SymbolKind,
         declarationRange: NSRange,
-        ownerTypeScope: TypeScope
+        ownerTypeScope: TypeScope,
+        typeName: String? = nil
     ) {
         let ownerScopes = typeScopes.filter { $0.qualifiedName == ownerTypeScope.qualifiedName }
         guard !ownerScopes.isEmpty else {
@@ -1089,6 +1167,14 @@ private extension SwiftFileSymbolIndex {
                 scopeRange: fullRange,
                 ownerQualifiedName: nil
             ))
+            if kind == .variable, let typeName {
+                typedValues.append(TypedValue(
+                    name: name,
+                    typeName: typeName,
+                    scopeRange: fullRange,
+                    declarationRange: declarationRange
+                ))
+            }
             return
         }
 
@@ -1101,6 +1187,14 @@ private extension SwiftFileSymbolIndex {
                 scopeRange: scope.bodyRange,
                 ownerQualifiedName: scope.qualifiedName
             ))
+            if kind == .variable, let typeName {
+                typedValues.append(TypedValue(
+                    name: name,
+                    typeName: typeName,
+                    scopeRange: scope.bodyRange,
+                    declarationRange: declarationRange
+                ))
+            }
         }
     }
 
@@ -1110,16 +1204,40 @@ private extension SwiftFileSymbolIndex {
         startLocation: Int
     ) {
         let scopeStart = min(max(startLocation, localScope.location), localScope.upperBound)
-        entries.append(Entry(
+        appendVariableEntry(
             name: maskedSource.substring(with: nameRange),
-            kind: .variable,
             role: .local,
             declarationRange: nameRange,
             scopeRange: NSRange(
                 location: scopeStart,
                 length: max(0, localScope.upperBound - scopeStart)
-            )
+            ),
+            typeName: nil
+        )
+    }
+
+    private mutating func appendVariableEntry(
+        name: String,
+        role: SymbolRole,
+        declarationRange: NSRange,
+        scopeRange: NSRange,
+        typeName: String?
+    ) {
+        entries.append(Entry(
+            name: name,
+            kind: .variable,
+            role: role,
+            declarationRange: declarationRange,
+            scopeRange: scopeRange
         ))
+        if let typeName {
+            typedValues.append(TypedValue(
+                name: name,
+                typeName: typeName,
+                scopeRange: scopeRange,
+                declarationRange: declarationRange
+            ))
+        }
     }
 }
 
@@ -1733,6 +1851,107 @@ private extension SwiftFileSymbolIndex {
         )
     }
 
+    func declaredTypeName(in range: NSRange) -> String? {
+        guard let colonLocation = topLevelColonLocation(in: range) else {
+            return nil
+        }
+        let typeRange = NSRange(
+            location: colonLocation + 1,
+            length: max(0, range.upperBound - colonLocation - 1)
+        )
+        let typeTextRange = declarationTypeHeadRange(in: typeRange)
+        guard typeTextRange.length > 0 else {
+            return nil
+        }
+
+        let typeText = maskedSource.substring(with: typeTextRange) as NSString
+        guard let match = Self.identifierRegex.firstMatch(
+            in: typeText as String,
+            range: NSRange(location: 0, length: typeText.length)
+        ) else {
+            return nil
+        }
+        return typeText.substring(with: match.range)
+    }
+
+    func topLevelColonLocation(in range: NSRange) -> Int? {
+        var parenDepth = 0
+        var bracketDepth = 0
+        var angleDepth = 0
+        var location = range.location
+        while location < range.upperBound {
+            let character = maskedSource.substring(with: NSRange(location: location, length: 1))
+            switch character {
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth = max(0, parenDepth - 1)
+            case "[":
+                bracketDepth += 1
+            case "]":
+                bracketDepth = max(0, bracketDepth - 1)
+            case "<":
+                angleDepth += 1
+            case ">":
+                angleDepth = max(0, angleDepth - 1)
+            case ":" where parenDepth == 0 && bracketDepth == 0 && angleDepth == 0:
+                return location
+            case "=", "{":
+                if parenDepth == 0 && bracketDepth == 0 && angleDepth == 0 {
+                    return nil
+                }
+            default:
+                break
+            }
+            location += 1
+        }
+        return nil
+    }
+
+    func declarationTypeHeadRange(in range: NSRange) -> NSRange {
+        var lowerBound = range.location
+        var upperBound = range.upperBound
+        while lowerBound < upperBound,
+              maskedSource.substring(with: NSRange(location: lowerBound, length: 1))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty {
+            lowerBound += 1
+        }
+
+        var scan = lowerBound
+        var angleDepth = 0
+        var parenDepth = 0
+        var bracketDepth = 0
+        while scan < upperBound {
+            let character = maskedSource.substring(with: NSRange(location: scan, length: 1))
+            switch character {
+            case "<":
+                angleDepth += 1
+            case ">":
+                angleDepth = max(0, angleDepth - 1)
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth = max(0, parenDepth - 1)
+            case "[":
+                bracketDepth += 1
+            case "]":
+                bracketDepth = max(0, bracketDepth - 1)
+            case "=", ",", "{", "\n", "\r":
+                if angleDepth == 0 && parenDepth == 0 && bracketDepth == 0 {
+                    upperBound = scan
+                    scan = range.upperBound
+                    continue
+                }
+            default:
+                break
+            }
+            scan += 1
+        }
+
+        return trimmedRange(NSRange(location: lowerBound, length: max(0, upperBound - lowerBound)))
+    }
+
     func closureParameterListRange(openBrace: Int, closeBrace: Int) -> NSRange? {
         let scanRange = NSRange(location: openBrace + 1, length: max(0, closeBrace - openBrace - 1))
         var location = scanRange.location
@@ -2056,7 +2275,7 @@ private extension SwiftFileSymbolIndex {
     static let identifierRegex = try! NSRegularExpression(pattern: identifierPattern)
 
     static let typeDeclarationRegex = try! NSRegularExpression(
-        pattern: #"\b(class|struct|enum|actor|protocol)\s+(\#(identifierPattern))"#
+        pattern: #"\b(class|struct|enum|actor|protocol|precedencegroup)\s+(\#(identifierPattern))"#
     )
 
     static let typeAliasRegex = try! NSRegularExpression(
