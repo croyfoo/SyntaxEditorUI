@@ -601,6 +601,11 @@ struct SyntaxEditorCoreTests {
         )
         #expect(
             SyntaxEditorHighlightTheme.semanticStyleKeys(
+                for: "xcode.syntax.markup.aside.kind"
+            )?.first == "editor.syntax.markup.aside.kind"
+        )
+        #expect(
+            SyntaxEditorHighlightTheme.semanticStyleKeys(
                 for: "xcode.syntax.definition.macro",
                 language: .swift
             )?.first == "editor.syntax.definition.macro"

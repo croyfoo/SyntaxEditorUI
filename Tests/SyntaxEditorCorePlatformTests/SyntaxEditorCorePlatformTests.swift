@@ -141,4 +141,22 @@ struct SyntaxEditorCorePlatformTests {
         #expect(SyntaxEditorHighlightTheme.color(for: .identifierFunction, in: theme) == theme.function)
         #expect(SyntaxEditorHighlightTheme.color(for: .plain, in: theme) == nil)
     }
+
+    @Test("SyntaxEditorFontDescriptor preserves fallback family when family is absent")
+    func syntaxEditorFontDescriptorPreservesFallbackFamily() {
+        let descriptor = SyntaxEditorFontDescriptor(family: nil, size: 13, weight: .bold)
+
+#if canImport(UIKit)
+        let fallback = UIFont(name: "Courier", size: 18)
+            ?? UIFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+        let font = descriptor.platformFont(fallback: fallback)
+#elseif canImport(AppKit)
+        let fallback = NSFont(name: "Courier", size: 18)
+            ?? NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+        let font = descriptor.platformFont(fallback: fallback)
+#endif
+
+        #expect(font.familyName == fallback.familyName)
+        #expect(abs(font.pointSize - 13) < 0.01)
+    }
 }

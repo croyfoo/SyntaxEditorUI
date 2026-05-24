@@ -311,17 +311,18 @@ package struct SyntaxEditorFontDescriptor: Hashable, Sendable {
     package func platformFont(fallback: UIFont) -> UIFont {
         if let family,
            let font = UIFont(name: family, size: size) {
-            return font
+            return font.applying(weight: weight)
         }
-        return UIFont.monospacedSystemFont(ofSize: size, weight: weight.uiFontWeight)
+        return UIFont(descriptor: fallback.fontDescriptor, size: size).applying(weight: weight)
     }
 #elseif canImport(AppKit)
     package func platformFont(fallback: NSFont) -> NSFont {
         if let family,
            let font = NSFont(name: family, size: size) {
-            return font
+            return font.applying(weight: weight)
         }
-        return NSFont.monospacedSystemFont(ofSize: size, weight: weight.nsFontWeight)
+        return NSFont(descriptor: fallback.fontDescriptor, size: size)?.applying(weight: weight)
+            ?? fallback
     }
 #endif
 }
@@ -367,6 +368,30 @@ package enum SyntaxEditorFontWeight: String, Sendable {
     }
 #endif
 }
+
+#if canImport(UIKit)
+private extension UIFont {
+    func applying(weight: SyntaxEditorFontWeight) -> UIFont {
+        let descriptor = fontDescriptor.addingAttributes([
+            .traits: [
+                UIFontDescriptor.TraitKey.weight: weight.uiFontWeight.rawValue,
+            ],
+        ])
+        return UIFont(descriptor: descriptor, size: pointSize)
+    }
+}
+#elseif canImport(AppKit)
+private extension NSFont {
+    func applying(weight: SyntaxEditorFontWeight) -> NSFont {
+        let descriptor = fontDescriptor.addingAttributes([
+            .traits: [
+                NSFontDescriptor.TraitKey.weight: weight.nsFontWeight.rawValue,
+            ],
+        ])
+        return NSFont(descriptor: descriptor, size: pointSize) ?? self
+    }
+}
+#endif
 
 package enum SyntaxEditorHighlightTheme {
     package static func color(
@@ -444,19 +469,18 @@ package enum SyntaxEditorHighlightTheme {
         _ syntaxID: EditorSourceSyntaxID,
         language: SyntaxLanguage?
     ) -> Bool {
-        BuiltInEditorColorThemeDefinitions.containsStyle(for: syntaxID)
-            || EditorSourceSyntaxCategory.category(for: syntaxID) != nil
+        EditorSourceSyntaxCategory.category(for: syntaxID) != nil
             || syntaxID == .plain
             || syntaxID == .identifier
+            || BuiltInEditorColorThemeDefinitions.containsStyle(for: syntaxID)
     }
 }
 
 private extension BuiltInEditorColorThemeDefinitions {
+    static let allStyleKeys: Set<String> = Set(all.values.flatMap { $0.styles.keys })
+
     static func containsStyle(for syntaxID: EditorSourceSyntaxID) -> Bool {
-        let key = syntaxID.styleKey
-        return all.values.contains { definition in
-            definition.styles[key] != nil
-        }
+        allStyleKeys.contains(syntaxID.styleKey)
     }
 }
 

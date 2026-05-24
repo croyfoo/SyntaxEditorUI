@@ -2059,7 +2059,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "editor.syntax.swift.keyword"
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
                 ),
             ],
             updateTokens: [],
@@ -2090,7 +2090,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "editor.syntax.swift.keyword"
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
                 ),
             ],
             updateTokens: [],
@@ -5215,7 +5215,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "editor.syntax.swift.keyword"
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
                 ),
             ],
             updateTokens: [],
@@ -5245,7 +5245,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    rawCaptureName: "editor.syntax.swift.keyword"
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
                 ),
             ],
             updateTokens: [],
