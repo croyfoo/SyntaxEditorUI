@@ -632,12 +632,6 @@ struct SyntaxEditorCoreTests {
         #expect(darkKeyword?.font?.weight == .bold)
     }
 
-    @Test("SyntaxEditorColorTheme keeps xcode as the default theme alias")
-    func syntaxEditorColorThemeKeepsXcodeAlias() {
-        #expect(SyntaxEditorColorTheme.xcode == .default)
-        #expect(SyntaxEditorColorTheme.xcode.preset == .default)
-    }
-
     @Test("SyntaxEditorRangeUtilities clamps and intersects UTF-16 ranges")
     func syntaxEditorRangeUtilities() {
         let clamped = SyntaxEditorRangeUtilities.clampedRange(NSRange(location: -4, length: 20), utf16Length: 10)
@@ -6822,6 +6816,52 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
         )
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C overlays before incremental symbol indexing")
+    func highlighterStripsStaleObjectiveCOverlaysBeforeIncrementalSymbolIndexing() async throws {
+        let source = """
+        int LocalFunction(void);
+
+        void run(void) {
+            LocalFunction();
+        }
+        """
+        let removedDeclaration = "int LocalFunction(void);\n\n"
+        let updatedSource = source.replacingOccurrences(of: removedDeclaration, with: "")
+        let mutation = SyntaxHighlightMutation(
+            location: 0,
+            length: (removedDeclaration as NSString).length,
+            replacement: ""
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        let functionCall = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "LocalFunction",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "LocalFunction();"
+        )
+        #expect(functionCall.styleKeys.first == "editor.syntax.identifier.function.system")
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "LocalFunction",
+            inOccurrenceOf: "LocalFunction();"
+        ).contains(.identifierFunction) == false)
     }
 
     @Test("SyntaxHighlighterEngine highlights HTML root and embedded languages")

@@ -7,17 +7,17 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     ) -> [SyntaxHighlightToken] {
         let nsSource = source as NSString
         guard nsSource.length > 0 else {
-            return tokens.filter { !isObjectiveCSemanticOverlayToken($0) }
+            return objectiveCBaseTokens(from: tokens, source: nsSource)
         }
 
-        let baseTokens = tokens.filter { !isObjectiveCSemanticOverlayToken($0) }
-        let index = ObjectiveCFileSymbolIndex(source: nsSource, tokens: tokens)
-        let overlayTokens = semanticTokens(from: tokens, source: nsSource, index: index)
+        let baseTokens = objectiveCBaseTokens(from: tokens, source: nsSource)
+        let index = ObjectiveCFileSymbolIndex(source: nsSource, tokens: baseTokens)
+        let overlayTokens = semanticTokens(from: baseTokens, source: nsSource, index: index)
         guard overlayTokens.isEmpty == false else {
             return baseTokens
         }
 
-        return deduplicated((baseTokens + overlayTokens).sorted(by: SyntaxHighlightTokenOrdering.displayOrder))
+        return deduplicated(mergedTokens(baseTokens: baseTokens, overlayTokens: overlayTokens))
     }
 
     private static func semanticTokens(
@@ -137,6 +137,21 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         return character == "("
     }
 
+    private static func looksLikeCFunctionDeclarationPrefix(before range: NSRange, in source: NSString) -> Bool {
+        let prefix = linePrefix(before: range, in: source)
+            .trimmingCharacters(in: .whitespaces)
+        guard prefix.isEmpty == false else {
+            return false
+        }
+        if prefix == "return" || prefix.hasSuffix("=") || prefix.hasSuffix("(") || prefix.hasSuffix(",") {
+            return false
+        }
+        if prefix.hasSuffix(".") || prefix.hasSuffix("->") || prefix.hasSuffix("[") {
+            return false
+        }
+        return true
+    }
+
     private static func isPropertyDeclarationName(_ range: NSRange, text: String, in source: NSString) -> Bool {
         let lineRange = source.lineRange(for: NSRange(location: range.location, length: 0))
         let line = source.substring(with: lineRange) as NSString
@@ -227,26 +242,78 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         )
     }
 
-    private static func isObjectiveCSemanticOverlayToken(_ token: SyntaxHighlightToken) -> Bool {
+    private static func objectiveCBaseTokens(
+        from tokens: [SyntaxHighlightToken],
+        source: NSString
+    ) -> [SyntaxHighlightToken] {
+        var syntaxIDsByRange: [String: Set<EditorSourceSyntaxID>] = [:]
+        for token in tokens where token.language == .objectiveC || token.language == nil {
+            syntaxIDsByRange[rangeKey(token.range), default: []].insert(token.syntaxID)
+        }
+
+        return tokens.filter { token in
+            !isObjectiveCSemanticOverlayToken(
+                token,
+                syntaxIDsAtSameRange: syntaxIDsByRange[rangeKey(token.range)] ?? [],
+                source: source
+            )
+        }
+    }
+
+    private static func mergedTokens(
+        baseTokens: [SyntaxHighlightToken],
+        overlayTokens: [SyntaxHighlightToken]
+    ) -> [SyntaxHighlightToken] {
+        let annotatedTokens = baseTokens.map { (token: $0, isOverlay: false) }
+            + overlayTokens.map { (token: $0, isOverlay: true) }
+
+        return annotatedTokens.sorted { lhs, rhs in
+            if lhs.token.range.location != rhs.token.range.location {
+                return lhs.token.range.location < rhs.token.range.location
+            }
+            if lhs.token.range.length != rhs.token.range.length {
+                return lhs.token.range.length > rhs.token.range.length
+            }
+            if lhs.isOverlay != rhs.isOverlay {
+                return !lhs.isOverlay && rhs.isOverlay
+            }
+            return SyntaxHighlightTokenOrdering.displayOrder(lhs.token, rhs.token)
+        }.map(\.token)
+    }
+
+    private static func isObjectiveCSemanticOverlayToken(
+        _ token: SyntaxHighlightToken,
+        syntaxIDsAtSameRange: Set<EditorSourceSyntaxID>,
+        source: NSString
+    ) -> Bool {
         guard token.language == .objectiveC || token.language == nil else {
             return false
         }
         switch token.syntaxID {
         case .declarationType,
              .declarationOther,
-             .identifierType,
-             .identifierTypeSystem,
-             .identifierClass,
-             .identifierClassSystem,
-             .identifierFunction,
-             .identifierFunctionSystem,
-             .identifierMacro,
-             .identifierMacroSystem,
-             .identifierConstant,
-             .identifierConstantSystem,
-             .identifierVariable,
-             .identifierVariableSystem:
+             .identifierConstantSystem:
             return true
+        case .identifierType:
+            if syntaxIDsAtSameRange.contains(.identifierTypeSystem) {
+                return true
+            }
+            guard token.range.upperBound <= source.length else {
+                return false
+            }
+            let text = source.substring(with: token.range)
+            return syntaxIDsAtSameRange.contains(.identifier)
+                && isMessageReceiverName(token.range, in: source)
+                && !isTypeDeclarationName(token.range, text: text, in: source)
+        case .identifierFunction:
+            if syntaxIDsAtSameRange.contains(.identifierFunctionSystem) {
+                return true
+            }
+            return token.range.upperBound <= source.length
+                && isCFunctionCallName(token.range, in: source)
+                && !looksLikeCFunctionDeclarationPrefix(before: token.range, in: source)
+        case .identifierVariable:
+            return syntaxIDsAtSameRange.contains(.identifierVariableSystem)
         default:
             return false
         }
@@ -265,11 +332,15 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         unique.reserveCapacity(tokens.count)
 
         for token in tokens {
-            let key = "\(token.range.location):\(token.range.length):\(token.rawCaptureName)"
+            let key = "\(rangeKey(token.range)):\(token.rawCaptureName)"
             guard seen.insert(key).inserted else { continue }
             unique.append(token)
         }
         return unique
+    }
+
+    private static func rangeKey(_ range: NSRange) -> String {
+        "\(range.location):\(range.length)"
     }
 
     private static let objectiveCIdentifierRegex = try! NSRegularExpression(

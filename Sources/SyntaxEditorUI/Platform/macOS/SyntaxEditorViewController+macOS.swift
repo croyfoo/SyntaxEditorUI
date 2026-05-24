@@ -1160,8 +1160,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             guard intersection.length > 0 else { continue }
 
             let attributes = styleAttributes(for: token.syntaxID, language: token.language)
-            guard !attributes.isEmpty else { continue }
-            textStorage.addAttributes(attributes, range: intersection)
+            textStorage.addAttributes(attributes.isEmpty ? baseAttributes : attributes, range: intersection)
         }
     }
 

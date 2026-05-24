@@ -1618,8 +1618,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             guard intersection.length > 0 else { continue }
 
             let attributes = styleAttributes(for: token.syntaxID, language: token.language)
-            guard !attributes.isEmpty else { continue }
-            storage.addAttributes(attributes, range: intersection)
+            storage.addAttributes(attributes.isEmpty ? baseAttributes : attributes, range: intersection)
         }
     }
 
