@@ -1,11 +1,15 @@
 #import "SourceModelBridge.h"
+#import <TargetConditionals.h>
+
+static NSString *const SourceModelBridgeErrorDomain = @"SourceModelBridge";
+static NSUInteger const SourceModelTokenBase = 0x20000;
+
+#if TARGET_OS_OSX
+
 #import <AppKit/AppKit.h>
 #import <dlfcn.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
-
-static NSString *const SourceModelBridgeErrorDomain = @"SourceModelBridge";
-static NSUInteger const SourceModelTokenBase = 0x20000;
 
 @interface SourceModelBufferProvider : NSObject
 @property(nonatomic, copy) NSString *text;
@@ -1068,3 +1072,61 @@ static NSDictionary *ColorDictionary(NSColor *color)
 }
 
 @end
+
+#else
+
+static void SetUnsupportedPlatformError(NSError **error)
+{
+    if (error != nil) {
+        *error = [NSError errorWithDomain:SourceModelBridgeErrorDomain
+                                     code:1
+                                 userInfo:@{
+                                     NSLocalizedDescriptionKey: @"SourceModelBridge is only available on macOS.",
+                                 }];
+    }
+}
+
+@implementation SourceModelBridge
+
++ (nullable NSDictionary<NSString *, id> *)snapshotForFileAtPath:(NSString *)filePath
+                                                        language:(nullable NSString *)languageInput
+                                                    toolchainApp:(NSString *)toolchainAppPath
+                                                     includeText:(BOOL)includeText
+                                                           error:(NSError **)error
+{
+    SetUnsupportedPlatformError(error);
+    return nil;
+}
+
++ (nullable NSDictionary<NSString *, id> *)renderedSnapshotForFileAtPath:(NSString *)filePath
+                                                                language:(nullable NSString *)languageInput
+                                                            toolchainApp:(NSString *)toolchainAppPath
+                                                               themeName:(nullable NSString *)themeName
+                                                             includeText:(BOOL)includeText
+                                                                   error:(NSError **)error
+{
+    SetUnsupportedPlatformError(error);
+    return nil;
+}
+
++ (nullable NSDictionary<NSString *, id> *)languageDiagnosticsForFileAtPath:(NSString *)filePath
+                                                                   language:(nullable NSString *)languageInput
+                                                               toolchainApp:(NSString *)toolchainAppPath
+                                                                      error:(NSError **)error
+{
+    SetUnsupportedPlatformError(error);
+    return nil;
+}
+
++ (nullable NSDictionary<NSString *, id> *)sourceEditorViewDiagnosticsForFileAtPath:(NSString *)filePath
+                                                                           language:(nullable NSString *)languageInput
+                                                                       toolchainApp:(NSString *)toolchainAppPath
+                                                                              error:(NSError **)error
+{
+    SetUnsupportedPlatformError(error);
+    return nil;
+}
+
+@end
+
+#endif

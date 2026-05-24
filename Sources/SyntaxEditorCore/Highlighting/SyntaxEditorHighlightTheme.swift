@@ -125,6 +125,8 @@ public struct SyntaxEditorColorTheme: Identifiable, Hashable {
     public static var civic: SyntaxEditorColorTheme { preset(.civic) }
     public static var classic: SyntaxEditorColorTheme { preset(.classic) }
     public static var `default`: SyntaxEditorColorTheme { preset(.default) }
+    @available(*, unavailable, renamed: "default")
+    public static var xcode: SyntaxEditorColorTheme { .default }
     public static var dusk: SyntaxEditorColorTheme { preset(.dusk) }
     public static var highContrast: SyntaxEditorColorTheme { preset(.highContrast) }
     public static var lowKey: SyntaxEditorColorTheme { preset(.lowKey) }
