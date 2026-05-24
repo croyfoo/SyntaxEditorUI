@@ -632,6 +632,12 @@ struct SyntaxEditorCoreTests {
         #expect(darkKeyword?.font?.weight == .bold)
     }
 
+    @Test("SyntaxEditorColorTheme keeps xcode as the default theme alias")
+    func syntaxEditorColorThemeKeepsXcodeAlias() {
+        #expect(SyntaxEditorColorTheme.xcode == .default)
+        #expect(SyntaxEditorColorTheme.xcode.preset == .default)
+    }
+
     @Test("SyntaxEditorRangeUtilities clamps and intersects UTF-16 ranges")
     func syntaxEditorRangeUtilities() {
         let clamped = SyntaxEditorRangeUtilities.clampedRange(NSRange(location: -4, length: 20), utf16Length: 10)
@@ -5744,6 +5750,48 @@ struct SyntaxHighlighterEngineTests {
             inOccurrenceOf: "return value"
         )
         #expect(valueReference.styleKeys.first == "editor.syntax.identifier.variable")
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Swift system macro overlays after local macro declarations")
+    func highlighterStripsStaleSwiftSystemMacroOverlaysAfterLocalMacroDeclarations() async throws {
+        let source = """
+        let expanded = #ExternalMacro()
+        """
+        let prefix = """
+        macro ExternalMacro() = #externalMacro(module: "FixtureMacros", type: "ExternalMacro")
+
+        """
+        let updatedSource = prefix + source
+        let mutation = SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
+        let macroInvocation = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "ExternalMacro",
+            syntaxID: .identifierMacro,
+            language: .swift,
+            inOccurrenceOf: "#ExternalMacro()"
+        )
+        #expect(macroInvocation.styleKeys.first == "editor.syntax.identifier.macro")
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "ExternalMacro",
+            inOccurrenceOf: "#ExternalMacro()"
+        ).contains(.identifierMacroSystem) == false)
     }
 
     @Test("SyntaxHighlighterEngine keeps Swift comment overlays in large comment ranges")

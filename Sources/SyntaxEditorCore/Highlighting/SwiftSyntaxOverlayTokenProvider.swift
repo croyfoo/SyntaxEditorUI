@@ -9,7 +9,7 @@ enum SwiftSyntaxOverlayTokenProvider {
         refreshRange: NSRange? = nil
     ) -> [SyntaxHighlightToken] {
         let nsSource = source as NSString
-        let baseTokens = tokens.filter { !isSwiftSemanticOverlayToken($0) }
+        let baseTokens = tokens.filter { !isSwiftSemanticOverlayToken($0, existingTokens: tokens, source: nsSource) }
         let targetRange = refreshRange.map {
             lineEnvelopeRange(containing: $0, in: nsSource)
         }
@@ -619,7 +619,11 @@ enum SwiftSyntaxOverlayTokenProvider {
         )?.range == NSRange(location: 0, length: (text as NSString).length)
     }
 
-    private static func isSwiftSemanticOverlayToken(_ token: SyntaxHighlightToken) -> Bool {
+    private static func isSwiftSemanticOverlayToken(
+        _ token: SyntaxHighlightToken,
+        existingTokens: [SyntaxHighlightToken],
+        source: NSString
+    ) -> Bool {
         guard token.language == .swift || token.language == nil else {
             return false
         }
@@ -636,8 +640,37 @@ enum SwiftSyntaxOverlayTokenProvider {
              .identifierVariable,
              .identifierVariableSystem:
             return true
+        case .identifierMacroSystem:
+            return isGeneratedSystemMacroOverlayToken(token, existingTokens: existingTokens, source: source)
         default:
             return false
+        }
+    }
+
+    private static func isGeneratedSystemMacroOverlayToken(
+        _ token: SyntaxHighlightToken,
+        existingTokens: [SyntaxHighlightToken],
+        source: NSString
+    ) -> Bool {
+        guard token.range.upperBound <= source.length else {
+            return false
+        }
+
+        let tokenText = source.substring(with: token.range)
+        if tokenText == "#" {
+            return existingTokens.contains {
+                $0.syntaxID == .identifierMacroSystem
+                    && $0.range.location == token.range.upperBound
+                    && $0.range.length > 0
+            }
+        }
+
+        return existingTokens.contains {
+            $0.syntaxID == .identifierMacroSystem
+                && $0.range.location + $0.range.length == token.range.location
+                && $0.range.length == 1
+                && $0.range.upperBound <= source.length
+                && source.substring(with: $0.range) == "#"
         }
     }
 
