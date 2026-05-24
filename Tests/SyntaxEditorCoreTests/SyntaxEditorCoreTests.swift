@@ -6500,9 +6500,19 @@ struct SyntaxHighlighterEngineTests {
         @end
 
         @implementation Sample
+        - (instancetype)init
+        {
+            self = [super init];
+            if (self == nil) {
+                return nil;
+            }
+            return self;
+        }
+
         - (NSString *)greetingFor:(NSString *)value {
             // comment
             self.name = ReferenceLanguageAliases()[@"objc"] ?: value;
+            NSUInteger count = self.name.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
         }
         @end
@@ -6514,9 +6524,7 @@ struct SyntaxHighlighterEngineTests {
         let defineRange = nsSource.range(of: "#define")
         let macroNameRange = nsSource.range(of: "ReferenceLog")
         let debugMacroRange = nsSource.range(of: "DEBUG")
-        let visibleSampleRange = nsSource.range(of: "VisibleSample")
         let interfaceRange = nsSource.range(of: "@interface")
-        let methodRange = nsSource.range(of: "greetingFor")
         let selfRange = nsSource.range(of: "self")
         let propertyAttributeRange = nsSource.range(of: "nonatomic")
         let dictionaryStringRange = nsSource.range(of: "@\"objc\"")
@@ -6531,19 +6539,19 @@ struct SyntaxHighlighterEngineTests {
             tokenIntersects($0, range: importRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         #expect(tokens.contains {
-            tokenIntersects($0, range: defineRange, syntaxID: "preprocessor.keyword", language: .objectiveC)
+            tokenIntersects($0, range: defineRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         #expect(tokens.contains {
-            tokenIntersects($0, range: macroNameRange, syntaxID: "preprocessor.define", language: .objectiveC)
+            tokenIntersects($0, range: macroNameRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         #expect(tokens.contains {
-            tokenIntersects($0, range: debugMacroRange, syntaxID: "preprocessor.identifier", language: .objectiveC)
+            tokenIntersects($0, range: debugMacroRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         let defineSnapshot = try semanticSnapshot(
             in: tokens,
             source: source,
             text: "#define",
-            syntaxID: "preprocessor.keyword",
+            syntaxID: .preprocessor,
             language: .objectiveC,
             inOccurrenceOf: "#define ReferenceLog"
         )
@@ -6562,15 +6570,113 @@ struct SyntaxHighlighterEngineTests {
         #expect(defineSnapshot.resolvedStyle.foreground == preprocessorStyle.foreground)
         #expect(defineSnapshot.resolvedStyle.foreground != keywordStyle.foreground)
         #expect(tokens.contains { tokenIntersects($0, range: defineRange, syntaxID: .keyword, language: .objectiveC) } == false)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "format",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "#define ReferenceLog(format"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "...",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "#define ReferenceLog(format, ...)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "instancetype",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "- (instancetype)init"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "nil",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "return nil;"
+        )
         #expect(tokens.contains {
             tokenIntersects($0, range: interfaceRange, syntaxID: .keyword, language: .objectiveC)
         })
-        #expect(tokens.contains {
-            tokenIntersects($0, range: visibleSampleRange, syntaxID: .identifier, language: .objectiveC)
-        })
-        #expect(tokens.contains {
-            tokenIntersects($0, range: methodRange, syntaxID: .identifier, language: .objectiveC)
-        })
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "VisibleSample",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "@interface VisibleSample"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSObject",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "@interface VisibleSample : NSObject"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "greetingFor",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "- (NSString *)greetingFor"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceLanguageAliases",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "ReferenceLanguageAliases(void)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceLanguageAliases",
+            syntaxID: .identifierFunction,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name = ReferenceLanguageAliases()"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSSelectorFromString",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSSelectorFromString(selectorName)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name ="
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "stringWithFormat",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "stringWithFormat:@\"Hello"
+        )
         #expect(tokens.contains {
             tokenIntersects($0, range: selfRange, syntaxID: .keyword, language: .objectiveC)
         })
@@ -6595,6 +6701,79 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.contains {
             tokenIntersects($0, range: stringRange, syntaxID: .string, language: .objectiveC)
         })
+    }
+
+    @Test("SyntaxHighlighterEngine aligns focused Objective-C reference tokens")
+    func highlighterAlignsObjectiveCReferenceTokens() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = try referenceSampleText(named: "Reference.m")
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        #expect(tokens.isEmpty == false)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "text",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property(nonatomic, copy) NSString *text;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSMethodSignature",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "[NSMethodSignature signatureWithObjCTypes:\"v@:{_NSRange=QQ}\"]"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "objc_msgSend",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return ((id (*)(id, SEL))objc_msgSend)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "_Nullable",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "ReferenceCallBoolError(id object, NSString *selectorName, NSError *_Nullable *_Nullable error)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "{",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "}",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSLocalizedDescriptionKey",
+            syntaxID: .identifierConstantSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
+        )
     }
 
     @Test("SyntaxHighlighterEngine highlights HTML root and embedded languages")

@@ -31,9 +31,9 @@
 ((identifier) @editor.syntax.objectivec.keyword
   (#any-of? @editor.syntax.objectivec.keyword
     "BOOL"
-    "Class"
     "FALSE"
     "IMP"
+    "Nil"
     "NO"
     "NULL"
     "SEL"
@@ -45,12 +45,21 @@
     "id"
     "inout"
     "instancetype"
+    "nil"
     "nonnull"
     "nullable"
     "null_unspecified"
     "out"
     "self"
     "super"))
+
+((type_identifier) @editor.syntax.objectivec.keyword
+  (#any-of? @editor.syntax.objectivec.keyword
+    "BOOL"
+    "IMP"
+    "SEL"
+    "id"
+    "instancetype"))
 
 ; BEGIN GENERATED EDITOR SYNTAX WORDS: objectivec-preprocessor-keywords
 [
@@ -62,10 +71,10 @@
   "#ifdef"
   "#ifndef"
   "#undef"
-] @editor.syntax.objectivec.preprocessor.keyword
+] @editor.syntax.objectivec.preprocessor
 ; END GENERATED EDITOR SYNTAX WORDS: objectivec-preprocessor-keywords
 
-(preproc_directive) @editor.syntax.objectivec.preprocessor.keyword
+(preproc_directive) @editor.syntax.objectivec.preprocessor
 
 "--" @editor.syntax.objectivec.plain
 "-" @editor.syntax.objectivec.plain
@@ -92,11 +101,11 @@
 
 (null) @editor.syntax.objectivec.keyword
 (number_literal) @editor.syntax.objectivec.number
-(char_literal) @editor.syntax.objectivec.number
+(char_literal) @editor.syntax.objectivec.character
 
-(field_identifier) @editor.syntax.objectivec.identifier
+(field_identifier) @editor.syntax.objectivec.identifier.variable
 (statement_identifier) @editor.syntax.objectivec.identifier
-(type_identifier) @editor.syntax.objectivec.identifier
+(type_identifier) @editor.syntax.objectivec.identifier.type.system
 (primitive_type) @editor.syntax.objectivec.keyword
 (sized_type_specifier) @editor.syntax.objectivec.keyword
 (storage_class_specifier) @editor.syntax.objectivec.keyword
@@ -116,18 +125,22 @@
 (preproc_linemarker) @editor.syntax.objectivec.preprocessor
 
 (preproc_def
-  name: (identifier) @editor.syntax.objectivec.preprocessor.define)
+  name: (identifier) @editor.syntax.objectivec.preprocessor)
 (preproc_function_def
-  name: (identifier) @editor.syntax.objectivec.preprocessor.define
+  name: (identifier) @editor.syntax.objectivec.preprocessor
   parameters: (preproc_params) @editor.syntax.objectivec.preprocessor)
+(preproc_params
+  (identifier) @editor.syntax.objectivec.preprocessor)
+(preproc_params
+  "..." @editor.syntax.objectivec.preprocessor)
 (preproc_undef
-  name: (_) @editor.syntax.objectivec.preprocessor.identifier) @editor.syntax.objectivec.preprocessor
+  name: (_) @editor.syntax.objectivec.preprocessor) @editor.syntax.objectivec.preprocessor
 (preproc_ifdef
-  name: (identifier) @editor.syntax.objectivec.preprocessor.identifier)
+  name: (identifier) @editor.syntax.objectivec.preprocessor)
 (preproc_elifdef
-  name: (identifier) @editor.syntax.objectivec.preprocessor.identifier)
+  name: (identifier) @editor.syntax.objectivec.preprocessor)
 (preproc_defined
-  (identifier) @editor.syntax.objectivec.preprocessor.identifier)
+  (identifier) @editor.syntax.objectivec.preprocessor)
 
 ; BEGIN GENERATED EDITOR SYNTAX WORDS: objectivec-attributes
 [
@@ -137,6 +150,7 @@
   "@defs"
   "@dynamic"
   "@end"
+  "@encode"
   "@finally"
   "@implementation"
   "@interface"
@@ -215,13 +229,29 @@
   "asm"
 ] @editor.syntax.objectivec.identifier
 
-(method_definition (identifier) @editor.syntax.objectivec.identifier)
+(function_declarator
+  declarator: (identifier) @editor.syntax.objectivec.identifier.function)
 
-(method_declaration (identifier) @editor.syntax.objectivec.identifier)
+(function_declarator
+  declarator: (pointer_declarator
+                declarator: (identifier) @editor.syntax.objectivec.identifier.function))
 
-(method_identifier (identifier)? @editor.syntax.objectivec.identifier ":" @editor.syntax.objectivec.plain (identifier)? @editor.syntax.objectivec.identifier)
+(call_expression
+  function: (identifier) @editor.syntax.objectivec.identifier.function.system)
 
-(message_expression method: (identifier) @editor.syntax.objectivec.identifier)
+(method_definition (identifier) @editor.syntax.objectivec.identifier.function)
+
+(method_declaration (identifier) @editor.syntax.objectivec.identifier.function)
+
+(method_identifier (identifier)? @editor.syntax.objectivec.identifier.function ":" @editor.syntax.objectivec.plain (identifier)? @editor.syntax.objectivec.identifier.variable)
+
+(message_expression method: (identifier) @editor.syntax.objectivec.identifier.function.system)
+
+(message_expression
+  receiver: (identifier) @editor.syntax.objectivec.identifier.type.system)
+
+((identifier) @editor.syntax.objectivec.identifier.function.system
+  (#eq? @editor.syntax.objectivec.identifier.function.system "objc_msgSend"))
 
 ; Attributes
 
@@ -262,7 +292,7 @@
     "__unsafe_unretained"
     "__unused"
     "__weak"
-  ]) @editor.syntax.objectivec.preprocessor
+  ]) @editor.syntax.objectivec.keyword
 
 [ "__real" "__imag" ] @editor.syntax.objectivec.preprocessor
 
@@ -271,15 +301,15 @@
 
 ; Types
 
-(class_declaration (identifier) @editor.syntax.objectivec.identifier)
+(class_declaration (identifier) @editor.syntax.objectivec.identifier.type)
 
-(class_interface "@interface" . (identifier) @editor.syntax.objectivec.identifier superclass: _? @editor.syntax.objectivec.identifier category: _? @editor.syntax.objectivec.identifier)
+(class_interface "@interface" . (identifier) @editor.syntax.objectivec.identifier.type superclass: _? @editor.syntax.objectivec.identifier.type.system category: _? @editor.syntax.objectivec.identifier.type)
 
-(class_implementation "@implementation" . (identifier) @editor.syntax.objectivec.identifier superclass: _? @editor.syntax.objectivec.identifier category: _? @editor.syntax.objectivec.identifier)
+(class_implementation "@implementation" . (identifier) @editor.syntax.objectivec.identifier.type superclass: _? @editor.syntax.objectivec.identifier.type.system category: _? @editor.syntax.objectivec.identifier.type)
 
-(protocol_forward_declaration (identifier) @editor.syntax.objectivec.identifier)
+(protocol_forward_declaration (identifier) @editor.syntax.objectivec.identifier.type)
 
-(protocol_reference_list (identifier) @editor.syntax.objectivec.identifier)
+(protocol_reference_list (identifier) @editor.syntax.objectivec.identifier.type.system)
 
 ; Constants
 
@@ -291,17 +321,51 @@
 
 (property_implementation "@synthesize" (identifier) @editor.syntax.objectivec.identifier)
 
+(property_declaration
+  (struct_declaration
+    (struct_declarator
+      (identifier) @editor.syntax.objectivec.identifier.variable)))
+
+(property_declaration
+  (struct_declaration
+    (struct_declarator
+      (pointer_declarator
+        declarator: (identifier) @editor.syntax.objectivec.identifier.variable))))
+
 ; Parameters
 
-(method_parameter ":" @editor.syntax.objectivec.plain (identifier) @editor.syntax.objectivec.identifier)
+(method_parameter ":" @editor.syntax.objectivec.plain (identifier) @editor.syntax.objectivec.identifier.variable)
 
-(method_parameter declarator: (identifier) @editor.syntax.objectivec.identifier)
+(method_parameter declarator: (identifier) @editor.syntax.objectivec.identifier.variable)
 
 (parameter_declaration
   declarator: (function_declarator
                 declarator: (parenthesized_declarator
                               (block_pointer_declarator
-                                declarator: (identifier) @editor.syntax.objectivec.identifier))))
+                                declarator: (identifier) @editor.syntax.objectivec.identifier.variable))))
+
+(parameter_declaration
+  declarator: (identifier) @editor.syntax.objectivec.identifier.variable)
+
+(parameter_declaration
+  declarator: (pointer_declarator
+                declarator: (identifier) @editor.syntax.objectivec.identifier.variable))
+
+(declaration
+  declarator: (identifier) @editor.syntax.objectivec.identifier.variable)
+
+(declaration
+  declarator: (pointer_declarator
+                declarator: (identifier) @editor.syntax.objectivec.identifier.variable))
+
+(declaration
+  declarator: (init_declarator
+                declarator: (identifier) @editor.syntax.objectivec.identifier.variable))
+
+(declaration
+  declarator: (init_declarator
+                declarator: (pointer_declarator
+                              declarator: (identifier) @editor.syntax.objectivec.identifier.variable)))
 
 "..." @editor.syntax.objectivec.plain
 
@@ -316,5 +380,21 @@
 (platform) @editor.syntax.objectivec.string
 
 (version_number) @editor.syntax.objectivec.url @editor.syntax.objectivec.number
+
+(dictionary_literal
+  "@" @editor.syntax.objectivec.number
+  "{" @editor.syntax.objectivec.number
+  "}" @editor.syntax.objectivec.number)
+
+(array_literal
+  "@" @editor.syntax.objectivec.number
+  "[" @editor.syntax.objectivec.number
+  "]" @editor.syntax.objectivec.number)
+
+(encode_expression
+  "@encode" @editor.syntax.objectivec.keyword)
+
+(selector_expression
+  "@selector" @editor.syntax.objectivec.keyword)
 
 [ "<" ">" ] @editor.syntax.objectivec.plain

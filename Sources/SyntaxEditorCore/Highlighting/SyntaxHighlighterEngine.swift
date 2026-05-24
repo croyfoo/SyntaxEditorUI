@@ -244,7 +244,7 @@ private final class SyntaxHighlightSession {
             layer.replaceContent(with: layeredSource)
             self.layer = layer
             let highlightTokens = highlightTokens(in: fullRange(for: layeredSource), source: layeredSource)
-            let classifiedTokens = swiftClassifiedTokensIfNeeded(
+            let classifiedTokens = semanticClassifiedTokensIfNeeded(
                 highlightTokens,
                 source: layeredSource
             )
@@ -351,12 +351,12 @@ private final class SyntaxHighlightSession {
             nextSourceUTF16Length: nextSourceLength
         )
         let refreshRange = mergedHighlight.refreshRange
-        let classifiedTokens = swiftClassifiedTokensIfNeeded(
+        let classifiedTokens = semanticClassifiedTokensIfNeeded(
             mergedHighlight.tokens,
             source: nextLayeredSource,
             refreshRange: refreshRange
         )
-        let resultRefreshRange = language == .swift
+        let resultRefreshRange = language == .swift || language == .objectiveC
             ? fullRange(for: nextLayeredSource)
             : refreshRange
 
@@ -561,20 +561,26 @@ private extension SyntaxHighlightSession {
         return ((before + replacementTokens + after).sorted(by: SyntaxHighlightTokenOrdering.displayOrder), refreshRange)
     }
 
-    func swiftClassifiedTokensIfNeeded(
+    func semanticClassifiedTokensIfNeeded(
         _ tokens: [SyntaxHighlightToken],
         source: String,
         refreshRange: NSRange? = nil
     ) -> [SyntaxHighlightToken] {
-        guard language == .swift else {
+        switch language {
+        case .swift:
+            return SwiftSyntaxOverlayTokenProvider.mergingOverlayTokens(
+                tokens: tokens,
+                source: source,
+                refreshRange: refreshRange
+            )
+        case .objectiveC:
+            return ObjectiveCSyntaxOverlayTokenProvider.mergingOverlayTokens(
+                tokens: tokens,
+                source: source
+            )
+        default:
             return tokens
         }
-
-        return SwiftSyntaxOverlayTokenProvider.mergingOverlayTokens(
-            tokens: tokens,
-            source: source,
-            refreshRange: refreshRange
-        )
     }
 
     static func oldRange(
