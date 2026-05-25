@@ -834,10 +834,149 @@ private struct ObjectiveCFileSymbolIndex {
             }
         }
 
+        let searchRange = propertyNameFallbackSearchRange(in: declaration)
+        guard searchRange.length > 0 else {
+            return nil
+        }
         return identifierRegex.matches(
             in: string,
-            range: NSRange(location: 0, length: declaration.length)
+            range: searchRange
         ).last?.range
+    }
+
+    private static func propertyNameFallbackSearchRange(in declaration: NSString) -> NSRange {
+        var end = declaration.length
+        end = trimmingTrailingPropertySyntax(in: declaration, end: end)
+
+        var didStripSuffix = true
+        while didStripSuffix {
+            didStripSuffix = false
+            end = trimmingTrailingPropertySyntax(in: declaration, end: end)
+
+            if let range = trailingFunctionLikeMacroRange(in: declaration, end: end),
+               hasIdentifierBefore(range.location, in: declaration) {
+                end = range.location
+                didStripSuffix = true
+                continue
+            }
+
+            if let range = trailingIdentifierRange(in: declaration, end: end) {
+                let name = declaration.substring(with: range)
+                if shouldStripBareTrailingPropertyAttribute(name),
+                   hasIdentifierBefore(range.location, in: declaration) {
+                    end = range.location
+                    didStripSuffix = true
+                }
+            }
+        }
+
+        end = trimmingTrailingPropertySyntax(in: declaration, end: end)
+        return NSRange(location: 0, length: max(0, end))
+    }
+
+    private static func trimmingTrailingPropertySyntax(in declaration: NSString, end: Int) -> Int {
+        var end = end
+        while end > 0 {
+            let character = declaration.substring(with: NSRange(location: end - 1, length: 1))
+            if character == ";" || isWhitespace(character) {
+                end -= 1
+            } else {
+                break
+            }
+        }
+        return end
+    }
+
+    private static func trailingFunctionLikeMacroRange(in declaration: NSString, end: Int) -> NSRange? {
+        guard end > 0,
+              declaration.substring(with: NSRange(location: end - 1, length: 1)) == ")",
+              let openParen = matchingOpeningParenthesis(in: declaration, before: end),
+              let nameRange = identifierRange(before: openParen, in: declaration)
+        else {
+            return nil
+        }
+
+        let name = declaration.substring(with: nameRange)
+        guard isIdentifier(name) else {
+            return nil
+        }
+        return NSRange(location: nameRange.location, length: end - nameRange.location)
+    }
+
+    private static func matchingOpeningParenthesis(in declaration: NSString, before end: Int) -> Int? {
+        var depth = 0
+        var cursor = end - 1
+        while cursor >= 0 {
+            let character = declaration.substring(with: NSRange(location: cursor, length: 1))
+            if character == ")" {
+                depth += 1
+            } else if character == "(" {
+                depth -= 1
+                if depth == 0 {
+                    return cursor
+                }
+                if depth < 0 {
+                    return nil
+                }
+            }
+
+            if cursor == 0 {
+                break
+            }
+            cursor -= 1
+        }
+        return nil
+    }
+
+    private static func trailingIdentifierRange(in declaration: NSString, end: Int) -> NSRange? {
+        identifierRange(before: end, in: declaration)
+    }
+
+    private static func identifierRange(before location: Int, in declaration: NSString) -> NSRange? {
+        var end = location
+        while end > 0 {
+            let character = declaration.substring(with: NSRange(location: end - 1, length: 1))
+            if isWhitespace(character) {
+                end -= 1
+            } else {
+                break
+            }
+        }
+
+        var start = end
+        while start > 0 {
+            let character = Character(declaration.substring(with: NSRange(location: start - 1, length: 1)))
+            if isIdentifierCharacter(character) {
+                start -= 1
+            } else {
+                break
+            }
+        }
+        guard start < end else {
+            return nil
+        }
+        return NSRange(location: start, length: end - start)
+    }
+
+    private static func hasIdentifierBefore(_ location: Int, in declaration: NSString) -> Bool {
+        identifierRegex.firstMatch(
+            in: declaration as String,
+            range: NSRange(location: 0, length: max(0, location))
+        ) != nil
+    }
+
+    private static func shouldStripBareTrailingPropertyAttribute(_ name: String) -> Bool {
+        name.hasPrefix("__") || name.contains("_") || bareTrailingPropertyAttributes.contains(name)
+    }
+
+    private static func isWhitespace(_ text: String) -> Bool {
+        text.unicodeScalars.allSatisfy {
+            CharacterSet.whitespacesAndNewlines.contains($0)
+        }
+    }
+
+    private static func isIdentifierCharacter(_ character: Character) -> Bool {
+        character == "_" || character.isLetter || character.isNumber
     }
 
     private static func zeroArgumentMethodNameRanges(in source: NSString) -> [NSRange] {
@@ -890,6 +1029,10 @@ private struct ObjectiveCFileSymbolIndex {
     private static let zeroArgumentMethodRegex = try! NSRegularExpression(
         pattern: #"(?m)^[ \t]*[-+]\s*\([^)]*\)\s*([A-Za-z_][A-Za-z0-9_]*)\s*[;{]"#
     )
+
+    private static let bareTrailingPropertyAttributes: Set<String> = [
+        "IBInspectable", "IBOutlet", "NS_REFINED_FOR_SWIFT"
+    ]
 
     private static let typedefRegex = try! NSRegularExpression(
         pattern: #"\btypedef\b[^;]*;"#,

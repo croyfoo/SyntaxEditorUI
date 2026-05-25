@@ -6564,6 +6564,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, assign) NSError ****quadError;
         @property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);
         @property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;
+        @property (nonatomic, copy) NSString *customMacroTitle MY_ATTR(foo);
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;
@@ -6593,6 +6594,7 @@ struct SyntaxHighlighterEngineTests {
             NSString *handlerDescription = self.handler.description;
             NSString *castHandlerDescription = ((id)self.handler).description;
             NSString *title = self.renamedTitle ?: self.refinedTitle;
+            NSString *customTitle = self.customMacroTitle;
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
@@ -6920,6 +6922,20 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "self.refinedTitle"
         )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "customMacroTitle",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.customMacroTitle"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "foo",
+            inOccurrenceOf: "MY_ATTR(foo)"
+        ).contains(.declarationOther) == false)
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
