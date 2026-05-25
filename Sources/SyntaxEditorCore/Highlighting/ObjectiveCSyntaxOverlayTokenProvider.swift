@@ -1072,10 +1072,17 @@ private struct ObjectiveCFileSymbolIndex {
         }
         let previousName = declaration.substring(with: previousRange)
         guard !typedefIgnoredIdentifiers.contains(previousName),
+              !isLikelyLowercaseTypedefName(previousName),
               let firstCharacter = previousName.first else {
             return false
         }
         return firstCharacter == "_" || firstCharacter.isLowercase
+    }
+
+    private static func isLikelyLowercaseTypedefName(_ name: String) -> Bool {
+        name.contains("_") && name.allSatisfy { character in
+            character == "_" || character.isLowercase || character.isNumber
+        }
     }
 
     private static func isWhitespace(_ text: String) -> Bool {

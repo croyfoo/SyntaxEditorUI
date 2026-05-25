@@ -6572,6 +6572,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, strong) id outletValue IBOutlet;
         @property (nonatomic, copy) NSString *user_id;
         @property (nonatomic) MyEnum HTTP_STATUS;
+        @property (nonatomic) dispatch_queue_t WORK_QUEUE;
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;
@@ -6608,6 +6609,7 @@ struct SyntaxHighlighterEngineTests {
             id outlet = self.outletValue;
             NSUInteger underscoredLength = self.user_id.length;
             NSInteger statusValue = self.HTTP_STATUS;
+            dispatch_queue_t queue = self.WORK_QUEUE;
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
@@ -6855,6 +6857,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "WORK_QUEUE",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) dispatch_queue_t WORK_QUEUE;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "wrappedName",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -7011,6 +7021,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.HTTP_STATUS"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "WORK_QUEUE",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.WORK_QUEUE"
         )
         #expect(syntaxIDs(
             in: tokens,
