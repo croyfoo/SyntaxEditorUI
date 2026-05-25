@@ -58,6 +58,22 @@ package struct SyntaxHighlightMutation: Equatable, Sendable {
     }
 }
 
+private struct SyntaxHighlightTokenKey: Hashable {
+    let location: Int
+    let length: Int
+    let syntaxID: EditorSourceSyntaxID
+    let language: SyntaxLanguage?
+    let rawCaptureName: String
+
+    init(_ token: SyntaxHighlightToken) {
+        location = token.range.location
+        length = token.range.length
+        syntaxID = token.syntaxID
+        language = token.language
+        rawCaptureName = token.rawCaptureName
+    }
+}
+
 package struct SyntaxHighlightResult: Sendable {
     package let tokens: [SyntaxHighlightToken]
     package let source: String
@@ -356,9 +372,12 @@ private final class SyntaxHighlightSession {
             source: nextLayeredSource,
             refreshRange: refreshRange
         )
-        let resultRefreshRange = language == .swift || language == .objectiveC
-            ? fullRange(for: nextLayeredSource)
-            : refreshRange
+        let resultRefreshRange = semanticRefreshRange(
+            previousTokens: mergedHighlight.tokens,
+            classifiedTokens: classifiedTokens,
+            baseRefreshRange: refreshRange,
+            sourceUTF16Length: nextSourceLength
+        )
 
         source = nextSource
         layeredSource = nextLayeredSource
@@ -581,6 +600,54 @@ private extension SyntaxHighlightSession {
         default:
             return tokens
         }
+    }
+
+    func semanticRefreshRange(
+        previousTokens: [SyntaxHighlightToken],
+        classifiedTokens: [SyntaxHighlightToken],
+        baseRefreshRange: NSRange,
+        sourceUTF16Length: Int
+    ) -> NSRange {
+        switch language {
+        case .swift, .objectiveC:
+            Self.refreshRangeIncludingTokenChanges(
+                from: previousTokens,
+                to: classifiedTokens,
+                baseRefreshRange: baseRefreshRange,
+                sourceUTF16Length: sourceUTF16Length
+            )
+        default:
+            baseRefreshRange
+        }
+    }
+
+    static func refreshRangeIncludingTokenChanges(
+        from previousTokens: [SyntaxHighlightToken],
+        to classifiedTokens: [SyntaxHighlightToken],
+        baseRefreshRange: NSRange,
+        sourceUTF16Length: Int
+    ) -> NSRange {
+        let previousKeys = Set(previousTokens.map(SyntaxHighlightTokenKey.init))
+        let classifiedKeys = Set(classifiedTokens.map(SyntaxHighlightTokenKey.init))
+        var refreshRange = SyntaxEditorRangeUtilities.clampedRange(
+            baseRefreshRange,
+            utf16Length: sourceUTF16Length
+        )
+
+        for token in previousTokens where !classifiedKeys.contains(SyntaxHighlightTokenKey(token)) {
+            refreshRange = union(
+                refreshRange,
+                SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: sourceUTF16Length)
+            )
+        }
+        for token in classifiedTokens where !previousKeys.contains(SyntaxHighlightTokenKey(token)) {
+            refreshRange = union(
+                refreshRange,
+                SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: sourceUTF16Length)
+            )
+        }
+
+        return SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: sourceUTF16Length)
     }
 
     static func oldRange(

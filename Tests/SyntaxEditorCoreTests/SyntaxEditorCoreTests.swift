@@ -5710,6 +5710,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
         #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
     }
 
@@ -5737,8 +5738,13 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange == NSRange(location: 0, length: updatedSource.utf16.count))
         #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
+
+        let nsUpdatedSource = updatedSource as NSString
+        let returnLineRange = nsUpdatedSource.range(of: "return value")
+        let returnValueRange = nsUpdatedSource.range(of: "value", options: [], range: returnLineRange)
+        #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: returnValueRange) == returnValueRange)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
 
         let valueReference = try effectiveSemanticSnapshot(
             in: incremental.tokens,
@@ -6867,6 +6873,34 @@ struct SyntaxHighlighterEngineTests {
             text: "LocalFunction",
             inOccurrenceOf: "LocalFunction();"
         ).contains(.identifierFunction) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C semantic refresh ranges local")
+    func highlighterKeepsObjectiveCSemanticRefreshRangesLocal() async throws {
+        let source = """
+        int LocalFunction(void);
+
+        void run(void) {
+            LocalFunction();
+            int value = 1;
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "value = 1", with: "value = 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine highlights HTML root and embedded languages")
