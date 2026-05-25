@@ -673,7 +673,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     )
 
     private static let trailingCastRegex = try! NSRegularExpression(
-        pattern: #"\(\s*[A-Za-z_][A-Za-z0-9_ *]*\s*\)\s*$"#
+        pattern: #"\(\s*[A-Za-z_][A-Za-z0-9_ <>,*]*\s*\)\s*$"#
     )
 
     private static let keywordLikeTypeNames: Set<String> = [

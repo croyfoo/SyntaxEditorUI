@@ -6618,6 +6618,7 @@ struct SyntaxHighlighterEngineTests {
             NSString *castRootName = ((Sample *)self).name;
             NSUInteger parenthesizedRootLength = (self).name.length;
             NSUInteger castRootLength = ((Sample *)self).name.length;
+            NSUInteger genericCastRootLength = ((Sample<Delegate> *)self).name.length;
             NSUInteger multilineParenthesizedLength = (
                 self.name
             ).length;
@@ -7057,6 +7058,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "((Sample *)self).name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "((Sample<Delegate> *)self).name.length"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
