@@ -1071,12 +1071,19 @@ private struct ObjectiveCFileSymbolIndex {
             return false
         }
         let previousName = declaration.substring(with: previousRange)
+        if isUppercaseIdentifier(previousName) {
+            return true
+        }
         guard !typedefIgnoredIdentifiers.contains(previousName),
               !isLikelyLowercaseTypedefName(previousName),
               let firstCharacter = previousName.first else {
             return false
         }
         return firstCharacter == "_" || firstCharacter.isLowercase
+    }
+
+    private static func isUppercaseIdentifier(_ name: String) -> Bool {
+        name == name.uppercased() && name.contains { $0.isLetter }
     }
 
     private static func isLikelyLowercaseTypedefName(_ name: String) -> Bool {
@@ -1139,7 +1146,7 @@ private struct ObjectiveCFileSymbolIndex {
     )
 
     private static let functionPointerPropertyNameRegex = try! NSRegularExpression(
-        pattern: #"\(\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\([^;]*\)"#
+        pattern: #"\(\s*\*\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\([^;]*\)"#
     )
 
     private static let propertyNameBeforeTrailingAttributesRegex = try! NSRegularExpression(

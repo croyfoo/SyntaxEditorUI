@@ -6561,6 +6561,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy) id (^handler)(id);
         @property (nonatomic, copy) id (^ _Nullable qualifiedHandler)(id);
         @property (nonatomic) int (*callback)(int);
+        @property (nonatomic) int (* _Nullable nullableCallback)(int);
         @property (nonatomic, strong) NSError **error;
         @property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;
         @property (nonatomic, assign) NSError ***tripleError;
@@ -6573,6 +6574,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy) NSString *user_id;
         @property (nonatomic) MyEnum HTTP_STATUS;
         @property (nonatomic) dispatch_queue_t WORK_QUEUE;
+        @property (nonatomic) MyEnum HTTP_STATUS_WITH_ATTR MY_ATTR;
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;
@@ -6600,6 +6602,7 @@ struct SyntaxHighlighterEngineTests {
             id (^block)(id) = self.handler;
             id (^qualifiedBlock)(id) = self.qualifiedHandler;
             int (*callbackValue)(int) = self.callback;
+            int (*nullableCallbackValue)(int) = self.nullableCallback;
             NSString *handlerDescription = self.handler.description;
             NSString *castHandlerDescription = ((id)self.handler).description;
             NSString *nestedCastHandlerDescription = ((id)(self.handler)).description;
@@ -6610,6 +6613,7 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger underscoredLength = self.user_id.length;
             NSInteger statusValue = self.HTTP_STATUS;
             dispatch_queue_t queue = self.WORK_QUEUE;
+            NSInteger statusWithAttr = self.HTTP_STATUS_WITH_ATTR;
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
@@ -6801,6 +6805,22 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "callback",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) int (*callback)(int);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "nullableCallback",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) int (* _Nullable nullableCallback)(int);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "error",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -6861,6 +6881,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .declarationOther,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic) dispatch_queue_t WORK_QUEUE;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "HTTP_STATUS_WITH_ATTR",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) MyEnum HTTP_STATUS_WITH_ATTR MY_ATTR;"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -6933,6 +6961,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.callback"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "nullableCallback",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.nullableCallback"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -7029,6 +7065,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.WORK_QUEUE"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "HTTP_STATUS_WITH_ATTR",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.HTTP_STATUS_WITH_ATTR"
         )
         #expect(syntaxIDs(
             in: tokens,
