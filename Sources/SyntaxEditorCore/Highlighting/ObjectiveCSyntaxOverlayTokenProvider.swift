@@ -239,6 +239,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         var cursor = location - 1
         while cursor >= 0 {
             let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if let nextCursor = indexBeforeQuotedLiteralEnding(at: cursor, in: source) {
+                cursor = nextCursor
+                continue
+            }
             if character == ";" || character == "{" || character == "}" {
                 return cursor + 1
             }
@@ -248,6 +252,40 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             cursor -= 1
         }
         return 0
+    }
+
+    private static func indexBeforeQuotedLiteralEnding(at location: Int, in source: NSString) -> Int? {
+        let quote = source.substring(with: NSRange(location: location, length: 1))
+        guard quote == "\"" || quote == "'",
+              !isEscaped(location, in: source) else {
+            return nil
+        }
+
+        var cursor = location - 1
+        while cursor >= 0 {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == quote, !isEscaped(cursor, in: source) {
+                if quote == "\"",
+                   cursor > 0,
+                   source.substring(with: NSRange(location: cursor - 1, length: 1)) == "@" {
+                    return cursor - 2
+                }
+                return cursor - 1
+            }
+            cursor -= 1
+        }
+        return nil
+    }
+
+    private static func isEscaped(_ location: Int, in source: NSString) -> Bool {
+        var backslashCount = 0
+        var cursor = location - 1
+        while cursor >= 0,
+              source.substring(with: NSRange(location: cursor, length: 1)) == "\\" {
+            backslashCount += 1
+            cursor -= 1
+        }
+        return backslashCount % 2 == 1
     }
 
     private static func expressionPrefixEndsWithSelf(_ prefix: String) -> Bool {
@@ -365,6 +403,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         var index = suffix.startIndex
 
         while index < suffix.endIndex {
+            if let nextIndex = indexAfterSkippableTriviaOrLiteral(startingAt: index, in: suffix) {
+                index = nextIndex
+                continue
+            }
             let character = suffix[index]
             switch character {
             case "(":
@@ -399,11 +441,6 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                     return false
                 }
             case "+", "*", "/", "%", "&", "|", "^", "!", "~", "<", ">":
-                if character == "/",
-                   let nextIndex = indexAfterComment(startingAt: index, in: suffix) {
-                    index = nextIndex
-                    continue
-                }
                 if parenDepth == 0 && bracketDepth == 0 {
                     return false
                 }
@@ -416,7 +453,23 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         return true
     }
 
+    private static func indexAfterSkippableTriviaOrLiteral(
+        startingAt index: String.Index,
+        in text: String
+    ) -> String.Index? {
+        if let nextIndex = indexAfterComment(startingAt: index, in: text) {
+            return nextIndex
+        }
+        if let nextIndex = indexAfterLiteral(startingAt: index, in: text) {
+            return nextIndex
+        }
+        return nil
+    }
+
     private static func indexAfterComment(startingAt index: String.Index, in text: String) -> String.Index? {
+        guard text[index] == "/" else {
+            return nil
+        }
         let markerIndex = text.index(after: index)
         guard markerIndex < text.endIndex else {
             return nil
@@ -447,11 +500,50 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         return nil
     }
 
+    private static func indexAfterLiteral(startingAt index: String.Index, in text: String) -> String.Index? {
+        let character = text[index]
+        if character == "@" {
+            let nextIndex = text.index(after: index)
+            guard nextIndex < text.endIndex, text[nextIndex] == "\"" else {
+                return nil
+            }
+            return indexAfterQuotedLiteral(startingAt: nextIndex, in: text)
+        }
+        if character == "\"" || character == "'" {
+            return indexAfterQuotedLiteral(startingAt: index, in: text)
+        }
+        return nil
+    }
+
+    private static func indexAfterQuotedLiteral(startingAt quoteIndex: String.Index, in text: String) -> String.Index {
+        let quote = text[quoteIndex]
+        var isEscaped = false
+        var cursor = text.index(after: quoteIndex)
+        while cursor < text.endIndex {
+            let character = text[cursor]
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == quote {
+                return text.index(after: cursor)
+            }
+            cursor = text.index(after: cursor)
+        }
+        return text.endIndex
+    }
+
     private static func hasUnmatchedClosingDelimiter(_ suffix: String) -> Bool {
         var parenDepth = 0
         var bracketDepth = 0
+        var index = suffix.startIndex
 
-        for character in suffix {
+        while index < suffix.endIndex {
+            if let nextIndex = indexAfterSkippableTriviaOrLiteral(startingAt: index, in: suffix) {
+                index = nextIndex
+                continue
+            }
+            let character = suffix[index]
             switch character {
             case "(":
                 parenDepth += 1
@@ -468,8 +560,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 }
                 bracketDepth -= 1
             default:
-                continue
+                break
             }
+            index = suffix.index(after: index)
         }
 
         return false
@@ -477,8 +570,14 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
     private static func hasUnmatchedClosingSquareBracket(_ suffix: String) -> Bool {
         var bracketDepth = 0
+        var index = suffix.startIndex
 
-        for character in suffix {
+        while index < suffix.endIndex {
+            if let nextIndex = indexAfterSkippableTriviaOrLiteral(startingAt: index, in: suffix) {
+                index = nextIndex
+                continue
+            }
+            let character = suffix[index]
             switch character {
             case "[":
                 bracketDepth += 1
@@ -488,8 +587,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 }
                 bracketDepth -= 1
             default:
-                continue
+                break
             }
+            index = suffix.index(after: index)
         }
 
         return false
@@ -504,8 +604,14 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     private static func hasUnmatchedOpeningDelimiter(_ suffix: String) -> Bool {
         var parenDepth = 0
         var bracketDepth = 0
+        var index = suffix.startIndex
 
-        for character in suffix {
+        while index < suffix.endIndex {
+            if let nextIndex = indexAfterSkippableTriviaOrLiteral(startingAt: index, in: suffix) {
+                index = nextIndex
+                continue
+            }
+            let character = suffix[index]
             switch character {
             case "(":
                 parenDepth += 1
@@ -520,8 +626,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                     bracketDepth -= 1
                 }
             default:
-                continue
+                break
             }
+            index = suffix.index(after: index)
         }
 
         return parenDepth > 0 || bracketDepth > 0

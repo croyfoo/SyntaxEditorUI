@@ -6646,6 +6646,9 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger nestedCount = self.items[other.length].count;
             id handlerValue = self.handler(other.value);
             NSString *handlerCallDescription = self.handler(value).description;
+            NSString *closeParenLiteralDescription = self.handler(@")").description;
+            NSString *openBracketLiteralDescription = self.handler(@"[").description;
+            NSString *semicolonLiteralDescription = self.handler(@";").description;
             NSUInteger wrappedCallLength = Wrap((self.name)).length;
             NSUInteger wrappedSelfRootLength = Wrap((self)).name.length;
             // self.name
@@ -7370,6 +7373,30 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.handler(value).description"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: #"self.handler(@")").description"#
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: #"self.handler(@"[").description"#
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: #"self.handler(@";").description"#
         )
         #expect(syntaxIDs(
             in: tokens,
