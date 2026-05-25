@@ -181,6 +181,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             let hasUnmatchedClosing = hasUnmatchedClosingDelimiter(suffix)
             let allowsWrappedSelfChainClose = hasUnmatchedClosing
                 && !hasUnmatchedClosingSquareBracket(suffix)
+                && containsOnlyClosingParenthesesAndWhitespace(suffix)
                 && allowsWrappedSelfChainStart(beforeSelf)
             if keepsSelfChainConnected(suffix)
                 && !hasUnmatchedOpeningDelimiter(suffix)
@@ -440,6 +441,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         }
 
         return false
+    }
+
+    private static func containsOnlyClosingParenthesesAndWhitespace(_ suffix: String) -> Bool {
+        suffix.allSatisfy { character in
+            character == ")" || character.isWhitespace
+        }
     }
 
     private static func hasUnmatchedOpeningDelimiter(_ suffix: String) -> Bool {
@@ -867,6 +874,15 @@ private struct ObjectiveCFileSymbolIndex {
                 return range
             }
         }
+        if let match = functionPointerPropertyNameRegex.firstMatch(
+            in: string,
+            range: NSRange(location: 0, length: declaration.length)
+        ) {
+            let range = match.range(at: 1)
+            if range.location != NSNotFound {
+                return range
+            }
+        }
         let searchRange = propertyNameFallbackSearchRange(in: declaration)
         guard searchRange.length > 0 else {
             return nil
@@ -1068,6 +1084,10 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static let blockPropertyNameRegex = try! NSRegularExpression(
         pattern: #"@property\b[^;]*\(\s*\^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
+    )
+
+    private static let functionPointerPropertyNameRegex = try! NSRegularExpression(
+        pattern: #"\(\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\([^;]*\)"#
     )
 
     private static let propertyNameBeforeTrailingAttributesRegex = try! NSRegularExpression(

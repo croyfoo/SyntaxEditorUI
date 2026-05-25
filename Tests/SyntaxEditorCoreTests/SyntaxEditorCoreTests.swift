@@ -6560,6 +6560,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy) NSArray *items;
         @property (nonatomic, copy) id (^handler)(id);
         @property (nonatomic, copy) id (^ _Nullable qualifiedHandler)(id);
+        @property (nonatomic) int (*callback)(int);
         @property (nonatomic, strong) NSError **error;
         @property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;
         @property (nonatomic, assign) NSError ***tripleError;
@@ -6596,6 +6597,7 @@ struct SyntaxHighlighterEngineTests {
             self.name = ReferenceLanguageAliases()[@"objc"] ?: value;
             id (^block)(id) = self.handler;
             id (^qualifiedBlock)(id) = self.qualifiedHandler;
+            int (*callbackValue)(int) = self.callback;
             NSString *handlerDescription = self.handler.description;
             NSString *castHandlerDescription = ((id)self.handler).description;
             NSString *title = self.renamedTitle ?: self.refinedTitle;
@@ -6611,6 +6613,7 @@ struct SyntaxHighlighterEngineTests {
             if ((self.name).length > 0) {
                 return value;
             }
+            if (self.name) other.length;
             NSString *parenthesizedRootName = (self).name;
             NSString *castRootName = ((Sample *)self).name;
             NSUInteger parenthesizedRootLength = (self).name.length;
@@ -6904,6 +6907,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.qualifiedHandler"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "callback",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.callback"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -7226,6 +7237,12 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "length",
             inOccurrenceOf: "[formatter stringFrom:self.name].length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "if (self.name) other.length"
         ).contains(.identifierVariableSystem) == false)
         _ = try effectiveSemanticSnapshot(
             in: tokens,
