@@ -6550,8 +6550,10 @@ struct SyntaxHighlighterEngineTests {
         @interface Sample : NSObject
         @property (nonatomic, copy) NSString *name;
         @property (nonatomic, copy) id (^handler)(id);
+        @property (nonatomic, copy) id (^ _Nullable qualifiedHandler)(id);
         @property (nonatomic, strong) NSError **error;
         @property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;
+        @property (nonatomic, assign) NSError ***tripleError;
         - (NSString *)greetingFor:(NSString *)value;
         @end
 
@@ -6569,6 +6571,7 @@ struct SyntaxHighlighterEngineTests {
             // comment
             self.name = ReferenceLanguageAliases()[@"objc"] ?: value;
             id (^block)(id) = self.handler;
+            id (^qualifiedBlock)(id) = self.qualifiedHandler;
             NSString *handlerDescription = self.handler.description;
             NSUInteger count = self.name.length;
             NSUInteger unknownCount = self.unknown.length;
@@ -6699,6 +6702,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "qualifiedHandler",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) id (^ _Nullable qualifiedHandler)(id);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "error",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -6711,6 +6722,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .declarationOther,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "tripleError",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, assign) NSError ***tripleError;"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -6759,6 +6778,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.handler;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "qualifiedHandler",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.qualifiedHandler"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

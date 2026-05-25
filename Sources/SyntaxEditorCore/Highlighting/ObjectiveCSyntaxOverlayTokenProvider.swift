@@ -508,7 +508,7 @@ private struct ObjectiveCFileSymbolIndex {
     )
 
     private static let blockPropertyRegex = try! NSRegularExpression(
-        pattern: #"@property\b[^;\n]*\(\s*\^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
+        pattern: #"@property\b[^;\n]*\(\s*\^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
     )
 
     private static let zeroArgumentMethodRegex = try! NSRegularExpression(
