@@ -6575,6 +6575,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic) MyEnum HTTP_STATUS;
         @property (nonatomic) dispatch_queue_t WORK_QUEUE;
         @property (nonatomic) MyEnum HTTP_STATUS_WITH_ATTR MY_ATTR;
+        @property (nonatomic) MY_ENUM SECOND_STATUS_WITH_ATTR MY_ATTR;
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;
@@ -6614,6 +6615,7 @@ struct SyntaxHighlighterEngineTests {
             NSInteger statusValue = self.HTTP_STATUS;
             dispatch_queue_t queue = self.WORK_QUEUE;
             NSInteger statusWithAttr = self.HTTP_STATUS_WITH_ATTR;
+            NSInteger secondStatusWithAttr = self.SECOND_STATUS_WITH_ATTR;
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
@@ -6893,6 +6895,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "SECOND_STATUS_WITH_ATTR",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) MY_ENUM SECOND_STATUS_WITH_ATTR MY_ATTR;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "wrappedName",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -7073,6 +7083,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.HTTP_STATUS_WITH_ATTR"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "SECOND_STATUS_WITH_ATTR",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.SECOND_STATUS_WITH_ATTR"
         )
         #expect(syntaxIDs(
             in: tokens,

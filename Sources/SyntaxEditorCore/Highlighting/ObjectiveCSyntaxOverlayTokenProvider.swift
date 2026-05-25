@@ -1073,7 +1073,7 @@ private struct ObjectiveCFileSymbolIndex {
         }
         let previousName = declaration.substring(with: previousRange)
         if isUppercaseIdentifier(previousName) {
-            return true
+            return hasPropertyTypeIdentifierBefore(previousRange.location, in: declaration)
         }
         guard !typedefIgnoredIdentifiers.contains(previousName),
               !isLikelyLowercaseTypedefName(previousName),
@@ -1085,6 +1085,57 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static func isUppercaseIdentifier(_ name: String) -> Bool {
         name == name.uppercased() && name.contains { $0.isLetter }
+    }
+
+    private static func hasPropertyTypeIdentifierBefore(_ location: Int, in declaration: NSString) -> Bool {
+        let start = propertyBodyStart(in: declaration)
+        guard start < location else {
+            return false
+        }
+        return identifierRegex.firstMatch(
+            in: declaration as String,
+            range: NSRange(location: start, length: location - start)
+        ) != nil
+    }
+
+    private static func propertyBodyStart(in declaration: NSString) -> Int {
+        var cursor = "@property".utf16.count
+        while cursor < declaration.length,
+              isWhitespace(declaration.substring(with: NSRange(location: cursor, length: 1))) {
+            cursor += 1
+        }
+
+        if cursor < declaration.length,
+           declaration.substring(with: NSRange(location: cursor, length: 1)) == "(",
+           let closeParen = matchingClosingParenthesis(in: declaration, after: cursor) {
+            cursor = closeParen + 1
+            while cursor < declaration.length,
+                  isWhitespace(declaration.substring(with: NSRange(location: cursor, length: 1))) {
+                cursor += 1
+            }
+        }
+        return cursor
+    }
+
+    private static func matchingClosingParenthesis(in declaration: NSString, after openParen: Int) -> Int? {
+        var depth = 0
+        var cursor = openParen
+        while cursor < declaration.length {
+            let character = declaration.substring(with: NSRange(location: cursor, length: 1))
+            if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                depth -= 1
+                if depth == 0 {
+                    return cursor
+                }
+                if depth < 0 {
+                    return nil
+                }
+            }
+            cursor += 1
+        }
+        return nil
     }
 
     private static func isLikelyLowercaseTypedefName(_ name: String) -> Bool {
