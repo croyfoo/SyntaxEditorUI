@@ -68,6 +68,13 @@ GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `
 
 ## Migration
 
+### v0.8.0
+
+These notes apply when upgrading from `v0.7.x` or earlier to `v0.8.0`.
+
+- `SyntaxEditorColorTheme.xcode` has been removed. Use `SyntaxEditorColorTheme.default`, shorthand `.default`, or `SyntaxEditorColorTheme.preset(_:)` instead.
+- `SyntaxEditorColorTheme.id` is now a `String` instead of a `UUID`. If your app stores or compares theme IDs, migrate those values to strings.
+
 ### v0.7.0
 
 These notes apply when upgrading from `v0.6.x` or earlier to `v0.7.0`.
