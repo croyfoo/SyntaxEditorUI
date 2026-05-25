@@ -6635,6 +6635,7 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger parenthesizedRootLength = (self).name.length;
             NSUInteger castRootLength = ((Sample *)self).name.length;
             NSUInteger genericCastRootLength = ((Sample<Delegate> *)self).name.length;
+            NSUInteger arithmeticLength = base + (self.name).length;
             NSUInteger multilineParenthesizedLength = (
                 self.name
             ).length;
@@ -7208,6 +7209,14 @@ struct SyntaxHighlighterEngineTests {
             text: "length",
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
+            inOccurrenceOf: "base + (self.name).length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
             inOccurrenceOf: "(\n        self.name\n    ).length"
         )
         _ = try effectiveSemanticSnapshot(
@@ -7501,6 +7510,33 @@ struct SyntaxHighlighterEngineTests {
         #expect(syntaxIDs(
             in: incompleteTokens,
             source: incompletePropertySource,
+            text: "length",
+            inOccurrenceOf: "self.notAProperty.length"
+        ).contains(.identifierVariableSystem) == false)
+
+        let wrappedIncompletePropertySource = """
+        @interface Broken : NSObject
+        @property (nonatomic, copy)
+        NSString *name
+        NSString *notAProperty;
+        @end
+        @implementation Broken
+        - (NSUInteger)length
+        {
+            return self.notAProperty.length;
+        }
+        @end
+        """
+        let wrappedIncompleteTokens = await engine.render(source: wrappedIncompletePropertySource, language: .objectiveC)
+        #expect(syntaxIDs(
+            in: wrappedIncompleteTokens,
+            source: wrappedIncompletePropertySource,
+            text: "notAProperty",
+            inOccurrenceOf: "self.notAProperty.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: wrappedIncompleteTokens,
+            source: wrappedIncompletePropertySource,
             text: "length",
             inOccurrenceOf: "self.notAProperty.length"
         ).contains(.identifierVariableSystem) == false)

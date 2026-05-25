@@ -663,7 +663,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         guard let previous = prefix.last else {
             return true
         }
-        return previous == "="
+        return previous == "=" || parenthesizedSelfPrefixOperators.contains(previous)
     }
 
     private static func previousNonWhitespaceCharacter(before range: NSRange, in source: NSString) -> Character? {
@@ -845,6 +845,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
     private static let parenthesizedSelfPrefixKeywords: Set<String> = [
         "else if", "for", "if", "return", "switch", "while"
+    ]
+
+    private static let parenthesizedSelfPrefixOperators: Set<Character> = [
+        "+", "-", "*", "/", "%", "&", "|", "^"
     ]
 }
 
@@ -1073,50 +1077,32 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func propertyDeclarationAppearsToSwallowFollowingDeclaration(in declaration: NSString) -> Bool {
-        let newlineRange = declaration.rangeOfCharacter(from: .newlines)
-        guard newlineRange.location != NSNotFound else {
+        let bodyStart = propertyBodyStart(in: declaration)
+        guard bodyStart < declaration.length else {
             return false
         }
 
-        let firstLine = declaration.substring(to: newlineRange.location) as NSString
-        guard firstPropertyLineContainsDeclaratorName(firstLine) else {
+        let body = declaration.substring(from: bodyStart)
+        let lines = body.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+        guard lines.count > 1 else {
             return false
         }
 
-        let continuation = declaration.substring(from: newlineRange.upperBound)
-        for line in continuation.components(separatedBy: .newlines) {
-            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmedLine.isEmpty == false else {
-                continue
+        var previousLineContainsDeclaratorName = false
+        for line in lines {
+            if previousLineContainsDeclaratorName,
+               propertyContinuationLineLooksLikeStandaloneDeclaration(line) {
+                return true
             }
-            return propertyContinuationLineLooksLikeStandaloneDeclaration(trimmedLine)
+            previousLineContainsDeclaratorName = propertyBodyLineContainsDeclaratorName(line)
         }
         return false
     }
 
-    private static func firstPropertyLineContainsDeclaratorName(_ firstLine: NSString) -> Bool {
-        var cursor = "@property".utf16.count
-        while cursor < firstLine.length,
-              isWhitespace(firstLine.substring(with: NSRange(location: cursor, length: 1))) {
-            cursor += 1
-        }
-        if cursor < firstLine.length,
-           firstLine.substring(with: NSRange(location: cursor, length: 1)) == "(" {
-            guard let closeParen = matchingClosingParenthesis(in: firstLine, after: cursor) else {
-                return false
-            }
-            cursor = closeParen + 1
-        }
-        while cursor < firstLine.length,
-              isWhitespace(firstLine.substring(with: NSRange(location: cursor, length: 1))) {
-            cursor += 1
-        }
-
-        guard cursor < firstLine.length else {
-            return false
-        }
-
-        let body = firstLine.substring(from: cursor) as NSString
+    private static func propertyBodyLineContainsDeclaratorName(_ line: String) -> Bool {
+        let body = line as NSString
         let bodyWithoutGenerics = stringByRemovingAngleBracketContents(from: body)
         let end = trimmingTrailingPropertySyntax(in: bodyWithoutGenerics, end: bodyWithoutGenerics.length)
         guard let lastIdentifierRange = identifierRange(before: end, in: bodyWithoutGenerics) else {
