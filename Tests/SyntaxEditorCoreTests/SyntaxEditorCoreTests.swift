@@ -6555,6 +6555,8 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;
         @property (nonatomic, assign) NSError ***tripleError;
         @property (nonatomic, assign) NSError ****quadError;
+        @property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);
+        @property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;
         - (NSString *)greetingFor:(NSString *)value;
         @end
 
@@ -6574,6 +6576,7 @@ struct SyntaxHighlighterEngineTests {
             id (^block)(id) = self.handler;
             id (^qualifiedBlock)(id) = self.qualifiedHandler;
             NSString *handlerDescription = self.handler.description;
+            NSString *title = self.renamedTitle ?: self.refinedTitle;
             NSUInteger count = self.name.length;
             NSUInteger unknownCount = self.unknown.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
@@ -6743,6 +6746,22 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "renamedTitle",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "refinedTitle",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "greetingFor",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -6803,6 +6822,22 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.handler.description"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "renamedTitle",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.renamedTitle"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "refinedTitle",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.refinedTitle"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

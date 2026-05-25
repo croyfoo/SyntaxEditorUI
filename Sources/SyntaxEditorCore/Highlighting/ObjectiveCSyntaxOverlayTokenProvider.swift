@@ -499,6 +499,15 @@ private struct ObjectiveCFileSymbolIndex {
                 return range
             }
         }
+        if let match = propertyNameBeforeTrailingAttributesRegex.firstMatch(
+            in: string,
+            range: NSRange(location: 0, length: declaration.length)
+        ) {
+            let range = match.range(at: 1)
+            if range.location != NSNotFound {
+                return range
+            }
+        }
 
         return identifierRegex.matches(
             in: string,
@@ -540,6 +549,10 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static let blockPropertyNameRegex = try! NSRegularExpression(
         pattern: #"@property\b[^;\n]*\(\s*\^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
+    )
+
+    private static let propertyNameBeforeTrailingAttributesRegex = try! NSRegularExpression(
+        pattern: #"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\];]*\]\s*)?(?:(?:[A-Z][A-Za-z0-9_]*|__[A-Za-z0-9_]+__|__[A-Za-z0-9_]+)\s*(?:\([^;]*\))?\s*)*;"#
     )
 
     private static let zeroArgumentMethodRegex = try! NSRegularExpression(
