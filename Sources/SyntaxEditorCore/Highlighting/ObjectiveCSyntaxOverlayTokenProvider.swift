@@ -251,22 +251,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     }
 
     private static func expressionPrefixEndsWithSelf(_ prefix: String) -> Bool {
-        var trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
         if expressionPrefixDirectlyEndsWithSelf(trimmed) {
             return true
         }
-        if parenthesizedSelfSuffixEndsWithSelf(trimmed) {
-            return true
-        }
-
-        while let unwrapped = unwrappedOuterParentheses(trimmed) {
-            trimmed = unwrapped
-            if expressionPrefixDirectlyEndsWithSelf(trimmed) {
-                return true
-            }
-        }
-
-        return false
+        return parenthesizedSelfSuffixEndsWithSelf(trimmed)
     }
 
     private static func expressionPrefixDirectlyEndsWithSelf(_ prefix: String) -> Bool {
@@ -300,7 +289,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                     let inner = String(trimmed[innerStart..<innerEnd])
                     let before = String(trimmed[..<index])
                     return allowsWrappedSelfChainStart(before)
-                        && expressionPrefixEndsWithSelf(inner)
+                        && expressionPrefixIsBareOrCastWrappedSelf(inner)
                 }
                 if depth < 0 {
                     return false
@@ -315,35 +304,42 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         return false
     }
 
-    private static func unwrappedOuterParentheses(_ text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.first == "(", trimmed.last == ")" else {
-            return nil
+    private static func expressionPrefixIsBareOrCastWrappedSelf(_ prefix: String) -> Bool {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == "self" {
+            return true
         }
+        if parenthesizedSelfSuffixEndsWithSelf(trimmed) {
+            return true
+        }
+        guard trimmed.hasSuffix("self") else {
+            return false
+        }
+        let beforeSelf = String(trimmed.dropLast("self".count))
+        return allowsCastOnlyPrefixBeforeSelf(beforeSelf)
+    }
 
-        var depth = 0
-        var index = trimmed.startIndex
-        while index < trimmed.endIndex {
-            let character = trimmed[index]
-            if character == "(" {
-                depth += 1
-            } else if character == ")" {
-                depth -= 1
-                if depth == 0, trimmed.index(after: index) != trimmed.endIndex {
-                    return nil
-                }
-                if depth < 0 {
-                    return nil
-                }
+    private static func allowsCastOnlyPrefixBeforeSelf(_ beforeSelf: String) -> Bool {
+        var prefix = beforeSelf.trimmingCharacters(in: .whitespacesAndNewlines)
+        var changed = true
+        while changed {
+            changed = false
+            while let match = trailingCastRegex.firstMatch(
+                in: prefix,
+                range: NSRange(location: 0, length: (prefix as NSString).length)
+            ) {
+                prefix = (prefix as NSString).substring(to: match.range.location)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                changed = true
             }
-            index = trimmed.index(after: index)
-        }
 
-        guard depth == 0 else {
-            return nil
+            while prefix.hasSuffix("(") {
+                prefix = String(prefix.dropLast())
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                changed = true
+            }
         }
-        return String(trimmed.dropFirst().dropLast())
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return prefix.isEmpty
     }
 
     private static func isInsideLineComment(_ range: NSRange, in text: NSString) -> Bool {
@@ -524,10 +520,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         guard let previous = prefix.last else {
             return true
         }
-        return !isObjectiveCIdentifierCharacter(previous)
-            && previous != ")"
-            && previous != "]"
-            && previous != "["
+        return previous == "="
     }
 
     private static func previousNonWhitespaceCharacter(before range: NSRange, in source: NSString) -> Character? {

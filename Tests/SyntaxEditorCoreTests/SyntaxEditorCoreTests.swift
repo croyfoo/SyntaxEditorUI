@@ -6649,6 +6649,7 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
             NSUInteger messageResultLength = [formatter stringFrom:self.name].length;
+            NSUInteger conditionalReceiverLength = (useFallback ? other : self).name.length;
             NSUInteger commentEscapedLength = self.commentEscapedName.length;
             NSUInteger commentedLength = self.commentedTitle.length;
             NSUInteger ghostLength = self.ghostName.length;
@@ -7363,6 +7364,18 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "length",
             inOccurrenceOf: "[formatter stringFrom:self.name].length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "name",
+            inOccurrenceOf: "(useFallback ? other : self).name.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "(useFallback ? other : self).name.length"
         ).contains(.identifierVariableSystem) == false)
         #expect(syntaxIDs(
             in: tokens,
