@@ -6569,6 +6569,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy) NSString *customMacroTitle MY_ATTR(foo);
         @property (nonatomic, copy) NSString *bareMacroTitle MY_ATTR;
         @property (nonatomic, strong) id outletValue IBOutlet;
+        @property (nonatomic, copy) NSString *user_id;
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;
@@ -6601,6 +6602,7 @@ struct SyntaxHighlighterEngineTests {
             NSString *customTitle = self.customMacroTitle;
             NSString *bareTitle = self.bareMacroTitle;
             id outlet = self.outletValue;
+            NSUInteger underscoredLength = self.user_id.length;
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
@@ -6958,6 +6960,22 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.outletValue"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "user_id",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.user_id.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.user_id.length"
         )
         #expect(syntaxIDs(
             in: tokens,

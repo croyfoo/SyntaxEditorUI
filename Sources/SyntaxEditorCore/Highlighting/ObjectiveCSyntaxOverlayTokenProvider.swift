@@ -1012,7 +1012,9 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func shouldStripBareTrailingPropertyAttribute(_ name: String) -> Bool {
-        name.hasPrefix("__") || name.contains("_") || bareTrailingPropertyAttributes.contains(name)
+        name.hasPrefix("__")
+            || bareTrailingPropertyAttributes.contains(name)
+            || (name.contains("_") && name == name.uppercased())
     }
 
     private static func isWhitespace(_ text: String) -> Bool {
