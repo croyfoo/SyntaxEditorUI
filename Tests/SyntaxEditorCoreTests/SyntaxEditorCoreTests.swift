@@ -6554,6 +6554,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, strong) NSError **error;
         @property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;
         @property (nonatomic, assign) NSError ***tripleError;
+        @property (nonatomic, assign) NSError ****quadError;
         - (NSString *)greetingFor:(NSString *)value;
         @end
 
@@ -6730,6 +6731,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .declarationOther,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic, assign) NSError ***tripleError;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "quadError",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, assign) NSError ****quadError;"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

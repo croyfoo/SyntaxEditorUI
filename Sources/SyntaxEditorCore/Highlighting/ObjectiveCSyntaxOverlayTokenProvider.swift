@@ -42,6 +42,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 continue
             }
 
+            if index.containsPropertyDeclarationNameRange(token.range) {
+                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .declarationOther))
+                continue
+            }
+
             switch token.syntaxID {
             case .identifier:
                 if isSelfMemberName(token.range, in: source),
@@ -333,11 +338,14 @@ private struct ObjectiveCFileSymbolIndex {
     let localTypes: Set<String>
     let localFunctions: Set<String>
     let localProperties: Set<String>
+    private let propertyDeclarationNameRanges: [NSRange]
 
     init(source: NSString, tokens: [SyntaxHighlightToken]) {
         var localTypes = Self.scanLocalTypes(source: source)
         var localFunctions = Set<String>()
-        var localProperties = Self.scanLocalProperties(source: source)
+        let propertyDeclarations = Self.scanLocalPropertyDeclarations(source: source)
+        var localProperties = Set(propertyDeclarations.map { $0.name })
+        Self.addZeroArgumentMethodProperties(source: source, to: &localProperties)
 
         for token in tokens {
             guard token.language == .objectiveC || token.language == nil,
@@ -369,6 +377,11 @@ private struct ObjectiveCFileSymbolIndex {
         self.localTypes = localTypes
         self.localFunctions = localFunctions
         self.localProperties = localProperties
+        self.propertyDeclarationNameRanges = propertyDeclarations.map { $0.range }
+    }
+
+    func containsPropertyDeclarationNameRange(_ range: NSRange) -> Bool {
+        propertyDeclarationNameRanges.contains { NSEqualRanges($0, range) }
     }
 
     private static func scanLocalTypes(source: NSString) -> Set<String> {
@@ -437,30 +450,32 @@ private struct ObjectiveCFileSymbolIndex {
         return declaration.substring(with: range)
     }
 
-    private static func scanLocalProperties(source: NSString) -> Set<String> {
+    private static func scanLocalPropertyDeclarations(source: NSString) -> [(name: String, range: NSRange)] {
         let string = source as String
         let fullRange = NSRange(location: 0, length: source.length)
-        var names = Set<String>()
+        var declarations: [(name: String, range: NSRange)] = []
 
-        for match in propertyRegex.matches(in: string, range: fullRange) {
-            guard match.numberOfRanges > 1 else { continue }
-            let range = match.range(at: 1)
-            guard range.location != NSNotFound else { continue }
+        for match in propertyDeclarationRegex.matches(in: string, range: fullRange) {
+            let declaration = source.substring(with: match.range) as NSString
+            guard let relativeNameRange = propertyDeclaredNameRange(in: declaration) else {
+                continue
+            }
+            let range = NSRange(
+                location: match.range.location + relativeNameRange.location,
+                length: relativeNameRange.length
+            )
             let name = source.substring(with: range)
             if isIdentifier(name) {
-                names.insert(name)
+                declarations.append((name: name, range: range))
             }
         }
 
-        for match in blockPropertyRegex.matches(in: string, range: fullRange) {
-            guard match.numberOfRanges > 1 else { continue }
-            let range = match.range(at: 1)
-            guard range.location != NSNotFound else { continue }
-            let name = source.substring(with: range)
-            if isIdentifier(name) {
-                names.insert(name)
-            }
-        }
+        return declarations
+    }
+
+    private static func addZeroArgumentMethodProperties(source: NSString, to names: inout Set<String>) {
+        let string = source as String
+        let fullRange = NSRange(location: 0, length: source.length)
 
         for match in zeroArgumentMethodRegex.matches(in: string, range: fullRange) {
             guard match.numberOfRanges > 1 else { continue }
@@ -471,8 +486,24 @@ private struct ObjectiveCFileSymbolIndex {
                 names.insert(name)
             }
         }
+    }
 
-        return names
+    private static func propertyDeclaredNameRange(in declaration: NSString) -> NSRange? {
+        let string = declaration as String
+        if let match = blockPropertyNameRegex.firstMatch(
+            in: string,
+            range: NSRange(location: 0, length: declaration.length)
+        ) {
+            let range = match.range(at: 1)
+            if range.location != NSNotFound {
+                return range
+            }
+        }
+
+        return identifierRegex.matches(
+            in: string,
+            range: NSRange(location: 0, length: declaration.length)
+        ).last?.range
     }
 
     private static func isZeroArgumentMethodName(_ range: NSRange, in source: NSString) -> Bool {
@@ -503,11 +534,11 @@ private struct ObjectiveCFileSymbolIndex {
         try! NSRegularExpression(pattern: #"\b(?:struct|union|enum)\s+([A-Za-z_][A-Za-z0-9_]*)"#),
     ]
 
-    private static let propertyRegex = try! NSRegularExpression(
-        pattern: #"@property\b[^;\n]*\b([A-Za-z_][A-Za-z0-9_]*)\s*;"#
+    private static let propertyDeclarationRegex = try! NSRegularExpression(
+        pattern: #"@property\b[^;\n]*;"#
     )
 
-    private static let blockPropertyRegex = try! NSRegularExpression(
+    private static let blockPropertyNameRegex = try! NSRegularExpression(
         pattern: #"@property\b[^;\n]*\(\s*\^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
     )
 
