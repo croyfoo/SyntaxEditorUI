@@ -6585,6 +6585,9 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger wrappedItemCount = self.items
                 .count;
             NSInteger status = self.HTTPStatusCode;
+            NSUInteger nestedCount = self.items[other.length].count;
+            id handlerValue = self.handler(other.value);
+            NSString *handlerCallDescription = self.handler(value).description;
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
             NSUInteger unknownCount = self.unknown.length;
@@ -6923,6 +6926,34 @@ struct SyntaxHighlighterEngineTests {
             text: "count",
             inOccurrenceOf: "items[self.name].count"
         ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.items[other.length].count"
+        ).contains(.identifierVariableSystem) == false)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "count",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.items[other.length].count"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "value",
+            inOccurrenceOf: "self.handler(other.value)"
+        ).contains(.identifierVariableSystem) == false)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.handler(value).description"
+        )
         #expect(syntaxIDs(
             in: tokens,
             source: source,

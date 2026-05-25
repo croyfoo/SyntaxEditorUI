@@ -173,6 +173,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             let beforeSelf = expression.substring(to: selfRange.location)
             let suffix = expression.substring(from: match.range.upperBound)
             if keepsSelfChainConnected(suffix)
+                && !hasUnmatchedOpeningDelimiter(suffix)
                 && (!hasUnmatchedClosingDelimiter(suffix) || allowsWrappedSelfChainStart(beforeSelf)) {
                 return true
             }
@@ -325,6 +326,32 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         }
 
         return false
+    }
+
+    private static func hasUnmatchedOpeningDelimiter(_ suffix: String) -> Bool {
+        var parenDepth = 0
+        var bracketDepth = 0
+
+        for character in suffix {
+            switch character {
+            case "(":
+                parenDepth += 1
+            case ")":
+                if parenDepth > 0 {
+                    parenDepth -= 1
+                }
+            case "[":
+                bracketDepth += 1
+            case "]":
+                if bracketDepth > 0 {
+                    bracketDepth -= 1
+                }
+            default:
+                continue
+            }
+        }
+
+        return parenDepth > 0 || bracketDepth > 0
     }
 
     private static func allowsWrappedSelfChainStart(_ beforeSelf: String) -> Bool {
