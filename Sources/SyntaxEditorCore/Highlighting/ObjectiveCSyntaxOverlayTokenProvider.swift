@@ -399,6 +399,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                     return false
                 }
             case "+", "*", "/", "%", "&", "|", "^", "!", "~", "<", ">":
+                if character == "/",
+                   let nextIndex = indexAfterComment(startingAt: index, in: suffix) {
+                    index = nextIndex
+                    continue
+                }
                 if parenDepth == 0 && bracketDepth == 0 {
                     return false
                 }
@@ -409,6 +414,37 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         }
 
         return true
+    }
+
+    private static func indexAfterComment(startingAt index: String.Index, in text: String) -> String.Index? {
+        let markerIndex = text.index(after: index)
+        guard markerIndex < text.endIndex else {
+            return nil
+        }
+
+        if text[markerIndex] == "/" {
+            var cursor = text.index(after: markerIndex)
+            while cursor < text.endIndex {
+                let character = text[cursor]
+                if character == "\n" || character == "\r" {
+                    return text.index(after: cursor)
+                }
+                cursor = text.index(after: cursor)
+            }
+            return text.endIndex
+        }
+
+        if text[markerIndex] == "*" {
+            var cursor = text.index(after: markerIndex)
+            while cursor < text.endIndex {
+                let next = text.index(after: cursor)
+                if text[cursor] == "*", next < text.endIndex, text[next] == "/" {
+                    return text.index(after: next)
+                }
+                cursor = next
+            }
+        }
+        return nil
     }
 
     private static func hasUnmatchedClosingDelimiter(_ suffix: String) -> Bool {
@@ -839,6 +875,9 @@ private struct ObjectiveCFileSymbolIndex {
             }
 
             let declaration = source.substring(with: match.range) as NSString
+            if firstLineContainsPropertyBodyIdentifier(in: declaration) {
+                continue
+            }
             guard let relativeNameRange = propertyDeclaredNameRange(in: declaration) else {
                 continue
             }
@@ -924,6 +963,39 @@ private struct ObjectiveCFileSymbolIndex {
             in: string,
             range: searchRange
         ).last?.range
+    }
+
+    private static func firstLineContainsPropertyBodyIdentifier(in declaration: NSString) -> Bool {
+        let newlineRange = declaration.rangeOfCharacter(from: .newlines)
+        guard newlineRange.location != NSNotFound else {
+            return false
+        }
+
+        let firstLine = declaration.substring(to: newlineRange.location) as NSString
+        var cursor = "@property".utf16.count
+        while cursor < firstLine.length,
+              isWhitespace(firstLine.substring(with: NSRange(location: cursor, length: 1))) {
+            cursor += 1
+        }
+        if cursor < firstLine.length,
+           firstLine.substring(with: NSRange(location: cursor, length: 1)) == "(" {
+            guard let closeParen = matchingClosingParenthesis(in: firstLine, after: cursor) else {
+                return false
+            }
+            cursor = closeParen + 1
+        }
+        while cursor < firstLine.length,
+              isWhitespace(firstLine.substring(with: NSRange(location: cursor, length: 1))) {
+            cursor += 1
+        }
+
+        guard cursor < firstLine.length else {
+            return false
+        }
+        return identifierRegex.firstMatch(
+            in: firstLine as String,
+            range: NSRange(location: cursor, length: firstLine.length - cursor)
+        ) != nil
     }
 
     private static func propertyNameFallbackSearchRange(in declaration: NSString) -> NSRange {

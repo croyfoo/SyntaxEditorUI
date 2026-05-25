@@ -6617,6 +6617,7 @@ struct SyntaxHighlighterEngineTests {
             NSInteger statusWithAttr = self.HTTP_STATUS_WITH_ATTR;
             NSInteger secondStatusWithAttr = self.SECOND_STATUS_WITH_ATTR;
             NSUInteger count = self.name.length;
+            NSUInteger commentedChainLength = self.name /* comment */ .length;
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
                 .count;
@@ -7121,6 +7122,14 @@ struct SyntaxHighlighterEngineTests {
             text: "length",
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
+            inOccurrenceOf: "self.name /* comment */ .length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
             inOccurrenceOf: "(self.name).length"
         )
         _ = try effectiveSemanticSnapshot(
@@ -7419,12 +7428,12 @@ struct SyntaxHighlighterEngineTests {
         let incompletePropertySource = """
         @interface Broken : NSObject
         @property (nonatomic, copy) NSString *name
-        - (NSString *)notAProperty:(NSString *)value;
+        NSString *notAProperty;
         @end
         @implementation Broken
         - (NSUInteger)length
         {
-            return self.value.length;
+            return self.notAProperty.length;
         }
         @end
         """
@@ -7432,14 +7441,14 @@ struct SyntaxHighlighterEngineTests {
         #expect(syntaxIDs(
             in: incompleteTokens,
             source: incompletePropertySource,
-            text: "value",
-            inOccurrenceOf: "self.value.length"
+            text: "notAProperty",
+            inOccurrenceOf: "self.notAProperty.length"
         ).contains(.identifierVariable) == false)
         #expect(syntaxIDs(
             in: incompleteTokens,
             source: incompletePropertySource,
             text: "length",
-            inOccurrenceOf: "self.value.length"
+            inOccurrenceOf: "self.notAProperty.length"
         ).contains(.identifierVariableSystem) == false)
     }
 
