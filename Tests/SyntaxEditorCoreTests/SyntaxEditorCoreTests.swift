@@ -6571,6 +6571,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy) NSString *bareMacroTitle MY_ATTR;
         @property (nonatomic, strong) id outletValue IBOutlet;
         @property (nonatomic, copy) NSString *user_id;
+        @property (nonatomic) NSInteger HTTP_STATUS;
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;
@@ -6605,12 +6606,15 @@ struct SyntaxHighlighterEngineTests {
             NSString *bareTitle = self.bareMacroTitle;
             id outlet = self.outletValue;
             NSUInteger underscoredLength = self.user_id.length;
+            NSInteger statusValue = self.HTTP_STATUS;
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
                 .count;
             NSUInteger parenthesizedLength = (self.name).length;
             if ((self.name).length > 0) {
+                return value;
+            } else if ((self.name).length > 1) {
                 return value;
             }
             if (self.name) other.length;
@@ -6989,6 +6993,14 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "self.user_id.length"
         )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "HTTP_STATUS",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.HTTP_STATUS"
+        )
         #expect(syntaxIDs(
             in: tokens,
             source: source,
@@ -7026,6 +7038,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "if ((self.name).length > 0)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "else if ((self.name).length > 1)"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

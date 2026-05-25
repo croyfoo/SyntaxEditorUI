@@ -681,7 +681,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     ]
 
     private static let parenthesizedSelfPrefixKeywords: Set<String> = [
-        "for", "if", "return", "switch", "while"
+        "else if", "for", "if", "return", "switch", "while"
     ]
 }
 
@@ -924,7 +924,11 @@ private struct ObjectiveCFileSymbolIndex {
 
             if let range = trailingIdentifierRange(in: declaration, end: end) {
                 let name = declaration.substring(with: range)
-                if shouldStripBareTrailingPropertyAttribute(name),
+                if shouldStripBareTrailingPropertyAttribute(
+                    name,
+                    before: range.location,
+                    in: declaration
+                ),
                    hasIdentifierBefore(range.location, in: declaration) {
                     end = range.location
                     didStripSuffix = true
@@ -1027,10 +1031,21 @@ private struct ObjectiveCFileSymbolIndex {
         ) != nil
     }
 
-    private static func shouldStripBareTrailingPropertyAttribute(_ name: String) -> Bool {
-        name.hasPrefix("__")
-            || bareTrailingPropertyAttributes.contains(name)
-            || (name.contains("_") && name == name.uppercased())
+    private static func shouldStripBareTrailingPropertyAttribute(
+        _ name: String,
+        before location: Int,
+        in declaration: NSString
+    ) -> Bool {
+        if name.hasPrefix("__") || bareTrailingPropertyAttributes.contains(name) {
+            return true
+        }
+        guard name.contains("_"),
+              name == name.uppercased(),
+              let previousRange = trailingIdentifierRange(in: declaration, end: location) else {
+            return false
+        }
+        let previousName = declaration.substring(with: previousRange)
+        return !typedefIgnoredIdentifiers.contains(previousName)
     }
 
     private static func isWhitespace(_ text: String) -> Bool {
