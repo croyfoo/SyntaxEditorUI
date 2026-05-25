@@ -6571,7 +6571,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy) NSString *bareMacroTitle MY_ATTR;
         @property (nonatomic, strong) id outletValue IBOutlet;
         @property (nonatomic, copy) NSString *user_id;
-        @property (nonatomic) NSInteger HTTP_STATUS;
+        @property (nonatomic) MyEnum HTTP_STATUS;
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;

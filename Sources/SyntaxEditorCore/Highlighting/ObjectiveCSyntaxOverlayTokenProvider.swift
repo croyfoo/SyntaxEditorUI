@@ -1045,7 +1045,11 @@ private struct ObjectiveCFileSymbolIndex {
             return false
         }
         let previousName = declaration.substring(with: previousRange)
-        return !typedefIgnoredIdentifiers.contains(previousName)
+        guard !typedefIgnoredIdentifiers.contains(previousName),
+              let firstCharacter = previousName.first else {
+            return false
+        }
+        return firstCharacter == "_" || firstCharacter.isLowercase
     }
 
     private static func isWhitespace(_ text: String) -> Bool {
