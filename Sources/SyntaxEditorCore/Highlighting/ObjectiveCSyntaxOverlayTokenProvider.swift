@@ -355,13 +355,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     }
 
     private static func allowsWrappedSelfChainStart(_ beforeSelf: String) -> Bool {
-        var prefix = beforeSelf.trimmingCharacters(in: .whitespaces)
+        var prefix = beforeSelf.trimmingCharacters(in: .whitespacesAndNewlines)
         while let match = trailingCastRegex.firstMatch(
             in: prefix,
             range: NSRange(location: 0, length: (prefix as NSString).length)
         ) {
             prefix = (prefix as NSString).substring(to: match.range.location)
-                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         guard prefix.hasSuffix("(") else {
@@ -586,7 +586,6 @@ private struct ObjectiveCFileSymbolIndex {
         var localFunctions = Set<String>()
         let propertyDeclarations = Self.scanLocalPropertyDeclarations(source: source)
         var localProperties = Set(propertyDeclarations.map { $0.name })
-        Self.addZeroArgumentMethodProperties(source: source, to: &localProperties)
 
         for token in tokens {
             guard token.language == .objectiveC || token.language == nil,
@@ -712,21 +711,6 @@ private struct ObjectiveCFileSymbolIndex {
         }
 
         return declarations
-    }
-
-    private static func addZeroArgumentMethodProperties(source: NSString, to names: inout Set<String>) {
-        let string = source as String
-        let fullRange = NSRange(location: 0, length: source.length)
-
-        for match in zeroArgumentMethodRegex.matches(in: string, range: fullRange) {
-            guard match.numberOfRanges > 1 else { continue }
-            let range = match.range(at: 1)
-            guard range.location != NSNotFound else { continue }
-            let name = source.substring(with: range)
-            if isIdentifier(name) {
-                names.insert(name)
-            }
-        }
     }
 
     private static func propertyDeclaredNameRange(in declaration: NSString) -> NSRange? {

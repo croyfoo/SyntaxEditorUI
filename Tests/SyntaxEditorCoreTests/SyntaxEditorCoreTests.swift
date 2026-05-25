@@ -6529,6 +6529,10 @@ struct SyntaxHighlighterEngineTests {
         #define ReferenceEnabled 1
         #endif
 
+        /*
+        - (NSString *)commentedTitle;
+        */
+
         typedef void (^ReferenceCompletion)(id object, NSError **error);
 
         static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
@@ -6587,6 +6591,9 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger wrappedItemCount = self.items
                 .count;
             NSUInteger parenthesizedLength = (self.name).length;
+            NSUInteger multilineParenthesizedLength = (
+                self.name
+            ).length;
             NSUInteger wrappedNameLength = self.wrappedName.length;
             NSInteger status = self.HTTPStatusCode;
             NSUInteger nestedCount = self.items[other.length].count;
@@ -6594,6 +6601,7 @@ struct SyntaxHighlighterEngineTests {
             NSString *handlerCallDescription = self.handler(value).description;
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
+            NSUInteger commentedLength = self.commentedTitle.length;
             NSUInteger unknownCount = self.unknown.length;
             NSUInteger mixedCount = self.name.length + self.missing.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
@@ -6920,6 +6928,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "(\n        self.name\n    ).length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "wrappedName",
             syntaxID: .identifierVariable,
             language: .objectiveC,
@@ -6968,6 +6984,18 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "length",
             inOccurrenceOf: "self.missing.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "commentedTitle",
+            inOccurrenceOf: "self.commentedTitle.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.commentedTitle.length"
         ).contains(.identifierVariableSystem) == false)
         #expect(syntaxIDs(
             in: tokens,
