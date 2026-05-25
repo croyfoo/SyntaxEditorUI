@@ -6567,6 +6567,9 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;
+        @property (nonatomic,
+                   copy)
+        NSString *multilineName;
         - (NSString *)greetingFor:(NSString *)value;
         - (NSString *)
         wrappedAccessor;
@@ -6598,16 +6601,22 @@ struct SyntaxHighlighterEngineTests {
             if ((self.name).length > 0) {
                 return value;
             }
+            NSString *parenthesizedRootName = (self).name;
+            NSString *castRootName = ((Sample *)self).name;
+            NSUInteger parenthesizedRootLength = (self).name.length;
+            NSUInteger castRootLength = ((Sample *)self).name.length;
             NSUInteger multilineParenthesizedLength = (
                 self.name
             ).length;
             NSUInteger wrappedNameLength = self.wrappedName.length;
+            NSUInteger multilineNameLength = self.multilineName.length;
             NSUInteger wrappedAccessorLength = self.wrappedAccessor.length;
             NSInteger status = self.HTTPStatusCode;
             NSUInteger nestedCount = self.items[other.length].count;
             id handlerValue = self.handler(other.value);
             NSString *handlerCallDescription = self.handler(value).description;
             NSUInteger wrappedCallLength = Wrap((self.name)).length;
+            NSUInteger wrappedSelfRootLength = Wrap((self)).name.length;
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
             NSUInteger commentedLength = self.commentedTitle.length;
@@ -6946,6 +6955,38 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "(self).name"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "((Sample *)self).name"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "(self).name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "((Sample *)self).name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "length",
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
@@ -6966,6 +7007,22 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.wrappedName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "multilineName",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.multilineName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.multilineName.length"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -7082,6 +7139,12 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "length",
             inOccurrenceOf: "Wrap((self.name)).length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "Wrap((self)).name.length"
         ).contains(.identifierVariableSystem) == false)
         #expect(syntaxIDs(
             in: tokens,

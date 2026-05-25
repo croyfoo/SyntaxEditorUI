@@ -161,7 +161,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         )
         for match in matches.reversed() {
             let selfRange = match.range(at: 2)
-            let firstMemberRange = match.range(at: 3)
+            let wrappedSelfClosingRange = match.range(at: 3)
+            let firstMemberRange = match.range(at: 4)
             guard selfRange.location != NSNotFound,
                   firstMemberRange.location != NSNotFound else {
                 continue
@@ -171,6 +172,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 continue
             }
             let beforeSelf = expression.substring(to: selfRange.location)
+            if wrappedSelfClosingRange.location != NSNotFound,
+               wrappedSelfClosingRange.length > 0,
+               !allowsWrappedSelfChainStart(beforeSelf) {
+                continue
+            }
             let suffix = expression.substring(from: match.range.upperBound)
             if keepsSelfChainConnected(suffix)
                 && !hasUnmatchedOpeningDelimiter(suffix)
@@ -237,15 +243,99 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     }
 
     private static func expressionPrefixEndsWithSelf(_ prefix: String) -> Bool {
-        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasSuffix("self") else {
+        var trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if expressionPrefixDirectlyEndsWithSelf(trimmed) {
+            return true
+        }
+        if parenthesizedSelfSuffixEndsWithSelf(trimmed) {
+            return true
+        }
+
+        while let unwrapped = unwrappedOuterParentheses(trimmed) {
+            trimmed = unwrapped
+            if expressionPrefixDirectlyEndsWithSelf(trimmed) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private static func expressionPrefixDirectlyEndsWithSelf(_ prefix: String) -> Bool {
+        guard prefix.hasSuffix("self") else {
             return false
         }
-        let beforeSelf = trimmed.dropLast("self".count)
+        let beforeSelf = prefix.dropLast("self".count)
         guard let previous = beforeSelf.last else {
             return true
         }
         return !isObjectiveCIdentifierCharacter(previous)
+    }
+
+    private static func parenthesizedSelfSuffixEndsWithSelf(_ prefix: String) -> Bool {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.last == ")" else {
+            return false
+        }
+
+        var depth = 0
+        var index = trimmed.index(before: trimmed.endIndex)
+        while true {
+            let character = trimmed[index]
+            if character == ")" {
+                depth += 1
+            } else if character == "(" {
+                depth -= 1
+                if depth == 0 {
+                    let innerStart = trimmed.index(after: index)
+                    let innerEnd = trimmed.index(before: trimmed.endIndex)
+                    let inner = String(trimmed[innerStart..<innerEnd])
+                    let before = String(trimmed[..<index])
+                    return allowsWrappedSelfChainStart(before)
+                        && expressionPrefixEndsWithSelf(inner)
+                }
+                if depth < 0 {
+                    return false
+                }
+            }
+
+            if index == trimmed.startIndex {
+                break
+            }
+            index = trimmed.index(before: index)
+        }
+        return false
+    }
+
+    private static func unwrappedOuterParentheses(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.first == "(", trimmed.last == ")" else {
+            return nil
+        }
+
+        var depth = 0
+        var index = trimmed.startIndex
+        while index < trimmed.endIndex {
+            let character = trimmed[index]
+            if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                depth -= 1
+                if depth == 0, trimmed.index(after: index) != trimmed.endIndex {
+                    return nil
+                }
+                if depth < 0 {
+                    return nil
+                }
+            }
+            index = trimmed.index(after: index)
+        }
+
+        guard depth == 0 else {
+            return nil
+        }
+        return String(trimmed.dropFirst().dropLast())
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func keepsSelfChainConnected(_ suffix: String) -> Bool {
@@ -548,7 +638,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     }
 
     private static let selfRootMemberRegex = try! NSRegularExpression(
-        pattern: #"(^|[^A-Za-z0-9_])(self)(?:\.|->)([A-Za-z_][A-Za-z0-9_]*)"#
+        pattern: #"(^|[^A-Za-z0-9_])(self)((?:\s*\))*)\s*(?:\.|->)([A-Za-z_][A-Za-z0-9_]*)"#
     )
 
     private static let trailingCastRegex = try! NSRegularExpression(
@@ -786,7 +876,7 @@ private struct ObjectiveCFileSymbolIndex {
     ]
 
     private static let propertyDeclarationRegex = try! NSRegularExpression(
-        pattern: #"@property\b[^\n;]*(?:;|\n(?!\s*(?:[-+]|@))[^\n;]*;)"#
+        pattern: #"@property\b[^\n;]*(?:\n(?!\s*(?:[-+]|@))[^\n;]*)*;"#
     )
 
     private static let blockPropertyNameRegex = try! NSRegularExpression(
