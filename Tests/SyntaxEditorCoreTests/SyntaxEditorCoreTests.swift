@@ -6558,6 +6558,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, assign) NSError ****quadError;
         @property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);
         @property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;
+        @property (nonatomic) NSInteger HTTPStatusCode;
         - (NSString *)greetingFor:(NSString *)value;
         @end
 
@@ -6581,6 +6582,7 @@ struct SyntaxHighlighterEngineTests {
             NSString *title = self.renamedTitle ?: self.refinedTitle;
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
+            NSInteger status = self.HTTPStatusCode;
             NSUInteger unknownCount = self.unknown.length;
             NSUInteger mixedCount = self.name.length + self.missing.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
@@ -6774,6 +6776,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "HTTPStatusCode",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) NSInteger HTTPStatusCode;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "greetingFor",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -6858,6 +6868,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.refinedTitle"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "HTTPStatusCode",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.HTTPStatusCode"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
