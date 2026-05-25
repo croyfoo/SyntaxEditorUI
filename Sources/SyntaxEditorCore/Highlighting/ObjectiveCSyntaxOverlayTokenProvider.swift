@@ -786,7 +786,7 @@ private struct ObjectiveCFileSymbolIndex {
     ]
 
     private static let propertyDeclarationRegex = try! NSRegularExpression(
-        pattern: #"@property\b[^;]*;"#
+        pattern: #"@property\b[^\n;]*(?:;|\n(?!\s*(?:[-+]|@))[^\n;]*;)"#
     )
 
     private static let blockPropertyNameRegex = try! NSRegularExpression(

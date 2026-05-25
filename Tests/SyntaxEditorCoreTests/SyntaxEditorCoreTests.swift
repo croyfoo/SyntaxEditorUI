@@ -7084,6 +7084,32 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.contains {
             tokenIntersects($0, range: stringRange, syntaxID: .string, language: .objectiveC)
         })
+
+        let incompletePropertySource = """
+        @interface Broken : NSObject
+        @property (nonatomic, copy) NSString *name
+        - (NSString *)notAProperty:(NSString *)value;
+        @end
+        @implementation Broken
+        - (NSUInteger)length
+        {
+            return self.value.length;
+        }
+        @end
+        """
+        let incompleteTokens = await engine.render(source: incompletePropertySource, language: .objectiveC)
+        #expect(syntaxIDs(
+            in: incompleteTokens,
+            source: incompletePropertySource,
+            text: "value",
+            inOccurrenceOf: "self.value.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: incompleteTokens,
+            source: incompletePropertySource,
+            text: "length",
+            inOccurrenceOf: "self.value.length"
+        ).contains(.identifierVariableSystem) == false)
     }
 
     @Test("SyntaxHighlighterEngine aligns focused Objective-C reference tokens")
