@@ -6568,6 +6568,8 @@ struct SyntaxHighlighterEngineTests {
         - (NSString *)greetingFor:(NSString *)value {
             // comment
             self.name = ReferenceLanguageAliases()[@"objc"] ?: value;
+            id (^block)(id) = self.handler;
+            NSString *handlerDescription = self.handler.description;
             NSUInteger count = self.name.length;
             NSUInteger unknownCount = self.unknown.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
@@ -6749,6 +6751,22 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.name ="
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "handler",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.handler;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.handler.description"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

@@ -452,6 +452,16 @@ private struct ObjectiveCFileSymbolIndex {
             }
         }
 
+        for match in blockPropertyRegex.matches(in: string, range: fullRange) {
+            guard match.numberOfRanges > 1 else { continue }
+            let range = match.range(at: 1)
+            guard range.location != NSNotFound else { continue }
+            let name = source.substring(with: range)
+            if isIdentifier(name) {
+                names.insert(name)
+            }
+        }
+
         for match in zeroArgumentMethodRegex.matches(in: string, range: fullRange) {
             guard match.numberOfRanges > 1 else { continue }
             let range = match.range(at: 1)
@@ -495,6 +505,10 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static let propertyRegex = try! NSRegularExpression(
         pattern: #"@property\b[^;\n]*\b([A-Za-z_][A-Za-z0-9_]*)\s*;"#
+    )
+
+    private static let blockPropertyRegex = try! NSRegularExpression(
+        pattern: #"@property\b[^;\n]*\(\s*\^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
     )
 
     private static let zeroArgumentMethodRegex = try! NSRegularExpression(
