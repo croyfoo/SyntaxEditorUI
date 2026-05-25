@@ -189,8 +189,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     private static func keepsSelfChainConnected(_ suffix: String) -> Bool {
         var parenDepth = 0
         var bracketDepth = 0
+        var index = suffix.startIndex
 
-        for character in suffix {
+        while index < suffix.endIndex {
+            let character = suffix[index]
             switch character {
             case "(":
                 parenDepth += 1
@@ -214,9 +216,23 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 if parenDepth == 0 && bracketDepth == 0 {
                     return false
                 }
+            case "-":
+                let nextIndex = suffix.index(after: index)
+                if nextIndex < suffix.endIndex, suffix[nextIndex] == ">" {
+                    index = suffix.index(after: nextIndex)
+                    continue
+                }
+                if parenDepth == 0 && bracketDepth == 0 {
+                    return false
+                }
+            case "+", "*", "/", "%", "&", "|", "^", "!", "~", "<", ">":
+                if parenDepth == 0 && bracketDepth == 0 {
+                    return false
+                }
             default:
-                continue
+                break
             }
+            index = suffix.index(after: index)
         }
 
         return true
