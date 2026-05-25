@@ -178,9 +178,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 continue
             }
             let suffix = expression.substring(from: match.range.upperBound)
+            let hasUnmatchedClosing = hasUnmatchedClosingDelimiter(suffix)
+            let allowsWrappedSelfChainClose = hasUnmatchedClosing
+                && !hasUnmatchedClosingSquareBracket(suffix)
+                && allowsWrappedSelfChainStart(beforeSelf)
             if keepsSelfChainConnected(suffix)
                 && !hasUnmatchedOpeningDelimiter(suffix)
-                && (!hasUnmatchedClosingDelimiter(suffix) || allowsWrappedSelfChainStart(beforeSelf)) {
+                && (!hasUnmatchedClosing || allowsWrappedSelfChainClose) {
                 return true
             }
         }
@@ -403,6 +407,26 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                     return true
                 }
                 parenDepth -= 1
+            case "[":
+                bracketDepth += 1
+            case "]":
+                if bracketDepth == 0 {
+                    return true
+                }
+                bracketDepth -= 1
+            default:
+                continue
+            }
+        }
+
+        return false
+    }
+
+    private static func hasUnmatchedClosingSquareBracket(_ suffix: String) -> Bool {
+        var bracketDepth = 0
+
+        for character in suffix {
+            switch character {
             case "[":
                 bracketDepth += 1
             case "]":
@@ -824,20 +848,23 @@ private struct ObjectiveCFileSymbolIndex {
                 return range
             }
         }
-        if let match = propertyNameBeforeTrailingAttributesRegex.firstMatch(
-            in: string,
-            range: NSRange(location: 0, length: declaration.length)
-        ) {
-            let range = match.range(at: 1)
-            if range.location != NSNotFound {
-                return range
-            }
-        }
-
         let searchRange = propertyNameFallbackSearchRange(in: declaration)
         guard searchRange.length > 0 else {
             return nil
         }
+
+        let searchableDeclaration = declaration.substring(with: searchRange) + ";"
+        if let match = propertyNameBeforeTrailingAttributesRegex.firstMatch(
+            in: searchableDeclaration,
+            range: NSRange(location: 0, length: (searchableDeclaration as NSString).length)
+        ) {
+            let range = match.range(at: 1)
+            if range.location != NSNotFound,
+               range.upperBound <= searchRange.length {
+                return range
+            }
+        }
+
         return identifierRegex.matches(
             in: string,
             range: searchRange

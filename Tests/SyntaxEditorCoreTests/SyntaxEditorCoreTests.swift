@@ -6565,6 +6565,8 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);
         @property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;
         @property (nonatomic, copy) NSString *customMacroTitle MY_ATTR(foo);
+        @property (nonatomic, copy) NSString *bareMacroTitle MY_ATTR;
+        @property (nonatomic, strong) id outletValue IBOutlet;
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;
@@ -6595,6 +6597,8 @@ struct SyntaxHighlighterEngineTests {
             NSString *castHandlerDescription = ((id)self.handler).description;
             NSString *title = self.renamedTitle ?: self.refinedTitle;
             NSString *customTitle = self.customMacroTitle;
+            NSString *bareTitle = self.bareMacroTitle;
+            id outlet = self.outletValue;
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
@@ -6621,6 +6625,7 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger wrappedSelfRootLength = Wrap((self)).name.length;
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
+            NSUInteger messageResultLength = [formatter stringFrom:self.name].length;
             NSUInteger commentedLength = self.commentedTitle.length;
             NSUInteger ghostLength = self.ghostName.length;
             NSUInteger unknownCount = self.unknown.length;
@@ -6930,6 +6935,22 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "self.customMacroTitle"
         )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "bareMacroTitle",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.bareMacroTitle"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "outletValue",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.outletValue"
+        )
         #expect(syntaxIDs(
             in: tokens,
             source: source,
@@ -7167,6 +7188,12 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "length",
             inOccurrenceOf: "[self.name description].length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "[formatter stringFrom:self.name].length"
         ).contains(.identifierVariableSystem) == false)
         _ = try effectiveSemanticSnapshot(
             in: tokens,
