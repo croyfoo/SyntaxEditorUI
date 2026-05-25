@@ -6549,6 +6549,7 @@ struct SyntaxHighlighterEngineTests {
 
         @interface Sample : NSObject
         @property (nonatomic, copy) NSString *name;
+        @property (nonatomic, copy) NSArray *items;
         @property (nonatomic, copy) id (^handler)(id);
         @property (nonatomic, copy) id (^ _Nullable qualifiedHandler)(id);
         @property (nonatomic, strong) NSError **error;
@@ -6576,8 +6577,10 @@ struct SyntaxHighlighterEngineTests {
             id (^block)(id) = self.handler;
             id (^qualifiedBlock)(id) = self.qualifiedHandler;
             NSString *handlerDescription = self.handler.description;
+            NSString *castHandlerDescription = ((id)self.handler).description;
             NSString *title = self.renamedTitle ?: self.refinedTitle;
             NSUInteger count = self.name.length;
+            NSUInteger itemCount = self.items[0].count;
             NSUInteger unknownCount = self.unknown.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
         }
@@ -6694,6 +6697,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .declarationOther,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic, copy) NSString *name;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "items",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSArray *items;"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -6826,6 +6837,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "((id)self.handler).description"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "renamedTitle",
             syntaxID: .identifierVariable,
             language: .objectiveC,
@@ -6846,6 +6865,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "count",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.items[0].count"
         )
         #expect(syntaxIDs(
             in: tokens,

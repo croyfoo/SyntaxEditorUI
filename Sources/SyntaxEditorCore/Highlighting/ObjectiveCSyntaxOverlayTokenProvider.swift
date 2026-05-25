@@ -151,18 +151,126 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     ) -> Bool {
         let prefix = linePrefix(before: range, in: source)
             .trimmingCharacters(in: .whitespaces)
-        guard let match = selfMemberChainRegex.firstMatch(
+        let expressionPrefix: String
+        if prefix.hasSuffix("->") {
+            expressionPrefix = String(prefix.dropLast(2))
+        } else if prefix.hasSuffix(".") {
+            expressionPrefix = String(prefix.dropLast())
+        } else {
+            return false
+        }
+
+        let expression = expressionPrefix as NSString
+        let matches = selfRootMemberRegex.matches(
+            in: expressionPrefix,
+            range: NSRange(location: 0, length: expression.length)
+        )
+        for match in matches.reversed() {
+            let selfRange = match.range(at: 2)
+            let firstMemberRange = match.range(at: 3)
+            guard selfRange.location != NSNotFound,
+                  firstMemberRange.location != NSNotFound else {
+                continue
+            }
+            let firstMember = expression.substring(with: firstMemberRange)
+            guard localProperties.contains(firstMember) else {
+                continue
+            }
+            let beforeSelf = expression.substring(to: selfRange.location)
+            let suffix = expression.substring(from: match.range.upperBound)
+            if keepsSelfChainConnected(suffix)
+                && (!hasUnmatchedClosingDelimiter(suffix) || allowsWrappedSelfChainStart(beforeSelf)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func keepsSelfChainConnected(_ suffix: String) -> Bool {
+        var parenDepth = 0
+        var bracketDepth = 0
+
+        for character in suffix {
+            switch character {
+            case "(":
+                parenDepth += 1
+            case ")":
+                if parenDepth > 0 {
+                    parenDepth -= 1
+                }
+            case "[":
+                bracketDepth += 1
+            case "]":
+                if bracketDepth > 0 {
+                    bracketDepth -= 1
+                }
+            case ";", "{", "}":
+                return false
+            case "=", "?", ":":
+                if parenDepth == 0 && bracketDepth == 0 {
+                    return false
+                }
+            case ",":
+                if parenDepth == 0 && bracketDepth == 0 {
+                    return false
+                }
+            default:
+                continue
+            }
+        }
+
+        return true
+    }
+
+    private static func hasUnmatchedClosingDelimiter(_ suffix: String) -> Bool {
+        var parenDepth = 0
+        var bracketDepth = 0
+
+        for character in suffix {
+            switch character {
+            case "(":
+                parenDepth += 1
+            case ")":
+                if parenDepth == 0 {
+                    return true
+                }
+                parenDepth -= 1
+            case "[":
+                bracketDepth += 1
+            case "]":
+                if bracketDepth == 0 {
+                    return true
+                }
+                bracketDepth -= 1
+            default:
+                continue
+            }
+        }
+
+        return false
+    }
+
+    private static func allowsWrappedSelfChainStart(_ beforeSelf: String) -> Bool {
+        var prefix = beforeSelf.trimmingCharacters(in: .whitespaces)
+        while let match = trailingCastRegex.firstMatch(
             in: prefix,
             range: NSRange(location: 0, length: (prefix as NSString).length)
-        ) else {
-            return false
+        ) {
+            prefix = (prefix as NSString).substring(to: match.range.location)
+                .trimmingCharacters(in: .whitespaces)
         }
-        let firstMemberRange = match.range(at: 1)
-        guard firstMemberRange.location != NSNotFound else {
-            return false
+
+        guard prefix.hasSuffix("(") else {
+            return true
         }
-        let firstMember = (prefix as NSString).substring(with: firstMemberRange)
-        return localProperties.contains(firstMember)
+        let beforeOpenParen = String(prefix.dropLast())
+            .trimmingCharacters(in: .whitespaces)
+        guard let previous = beforeOpenParen.last else {
+            return true
+        }
+        return !isObjectiveCIdentifierCharacter(previous)
+            && previous != ")"
+            && previous != "]"
     }
 
     private static func previousNonWhitespaceCharacter(before range: NSRange, in source: NSString) -> Character? {
@@ -325,8 +433,16 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         pattern: #"^[A-Za-z_][A-Za-z0-9_]*$"#
     )
 
-    private static let selfMemberChainRegex = try! NSRegularExpression(
-        pattern: #"(?:^|[^A-Za-z0-9_])self(?:\.|->)([A-Za-z_][A-Za-z0-9_]*)(?:\.|->)(?:[A-Za-z_][A-Za-z0-9_]*(?:\.|->))*$"#
+    private static func isObjectiveCIdentifierCharacter(_ character: Character) -> Bool {
+        character == "_" || character.isLetter || character.isNumber
+    }
+
+    private static let selfRootMemberRegex = try! NSRegularExpression(
+        pattern: #"(^|[^A-Za-z0-9_])(self)(?:\.|->)([A-Za-z_][A-Za-z0-9_]*)"#
+    )
+
+    private static let trailingCastRegex = try! NSRegularExpression(
+        pattern: #"\(\s*[A-Za-z_][A-Za-z0-9_ *]*\s*\)\s*$"#
     )
 
     private static let keywordLikeTypeNames: Set<String> = [
