@@ -584,7 +584,7 @@ private struct ObjectiveCFileSymbolIndex {
     init(source: NSString, tokens: [SyntaxHighlightToken]) {
         var localTypes = Self.scanLocalTypes(source: source)
         var localFunctions = Set<String>()
-        let propertyDeclarations = Self.scanLocalPropertyDeclarations(source: source)
+        let propertyDeclarations = Self.scanLocalPropertyDeclarations(source: source, tokens: tokens)
         var localProperties = Set(propertyDeclarations.map { $0.name })
 
         for token in tokens {
@@ -690,7 +690,10 @@ private struct ObjectiveCFileSymbolIndex {
         return declaration.substring(with: range)
     }
 
-    private static func scanLocalPropertyDeclarations(source: NSString) -> [(name: String, range: NSRange)] {
+    private static func scanLocalPropertyDeclarations(
+        source: NSString,
+        tokens: [SyntaxHighlightToken]
+    ) -> [(name: String, range: NSRange)] {
         let string = source as String
         let fullRange = NSRange(location: 0, length: source.length)
         var declarations: [(name: String, range: NSRange)] = []
@@ -705,12 +708,26 @@ private struct ObjectiveCFileSymbolIndex {
                 length: relativeNameRange.length
             )
             let name = source.substring(with: range)
-            if isIdentifier(name) {
+            if isIdentifier(name), isCodeIdentifierRange(range, tokens: tokens, source: source) {
                 declarations.append((name: name, range: range))
             }
         }
 
         return declarations
+    }
+
+    private static func isCodeIdentifierRange(
+        _ range: NSRange,
+        tokens: [SyntaxHighlightToken],
+        source: NSString
+    ) -> Bool {
+        tokens.contains { token in
+            guard NSEqualRanges(token.range, range),
+                  (token.language == .objectiveC || token.language == nil) else {
+                return false
+            }
+            return isIdentifier(source.substring(with: token.range))
+        }
     }
 
     private static func propertyDeclaredNameRange(in declaration: NSString) -> NSRange? {

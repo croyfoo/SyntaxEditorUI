@@ -6531,6 +6531,8 @@ struct SyntaxHighlighterEngineTests {
 
         /*
         - (NSString *)commentedTitle;
+        @property (copy)
+        NSString *ghostName;
         */
 
         typedef void (^ReferenceCompletion)(id object, NSError **error);
@@ -6602,6 +6604,7 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
             NSUInteger commentedLength = self.commentedTitle.length;
+            NSUInteger ghostLength = self.ghostName.length;
             NSUInteger unknownCount = self.unknown.length;
             NSUInteger mixedCount = self.name.length + self.missing.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
@@ -6996,6 +6999,18 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "length",
             inOccurrenceOf: "self.commentedTitle.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ghostName",
+            inOccurrenceOf: "self.ghostName.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.ghostName.length"
         ).contains(.identifierVariableSystem) == false)
         #expect(syntaxIDs(
             in: tokens,
