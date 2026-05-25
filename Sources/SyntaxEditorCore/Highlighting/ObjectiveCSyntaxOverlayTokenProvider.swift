@@ -477,17 +477,23 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
     private static func allowsWrappedSelfChainStart(_ beforeSelf: String) -> Bool {
         var prefix = beforeSelf.trimmingCharacters(in: .whitespacesAndNewlines)
-        while let match = trailingCastRegex.firstMatch(
-            in: prefix,
-            range: NSRange(location: 0, length: (prefix as NSString).length)
-        ) {
-            prefix = (prefix as NSString).substring(to: match.range.location)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
+        var changed = true
+        while changed {
+            changed = false
+            while let match = trailingCastRegex.firstMatch(
+                in: prefix,
+                range: NSRange(location: 0, length: (prefix as NSString).length)
+            ) {
+                prefix = (prefix as NSString).substring(to: match.range.location)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                changed = true
+            }
 
-        while prefix.hasSuffix("(") {
-            prefix = String(prefix.dropLast())
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            while prefix.hasSuffix("(") {
+                prefix = String(prefix.dropLast())
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                changed = true
+            }
         }
         guard prefix.isEmpty == false else {
             return true

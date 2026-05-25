@@ -6601,6 +6601,7 @@ struct SyntaxHighlighterEngineTests {
             int (*callbackValue)(int) = self.callback;
             NSString *handlerDescription = self.handler.description;
             NSString *castHandlerDescription = ((id)self.handler).description;
+            NSString *nestedCastHandlerDescription = ((id)(self.handler)).description;
             NSString *title = self.renamedTitle ?: self.refinedTitle;
             NSString *customTitle = self.customMacroTitle;
             NSString *bareTitle = self.bareMacroTitle;
@@ -6936,6 +6937,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "((id)self.handler).description"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "((id)(self.handler)).description"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
