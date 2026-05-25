@@ -6595,6 +6595,9 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger wrappedItemCount = self.items
                 .count;
             NSUInteger parenthesizedLength = (self.name).length;
+            if ((self.name).length > 0) {
+                return value;
+            }
             NSUInteger multilineParenthesizedLength = (
                 self.name
             ).length;
@@ -6931,6 +6934,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "(self.name).length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "if ((self.name).length > 0)"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

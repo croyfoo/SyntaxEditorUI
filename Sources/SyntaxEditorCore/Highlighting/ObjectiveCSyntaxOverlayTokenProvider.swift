@@ -560,7 +560,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     ]
 
     private static let parenthesizedSelfPrefixKeywords: Set<String> = [
-        "return"
+        "for", "if", "return", "switch", "while"
     ]
 }
 
@@ -574,6 +574,7 @@ private struct ObjectiveCFileSymbolIndex {
         var localTypes = Self.scanLocalTypes(source: source)
         var localFunctions = Set<String>()
         let propertyDeclarations = Self.scanLocalPropertyDeclarations(source: source, tokens: tokens)
+        let zeroArgumentMethodNameRanges = Self.zeroArgumentMethodNameRanges(in: source)
         var localProperties = Set(propertyDeclarations.map { $0.name })
 
         for token in tokens {
@@ -595,7 +596,10 @@ private struct ObjectiveCFileSymbolIndex {
                 localTypes.insert(text)
             case .identifierFunction:
                 localFunctions.insert(text)
-                if Self.isZeroArgumentMethodName(token.range, in: source) {
+                if Self.isZeroArgumentMethodName(
+                    token.range,
+                    in: zeroArgumentMethodNameRanges
+                ) {
                     localProperties.insert(text)
                 }
             default:
@@ -746,16 +750,25 @@ private struct ObjectiveCFileSymbolIndex {
         ).last?.range
     }
 
-    private static func isZeroArgumentMethodName(_ range: NSRange, in source: NSString) -> Bool {
+    private static func zeroArgumentMethodNameRanges(in source: NSString) -> [NSRange] {
         let string = source as String
         let fullRange = NSRange(location: 0, length: source.length)
-        for match in zeroArgumentMethodRegex.matches(in: string, range: fullRange) {
-            guard match.numberOfRanges > 1 else { continue }
-            if NSIntersectionRange(match.range(at: 1), range).length > 0 {
-                return true
+        return zeroArgumentMethodRegex.matches(in: string, range: fullRange).compactMap { match in
+            guard match.numberOfRanges > 1 else {
+                return nil
             }
+            let range = match.range(at: 1)
+            return range.location == NSNotFound ? nil : range
         }
-        return false
+    }
+
+    private static func isZeroArgumentMethodName(
+        _ range: NSRange,
+        in zeroArgumentMethodNameRanges: [NSRange]
+    ) -> Bool {
+        zeroArgumentMethodNameRanges.contains {
+            NSIntersectionRange($0, range).length > 0
+        }
     }
 
     private static func isIdentifier(_ text: String) -> Bool {
