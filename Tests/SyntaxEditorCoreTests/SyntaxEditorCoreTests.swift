@@ -6636,6 +6636,8 @@ struct SyntaxHighlighterEngineTests {
             NSString *handlerCallDescription = self.handler(value).description;
             NSUInteger wrappedCallLength = Wrap((self.name)).length;
             NSUInteger wrappedSelfRootLength = Wrap((self)).name.length;
+            // self.name
+            other.length;
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
             NSUInteger messageResultLength = [formatter stringFrom:self.name].length;
@@ -7263,6 +7265,12 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "length",
             inOccurrenceOf: "Wrap((self)).name.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "other.length;"
         ).contains(.identifierVariableSystem) == false)
         #expect(syntaxIDs(
             in: tokens,

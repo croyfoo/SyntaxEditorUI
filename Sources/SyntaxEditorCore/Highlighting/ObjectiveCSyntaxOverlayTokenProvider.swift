@@ -167,6 +167,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                   firstMemberRange.location != NSNotFound else {
                 continue
             }
+            if isInsideLineComment(selfRange, in: expression) {
+                continue
+            }
             let firstMember = expression.substring(with: firstMemberRange)
             guard localProperties.contains(firstMember) else {
                 continue
@@ -341,6 +344,23 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         }
         return String(trimmed.dropFirst().dropLast())
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func isInsideLineComment(_ range: NSRange, in text: NSString) -> Bool {
+        var lineStart = range.location
+        while lineStart > 0 {
+            let previous = text.substring(with: NSRange(location: lineStart - 1, length: 1))
+            if previous == "\n" || previous == "\r" {
+                break
+            }
+            lineStart -= 1
+        }
+
+        guard lineStart < range.location else {
+            return false
+        }
+        let linePrefix = text.substring(with: NSRange(location: lineStart, length: range.location - lineStart))
+        return linePrefix.contains("//")
     }
 
     private static func keepsSelfChainConnected(_ suffix: String) -> Bool {
