@@ -272,8 +272,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             return token.range.upperBound <= source.length
                 && isCFunctionCallName(token.range, in: source)
                 && !looksLikeCFunctionDeclarationPrefix(before: token.range, in: source)
-        case .identifierVariable:
-            return syntaxIDsAtSameRange.contains(.identifierVariableSystem)
+        case .identifierVariable,
+             .identifierVariableSystem:
+            return true
         default:
             return false
         }

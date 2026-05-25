@@ -6931,6 +6931,48 @@ struct SyntaxHighlighterEngineTests {
         ).contains(.identifierFunction) == false)
     }
 
+    @Test("SyntaxHighlighterEngine strips stale Objective-C self member overlays after property removal")
+    func highlighterStripsStaleObjectiveCSelfMemberOverlaysAfterPropertyRemoval() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length;
+        }
+        @end
+        """
+        let removedProperty = "@property(nonatomic, copy) NSString *name;\n"
+        let updatedSource = source.replacingOccurrences(of: removedProperty, with: "")
+        let mutation = SyntaxHighlightMutation(
+            location: (source as NSString).range(of: removedProperty).location,
+            length: (removedProperty as NSString).length,
+            replacement: ""
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "name",
+            inOccurrenceOf: "return self.name.length;"
+        ).contains(.identifierVariable) == false)
+    }
+
     @Test("SyntaxHighlighterEngine keeps Objective-C semantic refresh ranges local")
     func highlighterKeepsObjectiveCSemanticRefreshRangesLocal() async throws {
         let source = """
