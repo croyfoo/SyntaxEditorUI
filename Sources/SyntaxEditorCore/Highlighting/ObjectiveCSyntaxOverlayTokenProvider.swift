@@ -167,7 +167,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                   firstMemberRange.location != NSNotFound else {
                 continue
             }
-            if isInsideLineComment(selfRange, in: expression) {
+            if isInsideLineComment(selfRange, in: expression)
+                || isInsideCommentOrLiteral(selfRange, in: expression) {
                 continue
             }
             let firstMember = expression.substring(with: firstMemberRange)
@@ -395,6 +396,52 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         }
         let linePrefix = text.substring(with: NSRange(location: lineStart, length: range.location - lineStart))
         return linePrefix.contains("//")
+    }
+
+    private static func isInsideCommentOrLiteral(_ range: NSRange, in text: NSString) -> Bool {
+        var cursor = 0
+        var quote: String?
+        var isLineComment = false
+        var isBlockComment = false
+        var isEscaped = false
+
+        while cursor < min(range.location, text.length) {
+            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            let next = cursor + 1 < text.length
+                ? text.substring(with: NSRange(location: cursor + 1, length: 1))
+                : ""
+
+            if isLineComment {
+                if character == "\n" || character == "\r" {
+                    isLineComment = false
+                }
+            } else if isBlockComment {
+                if character == "*", next == "/" {
+                    isBlockComment = false
+                    cursor += 1
+                }
+            } else if let activeQuote = quote {
+                if isEscaped {
+                    isEscaped = false
+                } else if character == "\\" {
+                    isEscaped = true
+                } else if character == activeQuote {
+                    quote = nil
+                }
+            } else if character == "/", next == "/" {
+                isLineComment = true
+                cursor += 1
+            } else if character == "/", next == "*" {
+                isBlockComment = true
+                cursor += 1
+            } else if character == "\"" || character == "'" {
+                quote = character
+            }
+
+            cursor += 1
+        }
+
+        return quote != nil || isLineComment || isBlockComment
     }
 
     private static func keepsSelfChainConnected(_ suffix: String) -> Bool {
