@@ -334,6 +334,15 @@
       (pointer_declarator
         declarator: (identifier) @editor.syntax.objectivec.declaration.other))))
 
+(property_declaration
+  (_)*
+  (struct_declaration
+    (struct_declarator
+      (function_declarator
+        declarator: (parenthesized_declarator
+                      (block_pointer_declarator
+                        declarator: (identifier) @editor.syntax.objectivec.declaration.other))))))
+
 ; Parameters
 
 (method_parameter ":" @editor.syntax.objectivec.plain (identifier) @editor.syntax.objectivec.identifier)

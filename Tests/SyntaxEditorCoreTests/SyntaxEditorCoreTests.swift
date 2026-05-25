@@ -6549,6 +6549,7 @@ struct SyntaxHighlighterEngineTests {
 
         @interface Sample : NSObject
         @property (nonatomic, copy) NSString *name;
+        @property (nonatomic, copy) id (^handler)(id);
         - (NSString *)greetingFor:(NSString *)value;
         @end
 
@@ -6681,6 +6682,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .declarationOther,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic, copy) NSString *name;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "handler",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) id (^handler)(id);"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
