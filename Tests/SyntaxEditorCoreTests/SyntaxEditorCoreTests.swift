@@ -6582,6 +6582,8 @@ struct SyntaxHighlighterEngineTests {
             NSString *title = self.renamedTitle ?: self.refinedTitle;
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
+            NSUInteger wrappedItemCount = self.items
+                .count;
             NSInteger status = self.HTTPStatusCode;
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
@@ -6894,6 +6896,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.items[0].count"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "count",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.items\n        .count"
         )
         #expect(syntaxIDs(
             in: tokens,

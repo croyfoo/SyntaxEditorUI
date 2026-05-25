@@ -139,9 +139,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     }
 
     private static func isSelfMemberName(_ range: NSRange, in source: NSString) -> Bool {
-        let prefix = linePrefix(before: range, in: source)
-            .trimmingCharacters(in: .whitespaces)
-        return prefix.hasSuffix("self.") || prefix.hasSuffix("self->")
+        guard let expressionPrefix = memberAccessExpressionPrefix(before: range, in: source) else {
+            return false
+        }
+        return expressionPrefixEndsWithSelf(expressionPrefix)
     }
 
     private static func isMemberNameInKnownSelfChain(
@@ -149,14 +150,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         in source: NSString,
         localProperties: Set<String>
     ) -> Bool {
-        let prefix = linePrefix(before: range, in: source)
-            .trimmingCharacters(in: .whitespaces)
-        let expressionPrefix: String
-        if prefix.hasSuffix("->") {
-            expressionPrefix = String(prefix.dropLast(2))
-        } else if prefix.hasSuffix(".") {
-            expressionPrefix = String(prefix.dropLast())
-        } else {
+        guard let expressionPrefix = memberAccessExpressionPrefix(before: range, in: source) else {
             return false
         }
 
@@ -184,6 +178,73 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             }
         }
         return false
+    }
+
+    private static func memberAccessExpressionPrefix(before range: NSRange, in source: NSString) -> String? {
+        guard range.location > 0 else {
+            return nil
+        }
+
+        var cursor = range.location - 1
+        while cursor >= 0 {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                break
+            }
+            if cursor == 0 {
+                return nil
+            }
+            cursor -= 1
+        }
+
+        let operatorStart: Int
+        let character = source.substring(with: NSRange(location: cursor, length: 1))
+        if character == "." {
+            operatorStart = cursor
+        } else if character == ">", cursor > 0,
+                  source.substring(with: NSRange(location: cursor - 1, length: 1)) == "-" {
+            operatorStart = cursor - 1
+        } else {
+            return nil
+        }
+
+        let start = expressionBoundaryBefore(location: operatorStart, in: source)
+        guard start < operatorStart else {
+            return nil
+        }
+        return source.substring(with: NSRange(location: start, length: operatorStart - start))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func expressionBoundaryBefore(location: Int, in source: NSString) -> Int {
+        guard location > 0 else {
+            return 0
+        }
+
+        var cursor = location - 1
+        while cursor >= 0 {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == ";" || character == "{" || character == "}" {
+                return cursor + 1
+            }
+            if cursor == 0 {
+                break
+            }
+            cursor -= 1
+        }
+        return 0
+    }
+
+    private static func expressionPrefixEndsWithSelf(_ prefix: String) -> Bool {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix("self") else {
+            return false
+        }
+        let beforeSelf = trimmed.dropLast("self".count)
+        guard let previous = beforeSelf.last else {
+            return true
+        }
+        return !isObjectiveCIdentifierCharacter(previous)
     }
 
     private static func keepsSelfChainConnected(_ suffix: String) -> Bool {
