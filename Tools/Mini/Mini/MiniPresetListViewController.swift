@@ -27,7 +27,6 @@ final class MiniPresetListViewController: UICollectionViewController {
         dataSource = makeDataSource()
         applySnapshot()
         bindModel()
-        renderSelection()
     }
 
     override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -40,11 +39,8 @@ final class MiniPresetListViewController: UICollectionViewController {
     }
 
     private func bindModel() {
-        observations.update {
-            model.observe(\.currentPresetID) { [weak self] _ in
-                self?.renderSelection()
-            }
-            .store(in: observations)
+        observations.observe(model) { [weak self] _, _ in
+            self?.renderSelection()
         }
     }
 
@@ -139,7 +135,6 @@ final class MiniPresetListViewController: NSViewController, NSTableViewDataSourc
         configureTableView()
         tableView.reloadData()
         bindModel()
-        renderSelection()
     }
 
     private func configureHierarchy() {
@@ -203,11 +198,8 @@ final class MiniPresetListViewController: NSViewController, NSTableViewDataSourc
     }
 
     private func bindModel() {
-        observations.update {
-            model.observe(\.currentPresetID) { [weak self] _ in
-                self?.renderSelection()
-            }
-            .store(in: observations)
+        observations.observe(model) { [weak self] _, _ in
+            self?.renderSelection()
         }
     }
 
