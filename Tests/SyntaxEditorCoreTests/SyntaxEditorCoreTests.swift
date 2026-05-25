@@ -6583,6 +6583,8 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger count = self.name.length;
             NSUInteger itemCount = self.items[0].count;
             NSInteger status = self.HTTPStatusCode;
+            NSUInteger indexedCount = items[self.name].count;
+            NSUInteger messageLength = [self.name description].length;
             NSUInteger unknownCount = self.unknown.length;
             NSUInteger mixedCount = self.name.length + self.missing.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
@@ -6904,6 +6906,18 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "length",
             inOccurrenceOf: "self.missing.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "count",
+            inOccurrenceOf: "items[self.name].count"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "[self.name description].length"
         ).contains(.identifierVariableSystem) == false)
         _ = try effectiveSemanticSnapshot(
             in: tokens,

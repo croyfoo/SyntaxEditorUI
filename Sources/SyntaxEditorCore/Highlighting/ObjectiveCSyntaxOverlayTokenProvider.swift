@@ -277,7 +277,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         }
 
         guard prefix.hasSuffix("(") else {
-            return true
+            return false
         }
         let beforeOpenParen = String(prefix.dropLast())
             .trimmingCharacters(in: .whitespaces)
@@ -287,6 +287,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         return !isObjectiveCIdentifierCharacter(previous)
             && previous != ")"
             && previous != "]"
+            && previous != "["
     }
 
     private static func previousNonWhitespaceCharacter(before range: NSRange, in source: NSString) -> Character? {
