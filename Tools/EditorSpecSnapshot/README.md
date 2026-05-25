@@ -136,6 +136,37 @@ swift run EditorSpecTool xcode-source-editor-view-diagnostics \
   --language swift --pretty
 ```
 
+## Compare Objective-C highlighting with Xcode
+
+Objective-C does not currently have the same `SourceEditor.framework` /
+`SymbolCache` token path used by Swift in this tool. Use the older DVT
+text-storage rendered probe as the closest local signal for what Xcode paints:
+
+```bash
+swift run EditorSpecTool xcode-dvt-rendered-tokens \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.m \
+  --language objective-c --pretty
+
+swift run EditorSpecTool rendered-diff \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.m \
+  --language objective-c --pretty
+```
+
+Use `source-model-tokens` and `diff` for Objective-C rule investigation, not as
+the final rendered-color oracle. SourceModel structural items can expose
+`xcode.syntax.name.*` nodes such as function names and local parameter names,
+while the DVT text-storage rendered output for the same ranges may still paint
+plain `identifier` colors. Treat that difference as a real boundary between
+rule-model structure and editor rendering, especially before adding semantic
+overlays for system types, system functions, constants, declarations, or local
+variables.
+
+When aligning Objective-C runtime behavior, prefer a source-local pass: query
+captures should own syntax categories that the parse tree can express, and any
+Swift-side overlay should be reserved for ranges that cannot be represented by
+Tree-sitter queries. Do not infer symbols from companion headers unless that
+scope is explicitly reopened.
+
 `source-model-tokens` is useful for inspecting SourceModel rule closures and
 non-rendered syntax items:
 
@@ -150,7 +181,7 @@ The SourceModel snapshot output is a JSON list of flattened source model items
 with source ranges, matched rule identifiers, token names, and
 `xcode.syntax.*` node type names. It uses private framework APIs through the
 tool-only `SourceModelBridge` target. Keep it as an xclangspec/rule inspection
-aid and for non-Swift investigations; Swift alignment should use
+aid and for non-rendered structural investigations; Swift alignment should use
 `classification-diff` because SourceEditor exposes the same token taxonomy used
 by Xcode's editor.
 
