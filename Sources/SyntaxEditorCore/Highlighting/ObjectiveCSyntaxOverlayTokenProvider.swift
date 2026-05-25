@@ -364,34 +364,23 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        guard prefix.hasSuffix("(") else {
-            return false
+        while prefix.hasSuffix("(") {
+            prefix = String(prefix.dropLast())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        let beforeOpenParen = String(prefix.dropLast())
-            .trimmingCharacters(in: .whitespaces)
-        guard let previous = beforeOpenParen.last else {
+        guard prefix.isEmpty == false else {
             return true
         }
-        if isObjectiveCIdentifierCharacter(previous),
-           parenthesizedSelfPrefixKeywords.contains(lastIdentifier(in: beforeOpenParen)) {
+        if parenthesizedSelfPrefixKeywords.contains(prefix) {
+            return true
+        }
+        guard let previous = prefix.last else {
             return true
         }
         return !isObjectiveCIdentifierCharacter(previous)
             && previous != ")"
             && previous != "]"
             && previous != "["
-    }
-
-    private static func lastIdentifier(in text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        var identifier = ""
-        for character in trimmed.reversed() {
-            guard isObjectiveCIdentifierCharacter(character) else {
-                break
-            }
-            identifier.insert(character, at: identifier.startIndex)
-        }
-        return identifier
     }
 
     private static func previousNonWhitespaceCharacter(before range: NSRange, in source: NSString) -> Character? {
@@ -758,17 +747,15 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func isZeroArgumentMethodName(_ range: NSRange, in source: NSString) -> Bool {
-        let lineRange = source.lineRange(for: NSRange(location: range.location, length: 0))
-        let line = source.substring(with: lineRange)
-        let lineNS = line as NSString
-        let relativeRange = NSRange(location: range.location - lineRange.location, length: range.length)
-        guard let match = zeroArgumentMethodRegex.firstMatch(
-            in: line,
-            range: NSRange(location: 0, length: lineNS.length)
-        ) else {
-            return false
+        let string = source as String
+        let fullRange = NSRange(location: 0, length: source.length)
+        for match in zeroArgumentMethodRegex.matches(in: string, range: fullRange) {
+            guard match.numberOfRanges > 1 else { continue }
+            if NSIntersectionRange(match.range(at: 1), range).length > 0 {
+                return true
+            }
         }
-        return NSIntersectionRange(match.range(at: 1), relativeRange).length > 0
+        return false
     }
 
     private static func isIdentifier(_ text: String) -> Bool {

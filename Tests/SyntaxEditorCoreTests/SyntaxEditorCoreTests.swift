@@ -6568,6 +6568,8 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy)
         NSString *wrappedName;
         - (NSString *)greetingFor:(NSString *)value;
+        - (NSString *)
+        wrappedAccessor;
         @end
 
         @implementation Sample
@@ -6597,10 +6599,12 @@ struct SyntaxHighlighterEngineTests {
                 self.name
             ).length;
             NSUInteger wrappedNameLength = self.wrappedName.length;
+            NSUInteger wrappedAccessorLength = self.wrappedAccessor.length;
             NSInteger status = self.HTTPStatusCode;
             NSUInteger nestedCount = self.items[other.length].count;
             id handlerValue = self.handler(other.value);
             NSString *handlerCallDescription = self.handler(value).description;
+            NSUInteger wrappedCallLength = Wrap((self.name)).length;
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
             NSUInteger commentedLength = self.commentedTitle.length;
@@ -6955,6 +6959,22 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "wrappedAccessor",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.wrappedAccessor.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.wrappedAccessor.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "length",
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
@@ -7046,6 +7066,12 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "self.handler(value).description"
         )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "Wrap((self.name)).length"
+        ).contains(.identifierVariableSystem) == false)
         #expect(syntaxIDs(
             in: tokens,
             source: source,
