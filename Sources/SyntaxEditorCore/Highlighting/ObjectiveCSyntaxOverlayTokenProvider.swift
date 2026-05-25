@@ -167,8 +167,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                   firstMemberRange.location != NSNotFound else {
                 continue
             }
-            if isInsideLineComment(selfRange, in: expression)
-                || isInsideCommentOrLiteral(selfRange, in: expression) {
+            if isInsideCommentOrLiteral(selfRange, in: expression) {
                 continue
             }
             let firstMember = expression.substring(with: firstMemberRange)
@@ -379,23 +378,6 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             }
         }
         return prefix.isEmpty
-    }
-
-    private static func isInsideLineComment(_ range: NSRange, in text: NSString) -> Bool {
-        var lineStart = range.location
-        while lineStart > 0 {
-            let previous = text.substring(with: NSRange(location: lineStart - 1, length: 1))
-            if previous == "\n" || previous == "\r" {
-                break
-            }
-            lineStart -= 1
-        }
-
-        guard lineStart < range.location else {
-            return false
-        }
-        let linePrefix = text.substring(with: NSRange(location: lineStart, length: range.location - lineStart))
-        return linePrefix.contains("//")
     }
 
     private static func isInsideCommentOrLiteral(_ range: NSRange, in text: NSString) -> Bool {
@@ -1054,7 +1036,9 @@ private struct ObjectiveCFileSymbolIndex {
                 length: relativeNameRange.length
             )
             let name = source.substring(with: range)
-            if isIdentifier(name), isCodeIdentifierRange(range, tokens: tokens, source: source) {
+            if isIdentifier(name),
+               !typedefIgnoredIdentifiers.contains(name),
+               isCodeIdentifierRange(range, tokens: tokens, source: source) {
                 declarations.append((name: name, range: range))
             }
         }
@@ -1505,7 +1489,7 @@ private struct ObjectiveCFileSymbolIndex {
     )
 
     private static let functionPointerPropertyNameRegex = try! NSRegularExpression(
-        pattern: #"\(\s*\*\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\([^;]*\)"#
+        pattern: #"\(\s*\*+\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\([^;]*\)"#
     )
 
     private static let propertyNameBeforeTrailingAttributesRegex = try! NSRegularExpression(

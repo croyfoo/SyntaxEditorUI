@@ -6561,6 +6561,7 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy) id (^handler)(id);
         @property (nonatomic, copy) id (^ _Nullable qualifiedHandler)(id);
         @property (nonatomic) int (*callback)(int);
+        @property (nonatomic) int (**doubleCallback)(int);
         @property (nonatomic) int (* _Nullable nullableCallback)(int);
         @property (nonatomic, strong) NSError **error;
         @property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;
@@ -6605,6 +6606,7 @@ struct SyntaxHighlighterEngineTests {
             id (^block)(id) = self.handler;
             id (^qualifiedBlock)(id) = self.qualifiedHandler;
             int (*callbackValue)(int) = self.callback;
+            int (**doubleCallbackValue)(int) = self.doubleCallback;
             int (*nullableCallbackValue)(int) = self.nullableCallback;
             NSString *handlerDescription = self.handler.description;
             NSString *castHandlerDescription = ((id)self.handler).description;
@@ -6619,6 +6621,7 @@ struct SyntaxHighlighterEngineTests {
             NSInteger statusWithAttr = self.HTTP_STATUS_WITH_ATTR;
             NSInteger secondStatusWithAttr = self.SECOND_STATUS_WITH_ATTR;
             NSUInteger count = self.name.length;
+            NSUInteger literalCommentArgumentLength = Foo(@"//", self.name.length);
             NSUInteger commentedChainLength = self.name /* comment */ .length;
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
@@ -6826,6 +6829,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "doubleCallback",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) int (**doubleCallback)(int);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "nullableCallback",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -6994,6 +7005,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "doubleCallback",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.doubleCallback"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "nullableCallback",
             syntaxID: .identifierVariable,
             language: .objectiveC,
@@ -7132,6 +7151,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: #"Foo(@"//", self.name.length)"#
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
