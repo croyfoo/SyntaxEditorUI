@@ -596,9 +596,19 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     }
 
     private static func containsOnlyClosingParenthesesAndWhitespace(_ suffix: String) -> Bool {
-        suffix.allSatisfy { character in
-            character == ")" || character.isWhitespace
+        var index = suffix.startIndex
+        while index < suffix.endIndex {
+            if let nextIndex = indexAfterSkippableTriviaOrLiteral(startingAt: index, in: suffix) {
+                index = nextIndex
+                continue
+            }
+            let character = suffix[index]
+            guard character == ")" || character.isWhitespace else {
+                return false
+            }
+            index = suffix.index(after: index)
         }
+        return true
     }
 
     private static func hasUnmatchedOpeningDelimiter(_ suffix: String) -> Bool {
