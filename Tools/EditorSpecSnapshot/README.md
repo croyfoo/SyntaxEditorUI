@@ -139,8 +139,9 @@ swift run EditorSpecTool xcode-source-editor-view-diagnostics \
 ## Compare Objective-C highlighting with Xcode
 
 Objective-C does not currently have the same `SourceEditor.framework` /
-`SymbolCache` token path used by Swift in this tool. Use the older DVT
-text-storage rendered probe as the closest local signal for what Xcode paints:
+`SymbolCache` token path used by Swift in this tool. The older DVT text-storage
+rendered probe is the closest local signal for what Xcode paints, but it is not
+a complete semantic oracle:
 
 ```bash
 swift run EditorSpecTool xcode-dvt-rendered-tokens \
@@ -152,20 +153,33 @@ swift run EditorSpecTool rendered-diff \
   --language objective-c --pretty
 ```
 
-Use `source-model-tokens` and `diff` for Objective-C rule investigation, not as
-the final rendered-color oracle. SourceModel structural items can expose
-`xcode.syntax.name.*` nodes such as function names and local parameter names,
-while the DVT text-storage rendered output for the same ranges may still paint
-plain `identifier` colors. Treat that difference as a real boundary between
-rule-model structure and editor rendering, especially before adding semantic
-overlays for system types, system functions, constants, declarations, or local
-variables.
+Use `source-model-tokens`, `diff`, `ObjectiveC.xclangspec`, and
+`Built-in Syntax Types.xcsynspec` for Objective-C rule and taxonomy
+investigation, not as final rendered-color oracles. SourceModel structural items
+can expose `xcode.syntax.name.*` nodes such as function names and local
+parameter names, while the DVT text-storage rendered output for the same ranges
+may still paint plain `identifier` colors. Treat that difference as a real
+boundary between rule-model structure and editor rendering, especially before
+adding semantic overlays for system types, system functions, constants,
+declarations, local variables, or header-defined macros/constants that are not
+distinguishable from source-local text.
 
 When aligning Objective-C runtime behavior, prefer a source-local pass: query
 captures should own syntax categories that the parse tree can express, and any
 Swift-side overlay should be reserved for ranges that cannot be represented by
 Tree-sitter queries. Do not infer symbols from companion headers unless that
 scope is explicitly reopened.
+
+Objective-C `@property` declaration names are query-owned declaration tokens:
+`ObjectiveC.xclangspec` exposes `property.name.actual` as
+`xcode.syntax.name.other`, so keep them distinct from local declarations and
+method parameters even when other declarators remain plain identifiers.
+
+One deliberate source-local overlay remains for explicit `self.` member chains:
+the first known source-local property after `self.` is treated as a project
+property/global token, while following members in that same chain are treated as
+other property/global tokens. Do not extend that behavior to arbitrary dotted
+expressions or local declarations without a fresh Xcode-rendering check.
 
 `source-model-tokens` is useful for inspecting SourceModel rule closures and
 non-rendered syntax items:

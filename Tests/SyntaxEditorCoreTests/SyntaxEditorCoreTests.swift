@@ -6677,6 +6677,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "name",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *name;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "greetingFor",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -6774,6 +6782,54 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "language",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property(nonatomic, strong) id language;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "text",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return self.text.length;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return self.text.length;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceErrorDomain",
+            syntaxID: .identifier,
+            language: .objectiveC,
+            inOccurrenceOf: "static NSString *const ReferenceErrorDomain"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "index",
+            syntaxID: .identifier,
+            language: .objectiveC,
+            inOccurrenceOf: "- (unichar)characterAtIndex:(NSUInteger)index"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "symbol",
+            syntaxID: .identifier,
+            language: .objectiveC,
+            inOccurrenceOf: "void *symbol = dlsym"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "NSMethodSignature",
             syntaxID: .identifierTypeSystem,
             language: .objectiveC,
@@ -6823,7 +6879,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "NSLocalizedDescriptionKey",
-            syntaxID: .identifierConstantSystem,
+            syntaxID: .identifier,
             language: .objectiveC,
             inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
         )

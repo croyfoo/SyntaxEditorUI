@@ -44,35 +44,22 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
             switch token.syntaxID {
             case .identifier:
-                if isPropertyDeclarationName(token.range, text: text, in: source) {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .declarationOther))
-                } else if ObjectiveCSystemSymbols.isSystemConstant(text) {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierConstantSystem))
-                } else if ObjectiveCSystemSymbols.isSystemFunction(text) {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierFunctionSystem))
-                } else if isMessageReceiverName(token.range, in: source) {
-                    if index.localTypes.contains(text) || shouldTreatUnknownTypeAsProject(text) {
-                        overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierType))
-                    } else if ObjectiveCSystemSymbols.isSystemType(text) {
-                        overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierTypeSystem))
-                    }
+                if isSelfMemberName(token.range, in: source),
+                   index.localProperties.contains(text) {
+                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariable))
+                } else if isMemberNameInSelfChain(token.range, in: source) {
+                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariableSystem))
                 }
 
             case .identifierType, .identifierTypeSystem:
                 guard !keywordLikeTypeNames.contains(text) else {
                     continue
                 }
-                let syntaxID: EditorSourceSyntaxID
                 if isTypeDeclarationName(token.range, text: text, in: source) {
-                    syntaxID = .declarationType
+                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .declarationType))
                 } else if index.localTypes.contains(text) || shouldTreatUnknownTypeAsProject(text) {
-                    syntaxID = .identifierType
-                } else if ObjectiveCSystemSymbols.isSystemType(text) {
-                    syntaxID = .identifierTypeSystem
-                } else {
-                    continue
+                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierType))
                 }
-                overlayTokens.append(canonicalToken(range: token.range, syntaxID: syntaxID))
 
             case .identifierFunction:
                 overlayTokens.append(canonicalToken(range: token.range, syntaxID: .declarationOther))
@@ -81,16 +68,6 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 if index.localFunctions.contains(text),
                    isCFunctionCallName(token.range, in: source) {
                     overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierFunction))
-                } else {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierFunctionSystem))
-                }
-
-            case .identifierVariable, .identifierVariableSystem:
-                if isSelfMemberName(token.range, in: source),
-                   index.localProperties.contains(text) {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariable))
-                } else if isDotMemberName(token.range, in: source) {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariableSystem))
                 }
 
             default:
@@ -152,27 +129,6 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         return true
     }
 
-    private static func isPropertyDeclarationName(_ range: NSRange, text: String, in source: NSString) -> Bool {
-        let lineRange = source.lineRange(for: NSRange(location: range.location, length: 0))
-        let line = source.substring(with: lineRange) as NSString
-        guard line.range(of: "@property").location != NSNotFound else {
-            return false
-        }
-
-        let string = line as String
-        let matches = objectiveCIdentifierSearchRegex.matches(
-            in: string,
-            range: NSRange(location: 0, length: line.length)
-        )
-        for match in matches.reversed() {
-            let name = line.substring(with: match.range)
-            if !propertyNameIgnoredIdentifiers.contains(name) {
-                return name == text
-            }
-        }
-        return false
-    }
-
     private static func isMessageReceiverName(_ range: NSRange, in source: NSString) -> Bool {
         previousNonWhitespaceCharacter(before: range, in: source) == "["
     }
@@ -183,10 +139,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         return prefix.hasSuffix("self.") || prefix.hasSuffix("self->")
     }
 
-    private static func isDotMemberName(_ range: NSRange, in source: NSString) -> Bool {
+    private static func isMemberNameInSelfChain(_ range: NSRange, in source: NSString) -> Bool {
         let prefix = linePrefix(before: range, in: source)
             .trimmingCharacters(in: .whitespaces)
-        return prefix.hasSuffix(".") || prefix.hasSuffix("->")
+        return selfMemberChainRegex.firstMatch(
+            in: prefix,
+            range: NSRange(location: 0, length: (prefix as NSString).length)
+        ) != nil
     }
 
     private static func previousNonWhitespaceCharacter(before range: NSRange, in source: NSString) -> Character? {
@@ -291,9 +250,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         }
         switch token.syntaxID {
         case .declarationType,
-             .declarationOther,
              .identifierConstantSystem:
             return true
+        case .declarationOther:
+            return syntaxIDsAtSameRange.contains(.identifierFunction)
         case .identifierType:
             if syntaxIDsAtSameRange.contains(.identifierTypeSystem) {
                 return true
@@ -347,19 +307,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         pattern: #"^[A-Za-z_][A-Za-z0-9_]*$"#
     )
 
-    private static let objectiveCIdentifierSearchRegex = try! NSRegularExpression(
-        pattern: #"[A-Za-z_][A-Za-z0-9_]*"#
+    private static let selfMemberChainRegex = try! NSRegularExpression(
+        pattern: #"(?:^|[^A-Za-z0-9_])self(?:\.|->)(?:[A-Za-z_][A-Za-z0-9_]*(?:\.|->))+$"#
     )
 
     private static let keywordLikeTypeNames: Set<String> = [
         "BOOL", "IMP", "SEL", "id", "instancetype"
-    ]
-
-    private static let propertyNameIgnoredIdentifiers: Set<String> = [
-        "atomic", "nonatomic", "assign", "copy", "strong", "weak", "retain",
-        "readonly", "readwrite", "unsafe_unretained", "nullable", "nonnull",
-        "null_resettable", "class", "getter", "setter", "NSString",
-        "NSDictionary", "NSArray", "NSSet", "NSError", "BOOL", "id"
     ]
 }
 
@@ -564,14 +517,6 @@ private enum ObjectiveCSystemSymbols {
         return knownTypePrefixes.contains { name.hasPrefix($0) }
     }
 
-    static func isSystemFunction(_ name: String) -> Bool {
-        knownFunctionNames.contains(name)
-    }
-
-    static func isSystemConstant(_ name: String) -> Bool {
-        knownConstantNames.contains(name)
-    }
-
     private static let knownTypeNames: Set<String> = [
         "BOOL", "Class", "IMP", "NSInteger", "NSUInteger", "NSRange", "SEL",
         "char", "double", "float", "id", "instancetype", "int", "long",
@@ -582,11 +527,4 @@ private enum ObjectiveCSystemSymbols {
         "NS", "CF", "CG", "CA", "CI", "UI", "AV", "WK", "MTL", "OS", "dispatch_"
     ]
 
-    private static let knownFunctionNames: Set<String> = [
-        "objc_msgSend"
-    ]
-
-    private static let knownConstantNames: Set<String> = [
-        "NSLocalizedDescriptionKey", "RTLD_DEFAULT"
-    ]
 }
