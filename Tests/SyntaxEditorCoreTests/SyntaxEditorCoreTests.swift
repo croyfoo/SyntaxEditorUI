@@ -6529,6 +6529,12 @@ struct SyntaxHighlighterEngineTests {
         #define ReferenceEnabled 1
         #endif
 
+        /*
+        - (NSString *)commentedTitle;
+        @property (copy)
+        NSString *ghostName;
+        */
+
         typedef void (^ReferenceCompletion)(id object, NSError **error);
 
         static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
@@ -6548,8 +6554,40 @@ struct SyntaxHighlighterEngineTests {
         @end
 
         @interface Sample : NSObject
+        // @property (nonatomic, copy)
+        NSString *commentEscapedName;
         @property (nonatomic, copy) NSString *name;
+        @property (nonatomic, copy) NSArray *items;
+        @property (nonatomic, copy) id (^handler)(id);
+        @property (nonatomic, copy) id (^ _Nullable qualifiedHandler)(id);
+        @property (nonatomic) int (*callback)(int);
+        @property (nonatomic) int (**doubleCallback)(int);
+        @property (nonatomic) int (* _Nullable nullableCallback)(int);
+        @property (nonatomic, strong) NSError **error;
+        @property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;
+        @property (nonatomic, assign) NSError ***tripleError;
+        @property (nonatomic, assign) NSError ****quadError;
+        @property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);
+        @property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;
+        @property (nonatomic, copy) NSString *customMacroTitle MY_ATTR(foo);
+        @property (nonatomic, copy) NSString *bareMacroTitle MY_ATTR;
+        @property (nonatomic, strong) id outletValue IBOutlet;
+        @property (nonatomic, copy) NSString *user_id;
+        @property (nonatomic) MyEnum HTTP_STATUS;
+        @property (nonatomic) dispatch_queue_t WORK_QUEUE;
+        @property (nonatomic) MyEnum HTTP_STATUS_WITH_ATTR MY_ATTR;
+        @property (nonatomic) MY_ENUM SECOND_STATUS_WITH_ATTR MY_ATTR;
+        @property (nonatomic) NSInteger HTTPStatusCode;
+        @property (nonatomic, copy)
+        NSString *wrappedName;
+        @property (nonatomic, copy) NSString *
+        lineWrappedName;
+        @property (nonatomic,
+                   copy)
+        NSString *multilineName;
         - (NSString *)greetingFor:(NSString *)value;
+        - (NSString *)
+        wrappedAccessor;
         @end
 
         @implementation Sample
@@ -6565,8 +6603,77 @@ struct SyntaxHighlighterEngineTests {
         - (NSString *)greetingFor:(NSString *)value {
             // comment
             self.name = ReferenceLanguageAliases()[@"objc"] ?: value;
+            id (^block)(id) = self.handler;
+            id (^qualifiedBlock)(id) = self.qualifiedHandler;
+            int (*callbackValue)(int) = self.callback;
+            int (**doubleCallbackValue)(int) = self.doubleCallback;
+            int (*nullableCallbackValue)(int) = self.nullableCallback;
+            NSString *handlerDescription = self.handler.description;
+            NSString *castHandlerDescription = ((id)self.handler).description;
+            NSString *nestedCastHandlerDescription = ((id)(self.handler)).description;
+            NSString *title = self.renamedTitle ?: self.refinedTitle;
+            NSString *customTitle = self.customMacroTitle;
+            NSString *bareTitle = self.bareMacroTitle;
+            id outlet = self.outletValue;
+            NSUInteger underscoredLength = self.user_id.length;
+            NSInteger statusValue = self.HTTP_STATUS;
+            dispatch_queue_t queue = self.WORK_QUEUE;
+            NSInteger statusWithAttr = self.HTTP_STATUS_WITH_ATTR;
+            NSInteger secondStatusWithAttr = self.SECOND_STATUS_WITH_ATTR;
             NSUInteger count = self.name.length;
+            NSUInteger literalCommentArgumentLength = Foo(@"//", self.name.length);
+            NSUInteger commentedChainLength = self.name /* comment */ .length;
+            NSUInteger itemCount = self.items[0].count;
+            NSUInteger wrappedItemCount = self.items
+                .count;
+            NSUInteger parenthesizedLength = (self.name).length;
+            NSUInteger commentedParenthesizedLength = (self.name /* comment */).length;
+            if ((self.name).length > 0) {
+                return value;
+            } else if ((self.name).length > 1) {
+                return value;
+            }
+            if (self.name) other.length;
+            NSString *parenthesizedRootName = (self).name;
+            NSString *castRootName = ((Sample *)self).name;
+            NSUInteger parenthesizedRootLength = (self).name.length;
+            NSUInteger castRootLength = ((Sample *)self).name.length;
+            NSUInteger genericCastRootLength = ((Sample<Delegate> *)self).name.length;
+            NSUInteger arithmeticLength = base + (self.name).length;
+            NSUInteger multilineParenthesizedLength = (
+                self.name
+            ).length;
+            NSUInteger wrappedNameLength = self.wrappedName.length;
+            NSUInteger lineWrappedNameLength = self.lineWrappedName.length;
+            NSUInteger multilineNameLength = self.multilineName.length;
+            NSUInteger wrappedAccessorLength = self.wrappedAccessor.length;
+            NSInteger status = self.HTTPStatusCode;
+            NSUInteger nestedCount = self.items[other.length].count;
+            id handlerValue = self.handler(other.value);
+            NSString *handlerCallDescription = self.handler(value).description;
+            NSString *closeParenLiteralDescription = self.handler(@")").description;
+            NSString *openBracketLiteralDescription = self.handler(@"[").description;
+            NSString *semicolonLiteralDescription = self.handler(@";").description;
+            NSUInteger wrappedCallLength = Wrap((self.name)).length;
+            NSUInteger wrappedSelfRootLength = Wrap((self)).name.length;
+            // self.name
+            other.length;
+            NSUInteger indexedCount = items[self.name].count;
+            NSUInteger messageLength = [self.name description].length;
+            NSUInteger messageResultLength = [formatter stringFrom:self.name].length;
+            NSUInteger conditionalReceiverLength = (useFallback ? other : self).name.length;
+            NSUInteger literalReceiverLength = @"self.name".length;
+            NSUInteger commentEscapedLength = self.commentEscapedName.length;
+            NSUInteger commentedLength = self.commentedTitle.length;
+            NSUInteger ghostLength = self.ghostName.length;
+            NSUInteger unknownCount = self.unknown.length;
+            NSUInteger mixedCount = self.name.length + self.missing.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
+        }
+
+        - (NSUInteger)returnedNameLength
+        {
+            return (self.name).length;
         }
         @end
         """
@@ -6579,7 +6686,12 @@ struct SyntaxHighlighterEngineTests {
         let debugMacroRange = nsSource.range(of: "DEBUG")
         let interfaceRange = nsSource.range(of: "@interface")
         let selfRange = nsSource.range(of: "self")
-        let propertyAttributeRange = nsSource.range(of: "nonatomic")
+        let propertyDeclarationRange = nsSource.range(of: "@property (nonatomic, copy) NSString *name;")
+        let propertyAttributeRange = nsSource.range(
+            of: "nonatomic",
+            options: [],
+            range: propertyDeclarationRange
+        )
         let dictionaryStringRange = nsSource.range(of: "@\"objc\"")
         let typedefRange = nsSource.range(of: "typedef")
         let idRange = nsSource.range(of: "id object")
@@ -6677,6 +6789,158 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "name",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *name;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "items",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSArray *items;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "handler",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) id (^handler)(id);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "qualifiedHandler",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) id (^ _Nullable qualifiedHandler)(id);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "callback",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) int (*callback)(int);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "doubleCallback",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) int (**doubleCallback)(int);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "nullableCallback",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) int (* _Nullable nullableCallback)(int);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "error",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, strong) NSError **error;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "detailedError",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "tripleError",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, assign) NSError ***tripleError;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "quadError",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, assign) NSError ****quadError;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "renamedTitle",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "refinedTitle",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "HTTPStatusCode",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) NSInteger HTTPStatusCode;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "WORK_QUEUE",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) dispatch_queue_t WORK_QUEUE;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "HTTP_STATUS_WITH_ATTR",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) MyEnum HTTP_STATUS_WITH_ATTR MY_ATTR;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "SECOND_STATUS_WITH_ATTR",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic) MY_ENUM SECOND_STATUS_WITH_ATTR MY_ATTR;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "wrappedName",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy)\nNSString *wrappedName;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "lineWrappedName",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *\nlineWrappedName;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "greetingFor",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -6717,11 +6981,523 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "handler",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.handler;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "qualifiedHandler",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.qualifiedHandler"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "callback",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.callback"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "doubleCallback",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.doubleCallback"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "nullableCallback",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.nullableCallback"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.handler.description"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "((id)self.handler).description"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "((id)(self.handler)).description"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "renamedTitle",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.renamedTitle"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "refinedTitle",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.refinedTitle"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "customMacroTitle",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.customMacroTitle"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "bareMacroTitle",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.bareMacroTitle"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "outletValue",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.outletValue"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "user_id",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.user_id.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.user_id.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "HTTP_STATUS",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.HTTP_STATUS"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "WORK_QUEUE",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.WORK_QUEUE"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "HTTP_STATUS_WITH_ATTR",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.HTTP_STATUS_WITH_ATTR"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "SECOND_STATUS_WITH_ATTR",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.SECOND_STATUS_WITH_ATTR"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "foo",
+            inOccurrenceOf: "MY_ATTR(foo)"
+        ).contains(.declarationOther) == false)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "HTTPStatusCode",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.HTTPStatusCode"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "length",
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.name.length"
         )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: #"Foo(@"//", self.name.length)"#
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name /* comment */ .length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "(self.name).length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "(self.name /* comment */).length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "if ((self.name).length > 0)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "else if ((self.name).length > 1)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "(self).name"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "((Sample *)self).name"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "(self).name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "((Sample *)self).name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "((Sample<Delegate> *)self).name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "base + (self.name).length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "(\n        self.name\n    ).length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "wrappedName",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.wrappedName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.wrappedName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "lineWrappedName",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.lineWrappedName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.lineWrappedName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "multilineName",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.multilineName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.multilineName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "wrappedAccessor",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.wrappedAccessor.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.wrappedAccessor.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return (self.name).length;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "count",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.items[0].count"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "count",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.items\n        .count"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.unknown.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.missing.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "commentedTitle",
+            inOccurrenceOf: "self.commentedTitle.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.commentedTitle.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.commentEscapedName.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ghostName",
+            inOccurrenceOf: "self.ghostName.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.ghostName.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "count",
+            inOccurrenceOf: "items[self.name].count"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.items[other.length].count"
+        ).contains(.identifierVariableSystem) == false)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "count",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.items[other.length].count"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "value",
+            inOccurrenceOf: "self.handler(other.value)"
+        ).contains(.identifierVariableSystem) == false)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.handler(value).description"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: #"self.handler(@")").description"#
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: #"self.handler(@"[").description"#
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: #"self.handler(@";").description"#
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "Wrap((self.name)).length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "Wrap((self)).name.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "other.length;"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "[self.name description].length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "[formatter stringFrom:self.name].length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "name",
+            inOccurrenceOf: "(useFallback ? other : self).name.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "(useFallback ? other : self).name.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: #"@"self.name".length"#
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "if (self.name) other.length"
+        ).contains(.identifierVariableSystem) == false)
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
@@ -6754,6 +7530,59 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.contains {
             tokenIntersects($0, range: stringRange, syntaxID: .string, language: .objectiveC)
         })
+
+        let incompletePropertySource = """
+        @interface Broken : NSObject
+        @property (nonatomic, copy) NSString *name
+        NSString *notAProperty;
+        @end
+        @implementation Broken
+        - (NSUInteger)length
+        {
+            return self.notAProperty.length;
+        }
+        @end
+        """
+        let incompleteTokens = await engine.render(source: incompletePropertySource, language: .objectiveC)
+        #expect(syntaxIDs(
+            in: incompleteTokens,
+            source: incompletePropertySource,
+            text: "notAProperty",
+            inOccurrenceOf: "self.notAProperty.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: incompleteTokens,
+            source: incompletePropertySource,
+            text: "length",
+            inOccurrenceOf: "self.notAProperty.length"
+        ).contains(.identifierVariableSystem) == false)
+
+        let wrappedIncompletePropertySource = """
+        @interface Broken : NSObject
+        @property (nonatomic, copy)
+        NSString *name
+        NSString *notAProperty;
+        @end
+        @implementation Broken
+        - (NSUInteger)length
+        {
+            return self.notAProperty.length;
+        }
+        @end
+        """
+        let wrappedIncompleteTokens = await engine.render(source: wrappedIncompletePropertySource, language: .objectiveC)
+        #expect(syntaxIDs(
+            in: wrappedIncompleteTokens,
+            source: wrappedIncompletePropertySource,
+            text: "notAProperty",
+            inOccurrenceOf: "self.notAProperty.length"
+        ).contains(.identifierVariable) == false)
+        #expect(syntaxIDs(
+            in: wrappedIncompleteTokens,
+            source: wrappedIncompletePropertySource,
+            text: "length",
+            inOccurrenceOf: "self.notAProperty.length"
+        ).contains(.identifierVariableSystem) == false)
     }
 
     @Test("SyntaxHighlighterEngine aligns focused Objective-C reference tokens")
@@ -6770,6 +7599,54 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .declarationOther,
             language: .objectiveC,
             inOccurrenceOf: "@property(nonatomic, copy) NSString *text;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "language",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property(nonatomic, strong) id language;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "text",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return self.text.length;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return self.text.length;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceErrorDomain",
+            syntaxID: .identifier,
+            language: .objectiveC,
+            inOccurrenceOf: "static NSString *const ReferenceErrorDomain"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "index",
+            syntaxID: .identifier,
+            language: .objectiveC,
+            inOccurrenceOf: "- (unichar)characterAtIndex:(NSUInteger)index"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "symbol",
+            syntaxID: .identifier,
+            language: .objectiveC,
+            inOccurrenceOf: "void *symbol = dlsym"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -6823,7 +7700,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "NSLocalizedDescriptionKey",
-            syntaxID: .identifierConstantSystem,
+            syntaxID: .identifier,
             language: .objectiveC,
             inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
         )
@@ -6873,6 +7750,88 @@ struct SyntaxHighlighterEngineTests {
             text: "LocalFunction",
             inOccurrenceOf: "LocalFunction();"
         ).contains(.identifierFunction) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C self member overlays after property removal")
+    func highlighterStripsStaleObjectiveCSelfMemberOverlaysAfterPropertyRemoval() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length;
+        }
+        @end
+        """
+        let removedProperty = "@property(nonatomic, copy) NSString *name;\n"
+        let updatedSource = source.replacingOccurrences(of: removedProperty, with: "")
+        let mutation = SyntaxHighlightMutation(
+            location: (source as NSString).range(of: removedProperty).location,
+            length: (removedProperty as NSString).length,
+            replacement: ""
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "name",
+            inOccurrenceOf: "return self.name.length;"
+        ).contains(.identifierVariable) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C property declaration overlays after syntax edits")
+    func highlighterStripsStaleObjectiveCPropertyDeclarationOverlaysAfterSyntaxEdits() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy)
+        NSString *name;
+        @end
+        """
+        let semicolonRange = (source as NSString).range(of: "name;")
+        let semicolonLocation = semicolonRange.location + "name".utf16.count
+        let updatedSource = (source as NSString).replacingCharacters(
+            in: NSRange(location: semicolonLocation, length: 1),
+            with: ""
+        )
+        let mutation = SyntaxHighlightMutation(
+            location: semicolonLocation,
+            length: 1,
+            replacement: ""
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "name",
+            inOccurrenceOf: "NSString *name"
+        ).contains(.declarationOther) == false)
     }
 
     @Test("SyntaxHighlighterEngine keeps Objective-C semantic refresh ranges local")

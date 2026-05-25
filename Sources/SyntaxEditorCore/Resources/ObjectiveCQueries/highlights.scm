@@ -103,7 +103,7 @@
 (number_literal) @editor.syntax.objectivec.number
 (char_literal) @editor.syntax.objectivec.character
 
-(field_identifier) @editor.syntax.objectivec.identifier.variable
+(field_identifier) @editor.syntax.objectivec.identifier
 (statement_identifier) @editor.syntax.objectivec.identifier
 (type_identifier) @editor.syntax.objectivec.identifier.type.system
 (primitive_type) @editor.syntax.objectivec.keyword
@@ -243,7 +243,7 @@
 
 (method_declaration (identifier) @editor.syntax.objectivec.identifier.function)
 
-(method_identifier (identifier)? @editor.syntax.objectivec.identifier.function ":" @editor.syntax.objectivec.plain (identifier)? @editor.syntax.objectivec.identifier.variable)
+(method_identifier (identifier)? @editor.syntax.objectivec.identifier.function ":" @editor.syntax.objectivec.plain (identifier)? @editor.syntax.objectivec.identifier)
 
 (message_expression method: (identifier) @editor.syntax.objectivec.identifier.function.system)
 
@@ -322,50 +322,78 @@
 (property_implementation "@synthesize" (identifier) @editor.syntax.objectivec.identifier)
 
 (property_declaration
+  (_)*
   (struct_declaration
     (struct_declarator
-      (identifier) @editor.syntax.objectivec.identifier.variable)))
+      (identifier) @editor.syntax.objectivec.declaration.other)))
 
 (property_declaration
+  (_)*
   (struct_declaration
     (struct_declarator
       (pointer_declarator
-        declarator: (identifier) @editor.syntax.objectivec.identifier.variable))))
+        declarator: (identifier) @editor.syntax.objectivec.declaration.other))))
+
+(property_declaration
+  (_)*
+  (struct_declaration
+    (struct_declarator
+      (pointer_declarator
+        declarator: (pointer_declarator
+                      declarator: (identifier) @editor.syntax.objectivec.declaration.other)))))
+
+(property_declaration
+  (_)*
+  (struct_declaration
+    (struct_declarator
+      (pointer_declarator
+        declarator: (pointer_declarator
+                      declarator: (pointer_declarator
+                                    declarator: (identifier) @editor.syntax.objectivec.declaration.other))))))
+
+(property_declaration
+  (_)*
+  (struct_declaration
+    (struct_declarator
+      (function_declarator
+        declarator: (parenthesized_declarator
+                      (block_pointer_declarator
+                        declarator: (identifier) @editor.syntax.objectivec.declaration.other))))))
 
 ; Parameters
 
-(method_parameter ":" @editor.syntax.objectivec.plain (identifier) @editor.syntax.objectivec.identifier.variable)
+(method_parameter ":" @editor.syntax.objectivec.plain (identifier) @editor.syntax.objectivec.identifier)
 
-(method_parameter declarator: (identifier) @editor.syntax.objectivec.identifier.variable)
+(method_parameter declarator: (identifier) @editor.syntax.objectivec.identifier)
 
 (parameter_declaration
   declarator: (function_declarator
                 declarator: (parenthesized_declarator
                               (block_pointer_declarator
-                                declarator: (identifier) @editor.syntax.objectivec.identifier.variable))))
+                                declarator: (identifier) @editor.syntax.objectivec.identifier))))
 
 (parameter_declaration
-  declarator: (identifier) @editor.syntax.objectivec.identifier.variable)
+  declarator: (identifier) @editor.syntax.objectivec.identifier)
 
 (parameter_declaration
   declarator: (pointer_declarator
-                declarator: (identifier) @editor.syntax.objectivec.identifier.variable))
+                declarator: (identifier) @editor.syntax.objectivec.identifier))
 
 (declaration
-  declarator: (identifier) @editor.syntax.objectivec.identifier.variable)
+  declarator: (identifier) @editor.syntax.objectivec.identifier)
 
 (declaration
   declarator: (pointer_declarator
-                declarator: (identifier) @editor.syntax.objectivec.identifier.variable))
+                declarator: (identifier) @editor.syntax.objectivec.identifier))
 
 (declaration
   declarator: (init_declarator
-                declarator: (identifier) @editor.syntax.objectivec.identifier.variable))
+                declarator: (identifier) @editor.syntax.objectivec.identifier))
 
 (declaration
   declarator: (init_declarator
                 declarator: (pointer_declarator
-                              declarator: (identifier) @editor.syntax.objectivec.identifier.variable)))
+                              declarator: (identifier) @editor.syntax.objectivec.identifier)))
 
 "..." @editor.syntax.objectivec.plain
 
