@@ -372,10 +372,26 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         guard let previous = beforeOpenParen.last else {
             return true
         }
+        if isObjectiveCIdentifierCharacter(previous),
+           parenthesizedSelfPrefixKeywords.contains(lastIdentifier(in: beforeOpenParen)) {
+            return true
+        }
         return !isObjectiveCIdentifierCharacter(previous)
             && previous != ")"
             && previous != "]"
             && previous != "["
+    }
+
+    private static func lastIdentifier(in text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var identifier = ""
+        for character in trimmed.reversed() {
+            guard isObjectiveCIdentifierCharacter(character) else {
+                break
+            }
+            identifier.insert(character, at: identifier.startIndex)
+        }
+        return identifier
     }
 
     private static func previousNonWhitespaceCharacter(before range: NSRange, in source: NSString) -> Character? {
@@ -552,6 +568,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
     private static let keywordLikeTypeNames: Set<String> = [
         "BOOL", "IMP", "SEL", "id", "instancetype"
+    ]
+
+    private static let parenthesizedSelfPrefixKeywords: Set<String> = [
+        "return"
     ]
 }
 
@@ -765,11 +785,11 @@ private struct ObjectiveCFileSymbolIndex {
     ]
 
     private static let propertyDeclarationRegex = try! NSRegularExpression(
-        pattern: #"@property\b[^;\n]*;"#
+        pattern: #"@property\b[^;]*;"#
     )
 
     private static let blockPropertyNameRegex = try! NSRegularExpression(
-        pattern: #"@property\b[^;\n]*\(\s*\^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
+        pattern: #"@property\b[^;]*\(\s*\^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
     )
 
     private static let propertyNameBeforeTrailingAttributesRegex = try! NSRegularExpression(

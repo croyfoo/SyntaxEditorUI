@@ -6559,6 +6559,8 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);
         @property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;
         @property (nonatomic) NSInteger HTTPStatusCode;
+        @property (nonatomic, copy)
+        NSString *wrappedName;
         - (NSString *)greetingFor:(NSString *)value;
         @end
 
@@ -6584,6 +6586,8 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger itemCount = self.items[0].count;
             NSUInteger wrappedItemCount = self.items
                 .count;
+            NSUInteger parenthesizedLength = (self.name).length;
+            NSUInteger wrappedNameLength = self.wrappedName.length;
             NSInteger status = self.HTTPStatusCode;
             NSUInteger nestedCount = self.items[other.length].count;
             id handlerValue = self.handler(other.value);
@@ -6593,6 +6597,11 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger unknownCount = self.unknown.length;
             NSUInteger mixedCount = self.name.length + self.missing.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
+        }
+
+        - (NSUInteger)returnedNameLength
+        {
+            return (self.name).length;
         }
         @end
         """
@@ -6791,6 +6800,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "wrappedName",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy)\nNSString *wrappedName;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "greetingFor",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -6891,6 +6908,38 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "(self.name).length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "wrappedName",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.wrappedName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.wrappedName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return (self.name).length;"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
