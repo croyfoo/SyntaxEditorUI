@@ -238,23 +238,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         configureScrollView()
         configureUndoObservation()
         configureTraitChangeObservation()
-        applyObservedConfiguration(
-            language: configuration.language,
-            isEditable: configuration.isEditable,
-            lineWrappingEnabled: configuration.lineWrappingEnabled,
-            colorTheme: configuration.colorTheme,
-            forceLanguageRefresh: true,
-            schedulesHighlight: false
-        )
-        replaceEntireStorageText(document.textSnapshot())
-        scheduleHighlight(
-            source: text,
-            language: configuration.language,
-            revision: document.revision,
-            refreshStartUTF16: 0
-        )
+        startConfigurationObservation(schedulesInitialHighlight: false)
         startDocumentObservation()
-        startConfigurationObservation()
     }
 
     @available(*, unavailable)
@@ -287,19 +272,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         if configurationChanged {
             configurationObservations.cancelAll()
             configuration = nextConfiguration
-            applyObservedConfiguration(
-                language: nextConfiguration.language,
-                isEditable: nextConfiguration.isEditable,
-                lineWrappingEnabled: nextConfiguration.lineWrappingEnabled,
-                colorTheme: nextConfiguration.colorTheme,
-                forceLanguageRefresh: true,
-                schedulesHighlight: !documentChanged
-            )
-            startConfigurationObservation()
+            startConfigurationObservation(schedulesInitialHighlight: !documentChanged)
         }
 
         if documentChanged {
-            applyObservedDocumentChange(forceTextUpdate: true)
             startDocumentObservation()
         }
     }
@@ -783,33 +759,32 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         typingAttributes = baseAttributes()
     }
 
-    func startConfigurationObservation() {
-        configurationObservations.update {
-            configuration.observe([\.language, \.isEditable, \.lineWrappingEnabled, \.colorTheme.id]) { [weak self] in
-                guard let self else { return }
-                self.applyObservedConfiguration(
-                    language: self.configuration.language,
-                    isEditable: self.configuration.isEditable,
-                    lineWrappingEnabled: self.configuration.lineWrappingEnabled,
-                    colorTheme: self.configuration.colorTheme
-                )
-            }
-            .store(in: configurationObservations)
+    func startConfigurationObservation(schedulesInitialHighlight: Bool = true) {
+        configurationObservations.observe(configuration) { [weak self] event, configuration in
+            guard let self else { return }
+            self.applyObservedConfiguration(
+                language: configuration.language,
+                isEditable: configuration.isEditable,
+                lineWrappingEnabled: configuration.lineWrappingEnabled,
+                colorTheme: configuration.colorTheme,
+                forceLanguageRefresh: event.kind == .initial,
+                schedulesHighlight: event.kind != .initial || schedulesInitialHighlight
+            )
         }
     }
 
     func startDocumentObservation() {
-        documentObservations.update {
-            document.observe(\.revision) { [weak self] _ in
-                guard let self else { return }
-                self.applyObservedDocumentChange()
-            }
-            .store(in: documentObservations)
+        documentObservations.observe(document) { [weak self] event, document in
+            guard let self else { return }
+            self.applyObservedDocumentChange(
+                forceTextUpdate: event.kind == .initial,
+                observedRevision: document.revision
+            )
         }
     }
 
-    func applyObservedDocumentChange(forceTextUpdate: Bool = false) {
-        let revision = document.revision
+    func applyObservedDocumentChange(forceTextUpdate: Bool = false, observedRevision: Int? = nil) {
+        let revision = observedRevision ?? document.revision
         guard forceTextUpdate || revision != lastAppliedDocumentRevision else { return }
 
         isApplyingModel = true

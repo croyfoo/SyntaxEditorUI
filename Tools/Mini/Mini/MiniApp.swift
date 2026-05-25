@@ -229,7 +229,6 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
 //        window.titleVisibility = .hidden
 //        window.titlebarAppearsTransparent = false
         window.toolbarStyle = .unified
-        window.title = model.currentPreset.title
         window.center()
 
         super.init(window: window)
@@ -253,22 +252,16 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     }
 
     private func bindModel() {
-        configurationObservations.update {
-            model.observe(\.currentPresetID) { [weak self] _ in
-                self?.renderWindowState()
-            }
-            .store(in: configurationObservations)
+        configurationObservations.observe(model) { [weak self] _, _ in
+            self?.renderWindowState()
         }
         bindEditorModel()
     }
 
     private func bindEditorModel() {
-        editorObservations.update {
-            model.editorConfiguration.observe([\.lineWrappingEnabled, \.colorTheme.id]) { [weak self] in
-                self?.updateLineWrappingItem()
-                self?.updateThemeItem()
-            }
-            .store(in: editorObservations)
+        editorObservations.observe(model.editorConfiguration) { [weak self] _, configuration in
+            self?.updateLineWrappingItem(lineWrappingEnabled: configuration.lineWrappingEnabled)
+            self?.updateThemeItem(selectedThemePreset: configuration.colorTheme.preset ?? .default)
         }
     }
 
@@ -278,12 +271,15 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
         updateThemeItem()
     }
 
-    private func updateLineWrappingItem() {
-        lineWrappingItem?.setSelected(model.editorConfiguration.lineWrappingEnabled, at: 0)
+    private func updateLineWrappingItem(lineWrappingEnabled: Bool? = nil) {
+        lineWrappingItem?.setSelected(
+            lineWrappingEnabled ?? model.editorConfiguration.lineWrappingEnabled,
+            at: 0
+        )
     }
 
-    private func updateThemeItem() {
-        let selectedRawValue = model.selectedThemePreset.rawValue
+    private func updateThemeItem(selectedThemePreset: SyntaxEditorColorTheme.Preset? = nil) {
+        let selectedRawValue = (selectedThemePreset ?? model.selectedThemePreset).rawValue
         for item in themePopUpButton?.itemArray ?? [] where item.representedObject as? String == selectedRawValue {
             themePopUpButton?.select(item)
             return

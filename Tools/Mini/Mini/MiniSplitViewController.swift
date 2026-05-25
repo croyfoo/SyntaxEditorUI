@@ -27,7 +27,6 @@ final class MiniSplitViewController: UISplitViewController {
             rootViewController: presetListViewController
         )
         setViewController(sidebarNavigationController, for: .primary)
-        renderDetail()
         bindModel()
     }
 
@@ -37,21 +36,18 @@ final class MiniSplitViewController: UISplitViewController {
     }
 
     private func bindModel() {
-        configurationObservations.update {
-            model.observe(\.currentPresetID) { [weak self] _ in
-                self?.renderDetail()
-            }
-            .store(in: configurationObservations)
+        configurationObservations.observe(model) { [weak self] _, _ in
+            self?.renderDetail()
         }
         bindEditorModel()
     }
 
     private func bindEditorModel() {
-        editorObservations.update {
-            model.editorConfiguration.observe([\.lineWrappingEnabled, \.colorTheme.id]) { [weak self] in
-                self?.updateOverflowMenu()
-            }
-            .store(in: editorObservations)
+        editorObservations.observe(model.editorConfiguration) { [weak self] _, configuration in
+            self?.updateOverflowMenu(
+                lineWrappingEnabled: configuration.lineWrappingEnabled,
+                selectedThemePreset: configuration.colorTheme.preset ?? .default
+            )
         }
     }
 
@@ -88,7 +84,10 @@ final class MiniSplitViewController: UISplitViewController {
         updateOverflowMenu()
     }
 
-    private func makeOverflowItems() -> UIDeferredMenuElement {
+    private func makeOverflowItems(
+        lineWrappingEnabled: Bool? = nil,
+        selectedThemePreset: SyntaxEditorColorTheme.Preset? = nil
+    ) -> UIDeferredMenuElement {
         UIDeferredMenuElement.uncached { [weak self] completion in
             Task { @MainActor in
                 guard let self else {
@@ -96,19 +95,22 @@ final class MiniSplitViewController: UISplitViewController {
                     return
                 }
 
+                let lineWrappingEnabled = lineWrappingEnabled
+                    ?? self.model.editorConfiguration.lineWrappingEnabled
+                let selectedThemePreset = selectedThemePreset ?? self.model.selectedThemePreset
                 let lineWrappingAction = UIAction(
                     title: "Line Wrapping",
                     image: UIImage(systemName: "text.alignleft")
                 ) { [weak self] _ in
                     self?.toggleLineWrapping()
                 }
-                lineWrappingAction.state = self.model.editorConfiguration.lineWrappingEnabled ? .on : .off
+                lineWrappingAction.state = lineWrappingEnabled ? .on : .off
 
                 let themeActions = SyntaxEditorColorTheme.Preset.allCases.map { preset in
                     let action = UIAction(title: preset.displayName) { [weak self] _ in
                         self?.model.selectedThemePreset = preset
                     }
-                    action.state = self.model.selectedThemePreset == preset ? .on : .off
+                    action.state = selectedThemePreset == preset ? .on : .off
                     return action
                 }
                 let themeMenu = UIMenu(
@@ -122,8 +124,14 @@ final class MiniSplitViewController: UISplitViewController {
         }
     }
 
-    private func updateOverflowMenu() {
-        detailViewController?.navigationItem.additionalOverflowItems = makeOverflowItems()
+    private func updateOverflowMenu(
+        lineWrappingEnabled: Bool? = nil,
+        selectedThemePreset: SyntaxEditorColorTheme.Preset? = nil
+    ) {
+        detailViewController?.navigationItem.additionalOverflowItems = makeOverflowItems(
+            lineWrappingEnabled: lineWrappingEnabled,
+            selectedThemePreset: selectedThemePreset
+        )
     }
 
     private func toggleLineWrapping() {
@@ -202,15 +210,11 @@ final class MiniSplitViewController: NSSplitViewController {
         sidebarItem.titlebarSeparatorStyle = .none
         sidebarItem.canCollapse = false
         addSplitViewItem(sidebarItem)
-        renderDetail()
     }
 
     private func bindModel() {
-        configurationObservations.update {
-            model.observe(\.currentPresetID) { [weak self] _ in
-                self?.renderDetail()
-            }
-            .store(in: configurationObservations)
+        configurationObservations.observe(model) { [weak self] _, _ in
+            self?.renderDetail()
         }
     }
 
