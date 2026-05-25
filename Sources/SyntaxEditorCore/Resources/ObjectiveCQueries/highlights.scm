@@ -338,6 +338,14 @@
   (_)*
   (struct_declaration
     (struct_declarator
+      (pointer_declarator
+        declarator: (pointer_declarator
+                      declarator: (identifier) @editor.syntax.objectivec.declaration.other)))))
+
+(property_declaration
+  (_)*
+  (struct_declaration
+    (struct_declarator
       (function_declarator
         declarator: (parenthesized_declarator
                       (block_pointer_declarator

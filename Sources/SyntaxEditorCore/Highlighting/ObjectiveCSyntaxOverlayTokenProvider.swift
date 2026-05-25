@@ -47,7 +47,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 if isSelfMemberName(token.range, in: source),
                    index.localProperties.contains(text) {
                     overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariable))
-                } else if isMemberNameInSelfChain(token.range, in: source) {
+                } else if isMemberNameInKnownSelfChain(token.range, in: source, localProperties: index.localProperties) {
                     overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariableSystem))
                 }
 
@@ -139,13 +139,25 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         return prefix.hasSuffix("self.") || prefix.hasSuffix("self->")
     }
 
-    private static func isMemberNameInSelfChain(_ range: NSRange, in source: NSString) -> Bool {
+    private static func isMemberNameInKnownSelfChain(
+        _ range: NSRange,
+        in source: NSString,
+        localProperties: Set<String>
+    ) -> Bool {
         let prefix = linePrefix(before: range, in: source)
             .trimmingCharacters(in: .whitespaces)
-        return selfMemberChainRegex.firstMatch(
+        guard let match = selfMemberChainRegex.firstMatch(
             in: prefix,
             range: NSRange(location: 0, length: (prefix as NSString).length)
-        ) != nil
+        ) else {
+            return false
+        }
+        let firstMemberRange = match.range(at: 1)
+        guard firstMemberRange.location != NSNotFound else {
+            return false
+        }
+        let firstMember = (prefix as NSString).substring(with: firstMemberRange)
+        return localProperties.contains(firstMember)
     }
 
     private static func previousNonWhitespaceCharacter(before range: NSRange, in source: NSString) -> Character? {
@@ -309,7 +321,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     )
 
     private static let selfMemberChainRegex = try! NSRegularExpression(
-        pattern: #"(?:^|[^A-Za-z0-9_])self(?:\.|->)(?:[A-Za-z_][A-Za-z0-9_]*(?:\.|->))+$"#
+        pattern: #"(?:^|[^A-Za-z0-9_])self(?:\.|->)([A-Za-z_][A-Za-z0-9_]*)(?:\.|->)(?:[A-Za-z_][A-Za-z0-9_]*(?:\.|->))*$"#
     )
 
     private static let keywordLikeTypeNames: Set<String> = [

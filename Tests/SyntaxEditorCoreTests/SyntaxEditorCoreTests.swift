@@ -6550,6 +6550,8 @@ struct SyntaxHighlighterEngineTests {
         @interface Sample : NSObject
         @property (nonatomic, copy) NSString *name;
         @property (nonatomic, copy) id (^handler)(id);
+        @property (nonatomic, strong) NSError **error;
+        @property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;
         - (NSString *)greetingFor:(NSString *)value;
         @end
 
@@ -6567,6 +6569,7 @@ struct SyntaxHighlighterEngineTests {
             // comment
             self.name = ReferenceLanguageAliases()[@"objc"] ?: value;
             NSUInteger count = self.name.length;
+            NSUInteger unknownCount = self.unknown.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
         }
         @end
@@ -6694,6 +6697,22 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "error",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, strong) NSError **error;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "detailedError",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, strong) NSError *_Nullable *_Nullable detailedError;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "greetingFor",
             syntaxID: .declarationOther,
             language: .objectiveC,
@@ -6739,6 +6758,12 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "self.name.length"
         )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.unknown.length"
+        ).contains(.identifierVariableSystem) == false)
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
