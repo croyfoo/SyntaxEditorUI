@@ -1,5 +1,5 @@
 {
-  "originHash" : "3ef2d21e4177bf2c9534e731785528ea29069bf1063bce2fb2a91c93414c292a",
+  "originHash" : "013e6b0bb396c9a5d3eb1d61998acd7f4f8c2cf55c3507317b463269c59d67b6",
   "pins" : [
     {
       "identity" : "observationbridge",
@@ -94,10 +94,9 @@
     {
       "identity" : "tree-sitter-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/alex-pinkus/tree-sitter-swift",
+      "location" : "https://github.com/lynnswap/tree-sitter-swift",
       "state" : {
-        "revision" : "277b583bbb024f20ba88b95c48bf5a6a0b4f2287",
-        "version" : "0.7.1-with-generated-files"
+        "revision" : "60941d667d0bd58f7d5b83dcd59fe22a9865f200"
       }
     },
     {

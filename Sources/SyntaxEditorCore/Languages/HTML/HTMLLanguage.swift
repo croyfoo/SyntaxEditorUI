@@ -2,15 +2,17 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterHTML
 
-struct HTMLLanguage {
+struct HTMLLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "html" }
+    var language: SyntaxLanguage { .html }
     var displayName: String { "HTML" }
+    var aliases: Set<String> { ["html", "htm"] }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "HTML",
             bundleName: "TreeSitterHTML_TreeSitterHTML",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_html()) }
         )
     }
@@ -106,6 +108,12 @@ struct HTMLLanguage {
         let prefix = nsSource.substring(to: clampedLocation)
         let analysis = PrefixAnalyzer(text: prefix).analysis
         return analysis.shouldSuppressQuoteAutoPair
+    }
+}
+
+private extension HTMLLanguage {
+    static var queryDirectories: [URL] {
+        BundledLanguageQueryResources.directories(named: "HTMLQueries")
     }
 }
 
@@ -1351,6 +1359,9 @@ private extension HTMLLanguage {
     }
 
     static func scriptEmbeddedLanguage(forStartTagText startTagText: String) -> SyntaxLanguage? {
+        guard rawTextStartTagHasValidNameBoundary(startTagText, rawTextElementName: "script") else {
+            return nil
+        }
         guard let type = startTagTypeAttribute(in: startTagText) else {
             return SyntaxLanguage.javascript
         }
@@ -1360,12 +1371,51 @@ private extension HTMLLanguage {
     }
 
     static func styleEmbeddedLanguage(forStartTagText startTagText: String) -> SyntaxLanguage? {
+        guard rawTextStartTagHasValidNameBoundary(startTagText, rawTextElementName: "style") else {
+            return nil
+        }
         guard let type = startTagTypeAttribute(in: startTagText) else {
             return SyntaxLanguage.css
         }
 
         let essence = normalizedTypeAttributeEssence(type)
         return supportedStyleTypeEssences.contains(essence) ? SyntaxLanguage.css : nil
+    }
+
+    private static func rawTextStartTagHasValidNameBoundary(
+        _ startTagText: String,
+        rawTextElementName: String
+    ) -> Bool {
+        let nsText = startTagText as NSString
+        var cursor = 0
+        guard cursor < nsText.length, nsText.character(at: cursor) == 60 else {
+            return false
+        }
+
+        cursor += 1
+        while cursor < nsText.length, nsText.character(at: cursor) == 47 {
+            cursor += 1
+        }
+        skipHTMLAttributeWhitespace(in: nsText, cursor: &cursor)
+
+        let nameStart = cursor
+        while cursor < nsText.length, isHTMLTagNameCharacter(nsText.character(at: cursor)) {
+            cursor += 1
+        }
+        guard cursor > nameStart else {
+            return false
+        }
+
+        let tagName = nsText.substring(with: NSRange(location: nameStart, length: cursor - nameStart)).lowercased()
+        guard tagName == rawTextElementName else {
+            return false
+        }
+        guard cursor < nsText.length else {
+            return true
+        }
+
+        let boundary = nsText.character(at: cursor)
+        return isHTMLWhitespace(boundary) || boundary == 47 || boundary == 62
     }
 
     static func startTagTypeAttribute(in startTagText: String) -> String? {
@@ -1690,6 +1740,10 @@ extension HTMLLanguage {
 
             if quote == nil {
                 if codeUnit == 34 || codeUnit == 39 {
+                    if cursor > startOffset, source.character(at: cursor - 1) == codeUnit {
+                        cursor += 1
+                        continue
+                    }
                     quote = codeUnit
                     cursor += 1
                     continue

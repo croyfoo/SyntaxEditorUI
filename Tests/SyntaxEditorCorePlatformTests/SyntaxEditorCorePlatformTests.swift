@@ -119,15 +119,15 @@ struct SyntaxEditorCorePlatformTests {
 
         #expect(configuration.colorTheme == theme)
 
-        configuration.colorTheme = .xcode
-        #expect(configuration.colorTheme == .xcode)
+        configuration.colorTheme = .default
+        #expect(configuration.colorTheme == .default)
     }
 
-    @Test("SyntaxEditorHighlightTheme resolves Xcode colors on the current platform")
-    func syntaxEditorHighlightThemeResolvesXcodeColors() {
-        let theme = SyntaxEditorColorTheme.xcode
+    @Test("SyntaxEditorHighlightTheme resolves built-in colors on the current platform")
+    func syntaxEditorHighlightThemeResolvesBuiltInColors() {
+        let theme = SyntaxEditorColorTheme.default
 
-        #expect(syntaxEditorColor(theme.keyword, matchesLight: 0xAD3DA4, dark: 0xFC5FA3))
+        #expect(syntaxEditorColor(theme.keyword, matchesLight: 0x9B2393, dark: 0xFC5FA3))
         #expect(syntaxEditorColor(theme.string, matchesLight: 0xC41A16, dark: 0xFC6A5D))
         #expect(syntaxEditorColor(theme.bracketBackground, matchesLight: 0xF5E890, dark: 0x665C2B))
     }
@@ -136,9 +136,27 @@ struct SyntaxEditorCorePlatformTests {
     func syntaxEditorHighlightThemeCustomTheme() {
         let theme = customColorTheme()
 
-        #expect(SyntaxEditorHighlightTheme.color(for: "keyword.control", in: theme) == theme.keyword)
-        #expect(SyntaxEditorHighlightTheme.color(for: "string.quoted", in: theme) == theme.string)
-        #expect(SyntaxEditorHighlightTheme.color(for: "constructor", in: theme) == theme.function)
-        #expect(SyntaxEditorHighlightTheme.color(for: "unknown.capture", in: theme) == nil)
+        #expect(SyntaxEditorHighlightTheme.color(for: .keyword, in: theme) == theme.keyword)
+        #expect(SyntaxEditorHighlightTheme.color(for: .string, in: theme) == theme.string)
+        #expect(SyntaxEditorHighlightTheme.color(for: .identifierFunction, in: theme) == theme.function)
+        #expect(SyntaxEditorHighlightTheme.color(for: .plain, in: theme) == nil)
+    }
+
+    @Test("SyntaxEditorFontDescriptor preserves fallback family when family is absent")
+    func syntaxEditorFontDescriptorPreservesFallbackFamily() {
+        let descriptor = SyntaxEditorFontDescriptor(family: nil, size: 13, weight: .bold)
+
+#if canImport(UIKit)
+        let fallback = UIFont(name: "Courier", size: 18)
+            ?? UIFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+        let font = descriptor.platformFont(fallback: fallback)
+#elseif canImport(AppKit)
+        let fallback = NSFont(name: "Courier", size: 18)
+            ?? NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+        let font = descriptor.platformFont(fallback: fallback)
+#endif
+
+        #expect(font.familyName == fallback.familyName)
+        #expect(abs(font.pointSize - 13) < 0.01)
     }
 }

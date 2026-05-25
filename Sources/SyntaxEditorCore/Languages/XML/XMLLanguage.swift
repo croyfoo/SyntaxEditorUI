@@ -2,15 +2,16 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterXML
 
-struct XMLLanguage {
+struct XMLLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "xml" }
+    var language: SyntaxLanguage { .xml }
     var displayName: String { "XML" }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "XML",
             bundleName: "TreeSitterXML_TreeSitterXML",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_xml()) }
         )
     }
@@ -55,6 +56,12 @@ struct XMLLanguage {
         let clampedLocation = max(0, min(location, nsSource.length))
         let prefix = nsSource.substring(to: clampedLocation)
         return PrefixAnalyzer(text: prefix).analysis.shouldSuppressQuoteAutoPair
+    }
+}
+
+private extension XMLLanguage {
+    static var queryDirectories: [URL] {
+        BundledLanguageQueryResources.directories(named: "XMLQueries")
     }
 }
 

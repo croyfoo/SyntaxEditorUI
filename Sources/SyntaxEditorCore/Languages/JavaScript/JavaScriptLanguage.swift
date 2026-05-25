@@ -2,15 +2,17 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterJavaScript
 
-struct JavaScriptLanguage {
+struct JavaScriptLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "javascript" }
+    var language: SyntaxLanguage { .javascript }
     var displayName: String { "JavaScript" }
+    var aliases: Set<String> { ["javascript", "js"] }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "JavaScript",
             bundleName: "TreeSitterJavaScript_TreeSitterJavaScript",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_javascript()) }
         )
     }
@@ -28,6 +30,12 @@ struct JavaScriptLanguage {
         let clampedLocation = max(0, min(location, nsSource.length))
         let prefix = nsSource.substring(to: clampedLocation)
         return PrefixAnalyzer(text: prefix).analysis.isInsideLiteralOrComment
+    }
+}
+
+private extension JavaScriptLanguage {
+    static var queryDirectories: [URL] {
+        BundledLanguageQueryResources.directories(named: "JavaScriptQueries")
     }
 }
 

@@ -190,6 +190,7 @@ extension SyntaxEditorView {
         let previousMarkedRange = markedRange
         markedRange = nil
         if let previousMarkedRange {
+            clearMarkedTextAttributes(in: previousMarkedRange)
             reapplyTextAttributes(in: previousMarkedRange)
             finishMarkedTextUndoSessionIfNeeded(
                 finalText: text,

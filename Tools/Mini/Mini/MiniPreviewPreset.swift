@@ -1,3 +1,4 @@
+import Foundation
 import SyntaxEditorUI
 
 extension MiniPreviewPreset:Hashable,Identifiable{
@@ -15,6 +16,7 @@ struct MiniPreviewPreset {
         case html
         case javascript
         case json
+        case objectiveCHeader = "objective-c-header"
         case objectiveC = "objective-c"
         case swift
         case toml
@@ -22,11 +24,27 @@ struct MiniPreviewPreset {
     }
 
     let id: ID
-    let sampleText: String
+    let title: String
+    let sampleFilename: String
+    let fallbackSampleText: String
     let language: SyntaxLanguage
 
-    var title: String {
-        language.displayName
+    init(
+        id: ID,
+        title: String? = nil,
+        sampleFilename: String,
+        fallbackSampleText: String,
+        language: SyntaxLanguage
+    ) {
+        self.id = id
+        self.title = title ?? language.displayName
+        self.sampleFilename = sampleFilename
+        self.fallbackSampleText = fallbackSampleText
+        self.language = language
+    }
+
+    var sampleText: String {
+        Self.sampleText(named: sampleFilename) ?? fallbackSampleText
     }
 
     var accessibilityIdentifier: String {
@@ -35,13 +53,15 @@ struct MiniPreviewPreset {
 
     static let css = MiniPreviewPreset(
         id: .css,
-        sampleText: "body {\n    color: red;\n    background: white;\n}\n",
+        sampleFilename: "Reference.css",
+        fallbackSampleText: "body {\n    color: red;\n    background: white;\n}\n",
         language: SyntaxLanguage.css
     )
 
     static let html = MiniPreviewPreset(
         id: .html,
-        sampleText: """
+        sampleFilename: "Reference.html",
+        fallbackSampleText: """
         <!DOCTYPE html>
         <html>
         <head>
@@ -63,7 +83,8 @@ struct MiniPreviewPreset {
 
     static let javascript = MiniPreviewPreset(
         id: .javascript,
-        sampleText: """
+        sampleFilename: "Reference.js",
+        fallbackSampleText: """
         const answer = 42;
         function greet(name) {
             return `Hello, ${name}! ` + "\(String(repeating: "Hello, ", count: 120))";
@@ -74,7 +95,8 @@ struct MiniPreviewPreset {
 
     static let json = MiniPreviewPreset(
         id: .json,
-        sampleText: """
+        sampleFilename: "Reference.json",
+        fallbackSampleText: """
         {
           \"enabled\": true,
           \"count\": 1
@@ -83,11 +105,27 @@ struct MiniPreviewPreset {
         language: SyntaxLanguage.json
     )
 
+    static let objectiveCHeader = MiniPreviewPreset(
+        id: .objectiveCHeader,
+        title: "Objective-C Header",
+        sampleFilename: "Reference.h",
+        fallbackSampleText: """
+        #import <Foundation/Foundation.h>
+
+        @interface Sample : NSObject
+        @end
+        """,
+        language: SyntaxLanguage.objectiveC
+    )
+
     static let objectiveC = MiniPreviewPreset(
         id: .objectiveC,
-        sampleText: """
-        #import <Foundation/Foundation.h>
-        @interface Sample : NSObject
+        title: "Objective-C Implementation",
+        sampleFilename: "Reference.m",
+        fallbackSampleText: """
+        #import "Sample.h"
+
+        @implementation Sample
         @end
         """,
         language: SyntaxLanguage.objectiveC
@@ -95,7 +133,8 @@ struct MiniPreviewPreset {
 
     static let swift = MiniPreviewPreset(
         id: .swift,
-        sampleText: """
+        sampleFilename: "Reference.swift",
+        fallbackSampleText: """
         struct Greeting {
             let message = \"Hello\"
         }
@@ -105,7 +144,8 @@ struct MiniPreviewPreset {
 
     static let toml = MiniPreviewPreset(
         id: .toml,
-        sampleText: """
+        sampleFilename: "Reference.toml",
+        fallbackSampleText: """
         [package]
         name = \"SyntaxEditorUI\"
         enabled = true
@@ -115,7 +155,8 @@ struct MiniPreviewPreset {
 
     static let xml = MiniPreviewPreset(
         id: .xml,
-        sampleText: """
+        sampleFilename: "Reference.xml",
+        fallbackSampleText: """
         <?xml version=\"1.0\"?>
         <note priority=\"high\">Hello</note>
         """,
@@ -127,6 +168,7 @@ struct MiniPreviewPreset {
         html,
         javascript,
         json,
+        objectiveCHeader,
         objectiveC,
         swift,
         toml,
@@ -135,5 +177,40 @@ struct MiniPreviewPreset {
 
     static func preset(for id: ID) -> MiniPreviewPreset? {
         all.first { $0.id == id }
+    }
+
+    private static func sampleText(named filename: String) -> String? {
+        if let bundledURL = sampleURLInBundle(named: filename),
+           let text = try? String(contentsOf: bundledURL, encoding: .utf8)
+        {
+            return text
+        }
+
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("ReferenceSamples", isDirectory: true)
+            .appendingPathComponent(filename)
+        guard let text = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+            return nil
+        }
+        return text
+    }
+
+    private static func sampleURLInBundle(named filename: String) -> URL? {
+        let fileURL = URL(fileURLWithPath: filename)
+        let resourceName = fileURL.deletingPathExtension().lastPathComponent
+        let pathExtension = fileURL.pathExtension
+        let resolvedExtension = pathExtension.isEmpty ? nil : pathExtension
+        if let nestedURL = Bundle.main.url(
+            forResource: resourceName,
+            withExtension: resolvedExtension,
+            subdirectory: "ReferenceSamples"
+        ) {
+            return nestedURL
+        }
+        return Bundle.main.url(
+            forResource: resourceName,
+            withExtension: resolvedExtension
+        )
     }
 }

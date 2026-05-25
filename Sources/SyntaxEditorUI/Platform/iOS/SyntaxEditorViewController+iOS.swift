@@ -31,5 +31,18 @@ public final class SyntaxEditorViewController: UIViewController {
     public override func loadView() {
         view = editorView
     }
+
+    public func update(
+        document nextDocument: SyntaxEditorDocument,
+        configuration nextConfiguration: SyntaxEditorConfiguration
+    ) {
+        let documentChanged = document !== nextDocument
+        let configurationChanged = configuration !== nextConfiguration
+        guard documentChanged || configurationChanged else { return }
+
+        document = nextDocument
+        configuration = nextConfiguration
+        editorView.update(document: nextDocument, configuration: nextConfiguration)
+    }
 }
 #endif

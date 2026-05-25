@@ -38,9 +38,8 @@ final class MiniSplitViewController: UISplitViewController {
 
     private func bindModel() {
         configurationObservations.update {
-            model.observe([\.currentPresetID, \.editorDocument, \.editorConfiguration]) { [weak self] in
+            model.observe(\.currentPresetID) { [weak self] _ in
                 self?.renderDetail()
-                self?.bindEditorModel()
             }
             .store(in: configurationObservations)
         }
@@ -49,7 +48,7 @@ final class MiniSplitViewController: UISplitViewController {
 
     private func bindEditorModel() {
         editorObservations.update {
-            model.editorConfiguration.observe(\.lineWrappingEnabled) { [weak self] _ in
+            model.editorConfiguration.observe([\.lineWrappingEnabled, \.colorTheme.id]) { [weak self] in
                 self?.updateOverflowMenu()
             }
             .store(in: editorObservations)
@@ -59,9 +58,11 @@ final class MiniSplitViewController: UISplitViewController {
     private func renderDetail() {
         let editorDocument = model.editorDocument
         let editorConfiguration = model.editorConfiguration
-        if let currentDocument = editorViewController?.document,
-           currentDocument === editorDocument
-        {
+        if let editorViewController {
+            editorViewController.update(
+                document: editorDocument,
+                configuration: editorConfiguration
+            )
             detailViewController?.title = model.currentPreset.title
             updateOverflowMenu()
             return
@@ -102,7 +103,21 @@ final class MiniSplitViewController: UISplitViewController {
                     self?.toggleLineWrapping()
                 }
                 lineWrappingAction.state = self.model.editorConfiguration.lineWrappingEnabled ? .on : .off
-                completion([lineWrappingAction])
+
+                let themeActions = SyntaxEditorColorTheme.Preset.allCases.map { preset in
+                    let action = UIAction(title: preset.displayName) { [weak self] _ in
+                        self?.model.selectedThemePreset = preset
+                    }
+                    action.state = self.model.selectedThemePreset == preset ? .on : .off
+                    return action
+                }
+                let themeMenu = UIMenu(
+                    title: "Theme",
+                    image: UIImage(systemName: "paintpalette"),
+                    children: themeActions
+                )
+
+                completion([themeMenu, lineWrappingAction])
             }
         }
     }
@@ -192,7 +207,7 @@ final class MiniSplitViewController: NSSplitViewController {
 
     private func bindModel() {
         configurationObservations.update {
-            model.observe([\.currentPresetID, \.editorDocument, \.editorConfiguration]) { [weak self] in
+            model.observe(\.currentPresetID) { [weak self] _ in
                 self?.renderDetail()
             }
             .store(in: configurationObservations)
@@ -202,10 +217,12 @@ final class MiniSplitViewController: NSSplitViewController {
     private func renderDetail() {
         let editorDocument = model.editorDocument
         let editorConfiguration = model.editorConfiguration
-        if let currentDocument = editorViewController?.document,
-           currentDocument === editorDocument
-        {
-            editorViewController?.title = model.currentPreset.title
+        if let editorViewController {
+            editorViewController.update(
+                document: editorDocument,
+                configuration: editorConfiguration
+            )
+            editorViewController.title = model.currentPreset.title
             return
         }
 

@@ -4,8 +4,8 @@ import SyntaxEditorUI
 @MainActor
 @Observable
 final class MiniContentViewModel {
-    var editorDocument: SyntaxEditorDocument
-    var editorConfiguration: SyntaxEditorConfiguration
+    let editorDocument: SyntaxEditorDocument
+    let editorConfiguration: SyntaxEditorConfiguration
     var selectedPresetID: MiniPreviewPreset.ID? {
         didSet {
             guard let selectedPresetID,
@@ -15,13 +15,9 @@ final class MiniContentViewModel {
                 return
             }
 
+            editorConfiguration.language = preset.language
+            editorDocument.replaceText(text(for: preset))
             currentPresetID = selectedPresetID
-            let lineWrappingEnabled = editorConfiguration.lineWrappingEnabled
-            editorDocument = SyntaxEditorDocument(text: text(for: preset))
-            editorConfiguration = SyntaxEditorConfiguration(
-                language: preset.language,
-                lineWrappingEnabled: lineWrappingEnabled
-            )
         }
     }
 
@@ -43,6 +39,11 @@ final class MiniContentViewModel {
 
     var currentPreset: MiniPreviewPreset {
         MiniPreviewPreset.preset(for: currentPresetID) ?? .javascript
+    }
+
+    var selectedThemePreset: SyntaxEditorColorTheme.Preset {
+        get { editorConfiguration.colorTheme.preset ?? .default }
+        set { editorConfiguration.colorTheme = .preset(newValue) }
     }
 
     private func text(for preset: MiniPreviewPreset) -> String {

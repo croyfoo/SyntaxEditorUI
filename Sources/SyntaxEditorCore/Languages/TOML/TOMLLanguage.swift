@@ -2,15 +2,16 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterTOML
 
-struct TOMLLanguage {
+struct TOMLLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "toml" }
+    var language: SyntaxLanguage { .toml }
     var displayName: String { "TOML" }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "TOML",
             bundleName: "TreeSitterTOML_TreeSitterTOML",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_toml()) }
         )
     }
@@ -32,6 +33,10 @@ struct TOMLLanguage {
 }
 
 private extension TOMLLanguage {
+    static var queryDirectories: [URL] {
+        BundledLanguageQueryResources.directories(named: "TOMLQueries")
+    }
+
     struct PrefixAnalysis {
         var inLineComment = false
         var inBasicString = false

@@ -117,7 +117,7 @@ private struct SyntaxEditorTestContext {
         language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .xcode
+        colorTheme: SyntaxEditorColorTheme = .default
     ) {
         self.document = SyntaxEditorDocument(text: text)
         self.configuration = SyntaxEditorConfiguration(
@@ -228,6 +228,7 @@ private func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: Syn
 
 private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     private let tokens: [SyntaxHighlightToken]
+    private let updateTokens: [SyntaxHighlightToken]?
     private let delayNanoseconds: UInt64
     private let updateRefreshRange: NSRange?
     private var resetCount = 0
@@ -235,10 +236,12 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
 
     init(
         tokens: [SyntaxHighlightToken] = [],
+        updateTokens: [SyntaxHighlightToken]? = nil,
         delayNanoseconds: UInt64 = 0,
         updateRefreshRange: NSRange? = nil
     ) {
         self.tokens = tokens
+        self.updateTokens = updateTokens
         self.delayNanoseconds = delayNanoseconds
         self.updateRefreshRange = updateRefreshRange
     }
@@ -257,7 +260,13 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     ) async -> SyntaxHighlightResult {
         updateCount += 1
         await delayIfNeeded()
-        return result(source: source, language: language, revision: revision, refreshRange: updateRefreshRange)
+        return result(
+            tokens: updateTokens ?? tokens,
+            source: source,
+            language: language,
+            revision: revision,
+            refreshRange: updateRefreshRange
+        )
     }
 
     func callCount() -> Int {
@@ -270,17 +279,71 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     }
 
     private func result(
+        tokens: [SyntaxHighlightToken]? = nil,
         source: String,
         language: SyntaxLanguage,
         revision: Int,
         refreshRange: NSRange?
     ) -> SyntaxHighlightResult {
         SyntaxHighlightResult(
-            tokens: tokens,
+            tokens: tokens ?? self.tokens,
             source: source,
             language: language,
             revision: revision,
             refreshRange: refreshRange ?? NSRange(location: 0, length: source.utf16.count)
+        )
+    }
+}
+
+private actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {
+    private let swiftTokens: [SyntaxHighlightToken]
+    private let jsonTokens: [SyntaxHighlightToken]
+    private let delayNanoseconds: UInt64
+
+    init(
+        swiftTokens: [SyntaxHighlightToken],
+        jsonTokens: [SyntaxHighlightToken],
+        delayNanoseconds: UInt64 = 0
+    ) {
+        self.swiftTokens = swiftTokens
+        self.jsonTokens = jsonTokens
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+        await delayIfNeeded()
+        return result(source: source, language: language, revision: revision)
+    }
+
+    func update(
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation,
+        revision: Int
+    ) async -> SyntaxHighlightResult {
+        await delayIfNeeded()
+        return result(source: source, language: language, revision: revision)
+    }
+
+    private func delayIfNeeded() async {
+        guard delayNanoseconds > 0 else { return }
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+    }
+
+    private func result(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxHighlightResult {
+        let tokens: [SyntaxHighlightToken] = if language == SyntaxLanguage.swift {
+            swiftTokens
+        } else if language == SyntaxLanguage.json {
+            jsonTokens
+        } else {
+            []
+        }
+        return SyntaxHighlightResult(
+            tokens: tokens,
+            source: source,
+            language: language,
+            revision: revision,
+            refreshRange: NSRange(location: 0, length: source.utf16.count)
         )
     }
 }
@@ -399,6 +462,16 @@ private func layoutIOSEditorView(
 }
 
 @MainActor
+private func iOSEditorStableHorizontalOffset(_ editorView: SyntaxEditorView) -> CGFloat {
+    max(0, (editorView.contentSize.width - editorView.bounds.width) * 0.25)
+}
+
+@MainActor
+private func iOSEditorLineMidY(_ editorView: SyntaxEditorView, lineIndex: Int) -> CGFloat {
+    editorView.textContainerInset.top + editorView.font.lineHeight * (CGFloat(lineIndex) + 0.5)
+}
+
+@MainActor
 private func iOSEditorHasHorizontalOverflow(_ editorView: SyntaxEditorView) -> Bool {
     layoutIOSEditorView(editorView)
     return !editorView.textContainer.widthTracksTextView
@@ -489,6 +562,24 @@ private func iOSEditorForegroundColor(_ editorView: SyntaxEditorView, at locatio
 }
 
 @MainActor
+private func iOSEditorFont(_ editorView: SyntaxEditorView, at location: Int) -> UIFont? {
+    guard let attributedText = editorView.attributedText,
+          location >= 0,
+          location < attributedText.length
+    else {
+        return nil
+    }
+
+    return attributedText.attribute(.font, at: location, effectiveRange: nil) as? UIFont
+}
+
+private func syntaxEditorUITestFontsEqual(_ lhs: UIFont?, _ rhs: UIFont?) -> Bool {
+    guard let lhs, let rhs else { return false }
+    return lhs.fontName == rhs.fontName
+        && abs(lhs.pointSize - rhs.pointSize) < 0.01
+}
+
+@MainActor
 private func iOSEditorLineFragmentForegroundColor(_ editorView: SyntaxEditorView, at location: Int) -> UIColor? {
     guard let textLayoutManager = editorView.textLayoutManager,
           let textLocation = editorView.textLocation(forUTF16Offset: location)
@@ -522,6 +613,19 @@ private func iOSEditorLineBreakMode(_ editorView: SyntaxEditorView, at location:
 
     return (attributedText.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle)?
         .lineBreakMode
+}
+
+@MainActor
+private func iOSEditorParagraphSpacing(_ editorView: SyntaxEditorView, at location: Int = 0) -> CGFloat? {
+    guard let attributedText = editorView.attributedText,
+          location >= 0,
+          location < attributedText.length
+    else {
+        return nil
+    }
+
+    return (attributedText.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle)?
+        .paragraphSpacing
 }
 
 @MainActor
@@ -578,6 +682,63 @@ private func macEditorForegroundColor(_ editorView: SyntaxEditorView, at locatio
     }
 
     return textStorage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor
+}
+
+@MainActor
+private func macEditorFont(_ editorView: SyntaxEditorView, at location: Int) -> NSFont? {
+    guard let textStorage = editorView.textView.textStorage else {
+        return nil
+    }
+    guard location >= 0,
+          location < textStorage.length
+    else {
+        return nil
+    }
+
+    return textStorage.attribute(.font, at: location, effectiveRange: nil) as? NSFont
+}
+
+private func syntaxEditorUITestFontsEqual(_ lhs: NSFont?, _ rhs: NSFont?) -> Bool {
+    guard let lhs, let rhs else { return false }
+    return lhs.fontName == rhs.fontName
+        && abs(lhs.pointSize - rhs.pointSize) < 0.01
+}
+
+@MainActor
+private func macEditorUnderlineStyle(_ editorView: SyntaxEditorView, at location: Int) -> Int? {
+    guard let textStorage = editorView.textView.textStorage else {
+        return nil
+    }
+    guard location >= 0,
+          location < textStorage.length
+    else {
+        return nil
+    }
+
+    let value = textStorage.attribute(.underlineStyle, at: location, effectiveRange: nil)
+    if let number = value as? NSNumber {
+        return number.intValue
+    }
+    return value as? Int
+}
+
+@MainActor
+private func macEditorBackgroundColor(_ editorView: SyntaxEditorView, at location: Int) -> NSColor? {
+    guard let textStorage = editorView.textView.textStorage else {
+        return nil
+    }
+    guard location >= 0,
+          location < textStorage.length
+    else {
+        return nil
+    }
+
+    return textStorage.attribute(.backgroundColor, at: location, effectiveRange: nil) as? NSColor
+}
+
+@MainActor
+private func macEditorHasBackgroundAttribute(_ editorView: SyntaxEditorView, at location: Int) -> Bool {
+    macEditorBackgroundColor(editorView, at: location) != nil
 }
 
 private func makeMacCommandKeyEvent(
@@ -793,7 +954,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             delayNanoseconds: 30_000_000
@@ -1679,6 +1840,39 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
 
+    @Test("SyntaxEditorView resets nested empty-style iOS tokens to the base theme")
+    @MainActor
+    func syntaxEditorViewIOSResetsNestedEmptyStyleTokensToBaseTheme() async {
+        let source = "\"${value}\""
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: source.utf16.count),
+                    rawCaptureName: "editor.syntax.javascript.string"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: 3, length: 5),
+                    rawCaptureName: "editor.syntax.javascript.plain"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.string))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))
+    }
+
     @Test("SyntaxEditorView reapplies cached iOS syntax colors without highlighting")
     @MainActor
     func syntaxEditorViewIOSColorThemeReusesCachedHighlightTokens() async {
@@ -1695,7 +1889,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ]
         )
@@ -1736,7 +1930,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ]
         )
@@ -1757,6 +1951,215 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
 
+    @Test("SyntaxEditorView applies built-in iOS theme base font to plain and highlighted text")
+    @MainActor
+    func syntaxEditorViewIOSAppliesBuiltInThemeBaseFont() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
+        let plainFont = try #require(iOSEditorFont(editorView, at: 4))
+        #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
+        #expect(abs(plainFont.pointSize - 28) < 0.01)
+    }
+
+    @Test("SyntaxEditorView applies iOS base attributes before delayed highlight")
+    @MainActor
+    func syntaxEditorViewIOSAppliesBaseAttributesBeforeDelayedHighlight() async throws {
+        let source = "let value = 1"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            delayNanoseconds: 20_000_000
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: true,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: 0), editorView.font))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+        #expect(iOSEditorLineBreakMode(editorView) == .byCharWrapping)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(iOSEditorLineBreakMode(editorView) == .byCharWrapping)
+    }
+
+    @Test("SyntaxEditorView applies iOS base attributes to inserted text before delayed update highlight")
+    @MainActor
+    func syntaxEditorViewIOSAppliesBaseAttributesToInsertedTextBeforeDelayedUpdateHighlight() async {
+        let source = "let value = 1"
+        let insertedPrefix = "// "
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            updateTokens: [],
+            delayNanoseconds: 20_000_000,
+            updateRefreshRange: NSRange(location: 0, length: source.utf16.count + insertedPrefix.utf16.count)
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await editorView.waitForPendingHighlightForTesting()
+
+        editorView.selectedRange = NSRange(location: 0, length: 0)
+        editorView.insertText(insertedPrefix)
+
+        #expect(editorView.text == insertedPrefix + source)
+        #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: 0), editorView.font))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        await editorView.waitForPendingHighlightForTesting()
+    }
+
+    @Test("SyntaxEditorView restores iOS base font when syntax font tokens are removed")
+    @MainActor
+    func syntaxEditorViewIOSRestoresBaseFontWhenSyntaxFontTokensAreRemoved() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
+                ),
+            ],
+            updateTokens: [],
+            updateRefreshRange: NSRange(location: 0, length: 3)
+        )
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let baseFont = try #require(iOSEditorFont(editorView, at: 4))
+        let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
+        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, baseFont))
+
+        editorView.selectedRange = NSRange(location: 0, length: 3)
+        editorView.insertText("var")
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.text == "var value = 1")
+        #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: 0), baseFont))
+    }
+
+    @Test("SyntaxEditorView restores shifted iOS syntax font after prefix edits")
+    @MainActor
+    func syntaxEditorViewIOSRestoresShiftedSyntaxFontAfterPrefixEdits() async throws {
+        let source = "let value = 1"
+        let insertedPrefix = "// "
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
+                ),
+            ],
+            updateTokens: [],
+            updateRefreshRange: NSRange(location: 0, length: source.utf16.count + insertedPrefix.utf16.count)
+        )
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let baseFont = try #require(iOSEditorFont(editorView, at: 4))
+        let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
+        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, baseFont))
+
+        editorView.selectedRange = NSRange(location: 0, length: 0)
+        editorView.insertText(insertedPrefix)
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.text == insertedPrefix + source)
+        #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: insertedPrefix.utf16.count), baseFont))
+    }
+
+    @Test("SyntaxEditorView preserves iOS paragraph style while reapplying cached highlight")
+    @MainActor
+    func syntaxEditorViewIOSCachedHighlightPreservesParagraphStyle() async {
+        let source = "let value = 1"
+        let initialTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let updatedTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x112233),
+            keyword: syntaxEditorUITestColor(hex: 0x332211)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: initialTheme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await editorView.waitForPendingHighlightForTesting()
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = iOSEditorLineBreakMode(editorView) ?? .byClipping
+        paragraphStyle.paragraphSpacing = 11
+        editorView.textStorage.addAttribute(
+            .paragraphStyle,
+            value: paragraphStyle,
+            range: NSRange(location: 0, length: source.utf16.count)
+        )
+
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
+        #expect(iOSEditorParagraphSpacing(editorView) == 11)
+
+        model.configuration.colorTheme = updatedTheme
+        editorView.synchronizeDocumentForTesting()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
+        #expect(iOSEditorParagraphSpacing(editorView) == 11)
+    }
+
     @Test("SyntaxEditorView refreshes iOS TextKit line fragments after async syntax highlight")
     @MainActor
     func syntaxEditorViewIOSRefreshesLineFragmentsAfterAsyncHighlight() async {
@@ -1772,7 +2175,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             delayNanoseconds: 1_000_000
@@ -1808,11 +2211,11 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
                 SyntaxHighlightToken(
                     range: NSRange(location: firstPaste.utf16.count, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             delayNanoseconds: 20_000_000,
@@ -2016,7 +2419,7 @@ struct SyntaxEditorUITests {
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
         #expect(editorView.textLayoutManager != nil)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         let visibleRightEdge = editorView.contentOffset.x + editorView.bounds.width
@@ -2092,7 +2495,7 @@ struct SyntaxEditorUITests {
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
         #expect(iOSEditorTextUsageHeight(editorView) <= 120)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         #expect(editorView.contentOffset.x > 0)
@@ -2115,11 +2518,13 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        let stableOffsetX: CGFloat = 240
+        let stableOffsetX = iOSEditorStableHorizontalOffset(editorView)
         editorView.setContentOffset(CGPoint(x: stableOffsetX, y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        guard let position = editorView.closestPosition(to: CGPoint(x: editorView.bounds.midX, y: 54)) else {
+        guard let position = editorView.closestPosition(
+            to: CGPoint(x: editorView.bounds.midX, y: iOSEditorLineMidY(editorView, lineIndex: 2))
+        ) else {
             Issue.record("SyntaxEditorView could not resolve a visible iOS text-input point")
             return
         }
@@ -3174,7 +3579,7 @@ struct SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         guard let offscreenStartRange = editorView.textRange(
@@ -3202,10 +3607,12 @@ struct SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        guard let visiblePosition = editorView.closestPosition(to: CGPoint(x: 240, y: 54)),
+        guard let visiblePosition = editorView.closestPosition(
+            to: CGPoint(x: 240, y: iOSEditorLineMidY(editorView, lineIndex: 0))
+        ),
               let visibleRange = editorView.textRange(from: visiblePosition, to: visiblePosition)
         else {
             Issue.record("SyntaxEditorView could not resolve a visible gesture selection range")
@@ -3580,7 +3987,7 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         let stableOffsetX = editorView.contentOffset.x
         #expect(stableOffsetX > 0)
 
@@ -3608,7 +4015,7 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         let visibleRect = CGRect(origin: editorView.contentOffset, size: editorView.bounds.size)
@@ -3617,7 +4024,10 @@ struct SyntaxEditorUITests {
         #expect(abs(visibleRect.width - editorView.bounds.width) <= 1)
         #expect(abs(visibleRect.height - editorView.bounds.height) <= 1)
 
-        let visibleMidPoint = CGPoint(x: editorView.bounds.midX, y: editorView.bounds.minY + 54)
+        let visibleMidPoint = CGPoint(
+            x: editorView.bounds.midX,
+            y: editorView.bounds.minY + iOSEditorLineMidY(editorView, lineIndex: 2)
+        )
         guard let position = editorView.closestPosition(to: visibleMidPoint) else {
             Issue.record("SyntaxEditorView could not resolve a scrolled visible text-input point")
             return
@@ -3931,11 +4341,11 @@ struct SyntaxEditorUITests {
 
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         let stableOffsetX = editorView.contentOffset.x
         #expect(stableOffsetX > 0)
 
-        let tapPoint = CGPoint(x: stableOffsetX + 200, y: 54)
+        let tapPoint = CGPoint(x: stableOffsetX + 200, y: iOSEditorLineMidY(editorView, lineIndex: 2))
         guard let position = editorView.closestPosition(to: tapPoint),
               let textRange = editorView.textRange(from: position, to: position)
         else {
@@ -3970,13 +4380,14 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
         let stableOffsetX = editorView.contentOffset.x
         let visibleRect = editorView.bounds
-        let startPoint = CGPoint(x: visibleRect.minX + 120, y: visibleRect.minY + 54)
-        let endPoint = CGPoint(x: visibleRect.minX + 280, y: visibleRect.minY + 54)
+        let longLineMidY = iOSEditorLineMidY(editorView, lineIndex: 2)
+        let startPoint = CGPoint(x: visibleRect.minX + 120, y: visibleRect.minY + longLineMidY)
+        let endPoint = CGPoint(x: visibleRect.minX + 280, y: visibleRect.minY + longLineMidY)
 
         guard let startPosition = editorView.closestPosition(to: startPoint),
               let endPosition = editorView.closestPosition(to: endPoint),
@@ -4010,12 +4421,13 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        editorView.setContentOffset(CGPoint(x: 700, y: 0), animated: false)
+        editorView.setContentOffset(CGPoint(x: iOSEditorStableHorizontalOffset(editorView), y: 0), animated: false)
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
-        let viewportStartPoint = CGPoint(x: 120, y: 54)
-        let viewportEndPoint = CGPoint(x: 280, y: 54)
-        let extendedViewportEndPoint = CGPoint(x: 340, y: 54)
+        let longLineMidY = iOSEditorLineMidY(editorView, lineIndex: 2)
+        let viewportStartPoint = CGPoint(x: 120, y: longLineMidY)
+        let viewportEndPoint = CGPoint(x: 280, y: longLineMidY)
+        let extendedViewportEndPoint = CGPoint(x: 340, y: longLineMidY)
 
         guard let viewportStartPosition = editorView.closestPosition(to: viewportStartPoint),
               let viewportEndPosition = editorView.closestPosition(to: viewportEndPoint),
@@ -4584,6 +4996,39 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
 
+    @Test("SyntaxEditorView resets nested empty-style macOS tokens to the base theme")
+    @MainActor
+    func syntaxEditorViewMacResetsNestedEmptyStyleTokensToBaseTheme() async {
+        let source = "\"${value}\""
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: source.utf16.count),
+                    rawCaptureName: "editor.syntax.javascript.string"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: 3, length: 5),
+                    rawCaptureName: "editor.syntax.javascript.plain"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.string))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), theme.baseForeground))
+    }
+
     @Test("SyntaxEditorView reapplies cached macOS syntax colors without highlighting")
     @MainActor
     func syntaxEditorViewMacColorThemeReusesCachedHighlightTokens() async {
@@ -4600,7 +5045,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ]
         )
@@ -4664,6 +5109,373 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView applies macOS base attributes before delayed highlight")
+    @MainActor
+    func syntaxEditorViewMacAppliesBaseAttributesBeforeDelayedHighlight() async throws {
+        let source = "let value = 1"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            delayNanoseconds: 20_000_000
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        let baseFont = try #require(editorView.textView.font)
+
+        #expect(syntaxEditorUITestFontsEqual(macEditorFont(editorView, at: 0), baseFont))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
+    @Test("SyntaxEditorView applies built-in macOS theme base font to plain and highlighted text")
+    @MainActor
+    func syntaxEditorViewMacAppliesBuiltInThemeBaseFont() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let plainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
+        #expect(abs(plainFont.pointSize - 28) < 0.01)
+    }
+
+    @Test("SyntaxEditorView applies macOS base attributes to inserted text before delayed update highlight")
+    @MainActor
+    func syntaxEditorViewMacAppliesBaseAttributesToInsertedTextBeforeDelayedUpdateHighlight() async throws {
+        let source = "let value = 1"
+        let insertedPrefix = "// "
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            updateTokens: [],
+            delayNanoseconds: 20_000_000,
+            updateRefreshRange: NSRange(location: 0, length: source.utf16.count + insertedPrefix.utf16.count)
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        let baseFont = try #require(editorView.textView.font)
+        await editorView.waitForPendingHighlightForTesting()
+
+        editorView.textView.insertText(insertedPrefix, replacementRange: NSRange(location: 0, length: 0))
+
+        #expect(editorView.textView.string == insertedPrefix + source)
+        #expect(syntaxEditorUITestFontsEqual(macEditorFont(editorView, at: 0), baseFont))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        await editorView.waitForPendingHighlightForTesting()
+    }
+
+    @Test("SyntaxEditorView restores macOS base font when syntax font tokens are removed")
+    @MainActor
+    func syntaxEditorViewMacRestoresBaseFontWhenSyntaxFontTokensAreRemoved() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
+                ),
+            ],
+            updateTokens: [],
+            updateRefreshRange: NSRange(location: 0, length: 3)
+        )
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        let baseFont = try #require(editorView.textView.font)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, baseFont))
+
+        editorView.textView.insertText("var", replacementRange: NSRange(location: 0, length: 3))
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == "var value = 1")
+        #expect(syntaxEditorUITestFontsEqual(macEditorFont(editorView, at: 0), baseFont))
+    }
+
+    @Test("SyntaxEditorView restores shifted macOS syntax font after prefix edits")
+    @MainActor
+    func syntaxEditorViewMacRestoresShiftedSyntaxFontAfterPrefixEdits() async throws {
+        let source = "let value = 1"
+        let insertedPrefix = "// "
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
+                ),
+            ],
+            updateTokens: [],
+            updateRefreshRange: NSRange(location: 0, length: source.utf16.count + insertedPrefix.utf16.count)
+        )
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        let baseFont = try #require(editorView.textView.font)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, baseFont))
+
+        editorView.textView.insertText(insertedPrefix, replacementRange: NSRange(location: 0, length: 0))
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == insertedPrefix + source)
+        #expect(syntaxEditorUITestFontsEqual(macEditorFont(editorView, at: insertedPrefix.utf16.count), baseFont))
+    }
+
+    @Test("SyntaxEditorView preserves macOS non-syntax attributes while applying delayed highlight")
+    @MainActor
+    func syntaxEditorViewMacDelayedHighlightPreservesNonSyntaxAttributes() async {
+        let source = "let value = 1"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            delayNanoseconds: 20_000_000
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        editorView.textView.textStorage?.addAttribute(
+            .underlineStyle,
+            value: NSUnderlineStyle.single.rawValue,
+            range: NSRange(location: 4, length: 5)
+        )
+
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+        #expect(macEditorUnderlineStyle(editorView, at: 4) == NSUnderlineStyle.single.rawValue)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 4), theme.baseForeground))
+        #expect(macEditorUnderlineStyle(editorView, at: 4) == NSUnderlineStyle.single.rawValue)
+    }
+
+    @Test("SyntaxEditorView keeps macOS bracket highlight only for caret selections")
+    @MainActor
+    func syntaxEditorViewMacBracketHighlightSkipsNonemptySelection() async {
+        let source = "{}"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
+        await editorView.waitForPendingHighlightForTesting()
+
+        editorView.textView.setSelectedRange(NSRange(location: 1, length: 0))
+        editorView.textViewDidChangeSelection(
+            Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+        )
+
+        #expect(editorView.bracketHighlightRangesForTesting == [
+            NSRange(location: 0, length: 1),
+            NSRange(location: 1, length: 1),
+        ])
+        #expect(macEditorHasBackgroundAttribute(editorView, at: 0))
+        #expect(macEditorHasBackgroundAttribute(editorView, at: 1))
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: source.utf16.count))
+        editorView.textViewDidChangeSelection(
+            Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+        )
+
+        #expect(editorView.bracketHighlightRangesForTesting.isEmpty)
+        #expect(!macEditorHasBackgroundAttribute(editorView, at: 0))
+        #expect(!macEditorHasBackgroundAttribute(editorView, at: 1))
+    }
+
+    @Test("SyntaxEditorView keeps macOS text painting owned by the scroll view")
+    @MainActor
+    func syntaxEditorViewMacUsesScrollViewBackedTextPainting() {
+        let model = SyntaxEditorTestContext(text: "let value = 1", language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
+
+        #expect(editorView.drawsBackground)
+        #expect(!editorView.textView.drawsBackground)
+        #expect(!type(of: editorView.textView).isCompatibleWithResponsiveScrolling)
+    }
+
+    @Test("SyntaxEditorView defers macOS syntax colors while preserving active selection drawing")
+    @MainActor
+    func syntaxEditorViewMacDefersHighlightApplicationDuringSelection() async {
+        let source = "{}\nlet value = 1"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 3, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            delayNanoseconds: 20_000_000
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 2))
+        editorView.textViewDidChangeSelection(
+            Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+        )
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.bracketHighlightRangesForTesting.isEmpty)
+        #expect(!macEditorHasBackgroundAttribute(editorView, at: 0))
+        #expect(!macEditorHasBackgroundAttribute(editorView, at: 1))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), theme.baseForeground))
+
+        editorView.textView.setSelectedRange(NSRange(location: 2, length: 0))
+        editorView.textViewDidChangeSelection(
+            Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+        )
+
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), theme.keyword))
+        #expect(editorView.bracketHighlightRangesForTesting == [
+            NSRange(location: 0, length: 1),
+            NSRange(location: 1, length: 1),
+        ])
+    }
+
+    @Test("SyntaxEditorView drops deferred macOS syntax colors after language changes")
+    @MainActor
+    func syntaxEditorViewMacDropsDeferredHighlightAfterLanguageChange() async {
+        let source = "let"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorLanguageAwareTestHighlighter(
+            swiftTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            jsonTokens: [],
+            delayNanoseconds: 20_000_000
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: source.utf16.count))
+        editorView.textViewDidChangeSelection(
+            Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+        )
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        model.configuration.language = SyntaxLanguage.json
+        editorView.synchronizeDocumentForTesting()
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        editorView.textViewDidChangeSelection(
+            Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+        )
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+    }
+
+    @Test("SyntaxEditorView fully repaints macOS syntax colors after dropping deferred highlights")
+    @MainActor
+    func syntaxEditorViewMacFullRepaintsAfterDroppingDeferredHighlight() async {
+        let source = "let\nlet"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 4, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            delayNanoseconds: 20_000_000,
+            updateRefreshRange: NSRange(location: 0, length: 3)
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 3))
+        editorView.textViewDidChangeSelection(
+            Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+        )
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 4), theme.baseForeground))
+
+        editorView.textView.insertText("var", replacementRange: NSRange(location: 0, length: 3))
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == "var\nlet")
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 4), theme.keyword))
+    }
+
     @Test("SyntaxEditorView preserves macOS syntax colors outside command edit ranges")
     @MainActor
     func syntaxEditorViewMacCommandEditsPreserveSyntaxColorsOutsideRefreshRange() async {
@@ -4676,7 +5488,7 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             updateRefreshRange: NSRange(location: source.utf16.count, length: 2)
@@ -4737,7 +5549,7 @@ struct SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(range: NSRange(location: 0, length: 3), captureName: "keyword"),
+                SyntaxHighlightToken(range: NSRange(location: 0, length: 3), rawCaptureName: "editor.syntax.swift.keyword"),
             ],
             updateRefreshRange: NSRange(location: source.utf16.count, length: appendedText.utf16.count)
         )
@@ -4780,11 +5592,11 @@ struct SyntaxEditorUITests {
             tokens: [
                 SyntaxHighlightToken(
                     range: NSRange(location: 0, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
                 SyntaxHighlightToken(
                     range: NSRange(location: firstPaste.utf16.count, length: 3),
-                    captureName: "keyword"
+                    rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             delayNanoseconds: 20_000_000,

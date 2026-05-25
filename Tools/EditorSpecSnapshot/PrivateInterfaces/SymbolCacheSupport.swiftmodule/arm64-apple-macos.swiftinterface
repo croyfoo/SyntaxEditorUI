@@ -1,0 +1,57 @@
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version 6.3.2 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)
+// swift-module-flags: -target arm64-apple-macosx26.0 -enable-objc-interop -enable-library-evolution -swift-version 6 -module-name SymbolCacheSupport
+import Foundation
+import SourceEditor
+import SymbolCache
+import Swift
+
+public protocol SymbolCacheDocumentSettings: SourceEditor.SourceEditorDocumentSettings {
+    var shouldIndexAsFile: Swift.Bool { get }
+    var shouldUseSemanticServiceHelper: Swift.Bool { get }
+    var symbolCacheComposite: SymbolCache.SymbolCacheComposite { get }
+}
+
+public struct BasicSymbolCacheDocumentSettings: SymbolCacheSupport.SymbolCacheDocumentSettings {
+    public let symbolCacheComposite: SymbolCache.SymbolCacheComposite
+
+    public init(symbolCacheComposite: SymbolCache.SymbolCacheComposite)
+
+    public var shouldIndexAsFile: Swift.Bool { get }
+    public var shouldUseSemanticServiceHelper: Swift.Bool { get }
+}
+
+public struct SymbolCacheEditorLanguage: SourceEditor.SourceEditorLanguage {
+    public let delegateLanguage: SourceEditor.SourceEditorLanguage
+
+    public init(delegateLanguage: SourceEditor.SourceEditorLanguage)
+
+    public var contentGeneratingLangServiceClass: SourceEditor.ContentGeneratingLanguageService.Type? { get }
+    public var editableRangeSnapshotType: SourceEditor.EditableRangeSnapshot.Type? { get }
+    public var identifier: Swift.String { get }
+    public var langServiceClass: SourceEditor.SourceEditorLanguageService.Type { get }
+    public var lineDataFactory: SourceEditor.SourceEditorLineDataFactory { get }
+    public var name: Swift.String { get }
+}
+
+public class SymbolCacheLanguageService: SourceEditor.SourceEditorLanguageService {
+    public required init(language: SourceEditor.SourceEditorLanguage, buffer: SourceEditor.SourceEditorBuffer)
+
+    public var symbolCacheComposite: SymbolCache.SymbolCacheComposite? { get set }
+
+    public func clearSemanticCache()
+    public func documentSettingsChanged(_: Swift.String?)
+    public func documentWasClosed()
+
+    public func syntaxTypeAtPosition(_: SourceEditor.SourceEditorPosition) -> (SourceEditor.SourceEditorTokenType?, Swift.Range<SourceEditor.SourceEditorPosition>)?
+    public func syntaxTypeAtPosition(
+        _: SourceEditor.SourceEditorPosition,
+        includingSemanticsAndDocumentation: Swift.Bool
+    ) -> (SourceEditor.SourceEditorTokenType?, Swift.Range<SourceEditor.SourceEditorPosition>)?
+    public func enumerateSyntaxTokensOnLine(
+        _: Swift.Int,
+        handler: (SourceEditor.SourceEditorTokenType, Swift.Range<Swift.Int>) -> ()
+    )
+}
+
+public struct SwiftTypedNode {}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<note priority="high">
+    <!-- Reference sample -->
+    <title>Reference Preview</title>
+    <enabled>true</enabled>
+    <items>
+        <item id="1" kind="preview"><![CDATA[body { color: red; }]]></item>
+    </items>
+</note>

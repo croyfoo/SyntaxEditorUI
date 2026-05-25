@@ -47,8 +47,303 @@ private func sortHighlightTokens(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHig
         if $0.range.length != $1.range.length {
             return $0.range.length < $1.range.length
         }
-        return $0.captureName < $1.captureName
+        return $0.rawCaptureName < $1.rawCaptureName
     }
+}
+
+private func tokenIntersects(
+    _ token: SyntaxHighlightToken,
+    range: NSRange,
+    syntaxID: EditorSourceSyntaxID? = nil,
+    language: SyntaxLanguage? = nil
+) -> Bool {
+    if let syntaxID, token.syntaxID != syntaxID {
+        return false
+    }
+    if let language, token.language != language {
+        return false
+    }
+    return SyntaxEditorRangeUtilities.intersection(of: token.range, and: range).length > 0
+}
+
+private func tokenIsInjectedKeyword(_ token: SyntaxHighlightToken, in range: NSRange) -> Bool {
+    (token.language == .javascript || token.language == .json)
+        && token.syntaxID == .keyword
+        && SyntaxEditorRangeUtilities.intersection(of: token.range, and: range).length > 0
+}
+
+private struct HighlightSemanticSnapshot {
+    let text: String
+    let rawCaptureName: String
+    let syntaxID: EditorSourceSyntaxID
+    let styleKeys: [String]
+    let resolvedStyle: SyntaxEditorResolvedTextStyle
+}
+
+private func referenceSampleText(named filename: String) throws -> String {
+    let repositoryRootURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let sampleURL = repositoryRootURL
+        .appendingPathComponent("Tools/Mini/Mini/ReferenceSamples", isDirectory: true)
+        .appendingPathComponent(filename)
+    return try String(contentsOf: sampleURL, encoding: .utf8)
+}
+
+private func repositoryRootURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+}
+
+private func highlightQueryURL(language: SyntaxLanguage) -> URL {
+    let directoryName = switch language {
+    case .css:
+        "CSSQueries"
+    case .html:
+        "HTMLQueries"
+    case .javascript:
+        "JavaScriptQueries"
+    case .json:
+        "JSONQueries"
+    case .objectiveC:
+        "ObjectiveCQueries"
+    case .swift:
+        "SwiftQueries"
+    case .toml:
+        "TOMLQueries"
+    case .xml:
+        "XMLQueries"
+    }
+    return repositoryRootURL()
+        .appendingPathComponent("Sources/SyntaxEditorCore/Resources", isDirectory: true)
+        .appendingPathComponent(directoryName, isDirectory: true)
+        .appendingPathComponent("highlights.scm")
+}
+
+private func canonicalCaptureLanguageName(for language: SyntaxLanguage) -> String {
+    switch language {
+    case .css:
+        "css"
+    case .html:
+        "html"
+    case .javascript:
+        "javascript"
+    case .json:
+        "json"
+    case .objectiveC:
+        "objectivec"
+    case .swift:
+        "swift"
+    case .toml:
+        "toml"
+    case .xml:
+        "xml"
+    }
+}
+
+private func languageImplementationDirectoryName(for language: SyntaxLanguage) -> String {
+    switch language {
+    case .css:
+        "CSS"
+    case .html:
+        "HTML"
+    case .javascript:
+        "JavaScript"
+    case .json:
+        "JSON"
+    case .objectiveC:
+        "ObjectiveC"
+    case .swift:
+        "Swift"
+    case .toml:
+        "TOML"
+    case .xml:
+        "XML"
+    }
+}
+
+private func captureNames(inQuerySource source: String) -> [String] {
+    var captures: [String] = []
+    var index = source.startIndex
+    var isInString = false
+    var isEscaped = false
+    var isInLineComment = false
+
+    while index < source.endIndex {
+        let character = source[index]
+
+        if isInLineComment {
+            if character == "\n" {
+                isInLineComment = false
+            }
+            index = source.index(after: index)
+            continue
+        }
+
+        if isInString {
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == "\"" {
+                isInString = false
+            }
+            index = source.index(after: index)
+            continue
+        }
+
+        if character == ";" {
+            isInLineComment = true
+            index = source.index(after: index)
+            continue
+        }
+        if character == "\"" {
+            isInString = true
+            index = source.index(after: index)
+            continue
+        }
+        guard character == "@" else {
+            index = source.index(after: index)
+            continue
+        }
+
+        var end = source.index(after: index)
+        while end < source.endIndex {
+            let next = source[end]
+            guard next.isLetter || next.isNumber || next == "." || next == "_" || next == "-" else {
+                break
+            }
+            end = source.index(after: end)
+        }
+        if end > source.index(after: index) {
+            captures.append(String(source[source.index(after: index)..<end]))
+        }
+        index = end
+    }
+
+    return captures
+}
+
+private func semanticSnapshot(
+    in tokens: [SyntaxHighlightToken],
+    source: String,
+    text: String,
+    syntaxID: EditorSourceSyntaxID,
+    language: SyntaxLanguage,
+    inOccurrenceOf containingText: String? = nil
+) throws -> HighlightSemanticSnapshot {
+    let nsSource = source as NSString
+    let searchRange: NSRange
+    if let containingText {
+        searchRange = nsSource.range(of: containingText)
+        #expect(searchRange.location != NSNotFound)
+    } else {
+        searchRange = NSRange(location: 0, length: nsSource.length)
+    }
+    let expectedRange = nsSource.range(of: text, options: [], range: searchRange)
+    #expect(expectedRange.location != NSNotFound)
+    let matchedToken = tokens.first {
+        $0.syntaxID == syntaxID
+            && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0
+    }
+    if matchedToken == nil {
+        let nearby = tokens
+            .filter { SyntaxEditorRangeUtilities.intersection(of: $0.range, and: searchRange).length > 0 }
+            .map { token in
+                "\(nsSource.substring(with: token.range)):\(token.rawCaptureName)"
+            }
+            .joined(separator: ", ")
+        Issue.record("Could not find \(syntaxID.rawValue) for \(text) in \(containingText ?? source). Nearby: \(nearby)")
+    }
+    let token = try #require(matchedToken)
+    let tokenText = nsSource.substring(with: token.range)
+    let styleKeys = try #require(SyntaxEditorHighlightTheme.semanticStyleKeys(
+        for: token.syntaxID,
+        language: language
+    ))
+    let style = try #require(SyntaxEditorHighlightTheme.style(
+        for: token.syntaxID,
+        in: .default,
+        language: language,
+        appearance: .dark
+    ))
+    return HighlightSemanticSnapshot(
+        text: tokenText,
+        rawCaptureName: token.rawCaptureName,
+        syntaxID: token.syntaxID,
+        styleKeys: styleKeys,
+        resolvedStyle: style
+    )
+}
+
+private func syntaxIDs(
+    in tokens: [SyntaxHighlightToken],
+    source: String,
+    text: String,
+    inOccurrenceOf containingText: String
+) -> [EditorSourceSyntaxID] {
+    let nsSource = source as NSString
+    let searchRange = nsSource.range(of: containingText)
+    #expect(searchRange.location != NSNotFound)
+    let expectedRange = nsSource.range(of: text, options: [], range: searchRange)
+    #expect(expectedRange.location != NSNotFound)
+
+    return tokens
+        .filter { SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0 }
+        .map(\.syntaxID)
+}
+
+private func effectiveSemanticSnapshot(
+    in tokens: [SyntaxHighlightToken],
+    source: String,
+    text: String,
+    syntaxID: EditorSourceSyntaxID,
+    language: SyntaxLanguage,
+    inOccurrenceOf containingText: String
+) throws -> HighlightSemanticSnapshot {
+    let nsSource = source as NSString
+    let searchRange = nsSource.range(of: containingText)
+    #expect(searchRange.location != NSNotFound)
+    let expectedRange = nsSource.range(of: text, options: [], range: searchRange)
+    #expect(expectedRange.location != NSNotFound)
+
+    let overlappingTokens = tokens.filter {
+        SyntaxEditorRangeUtilities.intersection(of: $0.range, and: expectedRange).length > 0
+    }
+    let matchedToken = overlappingTokens.last
+    if matchedToken?.syntaxID != syntaxID {
+        let nearby = tokens
+            .filter { SyntaxEditorRangeUtilities.intersection(of: $0.range, and: searchRange).length > 0 }
+            .map { token in
+                "\(nsSource.substring(with: token.range)):\(token.rawCaptureName)"
+            }
+            .joined(separator: ", ")
+        Issue.record("Could not find effective \(syntaxID.rawValue) token for \(text) in \(containingText). Nearby: \(nearby)")
+    }
+
+    let token = try #require(matchedToken)
+    #expect(token.syntaxID == syntaxID)
+    let tokenText = nsSource.substring(with: token.range)
+    let styleKeys = try #require(SyntaxEditorHighlightTheme.semanticStyleKeys(
+        for: token.syntaxID,
+        language: language
+    ))
+    let style = try #require(SyntaxEditorHighlightTheme.style(
+        for: token.syntaxID,
+        in: .default,
+        language: language,
+        appearance: .dark
+    ))
+    return HighlightSemanticSnapshot(
+        text: tokenText,
+        rawCaptureName: token.rawCaptureName,
+        syntaxID: token.syntaxID,
+        styleKeys: styleKeys,
+        resolvedStyle: style
+    )
 }
 
 private extension SyntaxHighlighterEngine {
@@ -100,7 +395,7 @@ struct SyntaxEditorCoreTests {
         #expect(configuration.language.identifier == SyntaxLanguage.json.identifier)
         #expect(configuration.isEditable == true)
         #expect(configuration.lineWrappingEnabled == false)
-        #expect(configuration.colorTheme == .xcode)
+        #expect(configuration.colorTheme == .default)
 
         document.replaceText("body { color: red; }")
         configuration.language = SyntaxLanguage.css
@@ -112,7 +407,7 @@ struct SyntaxEditorCoreTests {
         #expect(configuration.language.identifier == SyntaxLanguage.css.identifier)
         #expect(configuration.isEditable == false)
         #expect(configuration.lineWrappingEnabled == true)
-        #expect(configuration.colorTheme == .xcode)
+        #expect(configuration.colorTheme == .default)
     }
 
     @Test("SyntaxEditorDocument text snapshots participate in observation")
@@ -136,18 +431,210 @@ struct SyntaxEditorCoreTests {
 
     @Test("SyntaxEditorHighlightTheme maps representative captures to theme slots")
     func syntaxEditorHighlightThemeMapping() {
-        let theme = SyntaxEditorColorTheme.xcode
+        let theme = SyntaxEditorColorTheme.default
+        let resolved = theme.resolved(for: .swift, appearance: .light)
+        let custom = SyntaxEditorColorTheme(
+            baseForeground: .syntaxEditorColor(.init(red: 1, green: 1, blue: 1, alpha: 1)),
+            bracketBackground: .syntaxEditorColor(.init(red: 0, green: 0, blue: 0, alpha: 1)),
+            comment: .syntaxEditorColor(.init(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)),
+            string: .syntaxEditorColor(.init(red: 0.2, green: 0.2, blue: 0.2, alpha: 1)),
+            keyword: .syntaxEditorColor(.init(red: 0.3, green: 0.3, blue: 0.3, alpha: 1)),
+            number: .syntaxEditorColor(.init(red: 0.4, green: 0.4, blue: 0.4, alpha: 1)),
+            function: .syntaxEditorColor(.init(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)),
+            type: .syntaxEditorColor(.init(red: 0.6, green: 0.6, blue: 0.6, alpha: 1)),
+            constant: .syntaxEditorColor(.init(red: 0.7, green: 0.7, blue: 0.7, alpha: 1)),
+            variable: .syntaxEditorColor(.init(red: 0.8, green: 0.8, blue: 0.8, alpha: 1)),
+            punctuation: .syntaxEditorColor(.init(red: 0.9, green: 0.9, blue: 0.9, alpha: 1))
+        )
+        let customResolved = custom.resolved(for: .swift, appearance: .light)
 
-        #expect(SyntaxEditorHighlightTheme.color(for: "keyword.control", in: theme) == theme.keyword)
-        #expect(SyntaxEditorHighlightTheme.color(for: "include", in: theme) == theme.keyword)
-        #expect(SyntaxEditorHighlightTheme.color(for: "string.quoted", in: theme) == theme.string)
-        #expect(SyntaxEditorHighlightTheme.color(for: "constructor", in: theme) == theme.function)
-        #expect(SyntaxEditorHighlightTheme.color(for: "parameter", in: theme) == theme.variable)
-        #expect(SyntaxEditorHighlightTheme.color(for: "namespace", in: theme) == theme.type)
-        #expect(SyntaxEditorHighlightTheme.color(for: "number", in: theme) == theme.number)
-        #expect(SyntaxEditorHighlightTheme.color(for: "text.uri", in: theme) == theme.number)
-        #expect(SyntaxEditorHighlightTheme.color(for: "delimiter", in: theme) == theme.punctuation)
-        #expect(SyntaxEditorHighlightTheme.color(for: "unknown.capture", in: theme) == nil)
+        #expect(SyntaxEditorHighlightTheme.color(for: .keyword, in: theme, language: .swift, appearance: .light) == resolved.keyword.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .string, in: theme, language: .swift, appearance: .light) == resolved.string.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .plain, in: theme, language: .swift, appearance: .light) == resolved.base.foreground)
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: .identifierTypeSystem, language: .swift)?.first == "editor.syntax.identifier.type.system")
+        #expect(SyntaxEditorHighlightTheme.color(for: .number, in: theme, language: .swift, appearance: .light) == resolved.number.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .declarationType, in: custom, language: .swift, appearance: .light) == customResolved.type.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .declarationOther, in: custom, language: .swift, appearance: .light) == customResolved.function.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .identifierFunctionSystem, in: custom, language: .swift, appearance: .light) == customResolved.function.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .identifierConstantSystem, in: custom, language: .swift, appearance: .light) == customResolved.constant.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .identifierVariableSystem, in: custom, language: .swift, appearance: .light) == customResolved.variable.foreground)
+        #expect(SyntaxEditorHighlightTheme.color(for: .identifier, in: custom, language: .swift, appearance: .light) == nil)
+        #expect(SyntaxEditorHighlightTheme.color(for: .plain, in: custom, language: .swift, appearance: .light) == nil)
+        #expect(SyntaxEditorHighlightTheme.color(for: "unknown.capture", in: theme, language: .swift, appearance: .light) == nil)
+    }
+
+    @Test("SyntaxEditorHighlightTheme resolves language-specific built-in styles")
+    func syntaxEditorHighlightThemeLanguageSpecificStyles() {
+        let theme = SyntaxEditorColorTheme.default
+        let swiftStyle = SyntaxEditorHighlightTheme.style(
+            for: .plain,
+            in: theme,
+            language: .swift,
+            appearance: .light
+        )
+        let swiftResolved = theme.resolved(for: .swift, appearance: .light)
+        #expect(swiftStyle?.foreground == swiftResolved.baseForeground)
+
+        let objectiveCStyle = SyntaxEditorHighlightTheme.style(
+            for: .plain,
+            in: theme,
+            language: .objectiveC,
+            appearance: .light
+        )
+        let objectiveCResolved = theme.resolved(for: .objectiveC, appearance: .light)
+        #expect(objectiveCStyle?.foreground == objectiveCResolved.baseForeground)
+    }
+
+    @Test("EditorSyntaxCapture parses canonical captures and falls back for non-canonical names")
+    func editorSyntaxCaptureParser() {
+        let swiftKeyword = EditorSyntaxCapture.parse(
+            rawCaptureName: "editor.syntax.swift.keyword",
+            rootLanguage: .html
+        )
+        #expect(swiftKeyword.syntaxID == .keyword)
+        #expect(swiftKeyword.language == .swift)
+
+        let objectiveCType = EditorSyntaxCapture.parse(
+            rawCaptureName: "@editor.syntax.objectivec.identifier.type.system",
+            rootLanguage: .swift
+        )
+        #expect(objectiveCType.syntaxID == .identifierTypeSystem)
+        #expect(objectiveCType.language == .objectiveC)
+
+        let fallback = EditorSyntaxCapture.parse(rawCaptureName: "keyword", rootLanguage: .swift)
+        #expect(fallback.syntaxID == .plain)
+        #expect(fallback.language == .swift)
+    }
+
+    @Test("Built-in highlight queries use canonical editor syntax captures")
+    func builtInHighlightQueriesUseCanonicalCaptures() throws {
+        for language in SyntaxLanguage.allCases {
+            let source = try String(contentsOf: highlightQueryURL(language: language), encoding: .utf8)
+            let captures = captureNames(inQuerySource: source)
+            let prefix = "editor.syntax.\(canonicalCaptureLanguageName(for: language))."
+            #expect(captures.isEmpty == false, "No captures found for \(language.rawValue)")
+
+            for capture in captures {
+                #expect(capture.hasPrefix(prefix), "Non-canonical capture @\(capture) in \(language.rawValue)")
+                let classification = EditorSyntaxCapture.parse(
+                    rawCaptureName: capture,
+                    rootLanguage: language
+                )
+                #expect(classification.language == language)
+                #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(
+                    for: classification.syntaxID,
+                    language: classification.language
+                )?.isEmpty == false)
+                #expect(SyntaxEditorHighlightTheme.style(
+                    for: classification.syntaxID,
+                    in: .default,
+                    language: classification.language,
+                    appearance: .dark
+                ) != nil)
+            }
+        }
+    }
+
+    @Test("Editor syntax style keys stay query-owned")
+    func editorSyntaxStyleKeysStayQueryOwned() throws {
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "attribute", language: .toml)?.first == "editor.syntax.attribute")
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "plain", language: .toml)?.first == "editor.syntax.plain")
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "keyword", language: .css)?.first == "editor.syntax.keyword")
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "keyword", language: .html)?.first == "editor.syntax.keyword")
+    }
+
+    @Test("Language source files live in language-specific directories")
+    func languageSourceFilesLiveInLanguageSpecificDirectories() {
+        let languagesURL = repositoryRootURL()
+            .appendingPathComponent("Sources/SyntaxEditorCore/Languages", isDirectory: true)
+        #expect(!FileManager.default.fileExists(atPath: languagesURL.appendingPathComponent("Builtin").path))
+        #expect(!FileManager.default.fileExists(atPath: languagesURL.appendingPathComponent("Generated").path))
+        #expect(!FileManager.default.fileExists(atPath: languagesURL.appendingPathComponent("Support").path))
+
+        for language in SyntaxLanguage.allCases {
+            let directoryName = languageImplementationDirectoryName(for: language)
+            let typeName = switch language {
+            case .css:
+                "CSSLanguage"
+            case .html:
+                "HTMLLanguage"
+            case .javascript:
+                "JavaScriptLanguage"
+            case .json:
+                "JSONLanguage"
+            case .objectiveC:
+                "ObjectiveCLanguage"
+            case .swift:
+                "SwiftLanguage"
+            case .toml:
+                "TOMLLanguage"
+            case .xml:
+                "XMLLanguage"
+            }
+            let languageDirectory = languagesURL.appendingPathComponent(directoryName, isDirectory: true)
+            #expect(FileManager.default.fileExists(atPath: languageDirectory.appendingPathComponent("\(typeName).swift").path))
+        }
+    }
+
+    @Test("SyntaxEditorHighlightTheme exposes exact semantic style keys")
+    func syntaxEditorHighlightThemeExposesExactSemanticStyleKeys() throws {
+        #expect(
+            SyntaxEditorHighlightTheme.semanticStyleKeys(
+                for: "xcode.syntax.keyword"
+            )?.first == "editor.syntax.keyword"
+        )
+        #expect(
+            SyntaxEditorHighlightTheme.semanticStyleKeys(
+                for: "xcode.syntax.preprocessor"
+            )?.first == "editor.syntax.preprocessor"
+        )
+        #expect(
+            SyntaxEditorHighlightTheme.semanticStyleKeys(
+                for: "xcode.syntax.preprocessor.define"
+            )?.first == "editor.syntax.preprocessor.define"
+        )
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "xcode.syntax.declaration.precedencegroup") == nil)
+        #expect(
+            SyntaxEditorHighlightTheme.semanticStyleKeys(
+                for: "xcode.syntax.definition.style"
+            )?.first == "editor.syntax.definition.style"
+        )
+        #expect(
+            SyntaxEditorHighlightTheme.semanticStyleKeys(
+                for: "xcode.syntax.markup.aside.kind"
+            )?.first == "editor.syntax.markup.aside.kind"
+        )
+        #expect(
+            SyntaxEditorHighlightTheme.semanticStyleKeys(
+                for: "xcode.syntax.definition.macro",
+                language: .swift
+            )?.first == "editor.syntax.definition.macro"
+        )
+        #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(
+            for: "xcode.syntax.not-a-real-syntax-id",
+            language: .swift
+        ) == nil)
+    }
+
+    @Test("SyntaxEditorHighlightTheme resolves built-in fonts")
+    func syntaxEditorHighlightThemeFonts() {
+        let theme = SyntaxEditorColorTheme.default
+        let lightComment = SyntaxEditorHighlightTheme.style(
+            for: "comment.doc",
+            in: theme,
+            language: .swift,
+            appearance: .light
+        )
+        #expect(lightComment?.font?.family == "HelveticaNeue")
+        #expect(lightComment?.font?.size == 12)
+
+        let darkKeyword = SyntaxEditorHighlightTheme.style(
+            for: "keyword.control",
+            in: theme,
+            language: .swift,
+            appearance: .dark
+        )
+        #expect(darkKeyword?.font?.weight == .bold)
     }
 
     @Test("SyntaxEditorRangeUtilities clamps and intersects UTF-16 ranges")
@@ -3301,6 +3788,2314 @@ struct SyntaxHighlighterEngineTests {
         }
     }
 
+    @Test("SyntaxHighlighterEngine emits canonical reference sample captures")
+    func highlighterEmitsCanonicalReferenceSampleCaptures() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let cases: [(language: SyntaxLanguage, filename: String)] = [
+            (.css, "Reference.css"),
+            (.html, "Reference.html"),
+            (.javascript, "Reference.js"),
+            (.json, "Reference.json"),
+            (.objectiveC, "Reference.m"),
+            (.swift, "Reference.swift"),
+            (.toml, "Reference.toml"),
+            (.xml, "Reference.xml"),
+        ]
+
+        for testCase in cases {
+            let source = try referenceSampleText(named: testCase.filename)
+            let tokens = await engine.render(source: source, language: testCase.language)
+            let nonCanonicalCaptures = tokens
+                .filter { $0.rawCaptureName.hasPrefix("editor.syntax.") == false }
+                .map(\.rawCaptureName)
+                .sorted()
+            #expect(
+                nonCanonicalCaptures.isEmpty,
+                "Non-canonical captures for \(testCase.language.rawValue): \(nonCanonicalCaptures.joined(separator: ", "))"
+            )
+
+            let unresolvedTokens = tokens
+                .filter {
+                    SyntaxEditorHighlightTheme.semanticStyleKeys(
+                        for: $0.syntaxID,
+                        language: $0.language ?? testCase.language
+                    ) == nil
+                }
+                .map { "\($0.rawCaptureName)->\($0.syntaxID.rawValue)" }
+                .sorted()
+
+            #expect(
+                unresolvedTokens.isEmpty,
+                "Unresolved source syntax IDs for \(testCase.language.rawValue): \(unresolvedTokens.joined(separator: ", "))"
+            )
+        }
+    }
+
+    @Test("SyntaxHighlighterEngine classifies Swift reference sample with Xcode-style semantic overlays")
+    func highlighterClassifiesSwiftReferenceSampleWithXcodeStyleSemanticOverlays() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = try referenceSampleText(named: "Reference.swift")
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
+
+        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+            ("MARK:", "mark", "editor.syntax.mark", "// MARK: - Reference highlighting surface"),
+            ("Foundation", "plain", "editor.syntax.plain", "import Foundation"),
+            ("Observation", "plain", "editor.syntax.plain", "import Observation"),
+            ("Renders a compact reference model.", "comment.doc", "editor.syntax.comment.doc", "/// Renders a compact reference model."),
+            ("https://example.invalid/reference.", "url", "editor.syntax.url", "https://example.invalid/reference."),
+            ("associatedtype", "keyword", "editor.syntax.keyword", "associatedtype Output"),
+            ("ReferenceID", "declaration.type", "editor.syntax.declaration.type", "typealias ReferenceID = UUID"),
+            ("macro", "keyword", "editor.syntax.keyword", "macro localized"),
+            ("localized", "declaration.other", "editor.syntax.declaration.other", "macro localized"),
+            ("attached", "keyword", "editor.syntax.keyword", "@attached(member"),
+            ("member", "plain", "editor.syntax.plain", "@attached(member"),
+            ("Codable", "plain", "editor.syntax.plain", "conformances: Codable"),
+            ("module", "plain", "editor.syntax.plain", #"#externalMacro(module: "ReferenceMacros""#),
+            ("externalMacro", "keyword", "editor.syntax.keyword", #"#externalMacro(module: "ReferenceMacros""#),
+            ("freestanding", "keyword", "editor.syntax.keyword", "@freestanding(expression)"),
+            ("propertyWrapper", "keyword", "editor.syntax.keyword", "@propertyWrapper"),
+            ("Comparable", "identifier.class.system", "editor.syntax.identifier.class.system", "Value: Comparable"),
+            ("ReferenceStore", "declaration.type", "editor.syntax.declaration.type", "final class ReferenceStore"),
+            ("OpenReferenceBase", "plain", "editor.syntax.plain", "OpenReferenceBase, @unchecked"),
+            ("UUID", "identifier.type.system", "editor.syntax.identifier.type.system", "typealias ReferenceID = UUID"),
+            ("load", "identifier.function", "editor.syntax.identifier.function", "try await load().map"),
+            ("Value", "plain", "editor.syntax.plain", "var wrappedValue: Value"),
+            ("wrappedValue", "declaration.other", "editor.syntax.declaration.other", "init(wrappedValue: Value"),
+            ("create", "declaration.other", "editor.syntax.declaration.other", "for key: Key, create: @Sendable"),
+            ("content", "declaration.other", "editor.syntax.declaration.other", "@RowBuilder content:"),
+            ("lhs", "declaration.other", "editor.syntax.declaration.other", "func <+> (lhs: ReferenceStore.State"),
+            ("rhs", "declaration.other", "editor.syntax.declaration.other", "rhs: ReferenceStore.State"),
+            ("@", "plain", "editor.syntax.plain", "@AutoCodable"),
+            ("AutoCodable", "plain", "editor.syntax.plain", "@AutoCodable"),
+            ("Observable", "identifier.function.system", "editor.syntax.identifier.function.system", "@Observable"),
+            ("MainActor", "identifier.class.system", "editor.syntax.identifier.class.system", "@MainActor"),
+            ("Clamped", "plain", "editor.syntax.plain", "@Clamped(0...globalLimit)"),
+            ("RowBuilder", "plain", "editor.syntax.plain", "@RowBuilder content:"),
+            ("AdditionPrecedence", "identifier.type.system", "editor.syntax.identifier.type.system", "higherThan: AdditionPrecedence"),
+            ("ReferencePrecedence", "plain", "editor.syntax.plain", "operator <+>: ReferencePrecedence"),
+            ("Sendable", "identifier.class.system", "editor.syntax.identifier.class.system", "@unchecked Sendable"),
+            ("ReferenceRenderable", "plain", "editor.syntax.plain", "@unchecked Sendable, ReferenceRenderable"),
+            ("CaseIterable", "identifier.class.system", "editor.syntax.identifier.class.system", "String, CaseIterable"),
+            ("Hashable", "identifier.class.system", "editor.syntax.identifier.class.system", "ID: Hashable"),
+            ("Identifiable", "identifier.class.system", "editor.syntax.identifier.class.system", "Identifiable {"),
+            ("State", "identifier.type", "editor.syntax.identifier.type", "var state: State = .ready"),
+            ("range", "identifier.constant.system", "editor.syntax.identifier.constant.system", "self.range = range"),
+            ("Item", "identifier.type", "editor.syntax.identifier.type", "Item(id: UUID()"),
+            ("ReferenceID", "identifier.type", "editor.syntax.identifier.type", "[Item<ReferenceID>]"),
+            ("sourceLocation", "keyword", "editor.syntax.keyword", "#sourceLocation(file:"),
+            ("sourceLocationCheck", "declaration.other", "editor.syntax.declaration.other", "let sourceLocationCheck: Any?"),
+            ("=", "plain", "editor.syntax.plain", "progress = 42"),
+            ("->", "plain", "editor.syntax.plain", "render() async throws -> [String]"),
+            ("#if", "keyword", "editor.syntax.keyword", "#if os(iOS)"),
+            ("iOS", "plain", "editor.syntax.plain", "#if os(iOS)"),
+            ("#available", "keyword", "editor.syntax.keyword", "if #available(macOS"),
+            ("self", "keyword", "editor.syntax.keyword", "self.items = value.items"),
+            ("Any", "keyword", "editor.syntax.keyword", "sourceLocationCheck: Any?"),
+            ("nil", "keyword", "editor.syntax.keyword", "Any? = nil"),
+            ("false", "keyword", "editor.syntax.keyword", "assignment: false"),
+            ("item-(?<number>\\d+)-(?<kind>[A-Z]+)", "string", "editor.syntax.string", #"let pattern = #/item-(?<number>\d+)-(?<kind>[A-Z]+)/#"#),
+            ("42", "number", "editor.syntax.number", "progress = 42"),
+            ("reference.title", "string", "editor.syntax.string", #"#localized("reference.title")"#),
+            ("AutoCodable", "declaration.other", "editor.syntax.declaration.other", "macro AutoCodable()"),
+        ]
+
+        for expectation in expectations {
+            let snapshot = try semanticSnapshot(
+                in: tokens,
+                source: source,
+                text: expectation.text,
+                syntaxID: expectation.syntaxID,
+                language: .swift,
+                inOccurrenceOf: expectation.occurrence
+            )
+            #expect(snapshot.styleKeys.first == expectation.styleKey)
+        }
+
+        let effectiveExpectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+            ("isolated", "keyword", "editor.syntax.keyword", "isolated deinit"),
+            ("defer", "keyword", "editor.syntax.keyword", "defer { state = .ready }"),
+            ("#if", "preprocessor", "editor.syntax.preprocessor", "#if os(iOS)"),
+            ("iOS", "preprocessor", "editor.syntax.preprocessor", "#if os(iOS)"),
+            ("macOS", "preprocessor", "editor.syntax.preprocessor", "#elseif os(macOS)"),
+            ("#else", "preprocessor", "editor.syntax.preprocessor", "#else"),
+            ("#endif", "preprocessor", "editor.syntax.preprocessor", "#endif"),
+            ("swift", "preprocessor", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
+            (">", "preprocessor", "editor.syntax.preprocessor", "#if swift(>=5.9)"),
+            ("5.9", "number", "editor.syntax.number", "#if swift(>=5.9)"),
+            ("&&", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("compiler", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("6.0", "number", "editor.syntax.number", "&& compiler(>=6.0)"),
+            ("#if", "preprocessor", "editor.syntax.preprocessor", "#if canImport(UIKit"),
+            ("#", "keyword", "editor.syntax.keyword", "if #available(macOS"),
+            ("#available", "keyword", "editor.syntax.keyword", "if #available(macOS"),
+        ]
+
+        for expectation in effectiveExpectations {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: expectation.text,
+                syntaxID: expectation.syntaxID,
+                language: .swift,
+                inOccurrenceOf: expectation.occurrence
+            )
+            #expect(snapshot.syntaxID == expectation.syntaxID)
+            #expect(snapshot.styleKeys.first == expectation.styleKey)
+        }
+
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "@",
+            inOccurrenceOf: "@attached(member"
+        ).last == .keyword)
+
+        let zeroLengthTokens = tokens.filter { $0.range.length == 0 }
+        if zeroLengthTokens.isEmpty == false {
+            let nsSource = source as NSString
+            let details = zeroLengthTokens.map { token in
+                "\(token.range.location):\(nsSource.substring(with: token.range)):\(token.rawCaptureName)"
+            }
+            Issue.record("Zero-length tokens: \(details.joined(separator: ", "))")
+        }
+        #expect(zeroLengthTokens.isEmpty)
+    }
+
+    @Test("SyntaxHighlighterEngine aligns Swift attributes with Xcode token classification")
+    func highlighterAlignsSwiftAttributesWithXcodeTokenClassification() async throws {
+        let source = """
+        @attached(member, names: named(FixtureCodingKeys))
+        @freestanding(expression)
+        macro LocalAttribute() = #externalMacro(module: "FixtureMacros", type: "LocalAttribute")
+        @propertyWrapper struct LocalWrapper { var wrappedValue: Int }
+        @LocalAttribute
+        @UnknownFixture
+        struct SwiftAttributesFixture {
+            @LocalWrapper var localValue: Int
+            @UnknownFixture var value: Int
+        }
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+            ("attached", "keyword", "editor.syntax.keyword", "@attached(member"),
+            ("freestanding", "keyword", "editor.syntax.keyword", "@freestanding(expression)"),
+            ("@", "plain", "editor.syntax.plain", "@LocalAttribute"),
+            ("LocalAttribute", "plain", "editor.syntax.plain", "@LocalAttribute"),
+            ("@", "plain", "editor.syntax.plain", "@LocalWrapper"),
+            ("LocalWrapper", "plain", "editor.syntax.plain", "@LocalWrapper"),
+            ("@", "identifier.class.system", "editor.syntax.identifier.class.system", "@UnknownFixture"),
+            ("UnknownFixture", "identifier.class.system", "editor.syntax.identifier.class.system", "@UnknownFixture"),
+        ]
+
+        for expectation in expectations {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: expectation.text,
+                syntaxID: expectation.syntaxID,
+                language: .swift,
+                inOccurrenceOf: expectation.occurrence
+            )
+            #expect(snapshot.syntaxID == expectation.syntaxID)
+            #expect(snapshot.styleKeys.first == expectation.styleKey)
+        }
+    }
+
+    @Test("SyntaxHighlighterEngine aligns Swift preprocessor macros with Xcode token classification")
+    func highlighterAlignsSwiftPreprocessorMacrosWithXcodeTokenClassification() async throws {
+        let source = """
+        macro FixtureMacro() = #externalMacro(module: "FixtureMacros", type: "FixtureMacro")
+
+        #sourceLocation(file: "SwiftPreprocessorMacros.swift", line: 100)
+        let sourceLocationFixture: Any? = nil
+
+        let invocation = #FixtureMacro()
+        let selector = #selector(runFixture)
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+            ("externalMacro", "keyword", "editor.syntax.keyword", "#externalMacro(module:"),
+            ("sourceLocation", "preprocessor", "editor.syntax.preprocessor", "#sourceLocation(file:"),
+            ("FixtureMacro", "identifier.macro", "editor.syntax.identifier.macro", "#FixtureMacro()"),
+            ("selector", "identifier.macro.system", "editor.syntax.identifier.macro.system", "#selector(runFixture)"),
+        ]
+
+        for expectation in expectations {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: expectation.text,
+                syntaxID: expectation.syntaxID,
+                language: .swift,
+                inOccurrenceOf: expectation.occurrence
+            )
+            #expect(snapshot.syntaxID == expectation.syntaxID)
+            #expect(snapshot.styleKeys.first == expectation.styleKey)
+        }
+    }
+
+    @Test("SyntaxHighlighterEngine classifies Swift file-local variables and external types")
+    func highlighterClassifiesSwiftFileLocalVariablesAndExternalTypes() async throws {
+        let source = """
+        struct LocalModel {
+            let value: Int
+        }
+
+        enum LocalState {
+            case ready
+        }
+
+        macro LocalMacro() = #externalMacro(module: "FixtureMacros", type: "LocalMacro")
+
+        func localFunction(_ model: LocalModel, count: Int) -> LocalModel {
+            let localValue = count
+            print(localValue)
+            return LocalModel(value: localValue)
+        }
+
+        let title: String = "title"
+        let interpolated = "\\(String(describing: title))"
+        let tuple: (String, Int) = ("value", 1)
+        let metatype = String.self
+        let maxValue = Int.max
+        typealias ExternalAlias = Double
+        func constrained<T>(_ value: T) where T == UInt {}
+        let handler: () -> Void = {}
+        handler()
+        let state = LocalState.ready
+        let model = LocalModel(value: 1)
+        let output = localFunction(model, count: 2)
+        let dotted = Namespace.String.self
+        let dottedCall = Namespace.String()
+        let expanded = #LocalMacro()
+        let external = #ExternalMacro()
+        @UnknownFixture var attributed: Int
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+            ("LocalModel", "identifier.type", "editor.syntax.identifier.type", "_ model: LocalModel"),
+            ("Int", "identifier.type.system", "editor.syntax.identifier.type.system", "value: Int"),
+            ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "title: String"),
+            ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "String(describing: title)"),
+            ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "tuple: (String"),
+            ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "String.self"),
+            ("Int", "identifier.type.system", "editor.syntax.identifier.type.system", "Int.max"),
+            ("Double", "identifier.type.system", "editor.syntax.identifier.type.system", "= Double"),
+            ("UInt", "identifier.type.system", "editor.syntax.identifier.type.system", "== UInt"),
+            ("handler", "identifier.variable", "editor.syntax.identifier.variable", "handler()"),
+            ("localFunction", "identifier.function", "editor.syntax.identifier.function", "localFunction(model"),
+            ("print", "identifier.function.system", "editor.syntax.identifier.function.system", "print(localValue)"),
+            ("model", "identifier.variable", "editor.syntax.identifier.variable", "localFunction(model"),
+            ("localValue", "plain", "editor.syntax.plain", "print(localValue)"),
+            ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "Namespace.String"),
+            ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "Namespace.String()"),
+            ("LocalState", "identifier.type", "editor.syntax.identifier.type", "LocalState.ready"),
+            ("ready", "identifier.constant", "editor.syntax.identifier.constant", "LocalState.ready"),
+            ("LocalModel", "identifier.type", "editor.syntax.identifier.type", "LocalModel(value: 1)"),
+            ("LocalMacro", "identifier.macro", "editor.syntax.identifier.macro", "#LocalMacro()"),
+            ("ExternalMacro", "identifier.macro.system", "editor.syntax.identifier.macro.system", "#ExternalMacro()"),
+        ]
+
+        for expectation in expectations {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: expectation.text,
+                syntaxID: expectation.syntaxID,
+                language: .swift,
+                inOccurrenceOf: expectation.occurrence
+            )
+            #expect(snapshot.syntaxID == expectation.syntaxID)
+            #expect(snapshot.styleKeys.first == expectation.styleKey)
+        }
+
+        for (text, occurrence) in [
+            ("value", "LocalModel(value: 1)"),
+            ("module", #"#externalMacro(module: "FixtureMacros""#),
+            ("type", #"type: "LocalMacro""#),
+        ] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: text,
+                syntaxID: .plain,
+                language: .swift,
+                inOccurrenceOf: occurrence
+            )
+            #expect(snapshot.syntaxID == .plain)
+        }
+    }
+
+    @Test("SyntaxHighlighterEngine keeps same-file functions named like system types plain")
+    func highlighterKeepsLocalFunctionsNamedLikeSystemTypesPlain() async throws {
+        let source = """
+        func String() -> Int {
+            1
+        }
+
+        let value = String()
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let call = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierFunction,
+            language: .swift,
+            inOccurrenceOf: "value = String()"
+        )
+        #expect(call.styleKeys.first == "editor.syntax.identifier.function")
+    }
+
+    @Test("SyntaxHighlighterEngine limits block-local functions named like system types")
+    func highlighterLimitsBlockLocalFunctionsNamedLikeSystemTypes() async throws {
+        let source = """
+        struct Holder {
+            func String() -> Int {
+                1
+            }
+        }
+
+        func render(flag: Bool) {
+            if flag {
+                func String() -> Int {
+                    1
+                }
+                let local = String()
+            }
+            let sibling = String()
+        }
+
+        let top = String()
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let localCall = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierFunction,
+            language: .swift,
+            inOccurrenceOf: "local = String()"
+        )
+        #expect(localCall.styleKeys.first == "editor.syntax.identifier.function")
+
+        let siblingCall = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "sibling = String()"
+        )
+        #expect(siblingCall.styleKeys.first == "editor.syntax.identifier.type.system")
+
+        let topCall = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "top = String()"
+        )
+        #expect(topCall.styleKeys.first == "editor.syntax.identifier.type.system")
+    }
+
+    @Test("SyntaxHighlighterEngine does not classify shadowed system type names as external")
+    func highlighterDoesNotClassifyShadowedSystemTypeNamesAsExternal() async throws {
+        let source = """
+        struct String {
+            let rawValue: Int
+        }
+
+        let shadow: String? = nil
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let shadow = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierType,
+            language: .swift,
+            inOccurrenceOf: "shadow: String?"
+        )
+        #expect(shadow.styleKeys.first == "editor.syntax.identifier.type")
+
+        let int = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Int",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "rawValue: Int"
+        )
+        #expect(int.styleKeys.first == "editor.syntax.identifier.type.system")
+    }
+
+    @Test("SyntaxHighlighterEngine keeps value and type namespaces separate")
+    func highlighterKeepsValueAndTypeNamespacesSeparate() async throws {
+        let source = """
+        func render() {
+            let String = "local"
+            let title: String = ""
+            _ = String
+        }
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let typeAnnotation = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "title: String"
+        )
+        #expect(typeAnnotation.styleKeys.first == "editor.syntax.identifier.type.system")
+
+        let valueReference = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "_ = String"
+        )
+        #expect(valueReference.styleKeys.first == "editor.syntax.plain")
+    }
+
+    @Test("SyntaxHighlighterEngine limits non-function local type shadows to executable braces")
+    func highlighterLimitsNonFunctionLocalTypeShadowsToExecutableBraces() async throws {
+        let source = """
+        let closure = {
+            struct String {
+                let rawValue: Int
+            }
+            let local: String? = nil
+        }
+
+        let outside: String = ""
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let localShadow = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierType,
+            language: .swift,
+            inOccurrenceOf: "local: String?"
+        )
+        #expect(localShadow.styleKeys.first == "editor.syntax.identifier.type")
+
+        let outsideSystem = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "outside: String"
+        )
+        #expect(outsideSystem.styleKeys.first == "editor.syntax.identifier.type.system")
+    }
+
+    @Test("SyntaxHighlighterEngine limits function block local type shadows")
+    func highlighterLimitsFunctionBlockLocalTypeShadows() async throws {
+        let source = """
+        func render(flag: Bool) {
+            if flag {
+                struct String {}
+                let local: String? = nil
+            }
+            let sibling: String = ""
+        }
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let localShadow = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierType,
+            language: .swift,
+            inOccurrenceOf: "local: String?"
+        )
+        #expect(localShadow.styleKeys.first == "editor.syntax.identifier.type")
+
+        let siblingSystem = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "sibling: String"
+        )
+        #expect(siblingSystem.styleKeys.first == "editor.syntax.identifier.type.system")
+    }
+
+    @Test("SyntaxHighlighterEngine scopes switch case locals to their clauses")
+    func highlighterScopesSwitchCaseLocalsToTheirClauses() async throws {
+        let source = """
+        struct SwitchScope {
+            var value: Int
+
+            func render(_ tag: Int) {
+                switch tag {
+                case 0:
+                    let value = 1
+                    _ = value
+                default:
+                    _ = value
+                }
+            }
+        }
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let memberValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "default:\n            _ = value"
+        )
+        #expect(memberValue.styleKeys.first == "editor.syntax.identifier.variable")
+    }
+
+    @Test("SyntaxHighlighterEngine indexes multi-line comma value declarations")
+    func highlighterIndexesMultiLineCommaValueDeclarations() async throws {
+        let source = """
+        struct MultiLineScope {
+            var value: Int
+
+            func render() {
+                let first = 0,
+                    value = first
+                _ = value
+            }
+        }
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let localValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "_ = value"
+        )
+        #expect(localValue.styleKeys.first == "editor.syntax.plain")
+    }
+
+    @Test("SyntaxHighlighterEngine treats Swift typealias and associatedtype declarations as type shadows")
+    func highlighterTreatsSwiftTypeAliasesAsTypeShadows() async throws {
+        let source = """
+        typealias String = Swift.String
+        let title: String = ""
+        let count: Double = 0
+
+        protocol Loader {
+            associatedtype Int
+            func load() -> Int
+        }
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let fileAlias = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierType,
+            language: .swift,
+            inOccurrenceOf: "title: String"
+        )
+        #expect(fileAlias.styleKeys.first == "editor.syntax.identifier.type")
+
+        let systemType = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Double",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "count: Double"
+        )
+        #expect(systemType.styleKeys.first == "editor.syntax.identifier.type.system")
+
+        let associatedType = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Int",
+            syntaxID: .identifierType,
+            language: .swift,
+            inOccurrenceOf: "load() -> Int"
+        )
+        #expect(associatedType.styleKeys.first == "editor.syntax.identifier.type")
+    }
+
+    @Test("SyntaxHighlighterEngine limits generic type shadowing to the active scope")
+    func highlighterLimitsGenericTypeShadowingToActiveScope() async throws {
+        let source = """
+        func scopedGeneric<String>(_ value: String) {
+            _ = value
+        }
+
+        struct Outer {
+            struct String {}
+            let nested: String
+        }
+
+        struct ExtendedOuter {}
+
+        extension ExtendedOuter {
+            struct String {}
+        }
+
+        struct Box {
+            struct String {}
+        }
+
+        extension Box {
+            func read(_ value: String) {}
+        }
+
+        func localTypeShadow() {
+            struct String {}
+            let local: String = .init()
+            _ = local
+        }
+
+        let standard: String = ""
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        let genericParameterUse = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "_ value: String"
+        )
+        #expect(genericParameterUse.styleKeys.first == "editor.syntax.plain")
+
+        let nestedType = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierType,
+            language: .swift,
+            inOccurrenceOf: "nested: String"
+        )
+        #expect(nestedType.styleKeys.first == "editor.syntax.identifier.type")
+
+        let standardType = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "standard: String"
+        )
+        #expect(standardType.styleKeys.first == "editor.syntax.identifier.type.system")
+
+        let nestedTypeInExtension = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierType,
+            language: .swift,
+            inOccurrenceOf: "read(_ value: String)"
+        )
+        #expect(nestedTypeInExtension.styleKeys.first == "editor.syntax.identifier.type")
+
+        let localFunctionType = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierType,
+            language: .swift,
+            inOccurrenceOf: "local: String"
+        )
+        #expect(localFunctionType.styleKeys.first == "editor.syntax.identifier.type")
+    }
+
+    @Test("SyntaxHighlighterEngine preserves Swift semantic scopes around casts and requirements")
+    func highlighterPreservesSwiftSemanticScopesAroundCastsAndRequirements() async throws {
+        let source = """
+        protocol Renderable {
+            func render() -> String
+        }
+
+        struct Item {
+            let id: String
+
+            func copy() -> String {
+                return id
+            }
+        }
+
+        func genericRender<T>(_ input: T, value: Any) -> Bool {
+            let localValue = 1
+            let text = value as? String
+            let count = value as! Int
+            return localValue > 0 && value is Double
+        }
+        """
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+
+        for (text, occurrence) in [
+            ("String", "value as? String"),
+            ("Int", "value as! Int"),
+            ("Double", "value is Double"),
+        ] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: text,
+                syntaxID: .identifierTypeSystem,
+                language: .swift,
+                inOccurrenceOf: occurrence
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.identifier.type.system")
+        }
+
+        let memberReference = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "id",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return id"
+        )
+        #expect(memberReference.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let localReference = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "localValue",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "localValue > 0"
+        )
+        #expect(localReference.styleKeys.first == "editor.syntax.plain")
+    }
+
+    @Test("SyntaxHighlighterEngine classifies Swift directive condition operators")
+    func highlighterClassifiesSwiftDirectiveConditionOperators() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        #if !DEBUG
+        let mode = "release"
+        #elseif canImport(UIKit, _version: 17.0)
+        let mode = "versioned"
+        #elseif swift(>=5.9) && compiler(>=6.0)
+        let mode = "modern"
+        #endif
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
+
+        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+            ("#if", "preprocessor", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("!", "preprocessor", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("DEBUG", "preprocessor", "editor.syntax.preprocessor", "#if !DEBUG"),
+            ("#elseif", "preprocessor", "editor.syntax.preprocessor", "#elseif canImport(UIKit"),
+            ("canImport", "preprocessor", "editor.syntax.preprocessor", "#elseif canImport(UIKit"),
+            ("_", "preprocessor", "editor.syntax.preprocessor", "_version: 17.0"),
+            (":", "preprocessor", "editor.syntax.preprocessor", "_version: 17.0"),
+            ("17.0", "number", "editor.syntax.number", "_version: 17.0"),
+            ("#elseif", "preprocessor", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
+            (">", "preprocessor", "editor.syntax.preprocessor", "#elseif swift(>=5.9)"),
+            ("5.9", "number", "editor.syntax.number", "#elseif swift(>=5.9)"),
+            ("&&", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
+            ("6.0", "number", "editor.syntax.number", "&& compiler(>=6.0)"),
+            ("#endif", "preprocessor", "editor.syntax.preprocessor", "#endif"),
+        ]
+
+        for expectation in expectations {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: expectation.text,
+                syntaxID: expectation.syntaxID,
+                language: .swift,
+                inOccurrenceOf: expectation.occurrence
+            )
+            #expect(snapshot.syntaxID == expectation.syntaxID)
+            #expect(snapshot.styleKeys.first == expectation.styleKey)
+        }
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "17.0",
+            inOccurrenceOf: "_version: 17.0"
+        ).contains(.preprocessor) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "_",
+            inOccurrenceOf: "_version: 17.0"
+        ).contains(.character) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps preprocessor fallback scoped to directive errors")
+    func highlighterKeepsPreprocessorFallbackScopedToDirectiveErrors() async {
+        let source = "let x: = y\nlet values = [foo: ]"
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: SyntaxLanguage.swift)
+
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: ":",
+            inOccurrenceOf: "let x: = y"
+        ).contains(.preprocessor) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: ":",
+            inOccurrenceOf: "[foo: ]"
+        ).contains(.preprocessor) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps contextual Swift keywords as identifiers")
+    func highlighterKeepsContextualSwiftKeywordsAsIdentifiers() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        func contextualNames() -> Int {
+            let async = 1
+            let get = 2
+            let left = 3
+            let `defer` = 4
+            return async + get + left + `defer`
+        }
+
+        struct KeywordMembers {
+            var `defer`: Int
+        }
+
+        func read(_ value: KeywordMembers) -> Int {
+            value.defer
+        }
+
+        precedencegroup ContextualPrecedence {
+            associativity: left
+            higherThan: AdditionPrecedence
+            assignment: false
+        }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
+
+        for (text, occurrence) in [
+            ("async", "let async = 1"),
+            ("get", "let get = 2"),
+            ("left", "let left = 3"),
+            ("defer", "let `defer` = 4"),
+            ("defer", "value.defer"),
+        ] {
+            let ids = syntaxIDs(
+                in: tokens,
+                source: source,
+                text: text,
+                inOccurrenceOf: occurrence
+            )
+            #expect(ids.contains(.keyword) == false)
+            #expect(ids.contains(.plain))
+        }
+
+        let precedenceLeft = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "left",
+            syntaxID: "keyword",
+            language: .swift,
+            inOccurrenceOf: "associativity: left"
+        )
+        #expect(precedenceLeft.styleKeys.first == "editor.syntax.keyword")
+    }
+
+    @Test("SyntaxHighlighterEngine classifies unqualified Swift member references")
+    func highlighterClassifiesUnqualifiedSwiftMemberReferences() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        let topLevelClosure = {
+            let temp = 1
+            return temp
+        }
+
+        struct Collision {
+            let id: String
+
+            init(id: String) {
+                self.id = id
+            }
+
+            func copy() -> String {
+                return id
+            }
+
+            func count() -> Int {
+                let count: Int = self.id.count
+                return count
+            }
+
+            func shadow(id: String) -> String {
+                return id.uppercased()
+            }
+
+            func anonymous(_ id: String) -> String {
+                return id.lowercased()
+            }
+        }
+
+        struct BlockShadow {
+            let value: Int
+
+            func read(_ flag: Bool) -> Int {
+                let copied = value
+                if flag {
+                    let value = 0
+                    _ = value
+                }
+                return value + copied + self.value
+            }
+        }
+
+        struct SameLineShadow {
+            let value: Int
+
+            func read() -> Int {
+                let value = value; _ = value
+                return self.value
+            }
+        }
+
+        struct UppercaseVariable {
+            let URL: String
+
+            func read() -> String {
+                let copy = URL
+                return copy
+            }
+        }
+
+        struct MultilineInitializerShadow {
+            let value: Int
+
+            func read() -> Int {
+                let value =
+                    value
+                _ = value
+                return self.value
+            }
+        }
+
+        struct ForLoopHeaderCollision {
+            let value: Int
+            let values: [Int]
+
+            func read() {
+                value.description
+                for item in values {
+                    _ = item
+                }
+                _ = value
+            }
+        }
+
+        struct ComparisonShadow {
+            let value: Int
+
+            func read(_ lhs: Int, _ rhs: Int) -> Int {
+                let value = lhs<rhs ? 1 : 0
+                return value
+            }
+        }
+
+        struct ConditionalShadow {
+            let value: Int
+
+            func read(_ optional: Int?) -> Int {
+                if
+                    let value = optional
+                {
+                    _ = value
+                }
+                return value + 1
+            }
+        }
+
+        struct OptionalConditionalShadow {
+            let value: Int?
+
+            func read() -> Int {
+                if let value = value, value > 0 {
+                    return value
+                }
+                return 0
+            }
+        }
+
+        struct GuardShadow {
+            let value: Int?
+
+            func read() -> Int {
+                guard let value = value else {
+                    return self.value ?? 0
+                }
+                return value
+            }
+
+            func readTrailing() -> Int {
+                guard let value = value, value > 0 else {
+                    return self.value ?? 0
+                }
+                return value
+            }
+        }
+
+        struct InitCallShadow {
+            let value: Int
+
+            func read() -> Int {
+                _ = InitCallShadow.init(value: value)
+                if value > 0 {
+                    return value
+                }
+                return value
+            }
+        }
+
+        struct OptionalLabelShadow {
+            let value: Int
+
+            func update(value: Int) {}
+            func throwing(value: Int) throws -> Int { value }
+
+            func read(_ optional: OptionalLabelShadow?) {
+                optional?.update(value: 1)
+                _ = try? throwing(value: 1)
+            }
+        }
+
+        struct UppercaseLabelShadow {
+            let URL: Int
+
+            func make(String: Int, URL: Int) {}
+
+            func read() {
+                make(String: 1, URL: URL)
+            }
+
+            func dictionary() {
+                let values: [String: Int] = [:]
+                _ = values
+            }
+        }
+
+        struct ClosureShadow {
+            let value: Int
+            let values: [Int]
+
+            func read() -> Int {
+                values.forEach { value in
+                    _ = value
+                }
+                _ = values.count
+                let mapped = values.map { value in value }
+                return mapped.first ?? value
+            }
+        }
+
+        enum AssociatedPattern {
+            case success(Int)
+            case failure
+        }
+
+        struct AssociatedPatternShadow {
+            let value: Int
+
+            func inline(_ state: AssociatedPattern) {
+                switch state {
+                case .success(let value):
+                    _ = value
+                case .failure:
+                    _ = value
+                default:
+                    _ = self.value
+                }
+            }
+
+            func leading(_ state: AssociatedPattern) {
+                switch state {
+                case let .success(value):
+                    _ = value
+                default:
+                    _ = self.value
+                }
+            }
+
+            func conditional(_ state: AssociatedPattern) {
+                if case let .success(value) = state {
+                    _ = value
+                }
+            }
+
+            func guardConditional(_ state: AssociatedPattern) {
+                guard case let .success(value) = state else {
+                    return
+                }
+                _ = value
+            }
+
+            func compactCase(_ state: AssociatedPattern) {
+                switch state {
+                case .failure: let value = 0; _ = value
+                default: _ = self.value
+                }
+            }
+        }
+
+        struct PatternDeclarationShadow {
+            let value: Int
+
+            func tuple(_ pair: (Int, Int)) -> Int {
+                let (value, _) = pair
+                return value
+            }
+
+            func comma() -> Int {
+                let first = 0, value = 1
+                return value + first
+            }
+
+            func chained() -> Int {
+                let value = 1, copy = value
+                return copy
+            }
+        }
+
+        struct A {
+            struct State {
+                let value: Int
+
+                func read() -> Int {
+                    return value + 1
+                }
+            }
+        }
+
+        struct B {
+            struct State {
+                func read() -> Int {
+                    return value + 2
+                }
+            }
+        }
+
+        struct OuterLeak {
+            let value: Int
+
+            struct Inner {
+                func read() -> Int {
+                    return value + 5
+                }
+            }
+        }
+
+        struct AccessorShadow {
+            let value: Int
+
+            var computed: Int {
+                let value = 0
+                return value
+            }
+        }
+
+        struct QualifiedExtension {
+            struct State {
+                let value: Int
+            }
+        }
+
+        extension QualifiedExtension.State {
+            func read() -> Int {
+                return value + 3
+            }
+        }
+
+        struct ExtensionDeclaredNested {}
+
+        extension ExtensionDeclaredNested {
+            struct State {
+                let value: Int
+            }
+        }
+
+        extension ExtensionDeclaredNested.State {
+            func read() -> Int {
+                return value + 6
+            }
+        }
+
+        struct DefaultClosure {
+            let value: Int
+
+            func read(_ action: () -> Void = {}) -> Int {
+                let value = 0
+                action()
+                return value + 4
+            }
+
+            func choose(_ flag: Bool, fallback: Int) -> Int {
+                return flag ? value : fallback
+            }
+        }
+
+        struct PatternShadow {
+            let value: Int
+            let values: [Int]
+            let pairs: [(Int, Int)]
+            let states: [AssociatedPattern]
+
+            func read() {
+                for value in values {
+                    _ = value
+                }
+
+                for (value, _) in pairs {
+                    _ = value
+                }
+
+                for case let .success(value) in states {
+                    _ = value
+                }
+
+                switch value {
+                case let value:
+                    switch value {
+                    case 0:
+                        break
+                    default:
+                        break
+                    }
+                    _ = value
+                }
+                let afterSwitch = value
+
+                do {
+                    throw NSError()
+                } catch let value {
+                    _ = value
+                }
+            }
+        }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
+
+        let topLevelClosureLocal = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "temp",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "return temp"
+        )
+        #expect(topLevelClosureLocal.styleKeys.first == "editor.syntax.plain")
+
+        let memberID = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "id",
+            syntaxID: .identifierVariableSystem,
+            language: .swift,
+            inOccurrenceOf: "self.id = id"
+        )
+        #expect(memberID.styleKeys.first == "editor.syntax.identifier.variable.system")
+
+        let propertyID = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "id",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return id"
+        )
+        #expect(propertyID.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let shadowedID = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "id",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "return id.uppercased()"
+        )
+        #expect(shadowedID.styleKeys.first == "editor.syntax.plain")
+
+        let anonymousID = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "id",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "return id.lowercased()"
+        )
+        #expect(anonymousID.styleKeys.first == "editor.syntax.plain")
+
+        let selfLineType = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Int",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "count: Int = self.id.count"
+        )
+        #expect(selfLineType.styleKeys.first == "editor.syntax.identifier.type.system")
+
+        let blockLocalValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "_ = value"
+        )
+        #expect(blockLocalValue.styleKeys.first == "editor.syntax.plain")
+
+        let memberBeforeBlockShadow = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "copied = value"
+        )
+        #expect(memberBeforeBlockShadow.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let memberAfterBlock = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return value + copied + self.value"
+        )
+        #expect(memberAfterBlock.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let sameLineInitializerMember = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "= value; _"
+        )
+        #expect(sameLineInitializerMember.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let sameLineLocalValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "; _ = value"
+        )
+        #expect(sameLineLocalValue.styleKeys.first == "editor.syntax.plain")
+
+        let uppercaseVariable = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "URL",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "copy = URL"
+        )
+        #expect(uppercaseVariable.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let multilineInitializerMember = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "=\n            value"
+        )
+        #expect(multilineInitializerMember.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let multilineLocalValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "_ = value\n        return self.value\n    }\n}\n\nstruct ForLoopHeaderCollision"
+        )
+        #expect(multilineLocalValue.styleKeys.first == "editor.syntax.plain")
+
+        let forLoopPrecedingMember = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "value.description"
+        )
+        #expect(forLoopPrecedingMember.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let forLoopFollowingMember = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "_ = value\n    }\n}\n\nstruct ComparisonShadow"
+        )
+        #expect(forLoopFollowingMember.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let destructuringDeclarationValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "let (value, _) = pair"
+        )
+        #expect(destructuringDeclarationValue.styleKeys.first == "editor.syntax.plain")
+
+        let comparisonLocalValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "return value\n    }\n}\n\nstruct ConditionalShadow"
+        )
+        #expect(comparisonLocalValue.styleKeys.first == "editor.syntax.plain")
+
+        let conditionalLocalValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "{\n            _ = value"
+        )
+        #expect(conditionalLocalValue.styleKeys.first == "editor.syntax.plain")
+
+        let memberAfterConditional = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return value + 1"
+        )
+        #expect(memberAfterConditional.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let conditionalBindingInitializerValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "= value, value > 0"
+        )
+        #expect(conditionalBindingInitializerValue.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let conditionalBindingBodyValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "{\n            return value\n        }\n        return 0"
+        )
+        #expect(conditionalBindingBodyValue.styleKeys.first == "editor.syntax.plain")
+
+        let conditionalBindingLaterClauseValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: ", value > 0"
+        )
+        #expect(conditionalBindingLaterClauseValue.styleKeys.first == "editor.syntax.plain")
+
+        let guardBindingInitializerValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "= value else"
+        )
+        #expect(guardBindingInitializerValue.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let guardBindingTrailingClauseValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: ", value > 0 else"
+        )
+        #expect(guardBindingTrailingClauseValue.styleKeys.first == "editor.syntax.plain")
+
+        let guardBindingBodyValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "return value\n    }\n}\n\nstruct InitCallShadow"
+        )
+        #expect(guardBindingBodyValue.styleKeys.first == "editor.syntax.plain")
+
+        let initCallBlockValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "if value > 0"
+        )
+        #expect(initCallBlockValue.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let optionalChainLabelValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "optional?.update(value: 1)"
+        )
+        #expect(optionalChainLabelValue.styleKeys.first == "editor.syntax.plain")
+
+        let tryOptionalLabelValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "try? throwing(value: 1)"
+        )
+        #expect(tryOptionalLabelValue.styleKeys.first == "editor.syntax.plain")
+
+        let uppercaseStringLabel = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "make(String: 1"
+        )
+        #expect(uppercaseStringLabel.styleKeys.first == "editor.syntax.plain")
+
+        let uppercaseURLLabel = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "URL",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "make(String: 1, URL: URL)"
+        )
+        #expect(uppercaseURLLabel.styleKeys.first == "editor.syntax.plain")
+
+        let uppercaseURLArgumentValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "URL",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: ": URL)"
+        )
+        #expect(uppercaseURLArgumentValue.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let dictionaryKeyType = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "String",
+            syntaxID: .identifierTypeSystem,
+            language: .swift,
+            inOccurrenceOf: "values: [String: Int]"
+        )
+        #expect(dictionaryKeyType.styleKeys.first == "editor.syntax.identifier.type.system")
+
+        let closureParameterValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "in value }"
+        )
+        #expect(closureParameterValue.styleKeys.first == "editor.syntax.plain")
+
+        let memberAfterClosure = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "?? value"
+        )
+        #expect(memberAfterClosure.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let memberCollectionAfterClosure = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "values",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "_ = values.count"
+        )
+        #expect(memberCollectionAfterClosure.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let inlineAssociatedCaseValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "case .success(let value):"
+        )
+        #expect(inlineAssociatedCaseValue.styleKeys.first == "editor.syntax.plain")
+
+        let memberAfterInlineAssociatedCase = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "case .failure:\n            _ = value"
+        )
+        #expect(memberAfterInlineAssociatedCase.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let leadingAssociatedCaseValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "case let .success(value):"
+        )
+        #expect(leadingAssociatedCaseValue.styleKeys.first == "editor.syntax.plain")
+
+        let conditionalCaseValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "{\n            _ = value\n        }\n    }\n\n    func guardConditional"
+        )
+        #expect(conditionalCaseValue.styleKeys.first == "editor.syntax.plain")
+
+        let guardCaseValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "return\n        }\n        _ = value"
+        )
+        #expect(guardCaseValue.styleKeys.first == "editor.syntax.plain")
+
+        let compactCaseLocalValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "; _ = value\n        default"
+        )
+        #expect(compactCaseLocalValue.styleKeys.first == "editor.syntax.plain")
+
+        let tuplePatternValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "pair\n        return value"
+        )
+        #expect(tuplePatternValue.styleKeys.first == "editor.syntax.plain")
+
+        let commaPatternValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "1\n        return value + first"
+        )
+        #expect(commaPatternValue.styleKeys.first == "editor.syntax.plain")
+
+        let chainedBindingInitializerValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "copy = value"
+        )
+        #expect(chainedBindingInitializerValue.styleKeys.first == "editor.syntax.plain")
+
+        let nestedMemberValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return value + 1"
+        )
+        #expect(nestedMemberValue.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let unrelatedNestedMemberValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "return value + 2"
+        )
+        #expect(unrelatedNestedMemberValue.styleKeys.first == "editor.syntax.plain")
+
+        let outerMemberLeakValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "return value + 5"
+        )
+        #expect(outerMemberLeakValue.styleKeys.first == "editor.syntax.plain")
+
+        let accessorLocalValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "computed: Int {\n        let value = 0\n        return value"
+        )
+        #expect(accessorLocalValue.styleKeys.first == "editor.syntax.plain")
+
+        let qualifiedExtensionMemberValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return value + 3"
+        )
+        #expect(qualifiedExtensionMemberValue.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let extensionDeclaredNestedMemberValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return value + 6"
+        )
+        #expect(extensionDeclaredNestedMemberValue.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let defaultClosureLocalValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "return value + 4"
+        )
+        #expect(defaultClosureLocalValue.styleKeys.first == "editor.syntax.plain")
+
+        let ternaryMemberValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "flag ? value : fallback"
+        )
+        #expect(ternaryMemberValue.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let forPatternValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "for value in values {\n            _ = value"
+        )
+        #expect(forPatternValue.styleKeys.first == "editor.syntax.plain")
+
+        let destructuredForPatternValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "_) in pairs {\n            _ = value"
+        )
+        #expect(destructuredForPatternValue.styleKeys.first == "editor.syntax.plain")
+
+        let caseForPatternValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: ") in states {\n            _ = value"
+        )
+        #expect(caseForPatternValue.styleKeys.first == "editor.syntax.plain")
+
+        let casePatternValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "case let value:"
+        )
+        #expect(casePatternValue.styleKeys.first == "editor.syntax.plain")
+
+        let memberAfterCasePattern = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "afterSwitch = value"
+        )
+        #expect(memberAfterCasePattern.styleKeys.first == "editor.syntax.identifier.variable")
+
+        let catchPatternValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "value",
+            syntaxID: .plain,
+            language: .swift,
+            inOccurrenceOf: "catch let value {\n            _ = value"
+        )
+        #expect(catchPatternValue.styleKeys.first == "editor.syntax.plain")
+    }
+
+    @Test("SyntaxHighlighterEngine does not duplicate Swift semantic overlays during incremental updates")
+    func highlighterKeepsSwiftSemanticOverlaysStableAcrossIncrementalUpdates() async throws {
+        let source = try referenceSampleText(named: "Reference.swift")
+        let updatedSource = source.replacingOccurrences(
+            of: "Reference highlighting surface",
+            with: "Reference highlighting surface updated"
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
+    }
+
+    @Test("SyntaxHighlighterEngine reapplies Swift semantic overlays after distant declaration edits")
+    func highlighterReappliesSwiftSemanticOverlaysAfterDistantDeclarationEdits() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "item", with: "value")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
+
+        let nsUpdatedSource = updatedSource as NSString
+        let returnLineRange = nsUpdatedSource.range(of: "return value")
+        let returnValueRange = nsUpdatedSource.range(of: "value", options: [], range: returnLineRange)
+        #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: returnValueRange) == returnValueRange)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+
+        let valueReference = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "value",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return value"
+        )
+        #expect(valueReference.styleKeys.first == "editor.syntax.identifier.variable")
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Swift system macro overlays after local macro declarations")
+    func highlighterStripsStaleSwiftSystemMacroOverlaysAfterLocalMacroDeclarations() async throws {
+        let source = """
+        let expanded = #ExternalMacro()
+        """
+        let prefix = """
+        macro ExternalMacro() = #externalMacro(module: "FixtureMacros", type: "ExternalMacro")
+
+        """
+        let updatedSource = prefix + source
+        let mutation = SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
+        let macroInvocation = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "ExternalMacro",
+            syntaxID: .identifierMacro,
+            language: .swift,
+            inOccurrenceOf: "#ExternalMacro()"
+        )
+        #expect(macroInvocation.styleKeys.first == "editor.syntax.identifier.macro")
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "ExternalMacro",
+            inOccurrenceOf: "#ExternalMacro()"
+        ).contains(.identifierMacroSystem) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Swift comment overlays in large comment ranges")
+    func highlighterKeepsSwiftCommentOverlaysInLargeCommentRanges() async {
+        let lines = (0..<400).map { index in
+            switch index {
+            case 24:
+                return "// MARK: - Batched paste surface"
+            case 120:
+                return "/// - Warning: See https://example.invalid/paste/\(index)."
+            default:
+                return "/// Documentation line \(index)"
+            }
+        }
+        let source = lines.joined(separator: "\n")
+        let nsSource = source as NSString
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: SyntaxLanguage.swift)
+
+        let markRange = nsSource.range(of: "MARK:")
+        let urlRange = nsSource.range(of: "https://example.invalid/paste/120.")
+
+        #expect(tokens.contains { tokenIntersects($0, range: markRange, syntaxID: .mark, language: .swift) })
+        #expect(tokens.contains { tokenIntersects($0, range: urlRange, syntaxID: .url, language: .swift) })
+    }
+
+    @Test("SyntaxHighlighterEngine emits semantic CSS captures for the reference sample")
+    func highlighterEmitsSemanticCSSCapturesForReferenceSample() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = try referenceSampleText(named: "Reference.css")
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        let elementSelector = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "body",
+            syntaxID: "declaration.other",
+            language: .css
+        )
+        let classSelector = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "page",
+            syntaxID: "declaration.other",
+            language: .css
+        )
+        let idSelector = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "hero",
+            syntaxID: "declaration.other",
+            language: .css
+        )
+        let property = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "min-height",
+            syntaxID: "keyword",
+            language: .css
+        )
+        let customProperty = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "--brand-accent",
+            syntaxID: "plain",
+            language: .css
+        )
+        let function = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "linear-gradient",
+            syntaxID: "plain",
+            language: .css
+        )
+        let attributeValue = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "\"page\"",
+            syntaxID: "string",
+            language: .css
+        )
+        let attributeName = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "aria-current",
+            syntaxID: "plain",
+            language: .css,
+            inOccurrenceOf: #"nav a[aria-current="page"]"#
+        )
+        let childCombinator = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: ">",
+            syntaxID: "plain",
+            language: .css,
+            inOccurrenceOf: "main > section"
+        )
+        let rgbaFunction = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "rgba",
+            syntaxID: "keyword",
+            language: .css
+        )
+        let repeatFunction = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "repeat",
+            syntaxID: "keyword",
+            language: .css
+        )
+        let supportsAtRule = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@supports",
+            syntaxID: "declaration.other",
+            language: .css
+        )
+        let supportsFeature = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "backdrop-filter",
+            syntaxID: "plain",
+            language: .css,
+            inOccurrenceOf: "@supports (backdrop-filter: blur(12px))"
+        )
+        let mediaFeature = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "min-width",
+            syntaxID: "keyword",
+            language: .css
+        )
+        let keyframesAtRule = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@keyframes",
+            syntaxID: "declaration.other",
+            language: .css
+        )
+        let keyframesName = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "reveal",
+            syntaxID: "declaration.other",
+            language: .css
+        )
+        let atRule = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@media",
+            syntaxID: "keyword",
+            language: .css
+        )
+        let unit = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "vh",
+            syntaxID: "keyword",
+            language: .css
+        )
+
+        #expect(elementSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(classSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(idSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(property.styleKeys.first == "editor.syntax.keyword")
+        #expect(customProperty.styleKeys.first == "editor.syntax.plain")
+        #expect(function.styleKeys.first == "editor.syntax.plain")
+        #expect(attributeValue.text == "\"page\"")
+        #expect(attributeValue.styleKeys.first == "editor.syntax.string")
+        #expect(attributeName.styleKeys.first == "editor.syntax.plain")
+        #expect(childCombinator.styleKeys.first == "editor.syntax.plain")
+        #expect(rgbaFunction.styleKeys.first == "editor.syntax.keyword")
+        #expect(repeatFunction.styleKeys.first == "editor.syntax.keyword")
+        #expect(supportsAtRule.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(supportsFeature.styleKeys.first == "editor.syntax.plain")
+        #expect(mediaFeature.styleKeys.first == "editor.syntax.keyword")
+        #expect(keyframesAtRule.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(keyframesName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(atRule.styleKeys.first == "editor.syntax.keyword")
+        #expect(unit.styleKeys.first == "editor.syntax.keyword")
+        let theme = SyntaxEditorColorTheme.default.resolved(for: .css, appearance: .dark)
+        #expect(classSelector.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
+        #expect(idSelector.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
+        #expect(childCombinator.resolvedStyle.foreground == theme.base.foreground)
+        #expect(rgbaFunction.resolvedStyle.foreground == theme.keyword.foreground)
+        #expect(repeatFunction.resolvedStyle.foreground == theme.keyword.foreground)
+        #expect(supportsAtRule.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
+        #expect(supportsFeature.resolvedStyle.foreground == theme.base.foreground)
+        #expect(mediaFeature.resolvedStyle.foreground == property.resolvedStyle.foreground)
+        #expect(keyframesAtRule.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
+        #expect(keyframesName.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
+        #expect(function.resolvedStyle.foreground == theme.base.foreground)
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine emits semantic HTML and injected captures for the reference sample")
+    func highlighterEmitsSemanticHTMLCapturesForReferenceSample() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = try referenceSampleText(named: "Reference.html")
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
+
+        let doctype = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "<!DOCTYPE html>",
+            syntaxID: "keyword",
+            language: .html
+        )
+        let tag = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "main",
+            syntaxID: "keyword",
+            language: .html
+        )
+        let attribute = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "data-state",
+            syntaxID: "attribute",
+            language: .html
+        )
+        let attributeValue = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "\"ready\"",
+            syntaxID: "string",
+            language: .html
+        )
+        let bracket = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "<",
+            syntaxID: "keyword",
+            language: .html,
+            inOccurrenceOf: #"<main class="page" id="hero">"#
+        )
+        let embeddedCSSProperty = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "margin",
+            syntaxID: "keyword",
+            language: .html,
+            inOccurrenceOf: "margin: 0;"
+        )
+        let embeddedCSSColor = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "#007aff",
+            syntaxID: "number",
+            language: .html
+        )
+        let embeddedCSSAttributeValue = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "\"page\"",
+            syntaxID: "string",
+            language: .html,
+            inOccurrenceOf: #"nav a[aria-current="page"]"#
+        )
+        let embeddedCSS = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "--brand-accent",
+            syntaxID: "plain",
+            language: .html
+        )
+        let embeddedJavaScript = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "const",
+            syntaxID: "keyword",
+            language: .html
+        )
+
+        #expect(doctype.styleKeys.first == "editor.syntax.keyword")
+        #expect(tag.styleKeys.first == "editor.syntax.keyword")
+        #expect(attribute.styleKeys.first == "editor.syntax.attribute")
+        #expect(attributeValue.styleKeys.first == "editor.syntax.string")
+        #expect(bracket.styleKeys.first == "editor.syntax.keyword")
+        #expect(embeddedCSSProperty.styleKeys.first == "editor.syntax.keyword")
+        #expect(embeddedCSSColor.styleKeys.first == "editor.syntax.number")
+        #expect(embeddedCSSAttributeValue.text == "\"page\"")
+        #expect(embeddedCSSAttributeValue.styleKeys.first == "editor.syntax.string")
+        #expect(embeddedCSS.styleKeys.first == "editor.syntax.plain")
+        #expect(embeddedJavaScript.styleKeys.first == "editor.syntax.keyword")
+        let nsSource = source as NSString
+        #expect(tokens.contains {
+            $0.syntaxID == .string
+                && $0.language == .html
+                && nsSource.substring(with: $0.range) == "\"ready\""
+        })
+        let theme = SyntaxEditorColorTheme.default.resolved(for: .html, appearance: .dark)
+        #expect(bracket.resolvedStyle.foreground == theme.keyword.foreground)
+        #expect(embeddedCSSProperty.resolvedStyle.foreground == theme.keyword.foreground)
+        #expect(embeddedCSSColor.resolvedStyle.foreground == theme.number.foreground)
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
     @Test("SyntaxHighlighterEngine is stable for repeated renders")
     func highlighterRepeatedRenderStability() async {
         let engine = sharedSyntaxHighlighterEngine
@@ -3469,12 +6264,10 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(incremental.tokens == full.tokens)
         #expect(incremental.tokens.contains {
-            $0.captureName.hasPrefix("property") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
+            tokenIntersects($0, range: stylePropertyRange, syntaxID: .keyword, language: .css)
         })
         #expect(incremental.tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
+            tokenIntersects($0, range: scriptKeywordRange, syntaxID: .keyword, language: .javascript)
         })
     }
 
@@ -3707,8 +6500,8 @@ struct SyntaxHighlighterEngineTests {
             language: SyntaxLanguage.swift
         ).tokens
 
-        #expect(javascriptTokens.contains { $0.captureName.hasPrefix("keyword") })
-        #expect(swiftTokens.contains { $0.captureName.hasPrefix("keyword") })
+        #expect(javascriptTokens.contains { $0.syntaxID == .keyword })
+        #expect(swiftTokens.contains { $0.syntaxID == .keyword })
     }
 
     @Test("SyntaxHighlighterEngine returns UTF-16-safe ranges for non-ASCII source")
@@ -3727,18 +6520,52 @@ struct SyntaxHighlighterEngineTests {
     }
 
     @Test("SyntaxHighlighterEngine highlights Objective-C structures")
-    func highlighterSupportsObjectiveC() async {
+    func highlighterSupportsObjectiveC() async throws {
         let engine = sharedSyntaxHighlighterEngine
         let source = """
         #import <Foundation/Foundation.h>
+        #define ReferenceLog(format, ...) NSLog((@"[Reference] " format), ##__VA_ARGS__)
+        #if defined(DEBUG)
+        #define ReferenceEnabled 1
+        #endif
+
+        typedef void (^ReferenceCompletion)(id object, NSError **error);
+
+        static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
+        {
+            return @{
+                @"objc": @"xcode.lang.objc",
+                @"swift": @"xcode.lang.swift",
+            };
+        }
+
+        static id ReferenceCallObject(id object, NSString *selectorName)
+        {
+            return ((id (*)(id, SEL))objc_msgSend)(object, NSSelectorFromString(selectorName));
+        }
+
+        __attribute__((visibility("default"))) @interface VisibleSample : NSObject
+        @end
+
         @interface Sample : NSObject
         @property (nonatomic, copy) NSString *name;
         - (NSString *)greetingFor:(NSString *)value;
         @end
 
         @implementation Sample
+        - (instancetype)init
+        {
+            self = [super init];
+            if (self == nil) {
+                return nil;
+            }
+            return self;
+        }
+
         - (NSString *)greetingFor:(NSString *)value {
             // comment
+            self.name = ReferenceLanguageAliases()[@"objc"] ?: value;
+            NSUInteger count = self.name.length;
             return [NSString stringWithFormat:@"Hello, %@", value];
         }
         @end
@@ -3747,32 +6574,333 @@ struct SyntaxHighlighterEngineTests {
         let tokens = await engine.render(source: source, language: SyntaxLanguage.objectiveC)
         let nsSource = source as NSString
         let importRange = nsSource.range(of: "#import")
+        let defineRange = nsSource.range(of: "#define")
+        let macroNameRange = nsSource.range(of: "ReferenceLog")
+        let debugMacroRange = nsSource.range(of: "DEBUG")
         let interfaceRange = nsSource.range(of: "@interface")
-        let methodRange = nsSource.range(of: "greetingFor")
+        let selfRange = nsSource.range(of: "self")
+        let propertyAttributeRange = nsSource.range(of: "nonatomic")
+        let dictionaryStringRange = nsSource.range(of: "@\"objc\"")
+        let typedefRange = nsSource.range(of: "typedef")
+        let idRange = nsSource.range(of: "id object")
+        let selectorRange = nsSource.range(of: "SEL")
         let commentRange = nsSource.range(of: "// comment")
         let stringRange = nsSource.range(of: "@\"Hello, %@\"")
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            ($0.captureName.hasPrefix("include") || $0.captureName.hasPrefix("preproc"))
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: importRange).length > 0
+            tokenIntersects($0, range: importRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword")
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: interfaceRange).length > 0
+            tokenIntersects($0, range: defineRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("method")
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: methodRange).length > 0
+            tokenIntersects($0, range: macroNameRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("comment")
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: commentRange).length > 0
+            tokenIntersects($0, range: debugMacroRange, syntaxID: .preprocessor, language: .objectiveC)
+        })
+        let defineSnapshot = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "#define",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "#define ReferenceLog"
+        )
+        let preprocessorStyle = try #require(SyntaxEditorHighlightTheme.style(
+            for: .preprocessor,
+            in: .default,
+            language: .objectiveC,
+            appearance: .dark
+        ))
+        let keywordStyle = try #require(SyntaxEditorHighlightTheme.style(
+            for: .keyword,
+            in: .default,
+            language: .objectiveC,
+            appearance: .dark
+        ))
+        #expect(defineSnapshot.resolvedStyle.foreground == preprocessorStyle.foreground)
+        #expect(defineSnapshot.resolvedStyle.foreground != keywordStyle.foreground)
+        #expect(tokens.contains { tokenIntersects($0, range: defineRange, syntaxID: .keyword, language: .objectiveC) } == false)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "format",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "#define ReferenceLog(format"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "...",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "#define ReferenceLog(format, ...)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "instancetype",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "- (instancetype)init"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "nil",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "return nil;"
+        )
+        #expect(tokens.contains {
+            tokenIntersects($0, range: interfaceRange, syntaxID: .keyword, language: .objectiveC)
+        })
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "VisibleSample",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "@interface VisibleSample"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSObject",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "@interface VisibleSample : NSObject"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "greetingFor",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "- (NSString *)greetingFor"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceLanguageAliases",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "ReferenceLanguageAliases(void)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceLanguageAliases",
+            syntaxID: .identifierFunction,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name = ReferenceLanguageAliases()"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSSelectorFromString",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSSelectorFromString(selectorName)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name ="
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "stringWithFormat",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "stringWithFormat:@\"Hello"
+        )
+        #expect(tokens.contains {
+            tokenIntersects($0, range: selfRange, syntaxID: .keyword, language: .objectiveC)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("string")
-                && SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stringRange).length > 0
+            tokenIntersects($0, range: propertyAttributeRange, syntaxID: .keyword, language: .objectiveC)
         })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: dictionaryStringRange, syntaxID: .string, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: typedefRange, syntaxID: .keyword, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: idRange, syntaxID: .keyword, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: selectorRange, syntaxID: .keyword, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: commentRange, syntaxID: .comment, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: stringRange, syntaxID: .string, language: .objectiveC)
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine aligns focused Objective-C reference tokens")
+    func highlighterAlignsObjectiveCReferenceTokens() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = try referenceSampleText(named: "Reference.m")
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        #expect(tokens.isEmpty == false)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "text",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property(nonatomic, copy) NSString *text;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSMethodSignature",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "[NSMethodSignature signatureWithObjCTypes:\"v@:{_NSRange=QQ}\"]"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "objc_msgSend",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return ((id (*)(id, SEL))objc_msgSend)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "_Nullable",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "ReferenceCallBoolError(id object, NSString *selectorName, NSError *_Nullable *_Nullable error)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "{",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "}",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSLocalizedDescriptionKey",
+            syntaxID: .identifierConstantSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C overlays before incremental symbol indexing")
+    func highlighterStripsStaleObjectiveCOverlaysBeforeIncrementalSymbolIndexing() async throws {
+        let source = """
+        int LocalFunction(void);
+
+        void run(void) {
+            LocalFunction();
+        }
+        """
+        let removedDeclaration = "int LocalFunction(void);\n\n"
+        let updatedSource = source.replacingOccurrences(of: removedDeclaration, with: "")
+        let mutation = SyntaxHighlightMutation(
+            location: 0,
+            length: (removedDeclaration as NSString).length,
+            replacement: ""
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        let functionCall = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "LocalFunction",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "LocalFunction();"
+        )
+        #expect(functionCall.styleKeys.first == "editor.syntax.identifier.function.system")
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "LocalFunction",
+            inOccurrenceOf: "LocalFunction();"
+        ).contains(.identifierFunction) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C semantic refresh ranges local")
+    func highlighterKeepsObjectiveCSemanticRefreshRangesLocal() async throws {
+        let source = """
+        int LocalFunction(void);
+
+        void run(void) {
+            LocalFunction();
+            int value = 1;
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "value = 1", with: "value = 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine highlights HTML root and embedded languages")
@@ -3792,16 +6920,14 @@ struct SyntaxHighlighterEngineTests {
         let scriptKeywordRange = nsSource.range(of: "const")
 
         #expect(tokens.isEmpty == false)
-        #expect(tokens.contains { $0.captureName.hasPrefix("comment") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("tag") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("attribute") })
+        #expect(tokens.contains { $0.syntaxID == .comment && $0.language == .html })
+        #expect(tokens.contains { $0.syntaxID == .keyword && $0.language == .html })
+        #expect(tokens.contains { $0.syntaxID == .attribute && $0.language == .html })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("property") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stylePropertyRange).length > 0
+            tokenIntersects($0, range: stylePropertyRange, syntaxID: .keyword, language: .css)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: scriptKeywordRange).length > 0
+            tokenIntersects($0, range: scriptKeywordRange, syntaxID: .keyword, language: .javascript)
         })
     }
 
@@ -3820,12 +6946,10 @@ struct SyntaxHighlighterEngineTests {
         let nestedAttributeRange = nsSource.range(of: "class")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("tag") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: nestedTagRange).length > 0
+            tokenIntersects($0, range: nestedTagRange, syntaxID: .keyword, language: .html)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("attribute") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: nestedAttributeRange).length > 0
+            tokenIntersects($0, range: nestedAttributeRange, syntaxID: .attribute, language: .html)
         })
     }
 
@@ -3843,10 +6967,9 @@ struct SyntaxHighlighterEngineTests {
         let tokens = await engine.render(source: source, language: SyntaxLanguage.xml)
 
         #expect(tokens.isEmpty == false)
-        #expect(tokens.contains { $0.captureName.hasPrefix("keyword") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("tag") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("property") })
-        #expect(tokens.contains { $0.captureName.hasPrefix("comment") })
+        #expect(tokens.contains { $0.syntaxID == .keyword })
+        #expect(tokens.contains { $0.syntaxID == .attribute })
+        #expect(tokens.contains { $0.syntaxID == .comment })
     }
 
     @Test("SyntaxHighlighterEngine highlights TOML structures")
@@ -3870,25 +6993,82 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("comment") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: commentRange).length > 0
+            tokenIntersects($0, range: commentRange, syntaxID: .comment, language: .toml)
         })
         #expect(tokens.contains {
-            ($0.captureName.hasPrefix("property") || $0.captureName.hasPrefix("type")) &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: propertyRange).length > 0
+            tokenIntersects($0, range: propertyRange, syntaxID: .attribute, language: .toml)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("string") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: stringRange).length > 0
+            tokenIntersects($0, range: stringRange, syntaxID: .string, language: .toml)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("boolean") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: booleanRange).length > 0
+            tokenIntersects($0, range: booleanRange, syntaxID: .keyword, language: .toml)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("number") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: numberRange).length > 0
+            tokenIntersects($0, range: numberRange, syntaxID: .number, language: .toml)
         })
+    }
+
+    @Test("SyntaxHighlighterEngine maps TOML captures through editor syntax families")
+    func highlighterMapsTOMLCapturesToEditorSyntaxFamilies() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = try referenceSampleText(named: "Reference.toml")
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.toml)
+
+        let sectionName = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "package",
+            syntaxID: "plain",
+            language: .toml,
+            inOccurrenceOf: "[package]"
+        )
+        let key = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "name",
+            syntaxID: "attribute",
+            language: .toml,
+            inOccurrenceOf: #"name = "ReferencePreview""#
+        )
+        let operatorToken = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "=",
+            syntaxID: "plain",
+            language: .toml,
+            inOccurrenceOf: #"name = "ReferencePreview""#
+        )
+        let string = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: #""ReferencePreview""#,
+            syntaxID: "string",
+            language: .toml
+        )
+        let boolean = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "true",
+            syntaxID: "keyword",
+            language: .toml,
+            inOccurrenceOf: "enabled = true"
+        )
+        let number = try semanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "2",
+            syntaxID: "number",
+            language: .toml,
+            inOccurrenceOf: "count = 2"
+        )
+
+        #expect(sectionName.styleKeys.first == "editor.syntax.plain")
+        #expect(key.styleKeys.first == "editor.syntax.attribute")
+        #expect(operatorToken.styleKeys.first == "editor.syntax.plain")
+        #expect(string.styleKeys.first == "editor.syntax.string")
+        #expect(boolean.styleKeys.first == "editor.syntax.keyword")
+        #expect(number.styleKeys.first == "editor.syntax.number")
     }
 
     @Test("SyntaxHighlighterEngine does not inject unsupported script types")
@@ -3900,11 +7080,10 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("tag") || $0.captureName.hasPrefix("attribute")
+            $0.language == .html && ($0.syntaxID == .keyword || $0.syntaxID == .attribute)
         })
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -3918,12 +7097,10 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
+            tokenIsInjectedKeyword($0, in: constRange)
         } == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -3936,8 +7113,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -3949,8 +7125,7 @@ struct SyntaxHighlighterEngineTests {
         let answerConstRange = (source as NSString).range(of: "const answer")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: answerConstRange).length > 0
+            tokenIntersects($0, range: answerConstRange, syntaxID: .keyword, language: .javascript)
         })
     }
 
@@ -3962,8 +7137,7 @@ struct SyntaxHighlighterEngineTests {
         let answerConstRange = (source as NSString).range(of: "const answer")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: answerConstRange).length > 0
+            tokenIntersects($0, range: answerConstRange, syntaxID: .keyword, language: .javascript)
         })
     }
 
@@ -3978,8 +7152,7 @@ struct SyntaxHighlighterEngineTests {
         let divRange = (source as NSString).range(of: "<div")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("tag") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: divRange).length > 0
+            tokenIntersects($0, range: divRange, syntaxID: .keyword, language: .html)
         })
     }
 
@@ -3992,8 +7165,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -4006,8 +7178,7 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(tokens.isEmpty == false)
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("keyword") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
+            tokenIsInjectedKeyword($0, in: trueRange)
         } == false)
     }
 
@@ -4022,8 +7193,7 @@ struct SyntaxHighlighterEngineTests {
         let spanRange = (source as NSString).range(of: "<span")
 
         #expect(tokens.contains {
-            $0.captureName.hasPrefix("tag") &&
-                SyntaxEditorRangeUtilities.intersection(of: $0.range, and: spanRange).length > 0
+            tokenIntersects($0, range: spanRange, syntaxID: .keyword, language: .html)
         })
     }
 
@@ -4046,9 +7216,8 @@ struct SyntaxHighlighterEngineTests {
 
             #expect(tokens.isEmpty == false)
             #expect(tokens.contains {
-                $0.captureName.hasPrefix("keyword") &&
-                    SyntaxEditorRangeUtilities.intersection(of: $0.range, and: trueRange).length > 0
-            } == false)
+                tokenIsInjectedKeyword($0, in: trueRange)
+            } == false, "Unexpected injected keyword in unsupported script case: \(source)")
         }
     }
 
@@ -4066,8 +7235,7 @@ struct SyntaxHighlighterEngineTests {
             let constRange = (source as NSString).range(of: "const")
 
             #expect(tokens.contains {
-                $0.captureName.hasPrefix("keyword") &&
-                    SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
+                tokenIntersects($0, range: constRange, syntaxID: .keyword, language: .javascript)
             })
         }
     }
@@ -4085,8 +7253,7 @@ struct SyntaxHighlighterEngineTests {
             let constRange = (source as NSString).range(of: "const")
 
             #expect(tokens.contains {
-                $0.captureName.hasPrefix("keyword") &&
-                    SyntaxEditorRangeUtilities.intersection(of: $0.range, and: constRange).length > 0
+                tokenIsInjectedKeyword($0, in: constRange)
             } == false)
         }
     }

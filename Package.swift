@@ -23,10 +23,58 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-objc", from: "3.0.2"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-toml", exact: "0.7.0"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-xml", exact: "0.7.0"),
-        .package(url: "https://github.com/alex-pinkus/tree-sitter-swift", exact: "0.7.1-with-generated-files"),
+        .package(url: "https://github.com/lynnswap/tree-sitter-swift", revision: "60941d667d0bd58f7d5b83dcd59fe22a9865f200"),
         .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.8.0"),
     ],
     targets: [
+        .target(
+            name: "XclangSpecSyntax",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+            ]
+        ),
+        .target(
+            name: "SourceModelBridge",
+            path: "Sources/SourceModelBridge",
+            publicHeadersPath: "include",
+            linkerSettings: [
+                .linkedFramework("AppKit", .when(platforms: [.macOS])),
+                .linkedFramework("Foundation"),
+            ]
+        ),
+        .executableTarget(
+            name: "EditorSpecTool",
+            dependencies: [
+                "SourceModelBridge",
+                "SyntaxEditorCore",
+            ],
+            path: "Tools/EditorSpecSnapshot/EditorSpecTool",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+                .unsafeFlags([
+                    "-I", "Tools/EditorSpecSnapshot/PrivateInterfaces",
+                    "-F", "/Applications/Xcode.app/Contents/SharedFrameworks",
+                ], .when(platforms: [.macOS])),
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-F", "/Applications/Xcode.app/Contents/SharedFrameworks",
+                    "-framework", "SourceEditor",
+                    "-framework", "SymbolCache",
+                    "-framework", "SymbolCacheIndexing",
+                    "-framework", "SymbolCacheSupport",
+                    "/Applications/Xcode.app/Contents/SharedFrameworks/SymbolCache.framework/Versions/A/SymbolCache",
+                    "/Applications/Xcode.app/Contents/SharedFrameworks/SymbolCacheIndexing.framework/Versions/A/SymbolCacheIndexing",
+                    "/Applications/Xcode.app/Contents/SharedFrameworks/SymbolCacheSupport.framework/Versions/A/SymbolCacheSupport",
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "/Applications/Xcode.app/Contents/SharedFrameworks",
+                ], .when(platforms: [.macOS])),
+            ]
+        ),
         .target(
             name: "SyntaxEditorCore",
             dependencies: [
@@ -42,7 +90,14 @@ let package = Package(
                 .product(name: "TreeSitterXML", package: "tree-sitter-xml"),
             ],
             resources: [
+                .copy("Resources/CSSQueries"),
+                .copy("Resources/HTMLQueries"),
+                .copy("Resources/JavaScriptQueries"),
+                .copy("Resources/JSONQueries"),
                 .copy("Resources/ObjectiveCQueries"),
+                .copy("Resources/SwiftQueries"),
+                .copy("Resources/TOMLQueries"),
+                .copy("Resources/XMLQueries"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -65,6 +120,10 @@ let package = Package(
         .testTarget(
             name: "SyntaxEditorCoreTests",
             dependencies: ["SyntaxEditorCore"]
+        ),
+        .testTarget(
+            name: "XclangSpecSyntaxTests",
+            dependencies: ["XclangSpecSyntax"]
         ),
         .testTarget(
             name: "SyntaxEditorCorePlatformTests",

@@ -2,15 +2,16 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterSwift
 
-struct SwiftLanguage {
+struct SwiftLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "swift" }
+    var language: SyntaxLanguage { .swift }
     var displayName: String { "Swift" }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "Swift",
             bundleName: "TreeSitterSwift_TreeSitterSwift",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_swift()) }
         )
     }
@@ -28,6 +29,12 @@ struct SwiftLanguage {
         let clampedLocation = max(0, min(location, nsSource.length))
         let prefix = nsSource.substring(to: clampedLocation)
         return PrefixAnalyzer(text: prefix).analysis.isInsideLiteralOrComment
+    }
+}
+
+private extension SwiftLanguage {
+    static var queryDirectories: [URL] {
+        BundledLanguageQueryResources.directories(named: "SwiftQueries")
     }
 }
 

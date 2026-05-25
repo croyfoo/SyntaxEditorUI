@@ -7,16 +7,37 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F0B200000000000000000006 /* Reference.m in Sources */ = {isa = PBXBuildFile; fileRef = F0B200000000000000000003 /* Reference.m */; };
 		F0A200000000000000000001 /* SyntaxEditorUI in Frameworks */ = {isa = PBXBuildFile; productRef = F0A200000000000000000003 /* SyntaxEditorUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		AB5455732F73E81C002604FB /* Mini.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mini.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB5455732F73E81C002604FB /* SyntaxPreview.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SyntaxPreview.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F0B200000000000000000001 /* Reference.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Mini/ReferenceSamples/Reference.h; sourceTree = SOURCE_ROOT; };
+		F0B200000000000000000003 /* Reference.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Mini/ReferenceSamples/Reference.m; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F0B200000000000000000005 /* Exceptions for "Mini" folder in "Mini" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ReferenceSamples/Reference.m,
+			);
+			target = AB5455722F73E81C002604FB /* Mini */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		AB5455752F73E81C002604FB /* Mini */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F0B200000000000000000005 /* Exceptions for "Mini" folder in "Mini" target */,
+			);
+			explicitFileTypes = {
+				ReferenceSamples/Reference.h = sourcecode.c.h;
+				ReferenceSamples/Reference.m = sourcecode.c.objc;
+				ReferenceSamples/Reference.swift = text;
+			};
 			path = Mini;
 			sourceTree = "<group>";
 		};
@@ -45,7 +66,7 @@
 		AB5455742F73E81C002604FB /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AB5455732F73E81C002604FB /* Mini.app */,
+				AB5455732F73E81C002604FB /* SyntaxPreview.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -60,6 +81,7 @@
 				AB54556F2F73E81C002604FB /* Sources */,
 				AB5455702F73E81C002604FB /* Frameworks */,
 				AB5455712F73E81C002604FB /* Resources */,
+				F0B200000000000000000007 /* Copy Reference Samples */,
 			);
 			buildRules = (
 			);
@@ -72,8 +94,8 @@
 			packageProductDependencies = (
 				F0A200000000000000000003 /* SyntaxEditorUI */,
 			);
-			productName = Mini;
-			productReference = AB5455732F73E81C002604FB /* Mini.app */;
+			productName = SyntaxPreview;
+			productReference = AB5455732F73E81C002604FB /* SyntaxPreview.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -123,11 +145,37 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		F0B200000000000000000007 /* Copy Reference Samples */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Mini/ReferenceSamples/Reference.h",
+				"$(SRCROOT)/Mini/ReferenceSamples/Reference.m",
+			);
+			name = "Copy Reference Samples";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ReferenceSamples/Reference.h",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ReferenceSamples/Reference.m",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nsamples_dir=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ReferenceSamples\"\nmkdir -p \"${samples_dir}\"\ncp \"${SRCROOT}/Mini/ReferenceSamples/Reference.h\" \"${samples_dir}/Reference.h\"\ncp \"${SRCROOT}/Mini/ReferenceSamples/Reference.m\" \"${samples_dir}/Reference.m\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		AB54556F2F73E81C002604FB /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F0B200000000000000000006 /* Reference.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -280,8 +328,8 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.syntaxeditorui.mini;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.syntaxeditorui.syntaxpreview;
+				PRODUCT_NAME = SyntaxPreview;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -321,8 +369,8 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.syntaxeditorui.mini;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.syntaxeditorui.syntaxpreview;
+				PRODUCT_NAME = SyntaxPreview;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";

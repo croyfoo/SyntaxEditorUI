@@ -1,0 +1,79 @@
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version 6.3.2 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)
+// swift-module-flags: -target arm64-apple-macosx26.0 -enable-objc-interop -enable-library-evolution -swift-version 6 -module-name SymbolCache
+import Foundation
+import Swift
+
+public struct SymbolCacheFilePath: Hashable {
+    public init(_: Foundation.URL)
+    public init(_: Swift.String)
+
+    public func filePathString() -> Swift.String
+}
+
+public struct SymbolID: Hashable {
+    public init(domainID: Swift.UInt32, id: Swift.UInt32)
+}
+
+public struct SymbolCacheLanguage: Equatable {
+    public static var swift: SymbolCache.SymbolCacheLanguage { get }
+}
+
+public struct SymbolCacheElement {}
+public class SymbolCacheElementStore {}
+public struct SymbolCacheIndexRegistry {}
+public class SymbolCacheProjectStateCache {}
+
+public protocol SymbolCacheProvider: AnyObject {
+    var basePath: SymbolCache.SymbolCacheFilePath? { get }
+    var elementStore: SymbolCache.SymbolCacheElementStore { get }
+    var indexRegistry: SymbolCache.SymbolCacheIndexRegistry { get set }
+    var name: Swift.String? { get }
+
+    func line(for: SymbolCache.SymbolCacheElement) -> Swift.Int?
+    func filePath(for: SymbolCache.SymbolID) -> Swift.String?
+    func snapshot() -> SymbolCache.SymbolCacheProvider
+}
+
+public protocol LanguageSpecificSymbolCacheProvider: SymbolCache.SymbolCacheProvider {
+    var language: SymbolCache.SymbolCacheLanguage { get }
+}
+
+public protocol ModuleNameSymbolCacheProvider: SymbolCache.SymbolCacheProvider {
+    var moduleName: Swift.String { get }
+}
+
+public protocol SymbolCacheProjectController {
+    var projectProviderSet: Swift.Set<Swift.UInt32>? { get }
+    var projectStateCache: SymbolCache.SymbolCacheProjectStateCache? { get }
+    var projectSymbolCaches: [SymbolCache.FileParsingSymbolCache] { get }
+
+    func updateProjectStateIfNeeded()
+    func fileWasOpened(filePath: Swift.String)
+    func fileWasClosed(filePath: Swift.String)
+}
+
+public protocol SymbolCacheComposite: AnyObject, SymbolCache.SymbolCacheProjectController {
+    var tokenStore: SymbolCache.SymbolCacheProviderTokenStore { get }
+}
+
+public struct SymbolCacheProviderTokenStore {
+    public init()
+    public init(providers: [SymbolCache.SymbolCacheProvider])
+}
+
+public class FileParsingSymbolCache {
+    public enum ParsingProgress: Equatable {
+        case completedSingleItem
+        case completedAllItems
+    }
+
+    public func parse(
+        fileURLs: [Foundation.URL],
+        canceled: @escaping () -> Swift.Bool,
+        observer: @escaping (SymbolCache.FileParsingSymbolCache.ParsingProgress) -> ()
+    )
+
+    public final func importsInFile(_: SymbolCache.SymbolCacheFilePath) -> [Swift.String]
+    public func snapshot() -> SymbolCache.SymbolCacheProvider
+}

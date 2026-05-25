@@ -4,13 +4,38 @@ import SwiftTreeSitterLayer
 
 package struct SyntaxHighlightToken: Equatable, Sendable {
     package let range: NSRange
-    package let captureName: String
+    package let syntaxID: EditorSourceSyntaxID
+    package let language: SyntaxLanguage?
+    package let rawCaptureName: String
 
-    package init(range: NSRange, captureName: String) {
-        self.range = range
-        self.captureName = captureName
+    package init(
+        range: NSRange,
+        rawCaptureName: String,
+        language: SyntaxLanguage = .swift
+    ) {
+        let classification = EditorSyntaxCapture.parse(
+            rawCaptureName: rawCaptureName,
+            rootLanguage: language
+        )
+        self.init(
+            range: range,
+            syntaxID: classification.syntaxID,
+            language: classification.language ?? language,
+            rawCaptureName: rawCaptureName
+        )
     }
 
+    package init(
+        range: NSRange,
+        syntaxID: EditorSourceSyntaxID,
+        language: SyntaxLanguage?,
+        rawCaptureName: String
+    ) {
+        self.range = range
+        self.syntaxID = syntaxID
+        self.language = language
+        self.rawCaptureName = rawCaptureName
+    }
 }
 
 package struct SyntaxHighlightMutation: Equatable, Sendable {
@@ -30,6 +55,22 @@ package struct SyntaxHighlightMutation: Equatable, Sendable {
             length: mutation.range.length,
             replacement: mutation.replacement
         )
+    }
+}
+
+private struct SyntaxHighlightTokenKey: Hashable {
+    let location: Int
+    let length: Int
+    let syntaxID: EditorSourceSyntaxID
+    let language: SyntaxLanguage?
+    let rawCaptureName: String
+
+    init(_ token: SyntaxHighlightToken) {
+        location = token.range.location
+        length = token.range.length
+        syntaxID = token.syntaxID
+        language = token.language
+        rawCaptureName = token.rawCaptureName
     }
 }
 
@@ -146,6 +187,44 @@ private struct HighlightingSetup: Sendable {
     let usesHTMLPreprocessing: Bool
 }
 
+private extension HighlightingSetup {
+    static func resolved(
+        for language: SyntaxLanguage,
+        resolver: LanguageConfigurationResolver = .shared
+    ) -> HighlightingSetup? {
+        guard let rootConfiguration = resolver.configuration(for: language) else {
+            return nil
+        }
+
+        let support = language.treeSitterSupport
+        let injectedAliases = resolver.supportedInjectedAliases(
+            for: support,
+            rootConfiguration: rootConfiguration
+        )
+        let injectedLanguageProvider = InjectedLanguageProvider(resolver: resolver)
+
+        if let injectedAliases {
+            for alias in injectedAliases {
+                guard injectedLanguageProvider.configuration(named: alias) != nil else {
+                    return HighlightingSetup(
+                        rootConfiguration: rootConfiguration,
+                        injectedLanguageProvider: injectedLanguageProvider,
+                        supportsLayeredHighlighting: false,
+                        usesHTMLPreprocessing: false
+                    )
+                }
+            }
+        }
+
+        return HighlightingSetup(
+            rootConfiguration: rootConfiguration,
+            injectedLanguageProvider: injectedLanguageProvider,
+            supportsLayeredHighlighting: injectedAliases?.isEmpty == false,
+            usesHTMLPreprocessing: resolver.supportsHTMLRawTextPreprocessing(for: rootConfiguration.language)
+        )
+    }
+}
+
 private enum CachedLanguageConfiguration {
     case resolved(LanguageConfiguration)
     case missing
@@ -180,7 +259,13 @@ private final class SyntaxHighlightSession {
             let layer = try makeLayer()
             layer.replaceContent(with: layeredSource)
             self.layer = layer
-            tokens = highlightTokens(in: fullRange(for: layeredSource), source: layeredSource)
+            let highlightTokens = highlightTokens(in: fullRange(for: layeredSource), source: layeredSource)
+            let classifiedTokens = semanticClassifiedTokensIfNeeded(
+                highlightTokens,
+                source: layeredSource
+            )
+
+            tokens = classifiedTokens
         } catch {
             layer = nil
             tokens = []
@@ -281,18 +366,30 @@ private final class SyntaxHighlightSession {
             previousSourceUTF16Length: previousLayeredSource.utf16.count,
             nextSourceUTF16Length: nextSourceLength
         )
+        let refreshRange = mergedHighlight.refreshRange
+        let classifiedTokens = semanticClassifiedTokensIfNeeded(
+            mergedHighlight.tokens,
+            source: nextLayeredSource,
+            refreshRange: refreshRange
+        )
+        let resultRefreshRange = semanticRefreshRange(
+            previousTokens: mergedHighlight.tokens,
+            classifiedTokens: classifiedTokens,
+            baseRefreshRange: refreshRange,
+            sourceUTF16Length: nextSourceLength
+        )
 
         source = nextSource
         layeredSource = nextLayeredSource
         lineIndex.apply(mutation: layeredMutation, previousSource: previousLayeredSource)
-        tokens = mergedHighlight.tokens
+        tokens = classifiedTokens
 
         return SyntaxHighlightResult(
             tokens: tokens,
             source: nextSource,
             language: language,
             revision: revision,
-            refreshRange: mergedHighlight.refreshRange
+            refreshRange: resultRefreshRange
         )
     }
 }
@@ -329,12 +426,23 @@ private extension SyntaxHighlightSession {
                 guard let range = Self.utf16Range(
                     fromByteRange: $0.tsRange.bytes,
                     sourceUTF16Length: sourceUTF16Length
-                ) else {
+                ),
+                    range.length > 0
+                else {
                     return nil
                 }
-                return SyntaxHighlightToken(range: range, captureName: $0.name)
+                let classification = EditorSyntaxCapture.parse(
+                    rawCaptureName: $0.name,
+                    rootLanguage: language
+                )
+                return SyntaxHighlightToken(
+                    range: range,
+                    syntaxID: classification.syntaxID,
+                    language: classification.language ?? language,
+                    rawCaptureName: $0.name
+                )
             }
-                .sorted(by: Self.highlightTokenDisplayOrder)
+                .sorted(by: SyntaxHighlightTokenOrdering.displayOrder)
         } catch {
             return []
         }
@@ -456,7 +564,12 @@ private extension SyntaxHighlightSession {
             ) else {
                 continue
             }
-            let adjustedToken = SyntaxHighlightToken(range: adjustedRange, captureName: token.captureName)
+            let adjustedToken = SyntaxHighlightToken(
+                range: adjustedRange,
+                syntaxID: token.syntaxID,
+                language: token.language,
+                rawCaptureName: token.rawCaptureName
+            )
             if adjustedRange.location < refreshedRange.location {
                 before.append(adjustedToken)
             } else {
@@ -464,25 +577,77 @@ private extension SyntaxHighlightSession {
             }
         }
 
-        return ((before + replacementTokens + after).sorted(by: highlightTokenDisplayOrder), refreshRange)
+        return ((before + replacementTokens + after).sorted(by: SyntaxHighlightTokenOrdering.displayOrder), refreshRange)
     }
 
-    static func highlightTokenDisplayOrder(_ lhs: SyntaxHighlightToken, _ rhs: SyntaxHighlightToken) -> Bool {
-        if lhs.range.location != rhs.range.location {
-            return lhs.range.location < rhs.range.location
+    func semanticClassifiedTokensIfNeeded(
+        _ tokens: [SyntaxHighlightToken],
+        source: String,
+        refreshRange: NSRange? = nil
+    ) -> [SyntaxHighlightToken] {
+        switch language {
+        case .swift:
+            return SwiftSyntaxOverlayTokenProvider.mergingOverlayTokens(
+                tokens: tokens,
+                source: source,
+                refreshRange: refreshRange
+            )
+        case .objectiveC:
+            return ObjectiveCSyntaxOverlayTokenProvider.mergingOverlayTokens(
+                tokens: tokens,
+                source: source
+            )
+        default:
+            return tokens
+        }
+    }
+
+    func semanticRefreshRange(
+        previousTokens: [SyntaxHighlightToken],
+        classifiedTokens: [SyntaxHighlightToken],
+        baseRefreshRange: NSRange,
+        sourceUTF16Length: Int
+    ) -> NSRange {
+        switch language {
+        case .swift, .objectiveC:
+            Self.refreshRangeIncludingTokenChanges(
+                from: previousTokens,
+                to: classifiedTokens,
+                baseRefreshRange: baseRefreshRange,
+                sourceUTF16Length: sourceUTF16Length
+            )
+        default:
+            baseRefreshRange
+        }
+    }
+
+    static func refreshRangeIncludingTokenChanges(
+        from previousTokens: [SyntaxHighlightToken],
+        to classifiedTokens: [SyntaxHighlightToken],
+        baseRefreshRange: NSRange,
+        sourceUTF16Length: Int
+    ) -> NSRange {
+        let previousKeys = Set(previousTokens.map(SyntaxHighlightTokenKey.init))
+        let classifiedKeys = Set(classifiedTokens.map(SyntaxHighlightTokenKey.init))
+        var refreshRange = SyntaxEditorRangeUtilities.clampedRange(
+            baseRefreshRange,
+            utf16Length: sourceUTF16Length
+        )
+
+        for token in previousTokens where !classifiedKeys.contains(SyntaxHighlightTokenKey(token)) {
+            refreshRange = union(
+                refreshRange,
+                SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: sourceUTF16Length)
+            )
+        }
+        for token in classifiedTokens where !previousKeys.contains(SyntaxHighlightTokenKey(token)) {
+            refreshRange = union(
+                refreshRange,
+                SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: sourceUTF16Length)
+            )
         }
 
-        let lhsSpecificity = lhs.captureName.split(separator: ".").count
-        let rhsSpecificity = rhs.captureName.split(separator: ".").count
-        if lhsSpecificity != rhsSpecificity {
-            return lhsSpecificity < rhsSpecificity
-        }
-
-        if lhs.range.length != rhs.range.length {
-            return lhs.range.length > rhs.range.length
-        }
-
-        return lhs.captureName < rhs.captureName
+        return SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: sourceUTF16Length)
     }
 
     static func oldRange(
@@ -913,39 +1078,10 @@ private actor LanguageConfigurationRegistry {
             return cached
         }
 
-        guard let rootConfiguration = resolver.configuration(for: language) else {
+        guard let setup = HighlightingSetup.resolved(for: language, resolver: resolver) else {
             layeredSetupCache[language] = nil
             return nil
         }
-
-        let support = language.treeSitterSupport
-        let injectedAliases = resolver.supportedInjectedAliases(
-            for: support,
-            rootConfiguration: rootConfiguration
-        )
-        let injectedLanguageProvider = InjectedLanguageProvider(resolver: resolver)
-
-        if let injectedAliases {
-            for alias in injectedAliases {
-                guard injectedLanguageProvider.configuration(named: alias) != nil else {
-                    let setup = HighlightingSetup(
-                        rootConfiguration: rootConfiguration,
-                        injectedLanguageProvider: injectedLanguageProvider,
-                        supportsLayeredHighlighting: false,
-                        usesHTMLPreprocessing: false
-                    )
-                    layeredSetupCache[language] = setup
-                    return setup
-                }
-            }
-        }
-
-        let setup = HighlightingSetup(
-            rootConfiguration: rootConfiguration,
-            injectedLanguageProvider: injectedLanguageProvider,
-            supportsLayeredHighlighting: injectedAliases?.isEmpty == false,
-            usesHTMLPreprocessing: resolver.supportsHTMLRawTextPreprocessing(for: rootConfiguration.language)
-        )
         layeredSetupCache[language] = setup
         return setup
     }

@@ -2,15 +2,16 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterJSON
 
-struct JSONLanguage {
+struct JSONLanguage: SyntaxLanguageSupport {
     init() {}
 
-    var identifier: String { "json" }
+    var language: SyntaxLanguage { .json }
     var displayName: String { "JSON" }
     var treeSitterSupport: SyntaxTreeSitterSupport {
         SyntaxTreeSitterSupport(
             name: "JSON",
             bundleName: "TreeSitterJSON_TreeSitterJSON",
+            queryDirectories: Self.queryDirectories,
             makeLanguage: { unsafe Language(tree_sitter_json()) }
         )
     }
@@ -26,5 +27,11 @@ struct JSONLanguage {
         let linePrefixLength = max(0, clampedLocation - lineRange.location)
         let linePrefix = nsSource.substring(with: NSRange(location: lineRange.location, length: linePrefixLength))
         return SyntaxLanguageTextUtilities.hasOddUnescapedQuote(in: linePrefix, quote: "\"")
+    }
+}
+
+private extension JSONLanguage {
+    static var queryDirectories: [URL] {
+        BundledLanguageQueryResources.directories(named: "JSONQueries")
     }
 }

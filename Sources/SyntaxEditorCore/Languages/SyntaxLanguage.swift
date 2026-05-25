@@ -20,24 +20,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
     }
 
     public var displayName: String {
-        switch self {
-        case .css:
-            "CSS"
-        case .html:
-            "HTML"
-        case .javascript:
-            "JavaScript"
-        case .json:
-            "JSON"
-        case .objectiveC:
-            "Objective-C"
-        case .swift:
-            "Swift"
-        case .toml:
-            "TOML"
-        case .xml:
-            "XML"
-        }
+        support.displayName
     }
 
     public static var all: [SyntaxLanguage] {
@@ -49,26 +32,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
-        switch lowered {
-        case "css":
-            return .css
-        case "html", "htm":
-            return .html
-        case "javascript", "js":
-            return .javascript
-        case "json":
-            return .json
-        case "objective-c", "objectivec", "objc":
-            return .objectiveC
-        case "swift":
-            return .swift
-        case "toml":
-            return .toml
-        case "xml":
-            return .xml
-        default:
-            return nil
-        }
+        return allCases.first { $0.support.aliases.contains(lowered) }
     }
 }
 
@@ -109,70 +73,40 @@ struct SyntaxTreeSitterSupport: Sendable {
 }
 
 extension SyntaxLanguage {
+    var support: any SyntaxLanguageSupport {
+        switch self {
+        case .css:
+            CSSLanguage()
+        case .html:
+            HTMLLanguage()
+        case .javascript:
+            JavaScriptLanguage()
+        case .json:
+            JSONLanguage()
+        case .objectiveC:
+            ObjectiveCLanguage()
+        case .swift:
+            SwiftLanguage()
+        case .toml:
+            TOMLLanguage()
+        case .xml:
+            XMLLanguage()
+        }
+    }
+
     package var syntaxHighlightCacheKey: String {
         identifier
     }
 
     var treeSitterSupport: SyntaxTreeSitterSupport {
-        switch self {
-        case .css:
-            CSSLanguage().treeSitterSupport
-        case .html:
-            HTMLLanguage().treeSitterSupport
-        case .javascript:
-            JavaScriptLanguage().treeSitterSupport
-        case .json:
-            JSONLanguage().treeSitterSupport
-        case .objectiveC:
-            ObjectiveCLanguage().treeSitterSupport
-        case .swift:
-            SwiftLanguage().treeSitterSupport
-        case .toml:
-            TOMLLanguage().treeSitterSupport
-        case .xml:
-            XMLLanguage().treeSitterSupport
-        }
+        support.treeSitterSupport
     }
 
     func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
-        switch self {
-        case .css:
-            CSSLanguage().toggleComment(source: source, selection: selection)
-        case .html:
-            HTMLLanguage().toggleComment(source: source, selection: selection)
-        case .javascript:
-            JavaScriptLanguage().toggleComment(source: source, selection: selection)
-        case .json:
-            JSONLanguage().toggleComment(source: source, selection: selection)
-        case .objectiveC:
-            ObjectiveCLanguage().toggleComment(source: source, selection: selection)
-        case .swift:
-            SwiftLanguage().toggleComment(source: source, selection: selection)
-        case .toml:
-            TOMLLanguage().toggleComment(source: source, selection: selection)
-        case .xml:
-            XMLLanguage().toggleComment(source: source, selection: selection)
-        }
+        support.toggleComment(source: source, selection: selection)
     }
 
     func isInsideLiteralOrComment(source: String, location: Int) -> Bool {
-        switch self {
-        case .css:
-            CSSLanguage().isInsideLiteralOrComment(source: source, location: location)
-        case .html:
-            HTMLLanguage().isInsideLiteralOrComment(source: source, location: location)
-        case .javascript:
-            JavaScriptLanguage().isInsideLiteralOrComment(source: source, location: location)
-        case .json:
-            JSONLanguage().isInsideLiteralOrComment(source: source, location: location)
-        case .objectiveC:
-            ObjectiveCLanguage().isInsideLiteralOrComment(source: source, location: location)
-        case .swift:
-            SwiftLanguage().isInsideLiteralOrComment(source: source, location: location)
-        case .toml:
-            TOMLLanguage().isInsideLiteralOrComment(source: source, location: location)
-        case .xml:
-            XMLLanguage().isInsideLiteralOrComment(source: source, location: location)
-        }
+        support.isInsideLiteralOrComment(source: source, location: location)
     }
 }
