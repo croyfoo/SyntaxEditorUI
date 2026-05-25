@@ -6554,6 +6554,8 @@ struct SyntaxHighlighterEngineTests {
         @end
 
         @interface Sample : NSObject
+        // @property (nonatomic, copy)
+        NSString *commentEscapedName;
         @property (nonatomic, copy) NSString *name;
         @property (nonatomic, copy) NSArray *items;
         @property (nonatomic, copy) id (^handler)(id);
@@ -6626,6 +6628,7 @@ struct SyntaxHighlighterEngineTests {
             NSUInteger indexedCount = items[self.name].count;
             NSUInteger messageLength = [self.name description].length;
             NSUInteger messageResultLength = [formatter stringFrom:self.name].length;
+            NSUInteger commentEscapedLength = self.commentEscapedName.length;
             NSUInteger commentedLength = self.commentedTitle.length;
             NSUInteger ghostLength = self.ghostName.length;
             NSUInteger unknownCount = self.unknown.length;
@@ -6648,7 +6651,12 @@ struct SyntaxHighlighterEngineTests {
         let debugMacroRange = nsSource.range(of: "DEBUG")
         let interfaceRange = nsSource.range(of: "@interface")
         let selfRange = nsSource.range(of: "self")
-        let propertyAttributeRange = nsSource.range(of: "nonatomic")
+        let propertyDeclarationRange = nsSource.range(of: "@property (nonatomic, copy) NSString *name;")
+        let propertyAttributeRange = nsSource.range(
+            of: "nonatomic",
+            options: [],
+            range: propertyDeclarationRange
+        )
         let dictionaryStringRange = nsSource.range(of: "@\"objc\"")
         let typedefRange = nsSource.range(of: "typedef")
         let idRange = nsSource.range(of: "id object")
@@ -7124,6 +7132,12 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "length",
             inOccurrenceOf: "self.commentedTitle.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "length",
+            inOccurrenceOf: "self.commentEscapedName.length"
         ).contains(.identifierVariableSystem) == false)
         #expect(syntaxIDs(
             in: tokens,

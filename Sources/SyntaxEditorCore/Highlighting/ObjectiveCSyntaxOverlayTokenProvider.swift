@@ -806,6 +806,11 @@ private struct ObjectiveCFileSymbolIndex {
         var declarations: [(name: String, range: NSRange)] = []
 
         for match in propertyDeclarationRegex.matches(in: string, range: fullRange) {
+            let propertyKeywordRange = NSRange(location: match.range.location, length: "@property".count)
+            guard isCodeTokenRange(propertyKeywordRange, tokens: tokens, source: source) else {
+                continue
+            }
+
             let declaration = source.substring(with: match.range) as NSString
             guard let relativeNameRange = propertyDeclaredNameRange(in: declaration) else {
                 continue
@@ -821,6 +826,20 @@ private struct ObjectiveCFileSymbolIndex {
         }
 
         return declarations
+    }
+
+    private static func isCodeTokenRange(
+        _ range: NSRange,
+        tokens: [SyntaxHighlightToken],
+        source: NSString
+    ) -> Bool {
+        tokens.contains { token in
+            guard NSEqualRanges(token.range, range),
+                  (token.language == .objectiveC || token.language == nil) else {
+                return false
+            }
+            return source.substring(with: token.range) == "@property"
+        }
     }
 
     private static func isCodeIdentifierRange(
