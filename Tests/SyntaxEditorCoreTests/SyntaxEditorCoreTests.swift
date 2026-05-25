@@ -6579,6 +6579,8 @@ struct SyntaxHighlighterEngineTests {
         @property (nonatomic) NSInteger HTTPStatusCode;
         @property (nonatomic, copy)
         NSString *wrappedName;
+        @property (nonatomic, copy) NSString *
+        lineWrappedName;
         @property (nonatomic,
                    copy)
         NSString *multilineName;
@@ -6637,6 +6639,7 @@ struct SyntaxHighlighterEngineTests {
                 self.name
             ).length;
             NSUInteger wrappedNameLength = self.wrappedName.length;
+            NSUInteger lineWrappedNameLength = self.lineWrappedName.length;
             NSUInteger multilineNameLength = self.multilineName.length;
             NSUInteger wrappedAccessorLength = self.wrappedAccessor.length;
             NSInteger status = self.HTTPStatusCode;
@@ -6909,6 +6912,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .declarationOther,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic, copy)\nNSString *wrappedName;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "lineWrappedName",
+            syntaxID: .declarationOther,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *\nlineWrappedName;"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -7211,6 +7222,22 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.wrappedName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "lineWrappedName",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.lineWrappedName.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.lineWrappedName.length"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

@@ -875,7 +875,7 @@ private struct ObjectiveCFileSymbolIndex {
             }
 
             let declaration = source.substring(with: match.range) as NSString
-            if firstLineContainsPropertyBodyIdentifier(in: declaration) {
+            if propertyDeclarationAppearsToSwallowFollowingDeclaration(in: declaration) {
                 continue
             }
             guard let relativeNameRange = propertyDeclaredNameRange(in: declaration) else {
@@ -965,13 +965,29 @@ private struct ObjectiveCFileSymbolIndex {
         ).last?.range
     }
 
-    private static func firstLineContainsPropertyBodyIdentifier(in declaration: NSString) -> Bool {
+    private static func propertyDeclarationAppearsToSwallowFollowingDeclaration(in declaration: NSString) -> Bool {
         let newlineRange = declaration.rangeOfCharacter(from: .newlines)
         guard newlineRange.location != NSNotFound else {
             return false
         }
 
         let firstLine = declaration.substring(to: newlineRange.location) as NSString
+        guard firstPropertyLineContainsDeclaratorName(firstLine) else {
+            return false
+        }
+
+        let continuation = declaration.substring(from: newlineRange.upperBound)
+        for line in continuation.components(separatedBy: .newlines) {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedLine.isEmpty == false else {
+                continue
+            }
+            return propertyContinuationLineLooksLikeStandaloneDeclaration(trimmedLine)
+        }
+        return false
+    }
+
+    private static func firstPropertyLineContainsDeclaratorName(_ firstLine: NSString) -> Bool {
         var cursor = "@property".utf16.count
         while cursor < firstLine.length,
               isWhitespace(firstLine.substring(with: NSRange(location: cursor, length: 1))) {
@@ -992,10 +1008,86 @@ private struct ObjectiveCFileSymbolIndex {
         guard cursor < firstLine.length else {
             return false
         }
+
+        let body = firstLine.substring(from: cursor) as NSString
+        let bodyWithoutGenerics = stringByRemovingAngleBracketContents(from: body)
+        let end = trimmingTrailingPropertySyntax(in: bodyWithoutGenerics, end: bodyWithoutGenerics.length)
+        guard let lastIdentifierRange = identifierRange(before: end, in: bodyWithoutGenerics) else {
+            return false
+        }
         return identifierRegex.firstMatch(
-            in: firstLine as String,
-            range: NSRange(location: cursor, length: firstLine.length - cursor)
+            in: bodyWithoutGenerics as String,
+            range: NSRange(location: 0, length: lastIdentifierRange.location)
         ) != nil
+    }
+
+    private static func stringByRemovingAngleBracketContents(from text: NSString) -> NSString {
+        var result = ""
+        var depth = 0
+        for character in text as String {
+            if character == "<" {
+                depth += 1
+                continue
+            }
+            if character == ">", depth > 0 {
+                depth -= 1
+                continue
+            }
+            if depth == 0 {
+                result.append(character)
+            }
+        }
+        return result as NSString
+    }
+
+    private static func propertyContinuationLineLooksLikeStandaloneDeclaration(_ line: String) -> Bool {
+        let trimmedLine = (line as NSString)
+        let end = trimmingTrailingPropertySyntax(in: trimmedLine, end: trimmedLine.length)
+        guard end > 0 else {
+            return false
+        }
+        let declaration = trimmedLine.substring(to: end) as NSString
+        let matches = identifierRegex.matches(
+            in: declaration as String,
+            range: NSRange(location: 0, length: declaration.length)
+        )
+        guard let firstMatch = matches.first else {
+            return false
+        }
+
+        let firstIdentifier = declaration.substring(with: firstMatch.range)
+        if isLikelyTrailingPropertyAttribute(firstIdentifier, in: declaration, matchCount: matches.count) {
+            return false
+        }
+        if (declaration as String).contains("*") {
+            return matches.count >= 1
+        }
+        return matches.count >= 2
+    }
+
+    private static func isLikelyTrailingPropertyAttribute(
+        _ name: String,
+        in declaration: NSString,
+        matchCount: Int
+    ) -> Bool {
+        if name.hasPrefix("__") || bareTrailingPropertyAttributes.contains(name) {
+            return true
+        }
+        if name.range(
+            of: #"^(?:NS|CF|API|AVAILABLE|DEPRECATED|IB)_"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+        if isUppercaseIdentifier(name) {
+            if matchCount == 1 {
+                return true
+            }
+            let suffix = declaration.substring(from: name.utf16.count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return suffix.first == "("
+        }
+        return false
     }
 
     private static func propertyNameFallbackSearchRange(in declaration: NSString) -> NSRange {
