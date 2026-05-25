@@ -636,6 +636,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             return true
         case .declarationOther:
             return syntaxIDsAtSameRange.contains(.identifierFunction)
+                || syntaxIDsAtSameRange.contains(.identifier)
         case .identifierType:
             if syntaxIDsAtSameRange.contains(.identifierTypeSystem) {
                 return true
