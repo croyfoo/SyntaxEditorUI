@@ -246,10 +246,25 @@ enum CSSSyntaxOverlayTokenProvider {
     ) -> [SourceLocalOverlayToken] {
         var tokens: [SourceLocalOverlayToken] = []
         var location = 0
+        let selectorRanges = ruleSelectorRanges(in: source)
+        var selectorRangeIndex = 0
         let sortedExcludedRanges = excludedRanges.sorted { $0.location < $1.location }
         var excludedRangeIndex = 0
 
         while location < source.length {
+            while selectorRangeIndex < selectorRanges.count,
+                  selectorRanges[selectorRangeIndex].upperBound <= location {
+                selectorRangeIndex += 1
+            }
+            guard selectorRangeIndex < selectorRanges.count else {
+                break
+            }
+            let selectorRange = selectorRanges[selectorRangeIndex]
+            if location < selectorRange.location {
+                location = selectorRange.location
+                continue
+            }
+
             while excludedRangeIndex < sortedExcludedRanges.count,
                   sortedExcludedRanges[excludedRangeIndex].upperBound <= location {
                 excludedRangeIndex += 1
@@ -285,8 +300,12 @@ enum CSSSyntaxOverlayTokenProvider {
             while nameEnd < source.length, isIdentifierUnitCharacter(source.character(at: nameEnd)) {
                 nameEnd += 1
             }
+            guard nameEnd <= selectorRange.upperBound else {
+                location = selectorRange.upperBound
+                continue
+            }
             let nameRange = NSRange(location: nameStart, length: nameEnd - nameStart)
-            if xcodeDeclarationPseudoClasses.contains(source.substring(with: nameRange)) {
+            if xcodeDeclarationPseudoClasses.contains(source.substring(with: nameRange).lowercased()) {
                 tokens.append(SourceLocalOverlayToken(range: nameRange, syntaxID: .declarationOther))
             }
             location = nameEnd
@@ -592,6 +611,68 @@ enum CSSSyntaxOverlayTokenProvider {
         return scan
     }
 
+    private static func ruleSelectorRanges(in source: NSString) -> [NSRange] {
+        collectRuleSelectorRanges(
+            location: 0,
+            upperBound: source.length,
+            source: source
+        )
+    }
+
+    private static func collectRuleSelectorRanges(
+        location initialLocation: Int,
+        upperBound: Int,
+        source: NSString
+    ) -> [NSRange] {
+        var ranges: [NSRange] = []
+        var location = initialLocation
+
+        while location < upperBound {
+            location = locationAfterSkippingWhitespaceAndComments(at: location, in: source)
+            guard location < upperBound else {
+                break
+            }
+            if source.character(at: location) == ascii("}") {
+                return ranges
+            }
+
+            if source.character(at: location) == ascii("@") {
+                guard let nestedOpen = findBlockOpen(after: location, in: source),
+                      nestedOpen < upperBound
+                else {
+                    location = min(locationAfterStatement(at: location, in: source), upperBound)
+                    continue
+                }
+                if matchesConditionalAtRule(at: location, in: source)
+                    || matchesSelectorGroupingAtRule(at: location, in: source),
+                   let blockEnd = locationAfterBlock(openedAt: nestedOpen, in: source) {
+                    ranges.append(contentsOf: collectRuleSelectorRanges(
+                        location: nestedOpen + 1,
+                        upperBound: min(blockEnd - 1, upperBound),
+                        source: source
+                    ))
+                    location = min(blockEnd, upperBound)
+                } else {
+                    location = min(locationAfterBlock(openedAt: nestedOpen, in: source) ?? (nestedOpen + 1), upperBound)
+                }
+                continue
+            }
+
+            let selectorStart = location
+            guard let blockOpen = findBlockOpen(after: selectorStart, in: source),
+                  blockOpen < upperBound
+            else {
+                return ranges
+            }
+            if let range = trimmedRange(location: selectorStart, upperBound: blockOpen, in: source) {
+                ranges.append(range)
+            }
+            location = min(locationAfterBlock(openedAt: blockOpen, in: source) ?? (blockOpen + 1), upperBound)
+        }
+
+        return ranges
+    }
+
     private static func collectNestedSelectorRanges(
         inBlockOpenedAt blockOpen: Int,
         source: NSString
@@ -616,6 +697,10 @@ enum CSSSyntaxOverlayTokenProvider {
                 }
                 if matchesConditionalAtRule(at: location, in: source),
                    let nestedScan = collectNestedSelectorRanges(inBlockOpenedAt: nestedOpen, source: source) {
+                    ranges.append(contentsOf: nestedScan.ranges)
+                    location = nestedScan.endLocation
+                } else if matchesSelectorGroupingAtRule(at: location, in: source),
+                          let nestedScan = collectNestedSelectorRanges(inBlockOpenedAt: nestedOpen, source: source) {
                     ranges.append(contentsOf: nestedScan.ranges)
                     location = nestedScan.endLocation
                 } else {
@@ -694,6 +779,13 @@ enum CSSSyntaxOverlayTokenProvider {
         matches("@media", at: location, in: source)
             || matches("@supports", at: location, in: source)
             || matches("@container", at: location, in: source)
+    }
+
+    private static func matchesSelectorGroupingAtRule(at location: Int, in source: NSString) -> Bool {
+        matches("@document", at: location, in: source)
+            || matches("@layer", at: location, in: source)
+            || matches("@scope", at: location, in: source)
+            || matches("@starting-style", at: location, in: source)
     }
 
     private static func matches(_ keyword: String, at location: Int, in source: NSString) -> Bool {
