@@ -216,7 +216,7 @@ enum CSSSyntaxOverlayTokenProvider {
                 continue
             }
             guard parenthesisDepth == 0,
-                  isIdentifierStartCharacter(character)
+                  isCSSIdentifierStart(at: location, upperBound: upperBound, source: source)
             else {
                 location += 1
                 continue
@@ -326,7 +326,7 @@ enum CSSSyntaxOverlayTokenProvider {
                 nameEnd += 1
             }
             let name = source.substring(with: NSRange(location: nameStart, length: nameEnd - nameStart))
-            guard xcodeDeclarationPseudoClasses.contains(name),
+            guard xcodeDeclarationPseudoClasses.contains(name.lowercased()),
                   nameEnd < source.length,
                   source.character(at: nameEnd) == ascii("("),
                   let argumentEnd = matchingCloseParenthesis(openedAt: nameEnd, in: source),
@@ -700,7 +700,7 @@ enum CSSSyntaxOverlayTokenProvider {
         let length = (keyword as NSString).length
         guard location >= 0,
               location + length <= source.length,
-              source.substring(with: NSRange(location: location, length: length)) == keyword
+              source.substring(with: NSRange(location: location, length: length)).lowercased() == keyword
         else {
             return false
         }
@@ -903,6 +903,24 @@ enum CSSSyntaxOverlayTokenProvider {
         (character >= ascii("A") && character <= ascii("Z"))
             || (character >= ascii("a") && character <= ascii("z"))
             || character == ascii("_")
+    }
+
+    private static func isCSSIdentifierStart(
+        at location: Int,
+        upperBound: Int,
+        source: NSString
+    ) -> Bool {
+        let character = source.character(at: location)
+        if isIdentifierStartCharacter(character) {
+            return true
+        }
+        guard character == ascii("-"),
+              location + 1 < upperBound
+        else {
+            return false
+        }
+        let next = source.character(at: location + 1)
+        return isIdentifierStartCharacter(next) || next == ascii("-")
     }
 
     private static func isIdentifierUnitCharacter(_ character: unichar) -> Bool {

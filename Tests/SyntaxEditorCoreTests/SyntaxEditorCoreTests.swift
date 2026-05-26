@@ -6101,6 +6101,9 @@ struct SyntaxHighlighterEngineTests {
         @container signed (width > +10px) and style(margin-left: -10px) {
             .signed { display: grid; }
         }
+        @CONTAINER --sidebar (width > 10px) {
+            .dash { display: grid; }
+        }
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
 
@@ -6234,6 +6237,30 @@ struct SyntaxHighlighterEngineTests {
             language: .css,
             inOccurrenceOf: ".signed {"
         )
+        let uppercaseContainerAtRule = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@CONTAINER",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@CONTAINER"
+        )
+        let hyphenatedContainerName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "--sidebar",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "--sidebar (width"
+        )
+        let uppercaseContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "dash",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".dash {"
+        )
 
         #expect(containerAtRule.styleKeys.first == "editor.syntax.declaration.other")
         #expect(queryNumber.styleKeys.first == "editor.syntax.number")
@@ -6250,6 +6277,9 @@ struct SyntaxHighlighterEngineTests {
         #expect(signedPositiveNumber.styleKeys.first == "editor.syntax.number")
         #expect(signedNegativeNumber.styleKeys.first == "editor.syntax.number")
         #expect(signedContainerSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(uppercaseContainerAtRule.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(hyphenatedContainerName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(uppercaseContainerSelector.styleKeys.first == "editor.syntax.plain")
         #expect(containerNameDigitIDs.contains(.number) == false)
         #expect(customPropertyKeywordIDs.contains(.keyword) == false)
         let selectorIDs = syntaxIDs(
@@ -6455,6 +6485,12 @@ struct SyntaxHighlighterEngineTests {
         @media (min-width: 1px) {
             section:is(.hero) { color: red; }
         }
+        @MEDIA (min-width: 1px) {
+            .caps { display: grid; }
+        }
+        @supports selector(:HAS(img)) {
+            .upper { display: grid; }
+        }
         section:is(.hero) { color: red; }
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
@@ -6485,6 +6521,26 @@ struct SyntaxHighlighterEngineTests {
             text: "is",
             inOccurrenceOf: "@media (min-width: 1px) {\n    section:is"
         )
+        let uppercaseMediaSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "caps",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".caps {"
+        )
+        let uppercaseSupportsHasIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "HAS",
+            inOccurrenceOf: "selector(:HAS"
+        )
+        let uppercaseSupportsArgumentIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "img",
+            inOccurrenceOf: ":HAS(img)"
+        )
         let topLevelIs = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
@@ -6500,6 +6556,10 @@ struct SyntaxHighlighterEngineTests {
         #expect(supportsArgumentIDs.contains(.declarationOther) == false)
         #expect(mediaIsIDs.contains(.declarationOther) == false)
         #expect(mediaIsIDs.contains(.keyword) == false)
+        #expect(uppercaseMediaSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(uppercaseSupportsHasIDs.contains(.declarationOther) == false)
+        #expect(uppercaseSupportsHasIDs.contains(.keyword) == false)
+        #expect(uppercaseSupportsArgumentIDs.contains(.declarationOther) == false)
         #expect(topLevelIs.styleKeys.first == "editor.syntax.declaration.other")
         #expect(tokens.allSatisfy { $0.range.length > 0 })
     }
