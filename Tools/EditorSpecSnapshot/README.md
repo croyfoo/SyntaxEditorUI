@@ -42,7 +42,7 @@ word-list blocks in the bundled `highlights.scm` resources. Package runtime code
 does not carry generated Xcode vocabulary; grammar and query captures own token
 classification, while theme code only resolves known editor syntax families.
 
-## Compare Swift highlighting with Xcode
+## Compare Swift and CSS highlighting with Xcode
 
 `EditorSpecTool` is a SwiftPM executable that uses `SyntaxEditorCore` for editor
 tokens and Xcode-installed tooling for reference tokens. It is the mechanical
@@ -97,6 +97,22 @@ framework details through package runtime APIs. The tool-only Swift interfaces
 under `PrivateInterfaces/` were derived from the installed Xcode frameworks
 with `MachOSwiftSection`; regenerate them if the local Xcode build changes the
 private ABI enough to break compilation.
+
+CSS uses the same `SourceEditorDataSource` probe shape, backed by
+`SourceModelSupport.SourceModelLanguageService` instead of SymbolCache. Use it
+when checking CSS visual alignment because the older standalone DVT
+text-storage path can miss the later SourceEditor classification that Xcode's
+editor applies:
+
+```bash
+swift run EditorSpecTool classification-diff \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.css \
+  --language css --pretty
+
+swift run EditorSpecTool rendered-diff \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.css \
+  --language css --pretty
+```
 
 `xcode-dvt-rendered-tokens` forces the older DVT text-storage color route even
 for Swift. Use it when investigating whether a live Xcode editor screenshot is

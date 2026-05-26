@@ -6,8 +6,9 @@ import SyntaxEditorCore
 import AppKit
 #endif
 
-#if canImport(SourceEditor) && canImport(SymbolCache) && canImport(SymbolCacheIndexing) && canImport(SymbolCacheSupport)
+#if canImport(SourceEditor) && canImport(SourceModelSupport) && canImport(SymbolCache) && canImport(SymbolCacheIndexing) && canImport(SymbolCacheSupport)
 import SourceEditor
+import SourceModelSupport
 import SymbolCache
 import SymbolCacheIndexing
 import SymbolCacheSupport
@@ -186,15 +187,15 @@ private enum ToolError: Error, CustomStringConvertible {
             Usage:
               swift run EditorSpecTool editor-tokens --file <path> [--language swift] [--pretty]
               swift run EditorSpecTool source-model-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--no-text]
-              swift run EditorSpecTool xcode-classification-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--no-text]
+              swift run EditorSpecTool xcode-classification-tokens --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-semantic-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--no-text]
-              swift run EditorSpecTool xcode-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--pretty] [--no-text]
+              swift run EditorSpecTool xcode-rendered-tokens --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-dvt-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-dvt-language-diagnostics --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty]
               swift run EditorSpecTool xcode-source-editor-view-diagnostics --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty]
-              swift run EditorSpecTool diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--include-matches]
-              swift run EditorSpecTool classification-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--include-matches]
-              swift run EditorSpecTool rendered-diff --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--include-matches]
+              swift run EditorSpecTool diff --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--pretty] [--include-matches]
+              swift run EditorSpecTool classification-diff --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--include-matches]
+              swift run EditorSpecTool rendered-diff --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--include-matches]
             """
         case let .missingArgument(argument):
             "Missing value for \(argument)"
@@ -319,10 +320,6 @@ private enum EditorSpecTool {
     }
 
     private static func xcodeClassificationTokenOutput(options: Options) async throws -> XcodeClassificationTokenOutput {
-        guard options.language.identifier == SyntaxLanguage.swift.identifier else {
-            throw ToolError.invalidLanguage(options.language.identifier)
-        }
-
         let source = try sourceText(options.filePath)
         return XcodeClassificationTokenOutput(
             source: sourceMetadata(
@@ -333,7 +330,7 @@ private enum EditorSpecTool {
                 appearance: options.appearanceName,
                 semanticDepth: options.semanticDepth
             ),
-            tokens: try await xcodeSwiftClassificationTokens(options: options, source: source, includeText: options.includeText)
+            tokens: try await xcodeClassificationTokens(options: options, source: source, includeText: options.includeText)
         )
     }
 
@@ -376,13 +373,9 @@ private enum EditorSpecTool {
     }
 
     private static func classificationDiffOutput(options: Options) async throws -> ClassificationDiffOutput {
-        guard options.language.identifier == SyntaxLanguage.swift.identifier else {
-            throw ToolError.invalidLanguage(options.language.identifier)
-        }
-
         let source = try sourceText(options.filePath)
         let sourceLength = utf16Length(source)
-        let xcodeTokens = try await xcodeSwiftClassificationTokens(options: options, source: source, includeText: true)
+        let xcodeTokens = try await xcodeClassificationTokens(options: options, source: source, includeText: true)
         let editorTokens = try await editorTokens(source: source, language: options.language)
         let boundaries = sortedClassificationBoundaries(
             sourceUTF16Length: sourceLength,
@@ -523,6 +516,10 @@ private enum EditorSpecTool {
     }
 
     private static func diffOutput(options: Options) async throws -> DiffOutput {
+        if options.language == .css {
+            return try await diffOutputFromClassification(options: options)
+        }
+
         let source = try sourceText(options.filePath)
         let sourceLength = utf16Length(source)
         let sourceSnapshot = try sourceModelSnapshot(options: options, includeText: true)
@@ -590,6 +587,40 @@ private enum EditorSpecTool {
         )
     }
 
+    private static func diffOutputFromClassification(options: Options) async throws -> DiffOutput {
+        let classificationOutput = try await classificationDiffOutput(options: options)
+        return DiffOutput(
+            source: classificationOutput.source,
+            summary: classificationOutput.summary,
+            differences: classificationOutput.differences.map(diffRecord(from:)),
+            matches: classificationOutput.matches.map(diffRecord(from:))
+        )
+    }
+
+    private static func diffRecord(from record: ClassificationDiffRecord) -> DiffRecord {
+        DiffRecord(
+            range: record.range,
+            text: record.text,
+            sourceSyntaxID: record.xcodeSyntaxID,
+            editorSyntaxID: record.editorSyntaxID,
+            sourceModel: sourceModelToken(from: record.xcode),
+            editor: record.editor
+        )
+    }
+
+    private static func sourceModelToken(from token: XcodeClassificationTokenRecord?) -> SourceModelTokenRecord? {
+        guard let token else {
+            return nil
+        }
+        return SourceModelTokenRecord(
+            range: token.range,
+            text: token.text,
+            syntaxID: token.syntaxID,
+            specificationIdentifier: "SourceEditor.\(token.tokenType)",
+            tokenName: token.uiKind ?? token.tokenType
+        )
+    }
+
     private static func sourceText(_ filePath: String) throws -> String {
         try String(contentsOfFile: filePath, encoding: .utf8)
     }
@@ -610,8 +641,18 @@ private enum EditorSpecTool {
         source: String,
         includeText: Bool
     ) throws -> [XcodeRenderedTokenRecord] {
-        if options.language.identifier == SyntaxLanguage.swift.identifier {
-            return try xcodeSwiftSemanticTokens(options: options, source: source, includeText: includeText)
+        if sourceEditorClassificationSupports(language: options.language) {
+            let classificationTokens = try xcodeClassificationTokens(
+                options: options,
+                source: source,
+                includeText: includeText
+            )
+            let xcodeThemeColors = try xcodeThemeColors(
+                xcodePath: options.xcodePath,
+                xcodeThemeName: options.xcodeThemeName,
+                appearanceName: options.appearanceName
+            )
+            return try classificationTokens
                 .map { token in
                     XcodeRenderedTokenRecord(
                         range: token.range,
@@ -619,8 +660,11 @@ private enum EditorSpecTool {
                         syntaxID: token.syntaxID,
                         nodeType: nil,
                         tokenType: token.tokenType,
-                        tokenModifiers: token.tokenModifiers,
-                        color: token.color
+                        tokenModifiers: token.uiKind.map { [$0] },
+                        color: try xcodeThemeColorRecord(
+                            syntaxID: token.syntaxID,
+                            colors: xcodeThemeColors
+                        )
                     )
                 }
         }
@@ -679,6 +723,35 @@ private enum EditorSpecTool {
     }
 
     @MainActor
+    private static func xcodeClassificationTokens(
+        options: Options,
+        source: String,
+        includeText: Bool
+    ) throws -> [XcodeClassificationTokenRecord] {
+        if options.language.identifier == SyntaxLanguage.swift.identifier {
+            return try xcodeSwiftClassificationTokens(
+                options: options,
+                source: source,
+                includeText: includeText
+            )
+        }
+
+        guard options.language == .css else {
+            throw ToolError.invalidLanguage(options.language.identifier)
+        }
+
+        return try xcodeGenericClassificationTokens(
+            options: options,
+            source: source,
+            includeText: includeText
+        )
+    }
+
+    private static func sourceEditorClassificationSupports(language: SyntaxLanguage) -> Bool {
+        language == .swift || language == .css
+    }
+
+    @MainActor
     private static func xcodeSwiftSemanticTokens(
         options: Options,
         source: String,
@@ -716,13 +789,40 @@ private enum EditorSpecTool {
         source: String,
         includeText: Bool
     ) throws -> [XcodeClassificationTokenRecord] {
-        #if canImport(SourceEditor) && canImport(SymbolCache) && canImport(SymbolCacheIndexing) && canImport(SymbolCacheSupport)
-        let lineStarts = utf16LineStartOffsets(source)
+        #if canImport(SourceEditor) && canImport(SourceModelSupport) && canImport(SymbolCache) && canImport(SymbolCacheIndexing) && canImport(SymbolCacheSupport)
         let dataSource = sourceEditorSwiftDataSource(options: options, source: source)
+        return try sourceEditorClassificationTokens(dataSource: dataSource, source: source, includeText: includeText)
+        #else
+        throw ToolError.xcodeTool("SourceEditor.framework token probe is available on macOS only.")
+        #endif
+    }
+
+    @MainActor
+    private static func xcodeGenericClassificationTokens(
+        options: Options,
+        source: String,
+        includeText: Bool
+    ) throws -> [XcodeClassificationTokenRecord] {
+        #if canImport(SourceEditor) && canImport(SourceModelSupport) && canImport(SymbolCache) && canImport(SymbolCacheIndexing) && canImport(SymbolCacheSupport)
+        let dataSource = sourceEditorGenericDataSource(options: options, source: source)
+        return try sourceEditorClassificationTokens(dataSource: dataSource, source: source, includeText: includeText)
+        #else
+        throw ToolError.xcodeTool("SourceEditor.framework token probe is available on macOS only.")
+        #endif
+    }
+
+    #if canImport(SourceEditor) && canImport(SourceModelSupport) && canImport(SymbolCache) && canImport(SymbolCacheIndexing) && canImport(SymbolCacheSupport)
+    private static func sourceEditorClassificationTokens(
+        dataSource: SourceEditorDataSource,
+        source: String,
+        includeText: Bool
+    ) throws -> [XcodeClassificationTokenRecord] {
+        let lineStarts = utf16LineStartOffsets(source)
         let buffer: SourceEditorBuffer = dataSource
         let tokenProvider = dataSource.languageService
 
         var records: [XcodeClassificationTokenRecord] = []
+        var seenRanges = Set<SnapshotRange>()
         for line in 0..<buffer.lineCount {
             guard line < lineStarts.count else {
                 continue
@@ -745,6 +845,7 @@ private enum EditorSpecTool {
                     length: lineRange.upperBound - lineRange.lowerBound
                 )
                 let info = sourceEditorTokenInfo(semanticToken)
+                seenRanges.insert(range)
                 records.append(XcodeClassificationTokenRecord(
                     range: range,
                     text: includeText ? ((try? utf16Slice(source, range: range)) ?? "") : "",
@@ -755,13 +856,97 @@ private enum EditorSpecTool {
             }
         }
 
+        if records.isEmpty {
+            records = sourceEditorScannedClassificationTokens(
+                tokenProvider: tokenProvider,
+                buffer: buffer,
+                source: source,
+                lineStarts: lineStarts,
+                includeText: includeText,
+                seenRanges: &seenRanges
+            )
+        }
+
         return records
-        #else
-        throw ToolError.xcodeTool("SourceEditor.framework token probe is available on macOS only.")
-        #endif
     }
 
-    #if canImport(SourceEditor) && canImport(SymbolCache) && canImport(SymbolCacheIndexing) && canImport(SymbolCacheSupport)
+    private static func sourceEditorScannedClassificationTokens(
+        tokenProvider: SourceEditorLanguageService,
+        buffer: SourceEditorBuffer,
+        source: String,
+        lineStarts: [Int],
+        includeText: Bool,
+        seenRanges: inout Set<SnapshotRange>
+    ) -> [XcodeClassificationTokenRecord] {
+        var records: [XcodeClassificationTokenRecord] = []
+        for line in 0..<buffer.lineCount {
+            guard line < lineStarts.count else {
+                continue
+            }
+            let lineUTF16Length = (buffer.lineContentForLine(line) as NSString).length
+            var column = 0
+            while column < lineUTF16Length {
+                let position = SourceEditorPosition(line: line, col: column)
+                guard let (optionalToken, positionRange) = tokenProvider.syntaxTypeAtPosition(
+                    position,
+                    includingSemanticsAndDocumentation: true
+                ),
+                    let token = optionalToken,
+                    let range = snapshotRange(
+                        from: positionRange,
+                        lineStarts: lineStarts,
+                        sourceUTF16Length: utf16Length(source)
+                    ),
+                    range.length > 0,
+                    seenRanges.contains(range) == false
+                else {
+                    column += 1
+                    continue
+                }
+
+                let info = sourceEditorTokenInfo(token)
+                records.append(XcodeClassificationTokenRecord(
+                    range: range,
+                    text: includeText ? ((try? utf16Slice(source, range: range)) ?? "") : "",
+                    tokenType: info.tokenType,
+                    uiKind: info.uiKind,
+                    syntaxID: info.syntaxID
+                ))
+                seenRanges.insert(range)
+
+                if positionRange.upperBound.line == line {
+                    column = max(positionRange.upperBound.col, column + 1)
+                } else {
+                    break
+                }
+            }
+        }
+        return records
+    }
+
+    private static func snapshotRange(
+        from range: Range<SourceEditorPosition>,
+        lineStarts: [Int],
+        sourceUTF16Length: Int
+    ) -> SnapshotRange? {
+        guard range.lowerBound.line >= 0,
+              range.lowerBound.line < lineStarts.count,
+              range.upperBound.line >= 0,
+              range.upperBound.line < lineStarts.count
+        else {
+            return nil
+        }
+        let location = lineStarts[range.lowerBound.line] + range.lowerBound.col
+        let end = lineStarts[range.upperBound.line] + range.upperBound.col
+        guard location >= 0,
+              end > location,
+              end <= sourceUTF16Length
+        else {
+            return nil
+        }
+        return SnapshotRange(location: location, length: end - location)
+    }
+
     private static func sourceEditorSwiftDataSource(options: Options, source: String) -> SourceEditorDataSource {
         let baseLanguage = GenericLanguage(
             name: "Swift",
@@ -785,6 +970,44 @@ private enum EditorSpecTool {
             languageService.documentSettingsChanged(options.filePath)
         }
         return dataSourceWithSettings
+    }
+
+    private static func sourceEditorGenericDataSource(options: Options, source: String) -> SourceEditorDataSource {
+        let language = SourceModelEditorLanguage(
+            name: options.language.displayName,
+            identifier: sourceEditorLanguageIdentifier(for: options.language),
+            languageService: SourceModelLanguageService.self,
+            lineDataFactory: DefaultSourceEditorLineDataFactory(),
+            editableRangeSnapshot: nil
+        )
+        return SourceEditorDataSource(
+            name: URL(fileURLWithPath: options.filePath).lastPathComponent,
+            language: language,
+            usingMutableString: NSMutableString(string: source),
+            formattingOptions: SourceEditorFormattingOptions(),
+            documentSettings: nil
+        )
+    }
+
+    private static func sourceEditorLanguageIdentifier(for language: SyntaxLanguage) -> String {
+        switch language {
+        case .css:
+            return "xcode.lang.css"
+        case .html:
+            return "xcode.lang.html"
+        case .javascript:
+            return "xcode.lang.javascript"
+        case .json:
+            return "xcode.lang.json"
+        case .objectiveC:
+            return "xcode.lang.objc"
+        case .swift:
+            return "xcode.lang.swift"
+        case .toml:
+            return "xcode.lang.toml"
+        case .xml:
+            return "xcode.lang.xml"
+        }
     }
 
     private static func sourceEditorSymbolCacheComposite(options: Options) -> ToolSymbolCacheComposite {

@@ -597,6 +597,17 @@ private extension SyntaxHighlightSession {
                 tokens: tokens,
                 source: source
             )
+        case .css:
+            return CSSSyntaxOverlayTokenProvider.mergingOverlayTokens(
+                tokens: tokens,
+                source: source
+            )
+        case .html:
+            return CSSSyntaxOverlayTokenProvider.mergingOverlayTokens(
+                tokens: tokens,
+                source: source,
+                scanningRanges: HTMLLanguage.embeddedCSSRawTextRanges(in: source)
+            )
         default:
             return tokens
         }
@@ -609,7 +620,7 @@ private extension SyntaxHighlightSession {
         sourceUTF16Length: Int
     ) -> NSRange {
         switch language {
-        case .swift, .objectiveC:
+        case .swift, .objectiveC, .css, .html:
             Self.refreshRangeIncludingTokenChanges(
                 from: previousTokens,
                 to: classifiedTokens,
