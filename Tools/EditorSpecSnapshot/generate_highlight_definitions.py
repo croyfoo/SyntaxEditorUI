@@ -35,19 +35,21 @@ QUERY_DIRECTORY_NAMES = {
 
 GENERATED_BLOCK_BEGIN = "; BEGIN GENERATED EDITOR SYNTAX WORDS: {name}"
 GENERATED_BLOCK_END = "; END GENERATED EDITOR SYNTAX WORDS: {name}"
-
-CSS_STABLE_AT_RULE_WORDS = {
-    "@keyframes",
-    "@supports",
+CSS_KEYWORD_PREDICATE_CHUNK_SIZE = 128
+CSS_ANONYMOUS_KEYWORD_AT_RULES = {
+    "@charset",
+    "@import",
+    "@media",
 }
 
-OBJECTIVEC_STABLE_ATTRIBUTE_WORDS = {
+OBJECTIVEC_STABLE_ATTRIBUTE_WORDS = [
     "@autoreleasepool",
     "@catch",
     "@compatibility_alias",
     "@defs",
     "@dynamic",
     "@end",
+    "@encode",
     "@finally",
     "@implementation",
     "@interface",
@@ -60,7 +62,7 @@ OBJECTIVEC_STABLE_ATTRIBUTE_WORDS = {
     "@synthesize",
     "@throw",
     "@try",
-}
+]
 
 OBJECTIVEC_STABLE_PREPROCESSOR_WORDS = {
     "define",
@@ -217,6 +219,22 @@ def scm_string_lines(values: list[str], indent: str) -> list[str]:
     return [f"{indent}{scm_string(value)}" for value in values]
 
 
+def chunks(values: list[str], size: int) -> list[list[str]]:
+    return [
+        values[index:index + size]
+        for index in range(0, len(values), size)
+    ]
+
+
+def generated_css_keyword_pattern(pattern_lines: list[str], values: list[str]) -> list[str]:
+    return [
+        *pattern_lines,
+        "  (#any-of? @editor.syntax.css.keyword",
+        *scm_string_lines(values, "    "),
+        "  ))",
+    ]
+
+
 def generated_block_body(name: str, languages: dict[str, dict[str, Any]]) -> str:
     if name == "swift-attributes":
         values = sorted({
@@ -246,11 +264,12 @@ def generated_block_body(name: str, languages: dict[str, dict[str, Any]]) -> str
         return "\n".join(lines)
 
     if name == "objectivec-attributes":
-        values = sorted({
+        attribute_words = set(languages["objectiveC"]["attributeWords"])
+        values = [
             word
-            for word in languages["objectiveC"]["attributeWords"]
-            if word in OBJECTIVEC_STABLE_ATTRIBUTE_WORDS
-        })
+            for word in OBJECTIVEC_STABLE_ATTRIBUTE_WORDS
+            if word in attribute_words
+        ]
         lines = [
             "[",
             *scm_string_lines(values, "  "),
@@ -267,19 +286,44 @@ def generated_block_body(name: str, languages: dict[str, dict[str, Any]]) -> str
         lines = [
             "[",
             *scm_string_lines(values, "  "),
-            "] @editor.syntax.objectivec.preprocessor.keyword",
+            "] @editor.syntax.objectivec.preprocessor",
         ]
         return "\n".join(lines)
 
-    if name == "css-at-rules":
-        css_words = set(languages["css"]["attributeWords"]) | {"@keyframes", "@supports"}
-        values = sorted(css_words.intersection(CSS_STABLE_AT_RULE_WORDS))
-        lines = [
-            "[",
-            *scm_string_lines(values, "  "),
-            "] @editor.syntax.css.declaration.other",
+    if name == "css-keywords":
+        values = languages["css"]["keywordWords"]
+        literal_values = sorted(set(values).intersection(CSS_ANONYMOUS_KEYWORD_AT_RULES))
+        patterns = [
+            [
+                "([",
+                "  (property_name)",
+                "  (feature_name)",
+                "  (function_name)",
+                "  (unit)",
+                "  (at_keyword)",
+                "  (tag_name)",
+                "  (keyword_query)",
+                "] @editor.syntax.css.keyword",
+            ],
+            ["((pseudo_class_selector (class_name) @editor.syntax.css.keyword)"],
+            ["((pseudo_element_selector (tag_name) @editor.syntax.css.keyword)"],
+            ["((declaration (plain_value) @editor.syntax.css.keyword)"],
+            ["((arguments (plain_value) @editor.syntax.css.keyword)"],
         ]
-        return "\n".join(lines)
+        literal_lines = [
+            "[",
+            *scm_string_lines(literal_values, "  "),
+            "] @editor.syntax.css.keyword",
+        ] if literal_values else []
+        predicate_lines = [
+            "\n".join(generated_css_keyword_pattern(pattern, chunk))
+            for pattern in patterns
+            for chunk in chunks(values, CSS_KEYWORD_PREDICATE_CHUNK_SIZE)
+        ]
+        return "\n\n".join([
+            *([] if not literal_lines else ["\n".join(literal_lines)]),
+            *predicate_lines,
+        ])
 
     if name == "json-literals":
         values = sorted(languages["json"]["keywordWords"])
@@ -337,7 +381,7 @@ def update_query_blocks(snapshot: dict[str, Any], query_root: Path) -> None:
         ("swift", "swift-attributes"),
         ("objectiveC", "objectivec-attributes"),
         ("objectiveC", "objectivec-preprocessor-keywords"),
-        ("css", "css-at-rules"),
+        ("css", "css-keywords"),
         ("json", "json-literals"),
         ("toml", "toml-literals"),
     ]:

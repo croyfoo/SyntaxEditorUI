@@ -5827,168 +5827,207 @@ struct SyntaxHighlighterEngineTests {
         let engine = sharedSyntaxHighlighterEngine
         let source = try referenceSampleText(named: "Reference.css")
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+        let theme = SyntaxEditorColorTheme.default.resolved(for: .css, appearance: .dark)
 
-        let elementSelector = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "body",
-            syntaxID: "declaration.other",
-            language: .css
-        )
-        let classSelector = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "page",
-            syntaxID: "declaration.other",
-            language: .css
-        )
-        let idSelector = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "hero",
-            syntaxID: "declaration.other",
-            language: .css
-        )
-        let property = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "min-height",
-            syntaxID: "keyword",
-            language: .css
-        )
-        let customProperty = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "--brand-accent",
-            syntaxID: "plain",
-            language: .css
-        )
-        let function = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "linear-gradient",
-            syntaxID: "plain",
-            language: .css
-        )
-        let attributeValue = try semanticSnapshot(
+        let selectorCases: [(text: String, containingText: String)] = [
+            ("body", "body {"),
+            ("page", ".page"),
+            ("hero", "#hero"),
+            ("nav", #"nav a[aria-current="page"]"#),
+            ("a", #"nav a[aria-current="page"]"#),
+            ("main", "main > section"),
+            ("section", "main > section"),
+            ("grid", ".grid {"),
+        ]
+        for testCase in selectorCases {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: testCase.text,
+                syntaxID: .declarationOther,
+                language: .css,
+                inOccurrenceOf: testCase.containingText
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
+        }
+
+        let pseudoSelectorArgumentCases: [(text: String, containingText: String)] = [
+            ("root", ":root"),
+            ("is", "section:is"),
+            ("hero", "section:is(.hero"),
+            ("summary", ".summary)"),
+        ]
+        for testCase in pseudoSelectorArgumentCases {
+            let ids = syntaxIDs(
+                in: tokens,
+                source: source,
+                text: testCase.text,
+                inOccurrenceOf: testCase.containingText
+            )
+            #expect(ids.contains(.declarationOther) == false)
+            #expect(ids.contains(.keyword) == false)
+        }
+
+        let identifierCases: [(text: String, containingText: String)] = [
+            ("color-scheme", "color-scheme: light dark"),
+            ("--brand-accent", "--brand-accent: #007aff"),
+            ("linear-gradient", "linear-gradient(135deg"),
+            ("var", "var(--brand-accent)"),
+            ("container-type", "container-type: inline-size"),
+            ("backdrop-filter", "@supports (backdrop-filter: blur(12px))"),
+            ("backdrop-filter", "backdrop-filter: blur(12px);"),
+            ("blur", "blur(12px)"),
+            ("grid-template-columns", "grid-template-columns: repeat"),
+            ("gap", "gap: 14px"),
+            ("transform", "transform: translateY(8px)"),
+            ("minmax", "minmax(180px"),
+            ("vh", "100vh"),
+            ("fr", "1fr"),
+            ("reveal", "@keyframes reveal"),
+            ("aria-current", #"nav a[aria-current="page"]"#),
+        ]
+        for testCase in identifierCases {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: testCase.text,
+                syntaxID: .identifier,
+                language: .css,
+                inOccurrenceOf: testCase.containingText
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.identifier")
+            #expect(snapshot.resolvedStyle.foreground == theme.base.foreground)
+        }
+
+        let declarationOtherCases: [(text: String, containingText: String)] = [
+            ("@supports", "@supports (backdrop-filter"),
+            ("@keyframes", "@keyframes reveal"),
+        ]
+        for testCase in declarationOtherCases {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: testCase.text,
+                syntaxID: .declarationOther,
+                language: .css,
+                inOccurrenceOf: testCase.containingText
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
+        }
+
+        let keywordCases: [(text: String, containingText: String)] = [
+            ("margin", "margin: 0"),
+            ("min-height", "min-height: 100vh"),
+            ("color", "color: #1d1d1f"),
+            ("background", "background: linear-gradient"),
+            ("border-color", "border-color: rgba"),
+            ("content", "content: \"Open\""),
+            ("opacity", "opacity: 0.86"),
+            ("display", "display: grid"),
+            ("grid", "display: grid"),
+            ("rgba", "rgba(0, 122"),
+            ("repeat", "repeat(auto-fit"),
+            ("auto", "margin: 0 auto"),
+            ("px", "760px"),
+            ("deg", "135deg"),
+            ("@media", "@media (min-width"),
+            ("min-width", "@media (min-width: 720px)"),
+            ("button", "button:hover"),
+            ("hover", "button:hover"),
+            ("after", "::after"),
+            ("from", "from {"),
+            ("to", "to {"),
+        ]
+        for testCase in keywordCases {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: testCase.text,
+                syntaxID: .keyword,
+                language: .css,
+                inOccurrenceOf: testCase.containingText
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.keyword")
+            #expect(snapshot.resolvedStyle.foreground == theme.keyword.foreground)
+        }
+
+        let attributeValue = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
             text: "\"page\"",
-            syntaxID: "string",
-            language: .css
-        )
-        let attributeName = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "aria-current",
-            syntaxID: "plain",
+            syntaxID: .string,
             language: .css,
             inOccurrenceOf: #"nav a[aria-current="page"]"#
         )
-        let childCombinator = try semanticSnapshot(
+        let childCombinator = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
             text: ">",
-            syntaxID: "plain",
+            syntaxID: .plain,
             language: .css,
             inOccurrenceOf: "main > section"
         )
-        let rgbaFunction = try semanticSnapshot(
+        let hexColor = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
-            text: "rgba",
-            syntaxID: "keyword",
-            language: .css
-        )
-        let repeatFunction = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "repeat",
-            syntaxID: "keyword",
-            language: .css
-        )
-        let supportsAtRule = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "@supports",
-            syntaxID: "declaration.other",
-            language: .css
-        )
-        let supportsFeature = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "backdrop-filter",
-            syntaxID: "plain",
+            text: "#007aff",
+            syntaxID: .number,
             language: .css,
-            inOccurrenceOf: "@supports (backdrop-filter: blur(12px))"
+            inOccurrenceOf: "#007aff"
         )
-        let mediaFeature = try semanticSnapshot(
+        let percentage = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
-            text: "min-width",
-            syntaxID: "keyword",
-            language: .css
-        )
-        let keyframesAtRule = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "@keyframes",
-            syntaxID: "declaration.other",
-            language: .css
-        )
-        let keyframesName = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "reveal",
-            syntaxID: "declaration.other",
-            language: .css
-        )
-        let atRule = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "@media",
-            syntaxID: "keyword",
-            language: .css
-        )
-        let unit = try semanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "vh",
-            syntaxID: "keyword",
-            language: .css
+            text: "0%",
+            syntaxID: .number,
+            language: .css,
+            inOccurrenceOf: "#eef4ff 0%"
         )
 
-        #expect(elementSelector.styleKeys.first == "editor.syntax.declaration.other")
-        #expect(classSelector.styleKeys.first == "editor.syntax.declaration.other")
-        #expect(idSelector.styleKeys.first == "editor.syntax.declaration.other")
-        #expect(property.styleKeys.first == "editor.syntax.keyword")
-        #expect(customProperty.styleKeys.first == "editor.syntax.plain")
-        #expect(function.styleKeys.first == "editor.syntax.plain")
         #expect(attributeValue.text == "\"page\"")
         #expect(attributeValue.styleKeys.first == "editor.syntax.string")
-        #expect(attributeName.styleKeys.first == "editor.syntax.plain")
         #expect(childCombinator.styleKeys.first == "editor.syntax.plain")
-        #expect(rgbaFunction.styleKeys.first == "editor.syntax.keyword")
-        #expect(repeatFunction.styleKeys.first == "editor.syntax.keyword")
-        #expect(supportsAtRule.styleKeys.first == "editor.syntax.declaration.other")
-        #expect(supportsFeature.styleKeys.first == "editor.syntax.plain")
-        #expect(mediaFeature.styleKeys.first == "editor.syntax.keyword")
-        #expect(keyframesAtRule.styleKeys.first == "editor.syntax.declaration.other")
-        #expect(keyframesName.styleKeys.first == "editor.syntax.declaration.other")
-        #expect(atRule.styleKeys.first == "editor.syntax.keyword")
-        #expect(unit.styleKeys.first == "editor.syntax.keyword")
-        let theme = SyntaxEditorColorTheme.default.resolved(for: .css, appearance: .dark)
-        #expect(classSelector.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
-        #expect(idSelector.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
-        #expect(childCombinator.resolvedStyle.foreground == theme.base.foreground)
-        #expect(rgbaFunction.resolvedStyle.foreground == theme.keyword.foreground)
-        #expect(repeatFunction.resolvedStyle.foreground == theme.keyword.foreground)
-        #expect(supportsAtRule.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
-        #expect(supportsFeature.resolvedStyle.foreground == theme.base.foreground)
-        #expect(mediaFeature.resolvedStyle.foreground == property.resolvedStyle.foreground)
-        #expect(keyframesAtRule.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
-        #expect(keyframesName.resolvedStyle.foreground == elementSelector.resolvedStyle.foreground)
-        #expect(function.resolvedStyle.foreground == theme.base.foreground)
+        #expect(hexColor.styleKeys.first == "editor.syntax.number")
+        #expect(percentage.styleKeys.first == "editor.syntax.number")
+        #expect(syntaxIDs(in: tokens, source: source, text: "#", inOccurrenceOf: "#007aff").contains(.plain) == false)
+        #expect(syntaxIDs(in: tokens, source: source, text: "%", inOccurrenceOf: "#eef4ff 0%").contains(.keyword) == false)
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps CSS attribute values string-styled while classifying units")
+    func highlighterPreservesCSSAttributeValueStringsAndUnitKeywords() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = #"[data-state=open] { color: red; width: 1fr; padding: 1px; }"#
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        let attributeValue = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "open",
+            syntaxID: .string,
+            language: .css,
+            inOccurrenceOf: "[data-state=open]"
+        )
+        let fractionalUnit = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "fr",
+            syntaxID: .identifier,
+            language: .css,
+            inOccurrenceOf: "1fr"
+        )
+        let pixelUnit = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "px",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "1px"
+        )
+
+        #expect(attributeValue.styleKeys.first == "editor.syntax.string")
+        #expect(fractionalUnit.styleKeys.first == "editor.syntax.identifier")
+        #expect(pixelUnit.styleKeys.first == "editor.syntax.keyword")
         #expect(tokens.allSatisfy { $0.range.length > 0 })
     }
 
@@ -6061,7 +6100,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "--brand-accent",
-            syntaxID: "plain",
+            syntaxID: "identifier",
             language: .html
         )
         let embeddedJavaScript = try semanticSnapshot(
@@ -6081,7 +6120,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(embeddedCSSColor.styleKeys.first == "editor.syntax.number")
         #expect(embeddedCSSAttributeValue.text == "\"page\"")
         #expect(embeddedCSSAttributeValue.styleKeys.first == "editor.syntax.string")
-        #expect(embeddedCSS.styleKeys.first == "editor.syntax.plain")
+        #expect(embeddedCSS.styleKeys.first == "editor.syntax.identifier")
         #expect(embeddedJavaScript.styleKeys.first == "editor.syntax.keyword")
         let nsSource = source as NSString
         #expect(tokens.contains {
