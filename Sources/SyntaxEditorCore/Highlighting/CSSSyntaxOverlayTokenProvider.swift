@@ -228,7 +228,7 @@ enum CSSSyntaxOverlayTokenProvider {
                 location += 1
             }
             let identifierRange = NSRange(location: identifierStart, length: location - identifierStart)
-            guard !containerPreludeBooleanOperators.contains(source.substring(with: identifierRange)) else {
+            guard !containerPreludeBooleanOperators.contains(source.substring(with: identifierRange).lowercased()) else {
                 continue
             }
             tokens.append(SourceLocalOverlayToken(
@@ -667,7 +667,69 @@ enum CSSSyntaxOverlayTokenProvider {
             if let range = trimmedRange(location: selectorStart, upperBound: blockOpen, in: source) {
                 ranges.append(range)
             }
+            ranges.append(contentsOf: collectNestedStyleRuleSelectorRanges(
+                inBlockOpenedAt: blockOpen,
+                source: source
+            ))
             location = min(locationAfterBlock(openedAt: blockOpen, in: source) ?? (blockOpen + 1), upperBound)
+        }
+
+        return ranges
+    }
+
+    private static func collectNestedStyleRuleSelectorRanges(
+        inBlockOpenedAt blockOpen: Int,
+        source: NSString
+    ) -> [NSRange] {
+        var ranges: [NSRange] = []
+        var location = blockOpen + 1
+
+        while location < source.length {
+            location = locationAfterSkippingWhitespaceAndComments(at: location, in: source)
+            guard location < source.length else {
+                return ranges
+            }
+            if source.character(at: location) == ascii("}") {
+                return ranges
+            }
+
+            if source.character(at: location) == ascii("@") {
+                guard let nestedOpen = findBlockOpen(after: location, in: source) else {
+                    location = locationAfterStatement(at: location, in: source)
+                    continue
+                }
+                if matchesConditionalAtRule(at: location, in: source)
+                    || matchesSelectorGroupingAtRule(at: location, in: source),
+                   let nestedScan = collectNestedSelectorRanges(inBlockOpenedAt: nestedOpen, source: source) {
+                    if matchesScopeAtRule(at: location, in: source),
+                       let preludeRange = trimmedRange(
+                           location: min(location + ("@scope" as NSString).length, source.length),
+                           upperBound: nestedOpen,
+                           in: source
+                       ) {
+                        ranges.append(preludeRange)
+                    }
+                    ranges.append(contentsOf: nestedScan.ranges)
+                    location = nestedScan.endLocation
+                } else {
+                    location = locationAfterBlock(openedAt: nestedOpen, in: source) ?? (nestedOpen + 1)
+                }
+                continue
+            }
+
+            guard let nestedBlockOpen = findBlockOpen(after: location, in: source) else {
+                let nextStatement = locationAfterStatement(at: location, in: source)
+                location = nextStatement > location ? nextStatement : location + 1
+                continue
+            }
+            if let range = trimmedRange(location: location, upperBound: nestedBlockOpen, in: source) {
+                ranges.append(range)
+            }
+            ranges.append(contentsOf: collectNestedStyleRuleSelectorRanges(
+                inBlockOpenedAt: nestedBlockOpen,
+                source: source
+            ))
+            location = locationAfterBlock(openedAt: nestedBlockOpen, in: source) ?? (nestedBlockOpen + 1)
         }
 
         return ranges
@@ -724,6 +786,10 @@ enum CSSSyntaxOverlayTokenProvider {
             if let range = trimmedRange(location: selectorStart, upperBound: nestedBlockOpen, in: source) {
                 ranges.append(range)
             }
+            ranges.append(contentsOf: collectNestedStyleRuleSelectorRanges(
+                inBlockOpenedAt: nestedBlockOpen,
+                source: source
+            ))
             location = locationAfterBlock(openedAt: nestedBlockOpen, in: source) ?? (nestedBlockOpen + 1)
         }
 

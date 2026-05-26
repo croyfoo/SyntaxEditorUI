@@ -6092,7 +6092,7 @@ struct SyntaxHighlighterEngineTests {
         @container sidebar2 style(color: red) {
             .card { --color: red; color: var(--color); }
         }
-        @container card (width > 30em) and style(color: red) {
+        @container card (width > 30em) AND style(color: red) {
             .tile { color: red; }
         }
         @container side_bar (width > 10px) {
@@ -6181,13 +6181,13 @@ struct SyntaxHighlighterEngineTests {
             text: "style",
             syntaxID: .declarationOther,
             language: .css,
-            inOccurrenceOf: "and style(color"
+            inOccurrenceOf: "AND style(color"
         )
         let combinedContainerOperatorIDs = syntaxIDs(
             in: tokens,
             source: source,
-            text: "and",
-            inOccurrenceOf: ") and style"
+            text: "AND",
+            inOccurrenceOf: ") AND style"
         )
         let combinedContainerSelector = try effectiveSemanticSnapshot(
             in: tokens,
@@ -6487,6 +6487,9 @@ struct SyntaxHighlighterEngineTests {
         }
         @MEDIA (min-width: 1px) {
             .caps { display: grid; }
+            .parent {
+                .child { display: grid; }
+            }
             @layer components {
                 .layered { display: grid; }
             }
@@ -6537,6 +6540,22 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .plain,
             language: .css,
             inOccurrenceOf: ".caps {"
+        )
+        let nestedParentSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "parent",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".parent {"
+        )
+        let nestedChildSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "child",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".child {"
         )
         let layeredSelector = try effectiveSemanticSnapshot(
             in: tokens,
@@ -6604,6 +6623,8 @@ struct SyntaxHighlighterEngineTests {
         #expect(mediaIsIDs.contains(.declarationOther) == false)
         #expect(mediaIsIDs.contains(.keyword) == false)
         #expect(uppercaseMediaSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(nestedParentSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(nestedChildSelector.styleKeys.first == "editor.syntax.plain")
         #expect(layeredSelector.styleKeys.first == "editor.syntax.plain")
         #expect(scopedSelector.styleKeys.first == "editor.syntax.plain")
         #expect(scopePreludeSelector.styleKeys.first == "editor.syntax.plain")
