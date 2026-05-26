@@ -62,6 +62,7 @@ enum CSSSyntaxOverlayTokenProvider {
                 in: scanSource,
                 preludeRanges: supportsPreludeRanges
             ) +
+            keyframesNameDeclarationTokens(in: scanSource) +
             containerAtRulePreludeTokens(
                 in: scanSource,
                 excluding: nestedSelectorRanges
@@ -141,20 +142,20 @@ enum CSSSyntaxOverlayTokenProvider {
                 continue
             }
 
-            guard matches("@container", at: location, in: source),
-                  let blockOpen = findBlockOpen(after: location, in: source)
-            else {
+            guard matches("@container", at: location, in: source) else {
                 location += 1
                 continue
             }
 
+            let blockOpen = findBlockOpen(after: location, in: source)
             let preludeStart = min(location + ("@container" as NSString).length, source.length)
+            let preludeEnd = blockOpen ?? locationAfterStatement(at: location, in: source)
             tokens.append(SourceLocalOverlayToken(
                 range: NSRange(location: location, length: preludeStart - location),
                 syntaxID: .declarationOther
             ))
-            if preludeStart < blockOpen {
-                let preludeRange = NSRange(location: preludeStart, length: blockOpen - preludeStart)
+            if preludeStart < preludeEnd {
+                let preludeRange = NSRange(location: preludeStart, length: preludeEnd - preludeStart)
                 tokens.append(contentsOf: containerPreludeDeclarationTokens(
                     in: preludeRange,
                     source: source
@@ -162,7 +163,8 @@ enum CSSSyntaxOverlayTokenProvider {
                 tokens.append(contentsOf: dimensionTokens(in: preludeRange, source: source))
                 tokens.append(contentsOf: keywordIdentifierTokens(in: preludeRange, source: source))
             }
-            if let blockEnd = locationAfterBlock(openedAt: blockOpen, in: source),
+            if let blockOpen,
+               let blockEnd = locationAfterBlock(openedAt: blockOpen, in: source),
                blockOpen + 1 < blockEnd - 1 {
                 tokens.append(contentsOf: keywordIdentifierTokens(
                     in: NSRange(location: blockOpen + 1, length: blockEnd - blockOpen - 2),
@@ -170,8 +172,61 @@ enum CSSSyntaxOverlayTokenProvider {
                     excluding: excludedRanges
                 ))
             }
-            location = blockOpen + 1
+            location = blockOpen.map { $0 + 1 } ?? max(location + ("@container" as NSString).length, preludeEnd)
         }
+        return tokens
+    }
+
+    private static func keyframesNameDeclarationTokens(in source: NSString) -> [SourceLocalOverlayToken] {
+        var tokens: [SourceLocalOverlayToken] = []
+        var location = 0
+        var blockDepth = 0
+
+        while location < source.length {
+            if let skipLocation = locationAfterSkippingCommentOrString(at: location, in: source) {
+                location = skipLocation
+                continue
+            }
+
+            let character = source.character(at: location)
+            if character == ascii("{") {
+                blockDepth += 1
+                location += 1
+                continue
+            }
+            if character == ascii("}") {
+                blockDepth = max(0, blockDepth - 1)
+                location += 1
+                continue
+            }
+
+            guard blockDepth == 0,
+                  matches("@keyframes", at: location, in: source)
+            else {
+                location += 1
+                continue
+            }
+
+            let keywordEnd = min(location + ("@keyframes" as NSString).length, source.length)
+            let nameStart = locationAfterSkippingWhitespaceAndComments(at: keywordEnd, in: source)
+            guard nameStart < source.length,
+                  isCSSIdentifierStart(at: nameStart, upperBound: source.length, source: source)
+            else {
+                location = keywordEnd
+                continue
+            }
+
+            var nameEnd = nameStart + 1
+            while nameEnd < source.length, isIdentifierUnitCharacter(source.character(at: nameEnd)) {
+                nameEnd += 1
+            }
+            tokens.append(SourceLocalOverlayToken(
+                range: NSRange(location: nameStart, length: nameEnd - nameStart),
+                syntaxID: .declarationOther
+            ))
+            location = nameEnd
+        }
+
         return tokens
     }
 

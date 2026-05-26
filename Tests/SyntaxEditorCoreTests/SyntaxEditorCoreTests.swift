@@ -6049,6 +6049,12 @@ struct SyntaxHighlighterEngineTests {
             language: .css,
             inOccurrenceOf: "to {"
         )
+        let nestedKeyframesNameIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "spin",
+            inOccurrenceOf: "@keyframes spin"
+        )
         let buttonKeyword = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
@@ -6076,6 +6082,8 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(fromKeyword.styleKeys.first == "editor.syntax.keyword")
         #expect(toKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(nestedKeyframesNameIDs.contains(.declarationOther) == false)
+        #expect(nestedKeyframesNameIDs.contains(.keyword) == false)
         #expect(buttonKeyword.styleKeys.first == "editor.syntax.keyword")
         #expect(hoverKeyword.styleKeys.first == "editor.syntax.keyword")
         #expect(afterKeyword.styleKeys.first == "editor.syntax.keyword")
@@ -6452,6 +6460,22 @@ struct SyntaxHighlighterEngineTests {
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
 
+        let incompleteContainerAtRule = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@container",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@container sidebar"
+        )
+        let incompleteContainerName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "sidebar",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@container sidebar"
+        )
         let secondBlockGridSelector = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
@@ -6469,6 +6493,8 @@ struct SyntaxHighlighterEngineTests {
             inOccurrenceOf: "display: grid"
         )
 
+        #expect(incompleteContainerAtRule.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(incompleteContainerName.styleKeys.first == "editor.syntax.declaration.other")
         #expect(secondBlockGridSelector.styleKeys.first == "editor.syntax.declaration.other")
         #expect(displayKeyword.styleKeys.first == "editor.syntax.keyword")
         #expect(tokens.allSatisfy { $0.range.length > 0 })

@@ -31,7 +31,6 @@
   "@supports"
   "@keyframes"
 ] @editor.syntax.css.declaration.other
-(keyframes_name) @editor.syntax.css.declaration.other
 
 ; BEGIN GENERATED EDITOR SYNTAX WORDS: css-keywords
 [
