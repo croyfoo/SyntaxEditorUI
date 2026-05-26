@@ -426,15 +426,14 @@ enum CSSSyntaxOverlayTokenProvider {
 
             let numberStart = location
             let character = source.character(at: location)
-            if isIdentifierUnitCharacter(character), !isDigit(character), character != ascii(".") {
+            if isCSSNumberStart(at: location, upperBound: upperBound, source: source) {
+                if character == ascii("+") || character == ascii("-") {
+                    location += 1
+                }
+                location = locationAfterNumberStarting(at: location, upperBound: upperBound, source: source)
+            } else if isIdentifierUnitCharacter(character) {
                 location = locationAfterIdentifierUnitRunStarting(at: location, upperBound: upperBound, source: source)
                 continue
-            } else if isDigit(character) {
-                location = locationAfterNumberStarting(at: location, upperBound: upperBound, source: source)
-            } else if character == ascii("."),
-                      location + 1 < upperBound,
-                      isDigit(source.character(at: location + 1)) {
-                location = locationAfterNumberStarting(at: location, upperBound: upperBound, source: source)
             } else {
                 location += 1
                 continue
@@ -525,6 +524,39 @@ enum CSSSyntaxOverlayTokenProvider {
         }
 
         return tokens
+    }
+
+    private static func isCSSNumberStart(
+        at location: Int,
+        upperBound: Int,
+        source: NSString
+    ) -> Bool {
+        let character = source.character(at: location)
+        if isDigit(character) {
+            return true
+        }
+        if character == ascii(".") {
+            return location + 1 < upperBound && isDigit(source.character(at: location + 1))
+        }
+        if character == ascii("+") || character == ascii("-") {
+            return location + 1 < upperBound
+                && isUnsignedCSSNumberStart(at: location + 1, upperBound: upperBound, source: source)
+        }
+        return false
+    }
+
+    private static func isUnsignedCSSNumberStart(
+        at location: Int,
+        upperBound: Int,
+        source: NSString
+    ) -> Bool {
+        let character = source.character(at: location)
+        if isDigit(character) {
+            return true
+        }
+        return character == ascii(".")
+            && location + 1 < upperBound
+            && isDigit(source.character(at: location + 1))
     }
 
     private static func locationAfterNumberStarting(

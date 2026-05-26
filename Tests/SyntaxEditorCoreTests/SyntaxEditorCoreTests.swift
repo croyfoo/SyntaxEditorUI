@@ -6098,6 +6098,9 @@ struct SyntaxHighlighterEngineTests {
         @container side_bar (width > 10px) {
             .panel { display: grid; }
         }
+        @container signed (width > +10px) and style(margin-left: -10px) {
+            .signed { display: grid; }
+        }
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
 
@@ -6207,6 +6210,30 @@ struct SyntaxHighlighterEngineTests {
             language: .css,
             inOccurrenceOf: ".panel {"
         )
+        let signedPositiveNumber = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "+10",
+            syntaxID: .number,
+            language: .css,
+            inOccurrenceOf: "+10px"
+        )
+        let signedNegativeNumber = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "-10",
+            syntaxID: .number,
+            language: .css,
+            inOccurrenceOf: "-10px"
+        )
+        let signedContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "signed",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".signed {"
+        )
 
         #expect(containerAtRule.styleKeys.first == "editor.syntax.declaration.other")
         #expect(queryNumber.styleKeys.first == "editor.syntax.number")
@@ -6220,6 +6247,9 @@ struct SyntaxHighlighterEngineTests {
         #expect(combinedContainerSelector.styleKeys.first == "editor.syntax.plain")
         #expect(underscoredContainerName.styleKeys.first == "editor.syntax.declaration.other")
         #expect(underscoredContainerSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(signedPositiveNumber.styleKeys.first == "editor.syntax.number")
+        #expect(signedNegativeNumber.styleKeys.first == "editor.syntax.number")
+        #expect(signedContainerSelector.styleKeys.first == "editor.syntax.plain")
         #expect(containerNameDigitIDs.contains(.number) == false)
         #expect(customPropertyKeywordIDs.contains(.keyword) == false)
         let selectorIDs = syntaxIDs(
