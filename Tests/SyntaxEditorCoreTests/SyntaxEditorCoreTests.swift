@@ -6023,10 +6023,10 @@ struct SyntaxHighlighterEngineTests {
     func highlighterKeepsModernCSSAtRulesHighlighted() async throws {
         let engine = sharedSyntaxHighlighterEngine
         let source = """
-        @layer reset;
-        @scope (.root) { .x { color: red; } }
+        @layer components { .layered { color: red; } }
+        @scope (.root) { .scoped { color: red; } }
         @property --x { syntax: "<color>"; }
-        @starting-style { .x { opacity: 0; } }
+        @starting-style { .starting { opacity: 0; } }
         @unknown value;
         @font-face { font-family: system-ui; }
         @page { margin: 0; }
@@ -6057,6 +6057,23 @@ struct SyntaxHighlighterEngineTests {
                 inOccurrenceOf: atRule
             )
             #expect(snapshot.styleKeys.first == "editor.syntax.keyword")
+        }
+
+        for testCase in [
+            (text: "layered", containingText: ".layered {"),
+            (text: "root", containingText: "@scope (.root)"),
+            (text: "scoped", containingText: ".scoped {"),
+            (text: "starting", containingText: ".starting {"),
+        ] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: testCase.text,
+                syntaxID: .plain,
+                language: .css,
+                inOccurrenceOf: testCase.containingText
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.plain")
         }
         #expect(tokens.allSatisfy { $0.range.length > 0 })
     }

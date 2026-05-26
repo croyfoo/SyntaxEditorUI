@@ -155,7 +155,8 @@ enum CSSSyntaxOverlayTokenProvider {
                 continue
             }
 
-            guard matchesConditionalAtRule(at: location, in: source),
+            guard matchesConditionalAtRule(at: location, in: source)
+                    || matchesSelectorGroupingAtRule(at: location, in: source),
                   let blockOpen = findBlockOpen(after: location, in: source),
                   let scan = collectNestedSelectorRanges(inBlockOpenedAt: blockOpen, source: source)
             else {
@@ -163,6 +164,14 @@ enum CSSSyntaxOverlayTokenProvider {
                 continue
             }
 
+            if matchesScopeAtRule(at: location, in: source),
+               let preludeRange = trimmedRange(
+                   location: min(location + ("@scope" as NSString).length, source.length),
+                   upperBound: blockOpen,
+                   in: source
+               ) {
+                ranges.append(preludeRange)
+            }
             ranges.append(contentsOf: scan.ranges)
             location = scan.endLocation
         }
