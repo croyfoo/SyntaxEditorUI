@@ -26,7 +26,7 @@
 (declaration (plain_value) @editor.syntax.css.plain)
 (arguments (plain_value) @editor.syntax.css.plain)
 
-(at_keyword) @editor.syntax.css.plain
+(at_keyword) @editor.syntax.css.declaration.other
 [
   "@supports"
   "@keyframes"

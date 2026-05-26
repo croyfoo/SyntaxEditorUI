@@ -6019,6 +6019,43 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.allSatisfy { $0.range.length > 0 })
     }
 
+    @Test("SyntaxHighlighterEngine keeps modern CSS at-rules highlighted")
+    func highlighterKeepsModernCSSAtRulesHighlighted() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        @layer reset;
+        @scope (.root) { .x { color: red; } }
+        @property --x { syntax: "<color>"; }
+        @starting-style { .x { opacity: 0; } }
+        @unknown value;
+        @media (min-width: 1px) { body { color: red; } }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        for atRule in ["@layer", "@scope", "@property", "@starting-style", "@unknown"] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: atRule,
+                syntaxID: .declarationOther,
+                language: .css,
+                inOccurrenceOf: atRule
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
+        }
+
+        let mediaAtRule = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@media",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "@media"
+        )
+        #expect(mediaAtRule.styleKeys.first == "editor.syntax.keyword")
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
     @Test("SyntaxHighlighterEngine preserves CSS keyframe keywords inside conditional at-rules")
     func highlighterPreservesCSSKeyframeKeywordsInsideConditionalAtRules() async throws {
         let engine = sharedSyntaxHighlighterEngine
