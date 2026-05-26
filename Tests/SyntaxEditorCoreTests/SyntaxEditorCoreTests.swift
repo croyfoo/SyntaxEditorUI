@@ -6676,6 +6676,18 @@ struct SyntaxHighlighterEngineTests {
             return (self.name).length;
         }
         @end
+
+        NS_ASSUME_NONNULL_BEGIN
+        NS_SWIFT_NAME(InlineSample)
+        typedef NS_ENUM(NSInteger, SampleState) {
+            SampleStateIdle,
+        };
+        typedef NS_OPTIONS(NSUInteger, SampleOptions) {
+            SampleOptionEnabled = 1 << 0,
+        };
+        NSString *macroText = @"NS_ENUM";
+        // NS_OPTIONS(CommentedOut)
+        NS_ASSUME_NONNULL_END
         """
 
         let tokens = await engine.render(source: source, language: SyntaxLanguage.objectiveC)
@@ -6693,7 +6705,8 @@ struct SyntaxHighlighterEngineTests {
             range: propertyDeclarationRange
         )
         let dictionaryStringRange = nsSource.range(of: "@\"objc\"")
-        let typedefRange = nsSource.range(of: "typedef")
+        let blockTypedefDeclarationRange = nsSource.range(of: "typedef void (^ReferenceCompletion)")
+        let typedefRange = nsSource.range(of: "typedef", options: [], range: blockTypedefDeclarationRange)
         let idRange = nsSource.range(of: "id object")
         let selectorRange = nsSource.range(of: "SEL")
         let commentRange = nsSource.range(of: "// comment")
@@ -6751,6 +6764,90 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "#define ReferenceLog(format, ...)"
         )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NS_ASSUME_NONNULL_BEGIN",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "NS_ASSUME_NONNULL_BEGIN"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NS_SWIFT_NAME",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "NS_SWIFT_NAME(InlineSample)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NS_ENUM",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_ENUM(NSInteger, SampleState)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "typedef",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_ENUM(NSInteger, SampleState)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "SampleState",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_ENUM(NSInteger, SampleState)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NS_OPTIONS",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_OPTIONS(NSUInteger, SampleOptions)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "typedef",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_OPTIONS(NSUInteger, SampleOptions)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "SampleOptions",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_OPTIONS(NSUInteger, SampleOptions)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NS_ASSUME_NONNULL_END",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "NS_ASSUME_NONNULL_END"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "NS_ENUM",
+            inOccurrenceOf: "@\"NS_ENUM\""
+        ).contains(.preprocessor) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "NS_OPTIONS",
+            inOccurrenceOf: "// NS_OPTIONS(CommentedOut)"
+        ).contains(.preprocessor) == false)
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
@@ -7588,8 +7685,84 @@ struct SyntaxHighlighterEngineTests {
     @Test("SyntaxHighlighterEngine aligns focused Objective-C reference tokens")
     func highlighterAlignsObjectiveCReferenceTokens() async throws {
         let engine = sharedSyntaxHighlighterEngine
+        let headerSource = try referenceSampleText(named: "Reference.h")
+        let headerTokens = await engine.render(source: headerSource, language: SyntaxLanguage.objectiveC)
         let source = try referenceSampleText(named: "Reference.m")
         let tokens = await engine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        #expect(headerTokens.isEmpty == false)
+        _ = try effectiveSemanticSnapshot(
+            in: headerTokens,
+            source: headerSource,
+            text: "NS_ASSUME_NONNULL_BEGIN",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "NS_ASSUME_NONNULL_BEGIN"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerTokens,
+            source: headerSource,
+            text: "NS_SWIFT_NAME",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "NS_SWIFT_NAME(ReferenceState)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerTokens,
+            source: headerSource,
+            text: "NS_ENUM",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_ENUM(NSInteger, REReferenceState)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerTokens,
+            source: headerSource,
+            text: "typedef",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_ENUM(NSInteger, REReferenceState)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerTokens,
+            source: headerSource,
+            text: "REReferenceState",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_ENUM(NSInteger, REReferenceState)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerTokens,
+            source: headerSource,
+            text: "NS_OPTIONS",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_OPTIONS(NSUInteger, REReferenceOptions)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerTokens,
+            source: headerSource,
+            text: "typedef",
+            syntaxID: .keyword,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_OPTIONS(NSUInteger, REReferenceOptions)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerTokens,
+            source: headerSource,
+            text: "REReferenceOptions",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef NS_OPTIONS(NSUInteger, REReferenceOptions)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerTokens,
+            source: headerSource,
+            text: "NS_ASSUME_NONNULL_END",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "NS_ASSUME_NONNULL_END"
+        )
 
         #expect(tokens.isEmpty == false)
         _ = try effectiveSemanticSnapshot(

@@ -13,6 +13,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         let baseTokens = objectiveCBaseTokens(from: tokens, source: nsSource)
         let index = ObjectiveCFileSymbolIndex(source: nsSource, tokens: baseTokens)
         let overlayTokens = semanticTokens(from: baseTokens, source: nsSource, index: index)
+            + appleMacroTokens(in: nsSource, baseTokens: baseTokens)
+            + appleEnumTypedefTokens(in: nsSource, baseTokens: baseTokens)
         guard overlayTokens.isEmpty == false else {
             return baseTokens
         }
@@ -39,6 +41,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
             let text = source.substring(with: token.range)
             guard isObjectiveCIdentifier(text) else {
+                continue
+            }
+
+            if appleMacroNames.contains(text) {
+                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .preprocessor))
                 continue
             }
 
@@ -81,6 +88,94 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         }
 
         return overlayTokens
+    }
+
+    private static func appleMacroTokens(
+        in source: NSString,
+        baseTokens: [SyntaxHighlightToken]
+    ) -> [SyntaxHighlightToken] {
+        let string = source as String
+        let fullRange = NSRange(location: 0, length: source.length)
+        let nonCodeRanges = nonCodeRanges(from: baseTokens, sourceLength: source.length)
+        return appleMacroRegex.matches(in: string, range: fullRange).compactMap { match in
+            let range = match.range
+            guard range.location != NSNotFound,
+                  range.length > 0,
+                  !rangeIntersectsSortedRanges(range, nonCodeRanges)
+            else {
+                return nil
+            }
+            return canonicalToken(range: range, syntaxID: .preprocessor)
+        }
+    }
+
+    private static func appleEnumTypedefTokens(
+        in source: NSString,
+        baseTokens: [SyntaxHighlightToken]
+    ) -> [SyntaxHighlightToken] {
+        let string = source as String
+        let fullRange = NSRange(location: 0, length: source.length)
+        let nonCodeRanges = nonCodeRanges(from: baseTokens, sourceLength: source.length)
+        var tokens: [SyntaxHighlightToken] = []
+        for match in appleEnumTypedefRegex.matches(in: string, range: fullRange) {
+            guard match.numberOfRanges == 5,
+                  !rangeIntersectsSortedRanges(match.range, nonCodeRanges)
+            else { continue }
+
+            let typedefRange = match.range(at: 1)
+            let macroRange = match.range(at: 2)
+            let declaredNameRange = match.range(at: 4)
+            guard typedefRange.location != NSNotFound,
+                  macroRange.location != NSNotFound,
+                  declaredNameRange.location != NSNotFound
+            else {
+                continue
+            }
+
+            tokens.append(canonicalToken(range: typedefRange, syntaxID: .keyword))
+            tokens.append(canonicalToken(range: macroRange, syntaxID: .preprocessor))
+            tokens.append(canonicalToken(range: declaredNameRange, syntaxID: .declarationType))
+        }
+        return tokens
+    }
+
+    private static func nonCodeRanges(
+        from tokens: [SyntaxHighlightToken],
+        sourceLength: Int
+    ) -> [NSRange] {
+        tokens.compactMap { token -> NSRange? in
+            guard token.language == .objectiveC || token.language == nil else {
+                return nil
+            }
+            switch token.syntaxID {
+            case .comment, .string, .character:
+                return SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: sourceLength)
+            default:
+                return nil
+            }
+        }.sorted { lhs, rhs in
+            if lhs.location != rhs.location {
+                return lhs.location < rhs.location
+            }
+            return lhs.length < rhs.length
+        }
+    }
+
+    private static func rangeIntersectsSortedRanges(_ range: NSRange, _ sortedRanges: [NSRange]) -> Bool {
+        var lower = 0
+        var upper = sortedRanges.count
+        while lower < upper {
+            let midpoint = (lower + upper) / 2
+            if sortedRanges[midpoint].upperBound <= range.location {
+                lower = midpoint + 1
+            } else {
+                upper = midpoint
+            }
+        }
+        guard lower < sortedRanges.count else {
+            return false
+        }
+        return SyntaxEditorRangeUtilities.intersection(of: range, and: sortedRanges[lower]).length > 0
     }
 
     private static func shouldTreatUnknownTypeAsProject(_ name: String) -> Bool {
@@ -865,6 +960,22 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     private static let objectiveCIdentifierRegex = try! NSRegularExpression(
         pattern: #"^[A-Za-z_][A-Za-z0-9_]*$"#
     )
+
+    private static let appleMacroRegex = try! NSRegularExpression(
+        pattern: #"\b(?:NS_ASSUME_NONNULL_BEGIN|NS_ASSUME_NONNULL_END|NS_SWIFT_NAME|NS_ENUM|NS_OPTIONS)\b"#
+    )
+
+    private static let appleEnumTypedefRegex = try! NSRegularExpression(
+        pattern: #"\b(typedef)\s+(NS_ENUM|NS_OPTIONS)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
+    )
+
+    private static let appleMacroNames: Set<String> = [
+        "NS_ASSUME_NONNULL_BEGIN",
+        "NS_ASSUME_NONNULL_END",
+        "NS_SWIFT_NAME",
+        "NS_ENUM",
+        "NS_OPTIONS",
+    ]
 
     private static func isObjectiveCIdentifierCharacter(_ character: Character) -> Bool {
         character == "_" || character.isLetter || character.isNumber
