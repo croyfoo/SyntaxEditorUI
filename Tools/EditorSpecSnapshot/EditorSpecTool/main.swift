@@ -641,7 +641,22 @@ private enum EditorSpecTool {
         source: String,
         includeText: Bool
     ) throws -> [XcodeRenderedTokenRecord] {
-        if sourceEditorClassificationSupports(language: options.language) {
+        if options.language.identifier == SyntaxLanguage.swift.identifier {
+            return try xcodeSwiftSemanticTokens(options: options, source: source, includeText: includeText)
+                .map { token in
+                    XcodeRenderedTokenRecord(
+                        range: token.range,
+                        text: token.text,
+                        syntaxID: token.syntaxID,
+                        nodeType: nil,
+                        tokenType: token.tokenType,
+                        tokenModifiers: token.tokenModifiers,
+                        color: token.color
+                    )
+                }
+        }
+
+        if options.language == .css {
             let classificationTokens = try xcodeClassificationTokens(
                 options: options,
                 source: source,
