@@ -184,7 +184,8 @@ enum CSSSyntaxOverlayTokenProvider {
                 in: $0,
                 source: source,
                 names: xcodeDeclarationSupportFunctions,
-                syntaxID: .declarationOther
+                syntaxID: .declarationOther,
+                skippingWhenAfterTopLevelNot: true
             )
             + keywordIdentifierTokens(in: $0, source: source)
         }
@@ -312,7 +313,10 @@ enum CSSSyntaxOverlayTokenProvider {
                 continue
             }
             let nameRange = NSRange(location: nameStart, length: nameEnd - nameStart)
-            if xcodeDeclarationPseudoClasses.contains(source.substring(with: nameRange).lowercased()) {
+            let name = source.substring(with: nameRange).lowercased()
+            if xcodeKeywordPseudoClasses.contains(name) {
+                tokens.append(SourceLocalOverlayToken(range: nameRange, syntaxID: .keyword))
+            } else if xcodeDeclarationPseudoClasses.contains(name) {
                 tokens.append(SourceLocalOverlayToken(range: nameRange, syntaxID: .declarationOther))
             }
             location = nameEnd
@@ -400,15 +404,30 @@ enum CSSSyntaxOverlayTokenProvider {
         in range: NSRange,
         source: NSString,
         names: Set<String>,
-        syntaxID: EditorSourceSyntaxID
+        syntaxID: EditorSourceSyntaxID,
+        skippingWhenAfterTopLevelNot: Bool = false
     ) -> [SourceLocalOverlayToken] {
         let upperBound = min(range.upperBound, source.length)
         var tokens: [SourceLocalOverlayToken] = []
         var location = max(0, range.location)
+        var parenthesisDepth = 0
+        var lastTopLevelIdentifier: String?
 
         while location < upperBound {
             if let skipLocation = locationAfterSkippingCommentOrString(at: location, in: source) {
                 location = min(skipLocation, upperBound)
+                continue
+            }
+
+            let character = source.character(at: location)
+            if character == ascii("(") {
+                parenthesisDepth += 1
+                location += 1
+                continue
+            }
+            if character == ascii(")") {
+                parenthesisDepth = max(0, parenthesisDepth - 1)
+                location += 1
                 continue
             }
 
@@ -424,12 +443,16 @@ enum CSSSyntaxOverlayTokenProvider {
             }
 
             let identifierRange = NSRange(location: identifierStart, length: location - identifierStart)
-            let identifier = source.substring(with: identifierRange)
+            let identifier = source.substring(with: identifierRange).lowercased()
             let nextLocation = locationAfterSkippingWhitespace(at: location, upperBound: upperBound, in: source)
-            if names.contains(identifier.lowercased()),
+            if names.contains(identifier),
                nextLocation < upperBound,
-               source.character(at: nextLocation) == ascii("(") {
+               source.character(at: nextLocation) == ascii("("),
+               !(skippingWhenAfterTopLevelNot && lastTopLevelIdentifier == "not") {
                 tokens.append(SourceLocalOverlayToken(range: identifierRange, syntaxID: syntaxID))
+            }
+            if parenthesisDepth == 0 {
+                lastTopLevelIdentifier = identifier
             }
         }
 
@@ -1192,6 +1215,10 @@ enum CSSSyntaxOverlayTokenProvider {
         "selector",
     ]
 
+    private static let xcodeKeywordPseudoClasses: Set<String> = [
+        "not",
+    ]
+
     private static let containerPreludeBooleanOperators: Set<String> = [
         "and",
         "not",
@@ -1203,7 +1230,6 @@ enum CSSSyntaxOverlayTokenProvider {
         "host",
         "host-context",
         "is",
-        "not",
         "where",
     ]
 

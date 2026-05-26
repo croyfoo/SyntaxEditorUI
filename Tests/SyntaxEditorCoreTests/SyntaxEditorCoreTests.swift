@@ -6481,6 +6481,9 @@ struct SyntaxHighlighterEngineTests {
         @supports selector(:has(img)) {
             .card { display: grid; }
         }
+        @supports not selector(:has(img)) {
+            .negated { display: grid; }
+        }
         @supports (display: grid) and (color: red) {
             .support-value { display: grid; }
         }
@@ -6506,6 +6509,7 @@ struct SyntaxHighlighterEngineTests {
             --foo: :not(.bar);
         }
         section:is(.hero) { color: red; }
+        section:not(.hidden) { color: red; }
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
 
@@ -6528,6 +6532,12 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "img",
             inOccurrenceOf: ":has(img)"
+        )
+        let negatedSupportsSelectorIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "selector",
+            inOccurrenceOf: "not selector"
         )
         let supportsDisplayKeyword = try effectiveSemanticSnapshot(
             in: tokens,
@@ -6641,11 +6651,21 @@ struct SyntaxHighlighterEngineTests {
             language: .css,
             inOccurrenceOf: "}\nsection:is"
         )
+        let topLevelNot = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "not",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "}\nsection:not"
+        )
 
         #expect(supportsSelector.styleKeys.first == "editor.syntax.declaration.other")
         #expect(supportsHasIDs.contains(.declarationOther) == false)
         #expect(supportsHasIDs.contains(.keyword) == false)
         #expect(supportsArgumentIDs.contains(.declarationOther) == false)
+        #expect(negatedSupportsSelectorIDs.contains(.declarationOther) == false)
+        #expect(negatedSupportsSelectorIDs.contains(.keyword) == false)
         #expect(supportsDisplayKeyword.styleKeys.first == "editor.syntax.keyword")
         #expect(supportsGridKeyword.styleKeys.first == "editor.syntax.keyword")
         #expect(supportsRedKeyword.styleKeys.first == "editor.syntax.keyword")
@@ -6663,6 +6683,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(uppercaseSupportsArgumentIDs.contains(.declarationOther) == false)
         #expect(valueNotIDs.contains(.declarationOther) == false)
         #expect(topLevelIs.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(topLevelNot.styleKeys.first == "editor.syntax.keyword")
         #expect(tokens.allSatisfy { $0.range.length > 0 })
     }
 
