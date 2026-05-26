@@ -73,6 +73,7 @@ enum CSSSyntaxOverlayTokenProvider {
                 preludeRanges: supportsPreludeRanges
             ) +
             atRuleDeclarationTokens(in: scanSource) +
+            namedAtRulePreludeDeclarationTokens(in: scanSource) +
             keyframesNameDeclarationTokens(in: scanSource) +
             containerAtRulePreludeTokens(
                 in: scanSource,
@@ -142,6 +143,43 @@ enum CSSSyntaxOverlayTokenProvider {
                 suppressWhenKeywordTokenExists: true
             ))
             location = nameEnd
+        }
+        return tokens
+    }
+
+    private static func namedAtRulePreludeDeclarationTokens(in source: NSString) -> [SourceLocalOverlayToken] {
+        var tokens: [SourceLocalOverlayToken] = []
+        var location = 0
+        while location < source.length {
+            if let skipLocation = locationAfterSkippingCommentOrString(at: location, in: source) {
+                location = skipLocation
+                continue
+            }
+
+            guard let keyword = namedAtRule(at: location, in: source) else {
+                location += 1
+                continue
+            }
+
+            let keywordEnd = min(location + (keyword as NSString).length, source.length)
+            let statementEnd = locationAfterStatement(at: location, in: source)
+            let blockOpen = findBlockOpen(after: location, in: source)
+            let preludeEnd = blockOpen.map { min($0, statementEnd) } ?? statementEnd
+            if keywordEnd < preludeEnd {
+                tokens.append(contentsOf: declarationIdentifierTokens(
+                    in: NSRange(location: keywordEnd, length: preludeEnd - keywordEnd),
+                    source: source,
+                    suppressWhenKeywordTokenExists: true
+                ))
+            }
+
+            if let blockOpen,
+               blockOpen < statementEnd,
+               let blockEnd = locationAfterBlock(openedAt: blockOpen, in: source) {
+                location = blockEnd
+            } else {
+                location = max(keywordEnd, statementEnd)
+            }
         }
         return tokens
     }
@@ -346,6 +384,40 @@ enum CSSSyntaxOverlayTokenProvider {
             tokens.append(SourceLocalOverlayToken(
                 range: identifierRange,
                 syntaxID: .declarationOther
+            ))
+        }
+
+        return tokens
+    }
+
+    private static func declarationIdentifierTokens(
+        in range: NSRange,
+        source: NSString,
+        suppressWhenKeywordTokenExists: Bool = false
+    ) -> [SourceLocalOverlayToken] {
+        let upperBound = min(range.upperBound, source.length)
+        var tokens: [SourceLocalOverlayToken] = []
+        var location = max(0, range.location)
+
+        while location < upperBound {
+            if let skipLocation = locationAfterSkippingCommentOrString(at: location, in: source) {
+                location = min(skipLocation, upperBound)
+                continue
+            }
+            guard isCSSIdentifierStart(at: location, upperBound: upperBound, source: source) else {
+                location += 1
+                continue
+            }
+
+            let identifierStart = location
+            location += 1
+            while location < upperBound, isIdentifierUnitCharacter(source.character(at: location)) {
+                location += 1
+            }
+            tokens.append(SourceLocalOverlayToken(
+                range: NSRange(location: identifierStart, length: location - identifierStart),
+                syntaxID: .declarationOther,
+                suppressWhenKeywordTokenExists: suppressWhenKeywordTokenExists
             ))
         }
 
@@ -1010,6 +1082,15 @@ enum CSSSyntaxOverlayTokenProvider {
         matches("@scope", at: location, in: source)
     }
 
+    private static func namedAtRule(at location: Int, in source: NSString) -> String? {
+        for keyword in namedAtRules {
+            if matches(keyword, at: location, in: source) {
+                return keyword
+            }
+        }
+        return nil
+    }
+
     private static func isAtRuleStart(at location: Int, in source: NSString) -> Bool {
         guard location >= 0,
               location + 1 < source.length,
@@ -1336,6 +1417,7 @@ enum CSSSyntaxOverlayTokenProvider {
         "max-width",
         "min-height",
         "min-width",
+        "not",
         "opacity",
         "padding",
         "repeat",
@@ -1365,6 +1447,11 @@ enum CSSSyntaxOverlayTokenProvider {
         "host-context",
         "is",
         "where",
+    ]
+
+    private static let namedAtRules = [
+        "@layer",
+        "@property",
     ]
 
     private struct SourceLocalOverlayToken {

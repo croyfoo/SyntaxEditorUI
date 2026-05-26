@@ -6047,6 +6047,21 @@ struct SyntaxHighlighterEngineTests {
             #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
         }
 
+        for testCase in [
+            (text: "components", containingText: "@layer components"),
+            (text: "--x", containingText: "@property --x"),
+        ] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: testCase.text,
+                syntaxID: .declarationOther,
+                language: .css,
+                inOccurrenceOf: testCase.containingText
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
+        }
+
         for atRule in ["@font-face", "@page", "@-webkit-keyframes", "@media"] {
             let snapshot = try effectiveSemanticSnapshot(
                 in: tokens,
@@ -6208,6 +6223,9 @@ struct SyntaxHighlighterEngineTests {
         @container signed (width > +10px) and style(margin-left: -10px) {
             .signed { display: grid; }
         }
+        @container not (width > 10px) {
+            .negated { display: grid; }
+        }
         @CONTAINER --sidebar (width > 10px) {
             .dash { display: grid; }
         }
@@ -6342,6 +6360,22 @@ struct SyntaxHighlighterEngineTests {
             language: .css,
             inOccurrenceOf: ".signed {"
         )
+        let negatedContainerNot = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "not",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "@container not"
+        )
+        let negatedContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "negated",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".negated {"
+        )
         let uppercaseContainerAtRule = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
@@ -6383,6 +6417,8 @@ struct SyntaxHighlighterEngineTests {
         #expect(signedPositiveNumber.styleKeys.first == "editor.syntax.number")
         #expect(signedNegativeNumber.styleKeys.first == "editor.syntax.number")
         #expect(signedContainerSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(negatedContainerNot.styleKeys.first == "editor.syntax.keyword")
+        #expect(negatedContainerSelector.styleKeys.first == "editor.syntax.plain")
         #expect(uppercaseContainerAtRule.styleKeys.first == "editor.syntax.declaration.other")
         #expect(hyphenatedContainerName.styleKeys.first == "editor.syntax.declaration.other")
         #expect(uppercaseContainerSelector.styleKeys.first == "editor.syntax.plain")
@@ -6664,6 +6700,14 @@ struct SyntaxHighlighterEngineTests {
             text: "selector",
             inOccurrenceOf: "not selector"
         )
+        let negatedSupportsNot = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "not",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "@supports not"
+        )
         let supportsDisplayKeyword = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
@@ -6791,6 +6835,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(supportsArgumentIDs.contains(.declarationOther) == false)
         #expect(negatedSupportsSelectorIDs.contains(.declarationOther) == false)
         #expect(negatedSupportsSelectorIDs.contains(.keyword) == false)
+        #expect(negatedSupportsNot.styleKeys.first == "editor.syntax.keyword")
         #expect(supportsDisplayKeyword.styleKeys.first == "editor.syntax.keyword")
         #expect(supportsGridKeyword.styleKeys.first == "editor.syntax.keyword")
         #expect(supportsRedKeyword.styleKeys.first == "editor.syntax.keyword")
