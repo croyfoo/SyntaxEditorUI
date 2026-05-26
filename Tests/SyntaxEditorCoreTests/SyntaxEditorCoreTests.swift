@@ -6028,6 +6028,9 @@ struct SyntaxHighlighterEngineTests {
         @property --x { syntax: "<color>"; }
         @starting-style { .x { opacity: 0; } }
         @unknown value;
+        @font-face { font-family: system-ui; }
+        @page { margin: 0; }
+        @-webkit-keyframes fade { from { opacity: 0; } }
         @media (min-width: 1px) { body { color: red; } }
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
@@ -6044,15 +6047,57 @@ struct SyntaxHighlighterEngineTests {
             #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
         }
 
-        let mediaAtRule = try effectiveSemanticSnapshot(
+        for atRule in ["@font-face", "@page", "@-webkit-keyframes", "@media"] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: atRule,
+                syntaxID: .keyword,
+                language: .css,
+                inOccurrenceOf: atRule
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.keyword")
+        }
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps keyword-valued CSS keyframe names as keywords")
+    func highlighterKeepsKeywordValuedCSSKeyframeNamesAsKeywords() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        @keyframes color {
+            from { opacity: 0; }
+        }
+        @keyframes move {
+            to { opacity: 1; }
+        }
+        @keyframes reveal {
+            from { opacity: 0; }
+        }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        for name in ["color", "move"] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: name,
+                syntaxID: .keyword,
+                language: .css,
+                inOccurrenceOf: "@keyframes \(name)"
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.keyword")
+        }
+
+        let revealName = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
-            text: "@media",
-            syntaxID: .keyword,
+            text: "reveal",
+            syntaxID: .declarationOther,
             language: .css,
-            inOccurrenceOf: "@media"
+            inOccurrenceOf: "@keyframes reveal"
         )
-        #expect(mediaAtRule.styleKeys.first == "editor.syntax.keyword")
+        #expect(revealName.styleKeys.first == "editor.syntax.declaration.other")
         #expect(tokens.allSatisfy { $0.range.length > 0 })
     }
 

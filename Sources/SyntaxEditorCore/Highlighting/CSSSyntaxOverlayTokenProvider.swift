@@ -16,7 +16,17 @@ enum CSSSyntaxOverlayTokenProvider {
         }
         let nestedSelectorRanges = sourceLocalOverlayContexts.flatMap(\.nestedSelectorRanges)
         let pseudoFunctionArgumentRanges = sourceLocalOverlayContexts.flatMap(\.pseudoFunctionArgumentRanges)
-        let sourceLocalOverlayTokens = sourceLocalOverlayContexts.flatMap(\.tokens)
+        let keywordTokenRanges = tokens
+            .filter { $0.language == .css && $0.syntaxID == .keyword }
+            .map(\.range)
+        let sourceLocalOverlayTokens = sourceLocalOverlayContexts
+            .flatMap(\.tokens)
+            .filter {
+                !isSourceLocalOverlayTokenSuppressedByKeyword(
+                    $0,
+                    keywordTokenRanges: keywordTokenRanges
+                )
+            }
         let baseTokens = tokens.filter { token in
             !isCSSSourceLocalOverlayToken(token)
                 && !isBasePlainTokenCoveredBySourceLocalOverlay(
@@ -62,6 +72,7 @@ enum CSSSyntaxOverlayTokenProvider {
                 in: scanSource,
                 preludeRanges: supportsPreludeRanges
             ) +
+            atRuleDeclarationTokens(in: scanSource) +
             keyframesNameDeclarationTokens(in: scanSource) +
             containerAtRulePreludeTokens(
                 in: scanSource,
@@ -105,6 +116,34 @@ enum CSSSyntaxOverlayTokenProvider {
             maskedSource.replaceCharacters(in: range, with: source.substring(with: range))
         }
         return maskedSource
+    }
+
+    private static func atRuleDeclarationTokens(in source: NSString) -> [SourceLocalOverlayToken] {
+        var tokens: [SourceLocalOverlayToken] = []
+        var location = 0
+        while location < source.length {
+            if let skipLocation = locationAfterSkippingCommentOrString(at: location, in: source) {
+                location = skipLocation
+                continue
+            }
+
+            guard isAtRuleStart(at: location, in: source) else {
+                location += 1
+                continue
+            }
+
+            var nameEnd = location + 2
+            while nameEnd < source.length, isIdentifierUnitCharacter(source.character(at: nameEnd)) {
+                nameEnd += 1
+            }
+            tokens.append(SourceLocalOverlayToken(
+                range: NSRange(location: location, length: nameEnd - location),
+                syntaxID: .declarationOther,
+                suppressWhenKeywordTokenExists: true
+            ))
+            location = nameEnd
+        }
+        return tokens
     }
 
     private static func conditionalAtRuleNestedSelectorRanges(in source: NSString) -> [NSRange] {
@@ -222,7 +261,8 @@ enum CSSSyntaxOverlayTokenProvider {
             }
             tokens.append(SourceLocalOverlayToken(
                 range: NSRange(location: nameStart, length: nameEnd - nameStart),
-                syntaxID: .declarationOther
+                syntaxID: .declarationOther,
+                suppressWhenKeywordTokenExists: true
             ))
             location = nameEnd
         }
@@ -906,6 +946,16 @@ enum CSSSyntaxOverlayTokenProvider {
             && token.rawCaptureName == sourceLocalOverlayRawCaptureName(syntaxID: token.syntaxID)
     }
 
+    private static func isSourceLocalOverlayTokenSuppressedByKeyword(
+        _ token: SourceLocalOverlayToken,
+        keywordTokenRanges: [NSRange]
+    ) -> Bool {
+        guard token.suppressWhenKeywordTokenExists else {
+            return false
+        }
+        return keywordTokenRanges.contains { $0 == token.range }
+    }
+
     private static func isBasePlainTokenCoveredBySourceLocalOverlay(
         _ token: SyntaxHighlightToken,
         overlayTokens: [SourceLocalOverlayToken]
@@ -949,6 +999,26 @@ enum CSSSyntaxOverlayTokenProvider {
 
     private static func matchesScopeAtRule(at location: Int, in source: NSString) -> Bool {
         matches("@scope", at: location, in: source)
+    }
+
+    private static func isAtRuleStart(at location: Int, in source: NSString) -> Bool {
+        guard location >= 0,
+              location + 1 < source.length,
+              source.character(at: location) == ascii("@")
+        else {
+            return false
+        }
+        if location > 0 {
+            let previous = source.character(at: location - 1)
+            guard isWhitespace(previous)
+                || previous == ascii("{")
+                || previous == ascii("}")
+                || previous == ascii(";")
+            else {
+                return false
+            }
+        }
+        return isCSSIdentifierStart(at: location + 1, upperBound: source.length, source: source)
     }
 
     private static func matches(_ keyword: String, at location: Int, in source: NSString) -> Bool {
@@ -1291,6 +1361,17 @@ enum CSSSyntaxOverlayTokenProvider {
     private struct SourceLocalOverlayToken {
         let range: NSRange
         let syntaxID: EditorSourceSyntaxID
+        let suppressWhenKeywordTokenExists: Bool
+
+        init(
+            range: NSRange,
+            syntaxID: EditorSourceSyntaxID,
+            suppressWhenKeywordTokenExists: Bool = false
+        ) {
+            self.range = range
+            self.syntaxID = syntaxID
+            self.suppressWhenKeywordTokenExists = suppressWhenKeywordTokenExists
+        }
     }
 
     private struct SourceLocalOverlayContext {

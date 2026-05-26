@@ -299,6 +299,7 @@ def generated_block_body(name: str, languages: dict[str, dict[str, Any]]) -> str
                 "  (property_name)",
                 "  (feature_name)",
                 "  (function_name)",
+                "  (keyframes_name)",
                 "  (unit)",
                 "  (at_keyword)",
                 "  (tag_name)",
