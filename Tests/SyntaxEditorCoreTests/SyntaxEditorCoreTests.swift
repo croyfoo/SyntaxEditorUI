@@ -6494,7 +6494,7 @@ struct SyntaxHighlighterEngineTests {
                 .scoped { display: grid; }
             }
         }
-        @supports selector(:HAS(img)) {
+        @supports SELECTOR(:HAS(img)) {
             .upper { display: grid; }
         }
         .value {
@@ -6554,11 +6554,27 @@ struct SyntaxHighlighterEngineTests {
             language: .css,
             inOccurrenceOf: ".scoped {"
         )
+        let scopePreludeSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "root",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: "@scope (.root)"
+        )
+        let uppercaseSupportsSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "SELECTOR",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@supports SELECTOR"
+        )
         let uppercaseSupportsHasIDs = syntaxIDs(
             in: tokens,
             source: source,
             text: "HAS",
-            inOccurrenceOf: "selector(:HAS"
+            inOccurrenceOf: "SELECTOR(:HAS"
         )
         let uppercaseSupportsArgumentIDs = syntaxIDs(
             in: tokens,
@@ -6590,6 +6606,8 @@ struct SyntaxHighlighterEngineTests {
         #expect(uppercaseMediaSelector.styleKeys.first == "editor.syntax.plain")
         #expect(layeredSelector.styleKeys.first == "editor.syntax.plain")
         #expect(scopedSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(scopePreludeSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(uppercaseSupportsSelector.styleKeys.first == "editor.syntax.declaration.other")
         #expect(uppercaseSupportsHasIDs.contains(.declarationOther) == false)
         #expect(uppercaseSupportsHasIDs.contains(.keyword) == false)
         #expect(uppercaseSupportsArgumentIDs.contains(.declarationOther) == false)

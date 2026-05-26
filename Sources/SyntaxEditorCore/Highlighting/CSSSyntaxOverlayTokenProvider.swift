@@ -419,7 +419,7 @@ enum CSSSyntaxOverlayTokenProvider {
             let identifierRange = NSRange(location: identifierStart, length: location - identifierStart)
             let identifier = source.substring(with: identifierRange)
             let nextLocation = locationAfterSkippingWhitespace(at: location, upperBound: upperBound, in: source)
-            if names.contains(identifier),
+            if names.contains(identifier.lowercased()),
                nextLocation < upperBound,
                source.character(at: nextLocation) == ascii("(") {
                 tokens.append(SourceLocalOverlayToken(range: identifierRange, syntaxID: syntaxID))
@@ -701,6 +701,14 @@ enum CSSSyntaxOverlayTokenProvider {
                     location = nestedScan.endLocation
                 } else if matchesSelectorGroupingAtRule(at: location, in: source),
                           let nestedScan = collectNestedSelectorRanges(inBlockOpenedAt: nestedOpen, source: source) {
+                    if matchesScopeAtRule(at: location, in: source),
+                       let preludeRange = trimmedRange(
+                           location: min(location + ("@scope" as NSString).length, source.length),
+                           upperBound: nestedOpen,
+                           in: source
+                       ) {
+                        ranges.append(preludeRange)
+                    }
                     ranges.append(contentsOf: nestedScan.ranges)
                     location = nestedScan.endLocation
                 } else {
@@ -786,6 +794,10 @@ enum CSSSyntaxOverlayTokenProvider {
             || matches("@layer", at: location, in: source)
             || matches("@scope", at: location, in: source)
             || matches("@starting-style", at: location, in: source)
+    }
+
+    private static func matchesScopeAtRule(at location: Int, in source: NSString) -> Bool {
+        matches("@scope", at: location, in: source)
     }
 
     private static func matches(_ keyword: String, at location: Int, in source: NSString) -> Bool {
