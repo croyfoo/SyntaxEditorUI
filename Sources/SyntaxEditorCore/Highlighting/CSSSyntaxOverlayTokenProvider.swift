@@ -11,31 +11,12 @@ enum CSSSyntaxOverlayTokenProvider {
             requestedScanningRanges,
             sourceUTF16Length: nsSource.length
         )
-        let scanSource = sourceForScanning(in: nsSource, scanningRanges: scanningRanges)
-        let nestedSelectorRanges = conditionalAtRuleNestedSelectorRanges(in: scanSource)
-            .filter { rangeIntersectsAny($0, scanningRanges) }
-        let supportsPreludeRanges = atRulePreludeRanges(keyword: "@supports", in: scanSource)
-            .filter { rangeIntersectsAny($0, scanningRanges) }
-        let pseudoFunctionArgumentRanges = pseudoClassArgumentRanges(in: scanSource)
-            .filter { rangeIntersectsAny($0, scanningRanges) }
-        let sourceLocalOverlayTokens = (
-            nestedSelectorRanges.map {
-                SourceLocalOverlayToken(range: $0, syntaxID: .plain)
-            } +
-            supportsAtRulePreludeTokens(
-                in: scanSource,
-                preludeRanges: supportsPreludeRanges
-            ) +
-            containerAtRulePreludeTokens(
-                in: scanSource,
-                excluding: nestedSelectorRanges
-            ) +
-            pseudoClassDeclarationTokens(
-                in: scanSource,
-                excluding: supportsPreludeRanges + nestedSelectorRanges
-            )
-        )
-        .filter { rangeIntersectsAny($0.range, scanningRanges) }
+        let sourceLocalOverlayContexts = scanningRanges.map {
+            sourceLocalOverlayContext(in: nsSource, scanningRange: $0)
+        }
+        let nestedSelectorRanges = sourceLocalOverlayContexts.flatMap(\.nestedSelectorRanges)
+        let pseudoFunctionArgumentRanges = sourceLocalOverlayContexts.flatMap(\.pseudoFunctionArgumentRanges)
+        let sourceLocalOverlayTokens = sourceLocalOverlayContexts.flatMap(\.tokens)
         let baseTokens = tokens.filter { token in
             !isCSSSourceLocalOverlayToken(token)
                 && !isBasePlainTokenCoveredBySourceLocalOverlay(
@@ -60,6 +41,43 @@ enum CSSSyntaxOverlayTokenProvider {
         }
 
         return deduplicated((baseTokens + overlayTokens).sorted(by: SyntaxHighlightTokenOrdering.displayOrder))
+    }
+
+    private static func sourceLocalOverlayContext(
+        in source: NSString,
+        scanningRange: NSRange
+    ) -> SourceLocalOverlayContext {
+        let scanSource = sourceForScanning(in: source, scanningRanges: [scanningRange])
+        let nestedSelectorRanges = conditionalAtRuleNestedSelectorRanges(in: scanSource)
+            .filter { rangesIntersect($0, scanningRange) }
+        let supportsPreludeRanges = atRulePreludeRanges(keyword: "@supports", in: scanSource)
+            .filter { rangesIntersect($0, scanningRange) }
+        let pseudoFunctionArgumentRanges = pseudoClassArgumentRanges(in: scanSource)
+            .filter { rangesIntersect($0, scanningRange) }
+        let tokens = (
+            nestedSelectorRanges.map {
+                SourceLocalOverlayToken(range: $0, syntaxID: .plain)
+            } +
+            supportsAtRulePreludeTokens(
+                in: scanSource,
+                preludeRanges: supportsPreludeRanges
+            ) +
+            containerAtRulePreludeTokens(
+                in: scanSource,
+                excluding: nestedSelectorRanges
+            ) +
+            pseudoClassDeclarationTokens(
+                in: scanSource,
+                excluding: supportsPreludeRanges + nestedSelectorRanges
+            )
+        )
+        .filter { rangesIntersect($0.range, scanningRange) }
+
+        return SourceLocalOverlayContext(
+            tokens: tokens,
+            nestedSelectorRanges: nestedSelectorRanges,
+            pseudoFunctionArgumentRanges: pseudoFunctionArgumentRanges
+        )
     }
 
     private static func normalizedScanningRanges(
@@ -866,12 +884,6 @@ enum CSSSyntaxOverlayTokenProvider {
         max(lhs.location, rhs.location) < min(lhs.upperBound, rhs.upperBound)
     }
 
-    private static func rangeIntersectsAny(_ range: NSRange, _ ranges: [NSRange]) -> Bool {
-        ranges.contains {
-            rangesIntersect(range, $0)
-        }
-    }
-
     private static func canonicalToken(
         range: NSRange,
         syntaxID: EditorSourceSyntaxID
@@ -970,6 +982,12 @@ enum CSSSyntaxOverlayTokenProvider {
     private struct SourceLocalOverlayToken {
         let range: NSRange
         let syntaxID: EditorSourceSyntaxID
+    }
+
+    private struct SourceLocalOverlayContext {
+        let tokens: [SourceLocalOverlayToken]
+        let nestedSelectorRanges: [NSRange]
+        let pseudoFunctionArgumentRanges: [NSRange]
     }
 
     private struct TokenKey: Hashable {

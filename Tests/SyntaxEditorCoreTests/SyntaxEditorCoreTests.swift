@@ -6363,6 +6363,37 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.allSatisfy { $0.range.length > 0 })
     }
 
+    @Test("SyntaxHighlighterEngine keeps separate HTML style blocks isolated for CSS overlays")
+    func highlighterKeepsSeparateHTMLStyleBlocksIsolatedForCSSOverlays() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        <style>@container sidebar</style>
+        <style>.grid { display: grid; }</style>
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
+
+        let secondBlockGridSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "grid",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: ".grid {"
+        )
+        let displayKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "display",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "display: grid"
+        )
+
+        #expect(secondBlockGridSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(displayKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
     @Test("SyntaxHighlighterEngine scopes CSS pseudo-function declaration overlays")
     func highlighterScopesCSSPseudoFunctionDeclarationOverlays() async throws {
         let engine = sharedSyntaxHighlighterEngine
