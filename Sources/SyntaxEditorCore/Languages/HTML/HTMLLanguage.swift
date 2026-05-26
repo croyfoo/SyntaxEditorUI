@@ -1857,4 +1857,51 @@ extension HTMLLanguage {
 
         return mutableSource as String
     }
+
+    static func embeddedCSSRawTextRanges(in source: String) -> [NSRange] {
+        let nsSource = source as NSString
+        var ranges: [NSRange] = []
+        var cursor = 0
+
+        while let startTag = nextRawTextStartTag(in: nsSource, from: cursor) {
+            let contentStart = NSMaxRange(startTag.range)
+            let startTagText = nsSource.substring(with: startTag.range)
+            let embeddedLanguage: SyntaxLanguage?
+            switch startTag.name {
+            case "script":
+                embeddedLanguage = scriptEmbeddedLanguage(forStartTagText: startTagText)
+            case "style":
+                embeddedLanguage = styleEmbeddedLanguage(forStartTagText: startTagText)
+            default:
+                embeddedLanguage = nil
+            }
+
+            let contentEnd: Int
+            if let embeddedLanguage {
+                contentEnd = rawTextClosingTagStart(
+                    in: nsSource,
+                    rawTextElementName: startTag.name,
+                    searchFrom: contentStart,
+                    embeddedLanguage: embeddedLanguage
+                ) ?? nsSource.length
+            } else {
+                contentEnd = rawTextClosingTagStart(
+                    in: nsSource,
+                    rawTextElementName: startTag.name,
+                    from: contentStart
+                ) ?? nsSource.length
+            }
+
+            if embeddedLanguage == .css, contentEnd > contentStart {
+                ranges.append(NSRange(location: contentStart, length: contentEnd - contentStart))
+            }
+            if contentEnd == nsSource.length {
+                break
+            }
+
+            cursor = contentEnd + 2
+        }
+
+        return ranges
+    }
 }

@@ -64,9 +64,13 @@ let package = Package(
                 .unsafeFlags([
                     "-F", "/Applications/Xcode.app/Contents/SharedFrameworks",
                     "-framework", "SourceEditor",
+                    "-framework", "SourceModel",
+                    "-framework", "SourceModelSupport",
                     "-framework", "SymbolCache",
                     "-framework", "SymbolCacheIndexing",
                     "-framework", "SymbolCacheSupport",
+                    "/Applications/Xcode.app/Contents/SharedFrameworks/SourceModel.framework/Versions/A/SourceModel",
+                    "/Applications/Xcode.app/Contents/SharedFrameworks/SourceModelSupport.framework/Versions/A/SourceModelSupport",
                     "/Applications/Xcode.app/Contents/SharedFrameworks/SymbolCache.framework/Versions/A/SymbolCache",
                     "/Applications/Xcode.app/Contents/SharedFrameworks/SymbolCacheIndexing.framework/Versions/A/SymbolCacheIndexing",
                     "/Applications/Xcode.app/Contents/SharedFrameworks/SymbolCacheSupport.framework/Versions/A/SymbolCacheSupport",

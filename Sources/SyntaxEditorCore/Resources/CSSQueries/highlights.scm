@@ -14,24 +14,23 @@
     (id_name) @editor.syntax.css.declaration.other))
 (namespace_name) @editor.syntax.css.declaration.other
 
-(property_name) @editor.syntax.css.identifier
-(feature_name) @editor.syntax.css.identifier
-(attribute_name) @editor.syntax.css.identifier
+(property_name) @editor.syntax.css.plain
+(feature_name) @editor.syntax.css.plain
+(attribute_name) @editor.syntax.css.plain
 
 (attribute_selector (string_value) @editor.syntax.css.string)
 (attribute_selector (plain_value) @editor.syntax.css.string)
 
-(function_name) @editor.syntax.css.identifier
+(function_name) @editor.syntax.css.plain
 
-(declaration (plain_value) @editor.syntax.css.identifier)
-(arguments (plain_value) @editor.syntax.css.identifier)
+(declaration (plain_value) @editor.syntax.css.plain)
+(arguments (plain_value) @editor.syntax.css.plain)
 
-(at_keyword) @editor.syntax.css.identifier
+(at_keyword) @editor.syntax.css.plain
 [
   "@supports"
   "@keyframes"
 ] @editor.syntax.css.declaration.other
-(keyframes_name) @editor.syntax.css.identifier
 
 ; BEGIN GENERATED EDITOR SYNTAX WORDS: css-keywords
 [
@@ -44,6 +43,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -184,6 +184,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -324,6 +325,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -464,6 +466,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -604,6 +607,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -744,6 +748,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -884,6 +889,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -1024,6 +1030,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -1164,6 +1171,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -1304,6 +1312,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -1444,6 +1453,7 @@
   (property_name)
   (feature_name)
   (function_name)
+  (keyframes_name)
   (unit)
   (at_keyword)
   (tag_name)
@@ -6822,8 +6832,8 @@
 (color_value) @editor.syntax.css.number
 (integer_value) @editor.syntax.css.number
 (float_value) @editor.syntax.css.number
-((unit) @editor.syntax.css.identifier
- (#match? @editor.syntax.css.identifier "^[A-Za-z][A-Za-z0-9-]*$"))
+((unit) @editor.syntax.css.plain
+ (#match? @editor.syntax.css.plain "^[A-Za-z][A-Za-z0-9-]*$"))
 
 [
   "~"

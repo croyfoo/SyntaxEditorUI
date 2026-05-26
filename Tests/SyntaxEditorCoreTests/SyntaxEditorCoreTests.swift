@@ -5829,17 +5829,19 @@ struct SyntaxHighlighterEngineTests {
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
         let theme = SyntaxEditorColorTheme.default.resolved(for: .css, appearance: .dark)
 
-        let selectorCases: [(text: String, containingText: String)] = [
+        let selectorDeclarationCases: [(text: String, containingText: String)] = [
             ("body", "body {"),
-            ("page", ".page"),
             ("hero", "#hero"),
             ("nav", #"nav a[aria-current="page"]"#),
             ("a", #"nav a[aria-current="page"]"#),
             ("main", "main > section"),
             ("section", "main > section"),
-            ("grid", ".grid {"),
+            ("is", "section:is"),
+            ("@supports", "@supports (backdrop-filter"),
+            ("@keyframes", "@keyframes reveal"),
+            ("reveal", "@keyframes reveal"),
         ]
-        for testCase in selectorCases {
+        for testCase in selectorDeclarationCases {
             let snapshot = try effectiveSemanticSnapshot(
                 in: tokens,
                 source: source,
@@ -5851,13 +5853,14 @@ struct SyntaxHighlighterEngineTests {
             #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
         }
 
-        let pseudoSelectorArgumentCases: [(text: String, containingText: String)] = [
+        let plainSelectorCases: [(text: String, containingText: String)] = [
             ("root", ":root"),
-            ("is", "section:is"),
             ("hero", "section:is(.hero"),
-            ("summary", ".summary)"),
+            ("summary", ".summary"),
+            ("nav", "@supports (backdrop-filter: blur(12px)) {\n    nav"),
+            ("grid", ".grid {"),
         ]
-        for testCase in pseudoSelectorArgumentCases {
+        for testCase in plainSelectorCases {
             let ids = syntaxIDs(
                 in: tokens,
                 source: source,
@@ -5868,7 +5871,7 @@ struct SyntaxHighlighterEngineTests {
             #expect(ids.contains(.keyword) == false)
         }
 
-        let identifierCases: [(text: String, containingText: String)] = [
+        let plainValueCases: [(text: String, containingText: String)] = [
             ("color-scheme", "color-scheme: light dark"),
             ("--brand-accent", "--brand-accent: #007aff"),
             ("linear-gradient", "linear-gradient(135deg"),
@@ -5883,36 +5886,19 @@ struct SyntaxHighlighterEngineTests {
             ("minmax", "minmax(180px"),
             ("vh", "100vh"),
             ("fr", "1fr"),
-            ("reveal", "@keyframes reveal"),
             ("aria-current", #"nav a[aria-current="page"]"#),
         ]
-        for testCase in identifierCases {
+        for testCase in plainValueCases {
             let snapshot = try effectiveSemanticSnapshot(
                 in: tokens,
                 source: source,
                 text: testCase.text,
-                syntaxID: .identifier,
+                syntaxID: .plain,
                 language: .css,
                 inOccurrenceOf: testCase.containingText
             )
-            #expect(snapshot.styleKeys.first == "editor.syntax.identifier")
+            #expect(snapshot.styleKeys.first == "editor.syntax.plain")
             #expect(snapshot.resolvedStyle.foreground == theme.base.foreground)
-        }
-
-        let declarationOtherCases: [(text: String, containingText: String)] = [
-            ("@supports", "@supports (backdrop-filter"),
-            ("@keyframes", "@keyframes reveal"),
-        ]
-        for testCase in declarationOtherCases {
-            let snapshot = try effectiveSemanticSnapshot(
-                in: tokens,
-                source: source,
-                text: testCase.text,
-                syntaxID: .declarationOther,
-                language: .css,
-                inOccurrenceOf: testCase.containingText
-            )
-            #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
         }
 
         let keywordCases: [(text: String, containingText: String)] = [
@@ -5920,6 +5906,8 @@ struct SyntaxHighlighterEngineTests {
             ("min-height", "min-height: 100vh"),
             ("color", "color: #1d1d1f"),
             ("background", "background: linear-gradient"),
+            ("max-width", "max-width: 760px"),
+            ("padding", "padding: 24px"),
             ("border-color", "border-color: rgba"),
             ("content", "content: \"Open\""),
             ("opacity", "opacity: 0.86"),
@@ -6012,7 +6000,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "fr",
-            syntaxID: .identifier,
+            syntaxID: .plain,
             language: .css,
             inOccurrenceOf: "1fr"
         )
@@ -6026,9 +6014,876 @@ struct SyntaxHighlighterEngineTests {
         )
 
         #expect(attributeValue.styleKeys.first == "editor.syntax.string")
-        #expect(fractionalUnit.styleKeys.first == "editor.syntax.identifier")
+        #expect(fractionalUnit.styleKeys.first == "editor.syntax.plain")
         #expect(pixelUnit.styleKeys.first == "editor.syntax.keyword")
         #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps modern CSS at-rules highlighted")
+    func highlighterKeepsModernCSSAtRulesHighlighted() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        @layer components { .layered { color: red; } }
+        @scope (.root) { .scoped { color: red; } }
+        @property --x { syntax: "<color>"; }
+        @starting-style { .starting { opacity: 0; } }
+        @unknown value;
+        @font-face { font-family: system-ui; }
+        @page { margin: 0; }
+        @-webkit-keyframes fade { from { opacity: 0; } }
+        @media (min-width: 1px) { body { color: red; } }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        for atRule in ["@layer", "@scope", "@property", "@starting-style", "@unknown"] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: atRule,
+                syntaxID: .declarationOther,
+                language: .css,
+                inOccurrenceOf: atRule
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
+        }
+
+        for testCase in [
+            (text: "components", containingText: "@layer components"),
+            (text: "--x", containingText: "@property --x"),
+        ] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: testCase.text,
+                syntaxID: .declarationOther,
+                language: .css,
+                inOccurrenceOf: testCase.containingText
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.declaration.other")
+        }
+
+        for atRule in ["@font-face", "@page", "@-webkit-keyframes", "@media"] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: atRule,
+                syntaxID: .keyword,
+                language: .css,
+                inOccurrenceOf: atRule
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.keyword")
+        }
+
+        for testCase in [
+            (text: "layered", containingText: ".layered {"),
+            (text: "root", containingText: "@scope (.root)"),
+            (text: "scoped", containingText: ".scoped {"),
+            (text: "starting", containingText: ".starting {"),
+        ] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: testCase.text,
+                syntaxID: .plain,
+                language: .css,
+                inOccurrenceOf: testCase.containingText
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.plain")
+        }
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps keyword-valued CSS keyframe names as keywords")
+    func highlighterKeepsKeywordValuedCSSKeyframeNamesAsKeywords() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        @keyframes color {
+            from { opacity: 0; }
+        }
+        @keyframes move {
+            to { opacity: 1; }
+        }
+        @keyframes reveal {
+            from { opacity: 0; }
+        }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        for name in ["color", "move"] {
+            let snapshot = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: name,
+                syntaxID: .keyword,
+                language: .css,
+                inOccurrenceOf: "@keyframes \(name)"
+            )
+            #expect(snapshot.styleKeys.first == "editor.syntax.keyword")
+        }
+
+        let revealName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "reveal",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@keyframes reveal"
+        )
+        #expect(revealName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine preserves CSS keyframe keywords inside conditional at-rules")
+    func highlighterPreservesCSSKeyframeKeywordsInsideConditionalAtRules() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        @media (min-width: 720px) {
+            button:hover::after { content: "Open"; }
+            @keyframes spin {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+        }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        let fromKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "from",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "from {"
+        )
+        let toKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "to",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "to {"
+        )
+        let nestedKeyframesNameIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "spin",
+            inOccurrenceOf: "@keyframes spin"
+        )
+        let buttonKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "button",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "button:hover"
+        )
+        let hoverKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "hover",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "button:hover"
+        )
+        let afterKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "after",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "::after"
+        )
+
+        #expect(fromKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(toKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(nestedKeyframesNameIDs.contains(.declarationOther) == false)
+        #expect(nestedKeyframesNameIDs.contains(.keyword) == false)
+        #expect(buttonKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(hoverKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(afterKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine classifies CSS container query nested selectors like Xcode")
+    func highlighterClassifiesCSSContainerQueryNestedSelectorsLikeXcode() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        @container (width > 10px) {
+            .grid { display: grid; }
+        }
+        @container sidebar2 style(color: red) {
+            .card { --color: red; color: var(--color); }
+        }
+        @container card (width > 30em) AND style(color: red) {
+            .tile { color: red; }
+        }
+        @container side_bar (width > 10px) {
+            .panel { display: grid; }
+        }
+        @container signed (width > +10px) and style(margin-left: -10px) {
+            .signed { display: grid; }
+        }
+        @container not (width > 10px) {
+            .negated { display: grid; }
+        }
+        @CONTAINER --sidebar (width > 10px) {
+            .dash { display: grid; }
+        }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        let containerAtRule = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@container",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@container"
+        )
+        let queryNumber = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "10",
+            syntaxID: .number,
+            language: .css,
+            inOccurrenceOf: "10px"
+        )
+        let queryUnit = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "px",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "10px"
+        )
+        let containerName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "sidebar2",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "sidebar2 style"
+        )
+        let containerStyleQuery = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "style",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "style(color"
+        )
+        let gridSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "grid",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".grid {"
+        )
+        let customProperty = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "--color",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: "--color: red"
+        )
+        let containerNameDigitIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "2",
+            inOccurrenceOf: "sidebar2 style"
+        )
+        let customPropertyKeywordIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "color",
+            inOccurrenceOf: "--color: red"
+        )
+        let combinedContainerStyleQueryIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "style",
+            inOccurrenceOf: "AND style(color"
+        )
+        let combinedContainerOperatorIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "AND",
+            inOccurrenceOf: ") AND style"
+        )
+        let combinedContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "tile",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".tile {"
+        )
+        let underscoredContainerName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "side_bar",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "side_bar (width"
+        )
+        let underscoredContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "panel",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".panel {"
+        )
+        let signedPositiveNumber = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "+10",
+            syntaxID: .number,
+            language: .css,
+            inOccurrenceOf: "+10px"
+        )
+        let signedNegativeNumber = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "-10",
+            syntaxID: .number,
+            language: .css,
+            inOccurrenceOf: "-10px"
+        )
+        let signedContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "signed",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".signed {"
+        )
+        let negatedContainerNot = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "not",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "@container not"
+        )
+        let negatedContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "negated",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".negated {"
+        )
+        let uppercaseContainerAtRule = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@CONTAINER",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@CONTAINER"
+        )
+        let hyphenatedContainerName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "--sidebar",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "--sidebar (width"
+        )
+        let uppercaseContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "dash",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".dash {"
+        )
+
+        #expect(containerAtRule.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(queryNumber.styleKeys.first == "editor.syntax.number")
+        #expect(queryUnit.styleKeys.first == "editor.syntax.keyword")
+        #expect(containerName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(containerStyleQuery.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(gridSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(customProperty.styleKeys.first == "editor.syntax.plain")
+        #expect(combinedContainerStyleQueryIDs.contains(.declarationOther) == false)
+        #expect(combinedContainerStyleQueryIDs.contains(.keyword) == false)
+        #expect(combinedContainerOperatorIDs.contains(.declarationOther) == false)
+        #expect(combinedContainerSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(underscoredContainerName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(underscoredContainerSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(signedPositiveNumber.styleKeys.first == "editor.syntax.number")
+        #expect(signedNegativeNumber.styleKeys.first == "editor.syntax.number")
+        #expect(signedContainerSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(negatedContainerNot.styleKeys.first == "editor.syntax.keyword")
+        #expect(negatedContainerSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(uppercaseContainerAtRule.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(hyphenatedContainerName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(uppercaseContainerSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(containerNameDigitIDs.contains(.number) == false)
+        #expect(customPropertyKeywordIDs.contains(.keyword) == false)
+        let selectorIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "grid",
+            inOccurrenceOf: ".grid {"
+        )
+        #expect(selectorIDs.contains(.declarationOther) == false)
+        #expect(selectorIDs.contains(.keyword) == false)
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine treats CSS comments after conditional at-rules as whitespace")
+    func highlighterTreatsCSSCommentsAfterConditionalAtRulesAsWhitespace() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        @media/*x*/ (min-width: 1px) {
+            .grid { display: grid; }
+        }
+        @supports/*x*/ selector(:has(img)) {
+            .card { display: grid; }
+        }
+        @container/*x*/ sidebar style(color: red) {
+            .panel { display: grid; }
+        }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        let mediaGridSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "grid",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".grid {"
+        )
+        let supportsSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "selector",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@supports/*x*/ selector"
+        )
+        let containerAtRule = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@container",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@container/*x*/"
+        )
+        let containerName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "sidebar",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "sidebar style"
+        )
+        let containerPanelSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "panel",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".panel {"
+        )
+
+        #expect(mediaGridSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(supportsSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(containerAtRule.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(containerName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(containerPanelSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine applies CSS source-local overlays inside HTML style blocks")
+    func highlighterAppliesCSSSourceLocalOverlaysInsideHTMLStyleBlocks() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        <style>
+        @container (width > 10px) {
+            .grid { --color: red; display: grid; }
+        }
+        </style>
+        <div data-note="@container (width > 10px)"></div>
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
+        let nsSource = source as NSString
+        let embeddedContainerStart = nsSource.range(of: "@container (width")
+        #expect(embeddedContainerStart.location != NSNotFound)
+        let embeddedContainerRange = NSRange(
+            location: embeddedContainerStart.location,
+            length: ("@container" as NSString).length
+        )
+
+        let embeddedContainer = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@container",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@container (width"
+        )
+        let embeddedGridSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "grid",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".grid {"
+        )
+        let embeddedCustomProperty = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "--color",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: "--color: red"
+        )
+        let attributeContainerIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "@container",
+            inOccurrenceOf: "data-note=\"@container"
+        )
+
+        #expect(embeddedContainer.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(embeddedGridSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(embeddedCustomProperty.styleKeys.first == "editor.syntax.plain")
+        #expect(tokens.contains {
+            tokenIntersects($0, range: embeddedContainerRange, syntaxID: .declarationOther, language: .css)
+        })
+        #expect(attributeContainerIDs.contains(.declarationOther) == false)
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps HTML text from driving embedded CSS source-local overlays")
+    func highlighterConstrainsCSSSourceLocalOverlayScanningToHTMLStyleBlocks() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        <div>@container {
+        <style>
+        .grid { display: grid; }
+        </style>
+        }</div>
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
+
+        let topLevelGridSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "grid",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: ".grid {"
+        )
+
+        #expect(topLevelGridSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps separate HTML style blocks isolated for CSS overlays")
+    func highlighterKeepsSeparateHTMLStyleBlocksIsolatedForCSSOverlays() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        <style>@container sidebar</style>
+        <style>.grid { display: grid; }</style>
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.html)
+
+        let incompleteContainerAtRule = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@container",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@container sidebar"
+        )
+        let incompleteContainerName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "sidebar",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@container sidebar"
+        )
+        let secondBlockGridSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "grid",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: ".grid {"
+        )
+        let displayKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "display",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "display: grid"
+        )
+
+        #expect(incompleteContainerAtRule.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(incompleteContainerName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(secondBlockGridSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(displayKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine scopes CSS pseudo-function declaration overlays")
+    func highlighterScopesCSSPseudoFunctionDeclarationOverlays() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        @supports selector(:has(img)) {
+            .card { display: grid; }
+        }
+        @supports not selector(:has(img)) {
+            .negated { display: grid; }
+        }
+        @supports (display: grid) and (color: red) {
+            .support-value { display: grid; }
+        }
+        @media (min-width: 1px) {
+            section:is(.hero) { color: red; }
+        }
+        @MEDIA (min-width: 1px) {
+            .caps { display: grid; }
+            .parent {
+                .child { display: grid; }
+            }
+            @layer components {
+                .layered { display: grid; }
+            }
+            @scope (.root) {
+                .scoped { display: grid; }
+            }
+        }
+        @supports SELECTOR(:HAS(img)) {
+            .upper { display: grid; }
+        }
+        .value {
+            --foo: :not(.bar);
+        }
+        section:is(.hero) { color: red; }
+        section:not(.hidden) { color: red; }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        let supportsSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "selector",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@supports selector"
+        )
+        let supportsHasIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "has",
+            inOccurrenceOf: "selector(:has"
+        )
+        let supportsArgumentIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "img",
+            inOccurrenceOf: ":has(img)"
+        )
+        let negatedSupportsSelectorIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "selector",
+            inOccurrenceOf: "not selector"
+        )
+        let negatedSupportsNot = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "not",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "@supports not"
+        )
+        let supportsDisplayKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "display",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "(display: grid)"
+        )
+        let supportsGridKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "grid",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "(display: grid)"
+        )
+        let supportsRedKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "red",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "(color: red)"
+        )
+        let mediaIsIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "is",
+            inOccurrenceOf: "@media (min-width: 1px) {\n    section:is"
+        )
+        let uppercaseMediaSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "caps",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".caps {"
+        )
+        let nestedParentSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "parent",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".parent {"
+        )
+        let nestedChildSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "child",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".child {"
+        )
+        let layeredSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "layered",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".layered {"
+        )
+        let scopedSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "scoped",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".scoped {"
+        )
+        let scopePreludeSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "root",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: "@scope (.root)"
+        )
+        let uppercaseSupportsSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "SELECTOR",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@supports SELECTOR"
+        )
+        let uppercaseSupportsHasIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "HAS",
+            inOccurrenceOf: "SELECTOR(:HAS"
+        )
+        let uppercaseSupportsArgumentIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "img",
+            inOccurrenceOf: ":HAS(img)"
+        )
+        let valueNotIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "not",
+            inOccurrenceOf: "--foo: :not"
+        )
+        let topLevelIs = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "is",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "}\nsection:is"
+        )
+        let topLevelNot = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "not",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "}\nsection:not"
+        )
+
+        #expect(supportsSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(supportsHasIDs.contains(.declarationOther) == false)
+        #expect(supportsHasIDs.contains(.keyword) == false)
+        #expect(supportsArgumentIDs.contains(.declarationOther) == false)
+        #expect(negatedSupportsSelectorIDs.contains(.declarationOther) == false)
+        #expect(negatedSupportsSelectorIDs.contains(.keyword) == false)
+        #expect(negatedSupportsNot.styleKeys.first == "editor.syntax.keyword")
+        #expect(supportsDisplayKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(supportsGridKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(supportsRedKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(mediaIsIDs.contains(.declarationOther) == false)
+        #expect(mediaIsIDs.contains(.keyword) == false)
+        #expect(uppercaseMediaSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(nestedParentSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(nestedChildSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(layeredSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(scopedSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(scopePreludeSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(uppercaseSupportsSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(uppercaseSupportsHasIDs.contains(.declarationOther) == false)
+        #expect(uppercaseSupportsHasIDs.contains(.keyword) == false)
+        #expect(uppercaseSupportsArgumentIDs.contains(.declarationOther) == false)
+        #expect(valueNotIDs.contains(.declarationOther) == false)
+        #expect(topLevelIs.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(topLevelNot.styleKeys.first == "editor.syntax.keyword")
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale CSS conditional selector overlays after at-rule edits")
+    func highlighterStripsStaleCSSConditionalSelectorOverlaysAfterAtRuleEdits() async throws {
+        let source = """
+        @media (min-width: 720px) {
+            .grid { display: grid; }
+        }
+        """
+        let updatedSource = """
+        @layer (min-width: 720px) {
+            .grid { display: grid; }
+        }
+        """
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.css)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.css,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.css)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.allSatisfy { $0.range.length > 0 })
     }
 
     @Test("SyntaxHighlighterEngine emits semantic HTML and injected captures for the reference sample")
@@ -6100,7 +6955,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "--brand-accent",
-            syntaxID: "identifier",
+            syntaxID: "plain",
             language: .html
         )
         let embeddedJavaScript = try semanticSnapshot(
@@ -6120,7 +6975,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(embeddedCSSColor.styleKeys.first == "editor.syntax.number")
         #expect(embeddedCSSAttributeValue.text == "\"page\"")
         #expect(embeddedCSSAttributeValue.styleKeys.first == "editor.syntax.string")
-        #expect(embeddedCSS.styleKeys.first == "editor.syntax.identifier")
+        #expect(embeddedCSS.styleKeys.first == "editor.syntax.plain")
         #expect(embeddedJavaScript.styleKeys.first == "editor.syntax.keyword")
         let nsSource = source as NSString
         #expect(tokens.contains {
