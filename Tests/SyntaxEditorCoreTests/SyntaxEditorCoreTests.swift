@@ -6175,12 +6175,10 @@ struct SyntaxHighlighterEngineTests {
             text: "color",
             inOccurrenceOf: "--color: red"
         )
-        let combinedContainerStyleQuery = try effectiveSemanticSnapshot(
+        let combinedContainerStyleQueryIDs = syntaxIDs(
             in: tokens,
             source: source,
             text: "style",
-            syntaxID: .declarationOther,
-            language: .css,
             inOccurrenceOf: "AND style(color"
         )
         let combinedContainerOperatorIDs = syntaxIDs(
@@ -6269,7 +6267,8 @@ struct SyntaxHighlighterEngineTests {
         #expect(containerStyleQuery.styleKeys.first == "editor.syntax.declaration.other")
         #expect(gridSelector.styleKeys.first == "editor.syntax.plain")
         #expect(customProperty.styleKeys.first == "editor.syntax.plain")
-        #expect(combinedContainerStyleQuery.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(combinedContainerStyleQueryIDs.contains(.declarationOther) == false)
+        #expect(combinedContainerStyleQueryIDs.contains(.keyword) == false)
         #expect(combinedContainerOperatorIDs.contains(.declarationOther) == false)
         #expect(combinedContainerSelector.styleKeys.first == "editor.syntax.plain")
         #expect(underscoredContainerName.styleKeys.first == "editor.syntax.declaration.other")
@@ -6482,6 +6481,9 @@ struct SyntaxHighlighterEngineTests {
         @supports selector(:has(img)) {
             .card { display: grid; }
         }
+        @supports (display: grid) and (color: red) {
+            .support-value { display: grid; }
+        }
         @media (min-width: 1px) {
             section:is(.hero) { color: red; }
         }
@@ -6526,6 +6528,30 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "img",
             inOccurrenceOf: ":has(img)"
+        )
+        let supportsDisplayKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "display",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "(display: grid)"
+        )
+        let supportsGridKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "grid",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "(display: grid)"
+        )
+        let supportsRedKeyword = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "red",
+            syntaxID: .keyword,
+            language: .css,
+            inOccurrenceOf: "(color: red)"
         )
         let mediaIsIDs = syntaxIDs(
             in: tokens,
@@ -6620,6 +6646,9 @@ struct SyntaxHighlighterEngineTests {
         #expect(supportsHasIDs.contains(.declarationOther) == false)
         #expect(supportsHasIDs.contains(.keyword) == false)
         #expect(supportsArgumentIDs.contains(.declarationOther) == false)
+        #expect(supportsDisplayKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(supportsGridKeyword.styleKeys.first == "editor.syntax.keyword")
+        #expect(supportsRedKeyword.styleKeys.first == "editor.syntax.keyword")
         #expect(mediaIsIDs.contains(.declarationOther) == false)
         #expect(mediaIsIDs.contains(.keyword) == false)
         #expect(uppercaseMediaSelector.styleKeys.first == "editor.syntax.plain")

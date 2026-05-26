@@ -186,6 +186,7 @@ enum CSSSyntaxOverlayTokenProvider {
                 names: xcodeDeclarationSupportFunctions,
                 syntaxID: .declarationOther
             )
+            + keywordIdentifierTokens(in: $0, source: source)
         }
     }
 
@@ -197,6 +198,7 @@ enum CSSSyntaxOverlayTokenProvider {
         var tokens: [SourceLocalOverlayToken] = []
         var location = max(0, range.location)
         var parenthesisDepth = 0
+        var hasSeenBooleanOperator = false
 
         while location < upperBound {
             if let skipLocation = locationAfterSkippingCommentOrString(at: location, in: source) {
@@ -228,7 +230,12 @@ enum CSSSyntaxOverlayTokenProvider {
                 location += 1
             }
             let identifierRange = NSRange(location: identifierStart, length: location - identifierStart)
-            guard !containerPreludeBooleanOperators.contains(source.substring(with: identifierRange).lowercased()) else {
+            let identifier = source.substring(with: identifierRange).lowercased()
+            guard !containerPreludeBooleanOperators.contains(identifier) else {
+                hasSeenBooleanOperator = true
+                continue
+            }
+            guard !hasSeenBooleanOperator else {
                 continue
             }
             tokens.append(SourceLocalOverlayToken(
