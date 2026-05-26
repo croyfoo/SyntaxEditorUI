@@ -6092,6 +6092,9 @@ struct SyntaxHighlighterEngineTests {
         @container sidebar2 style(color: red) {
             .card { --color: red; color: var(--color); }
         }
+        @container card (width > 30em) and style(color: red) {
+            .tile { color: red; }
+        }
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
 
@@ -6163,6 +6166,28 @@ struct SyntaxHighlighterEngineTests {
             text: "color",
             inOccurrenceOf: "--color: red"
         )
+        let combinedContainerStyleQuery = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "style",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "and style(color"
+        )
+        let combinedContainerOperatorIDs = syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "and",
+            inOccurrenceOf: ") and style"
+        )
+        let combinedContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "tile",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".tile {"
+        )
 
         #expect(containerAtRule.styleKeys.first == "editor.syntax.declaration.other")
         #expect(queryNumber.styleKeys.first == "editor.syntax.number")
@@ -6171,6 +6196,9 @@ struct SyntaxHighlighterEngineTests {
         #expect(containerStyleQuery.styleKeys.first == "editor.syntax.declaration.other")
         #expect(gridSelector.styleKeys.first == "editor.syntax.plain")
         #expect(customProperty.styleKeys.first == "editor.syntax.plain")
+        #expect(combinedContainerStyleQuery.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(combinedContainerOperatorIDs.contains(.declarationOther) == false)
+        #expect(combinedContainerSelector.styleKeys.first == "editor.syntax.plain")
         #expect(containerNameDigitIDs.contains(.number) == false)
         #expect(customPropertyKeywordIDs.contains(.keyword) == false)
         let selectorIDs = syntaxIDs(
@@ -6181,6 +6209,71 @@ struct SyntaxHighlighterEngineTests {
         )
         #expect(selectorIDs.contains(.declarationOther) == false)
         #expect(selectorIDs.contains(.keyword) == false)
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    @Test("SyntaxHighlighterEngine treats CSS comments after conditional at-rules as whitespace")
+    func highlighterTreatsCSSCommentsAfterConditionalAtRulesAsWhitespace() async throws {
+        let engine = sharedSyntaxHighlighterEngine
+        let source = """
+        @media/*x*/ (min-width: 1px) {
+            .grid { display: grid; }
+        }
+        @supports/*x*/ selector(:has(img)) {
+            .card { display: grid; }
+        }
+        @container/*x*/ sidebar style(color: red) {
+            .panel { display: grid; }
+        }
+        """
+        let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
+
+        let mediaGridSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "grid",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".grid {"
+        )
+        let supportsSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "selector",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@supports/*x*/ selector"
+        )
+        let containerAtRule = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@container",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "@container/*x*/"
+        )
+        let containerName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "sidebar",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "sidebar style"
+        )
+        let containerPanelSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "panel",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".panel {"
+        )
+
+        #expect(mediaGridSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(supportsSelector.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(containerAtRule.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(containerName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(containerPanelSelector.styleKeys.first == "editor.syntax.plain")
         #expect(tokens.allSatisfy { $0.range.length > 0 })
     }
 

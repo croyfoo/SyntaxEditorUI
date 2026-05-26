@@ -178,7 +178,7 @@ enum CSSSyntaxOverlayTokenProvider {
         let upperBound = min(range.upperBound, source.length)
         var tokens: [SourceLocalOverlayToken] = []
         var location = max(0, range.location)
-        var isInsideCondition = false
+        var parenthesisDepth = 0
 
         while location < upperBound {
             if let skipLocation = locationAfterSkippingCommentOrString(at: location, in: source) {
@@ -188,11 +188,16 @@ enum CSSSyntaxOverlayTokenProvider {
 
             let character = source.character(at: location)
             if character == ascii("(") {
-                isInsideCondition = true
+                parenthesisDepth += 1
                 location += 1
                 continue
             }
-            guard !isInsideCondition,
+            if character == ascii(")") {
+                parenthesisDepth = max(0, parenthesisDepth - 1)
+                location += 1
+                continue
+            }
+            guard parenthesisDepth == 0,
                   isIdentifierStartCharacter(character)
             else {
                 location += 1
@@ -204,8 +209,12 @@ enum CSSSyntaxOverlayTokenProvider {
             while location < upperBound, isIdentifierUnitCharacter(source.character(at: location)) {
                 location += 1
             }
+            let identifierRange = NSRange(location: identifierStart, length: location - identifierStart)
+            guard !containerPreludeBooleanOperators.contains(source.substring(with: identifierRange)) else {
+                continue
+            }
             tokens.append(SourceLocalOverlayToken(
-                range: NSRange(location: identifierStart, length: location - identifierStart),
+                range: identifierRange,
                 syntaxID: .declarationOther
             ))
         }
@@ -648,7 +657,11 @@ enum CSSSyntaxOverlayTokenProvider {
         guard location + length < source.length else {
             return true
         }
-        let next = source.character(at: location + length)
+        let nextLocation = location + length
+        if locationAfterSkippingComment(at: nextLocation, in: source) != nil {
+            return true
+        }
+        let next = source.character(at: nextLocation)
         return isWhitespace(next) || next == ascii("(") || next == ascii("{")
     }
 
@@ -937,6 +950,12 @@ enum CSSSyntaxOverlayTokenProvider {
 
     private static let xcodeDeclarationSupportFunctions: Set<String> = [
         "selector",
+    ]
+
+    private static let containerPreludeBooleanOperators: Set<String> = [
+        "and",
+        "not",
+        "or",
     ]
 
     private static let xcodeDeclarationPseudoClasses: Set<String> = [
