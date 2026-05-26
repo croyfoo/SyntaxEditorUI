@@ -877,6 +877,7 @@ enum CSSSyntaxOverlayTokenProvider {
         (character >= ascii("A") && character <= ascii("Z"))
             || (character >= ascii("a") && character <= ascii("z"))
             || (character >= ascii("0") && character <= ascii("9"))
+            || character == ascii("_")
             || character == ascii("-")
     }
 

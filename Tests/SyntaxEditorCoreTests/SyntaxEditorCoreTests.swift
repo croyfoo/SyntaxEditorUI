@@ -6095,6 +6095,9 @@ struct SyntaxHighlighterEngineTests {
         @container card (width > 30em) and style(color: red) {
             .tile { color: red; }
         }
+        @container side_bar (width > 10px) {
+            .panel { display: grid; }
+        }
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
 
@@ -6188,6 +6191,22 @@ struct SyntaxHighlighterEngineTests {
             language: .css,
             inOccurrenceOf: ".tile {"
         )
+        let underscoredContainerName = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "side_bar",
+            syntaxID: .declarationOther,
+            language: .css,
+            inOccurrenceOf: "side_bar (width"
+        )
+        let underscoredContainerSelector = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "panel",
+            syntaxID: .plain,
+            language: .css,
+            inOccurrenceOf: ".panel {"
+        )
 
         #expect(containerAtRule.styleKeys.first == "editor.syntax.declaration.other")
         #expect(queryNumber.styleKeys.first == "editor.syntax.number")
@@ -6199,6 +6218,8 @@ struct SyntaxHighlighterEngineTests {
         #expect(combinedContainerStyleQuery.styleKeys.first == "editor.syntax.declaration.other")
         #expect(combinedContainerOperatorIDs.contains(.declarationOther) == false)
         #expect(combinedContainerSelector.styleKeys.first == "editor.syntax.plain")
+        #expect(underscoredContainerName.styleKeys.first == "editor.syntax.declaration.other")
+        #expect(underscoredContainerSelector.styleKeys.first == "editor.syntax.plain")
         #expect(containerNameDigitIDs.contains(.number) == false)
         #expect(customPropertyKeywordIDs.contains(.keyword) == false)
         let selectorIDs = syntaxIDs(
