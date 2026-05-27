@@ -296,7 +296,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             language: configuration.language,
             isEditable: configuration.isEditable,
             lineWrappingEnabled: configuration.lineWrappingEnabled,
-            colorTheme: configuration.colorTheme
+            colorTheme: configuration.colorTheme,
+            drawsBackground: configuration.drawsBackground
         )
         applyObservedDocumentChange()
     }
@@ -770,6 +771,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 isEditable: configuration.isEditable,
                 lineWrappingEnabled: configuration.lineWrappingEnabled,
                 colorTheme: configuration.colorTheme,
+                drawsBackground: configuration.drawsBackground,
                 forceLanguageRefresh: event.kind == .initial,
                 schedulesHighlight: event.kind != .initial || schedulesInitialHighlight
             )
@@ -855,6 +857,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         isEditable: Bool,
         lineWrappingEnabled: Bool,
         colorTheme: SyntaxEditorColorTheme,
+        drawsBackground: Bool,
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
@@ -868,7 +871,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             applyBaseForegroundColorChange(from: previousColorTheme, to: colorTheme)
         }
         lastAppliedColorTheme = colorTheme
-        updateEditorBackgroundColor()
+        updateEditorBackgroundColor(drawsBackground: drawsBackground)
 
         updateTextInteractions()
         applyLineWrappingConfiguration(lineWrappingEnabled: lineWrappingEnabled)
@@ -1796,7 +1799,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func updateEditorBackgroundColor() {
-        backgroundColor = resolvedSyntaxColor(resolvedColorTheme().background)
+        updateEditorBackgroundColor(drawsBackground: configuration.drawsBackground)
+    }
+
+    func updateEditorBackgroundColor(drawsBackground: Bool) {
+        let color = drawsBackground ? resolvedSyntaxColor(resolvedColorTheme().background) : .clear
+        isOpaque = drawsBackground && color.cgColor.alpha >= 1
+        backgroundColor = color
         textContentView.backgroundColor = backgroundColor
     }
 

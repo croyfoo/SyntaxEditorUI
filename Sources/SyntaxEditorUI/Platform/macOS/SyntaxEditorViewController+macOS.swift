@@ -251,7 +251,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             language: configuration.language,
             isEditable: configuration.isEditable,
             lineWrappingEnabled: configuration.lineWrappingEnabled,
-            colorTheme: configuration.colorTheme
+            colorTheme: configuration.colorTheme,
+            drawsBackground: configuration.drawsBackground
         )
         applyObservedDocumentChange()
     }
@@ -448,7 +449,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func configureScrollView() {
-        scrollView.drawsBackground = true
+        scrollView.drawsBackground = configuration.drawsBackground
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = !configuration.lineWrappingEnabled
@@ -520,6 +521,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
                 isEditable: configuration.isEditable,
                 lineWrappingEnabled: configuration.lineWrappingEnabled,
                 colorTheme: configuration.colorTheme,
+                drawsBackground: configuration.drawsBackground,
                 forceLanguageRefresh: event.kind == .initial,
                 schedulesHighlight: event.kind != .initial || schedulesInitialHighlight
             )
@@ -594,6 +596,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         isEditable: Bool,
         lineWrappingEnabled: Bool,
         colorTheme: SyntaxEditorColorTheme,
+        drawsBackground: Bool,
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
@@ -604,7 +607,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         }
         lastAppliedColorTheme = colorTheme
         updateTextViewFontAndTypingAttributes()
-        updateEditorBackgroundColor()
+        updateEditorBackgroundColor(drawsBackground: drawsBackground)
 
         if textView.isEditable != isEditable {
             textView.isEditable = isEditable
@@ -1274,7 +1277,12 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func updateEditorBackgroundColor() {
+        updateEditorBackgroundColor(drawsBackground: configuration.drawsBackground)
+    }
+
+    private func updateEditorBackgroundColor(drawsBackground: Bool) {
         let color = resolvedColorTheme().background
+        scrollView.drawsBackground = drawsBackground
         scrollView.backgroundColor = color
         textView.backgroundColor = color
     }

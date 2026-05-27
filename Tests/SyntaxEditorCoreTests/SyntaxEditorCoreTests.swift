@@ -396,11 +396,13 @@ struct SyntaxEditorCoreTests {
         #expect(configuration.isEditable == true)
         #expect(configuration.lineWrappingEnabled == false)
         #expect(configuration.colorTheme == .default)
+        #expect(configuration.drawsBackground == true)
 
         document.replaceText("body { color: red; }")
         configuration.language = SyntaxLanguage.css
         configuration.isEditable = false
         configuration.lineWrappingEnabled = true
+        configuration.drawsBackground = false
 
         #expect(document.textSnapshot() == "body { color: red; }")
         #expect(document.revision == 1)
@@ -408,6 +410,7 @@ struct SyntaxEditorCoreTests {
         #expect(configuration.isEditable == false)
         #expect(configuration.lineWrappingEnabled == true)
         #expect(configuration.colorTheme == .default)
+        #expect(configuration.drawsBackground == false)
     }
 
     @Test("SyntaxEditorDocument text snapshots participate in observation")

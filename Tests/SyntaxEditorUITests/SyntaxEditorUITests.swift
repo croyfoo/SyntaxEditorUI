@@ -116,14 +116,16 @@ private struct SyntaxEditorTestContext {
         language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .default
+        colorTheme: SyntaxEditorColorTheme = .default,
+        drawsBackground: Bool = true
     ) {
         self.document = SyntaxEditorDocument(text: text)
         self.configuration = SyntaxEditorConfiguration(
             language: language,
             isEditable: isEditable,
             lineWrappingEnabled: lineWrappingEnabled,
-            colorTheme: colorTheme
+            colorTheme: colorTheme,
+            drawsBackground: drawsBackground
         )
     }
 }
@@ -172,7 +174,8 @@ private func syntaxEditorUITestColorTheme(
     type: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x808182),
     constant: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x909192),
     variable: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xA0A1A2),
-    punctuation: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xB0B1B2)
+    punctuation: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xB0B1B2),
+    background: SyntaxEditorColor = .clear
 ) -> SyntaxEditorColorTheme {
     SyntaxEditorColorTheme(
         baseForeground: baseForeground,
@@ -185,7 +188,8 @@ private func syntaxEditorUITestColorTheme(
         type: type,
         constant: constant,
         variable: variable,
-        punctuation: punctuation
+        punctuation: punctuation,
+        background: background
     )
 }
 
@@ -1884,6 +1888,36 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
+    }
+
+    @Test("SyntaxEditorView reflects iOS background drawing configuration")
+    @MainActor
+    func syntaxEditorViewIOSDrawsBackgroundObservation() async {
+        let background = syntaxEditorUITestColor(hex: 0x112233)
+        let theme = syntaxEditorUITestColorTheme(background: background)
+        let model = SyntaxEditorTestContext(
+            text: "let value = 1",
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
+        guard let delivery = editorView.configurationDeliveryForTesting else {
+            Issue.record("Expected SyntaxEditorView to expose its production configuration delivery")
+            return
+        }
+        let clearsBackground = await delivery.values {
+            syntaxEditorUITestColorsEqual(editorView.backgroundColor, UIColor.clear)
+                && syntaxEditorUITestColorsEqual(editorView.textContentView.backgroundColor, UIColor.clear)
+                && editorView.isOpaque == false
+        }
+
+        #expect(syntaxEditorUITestColorsEqual(editorView.backgroundColor, background))
+        #expect(syntaxEditorUITestColorsEqual(editorView.textContentView.backgroundColor, background))
+        #expect(editorView.isOpaque)
+
+        model.configuration.drawsBackground = false
+
+        #expect(await clearsBackground.waitUntilValue(true))
     }
 
     @Test("SyntaxEditorView resets nested empty-style iOS tokens to the base theme")
@@ -5070,6 +5104,38 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
+    }
+
+    @Test("SyntaxEditorView reflects macOS background drawing configuration")
+    @MainActor
+    func syntaxEditorViewMacDrawsBackgroundObservation() async {
+        let background = syntaxEditorUITestColor(hex: 0x112233)
+        let theme = syntaxEditorUITestColorTheme(background: background)
+        let model = SyntaxEditorTestContext(
+            text: "let value = 1",
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
+        guard let delivery = editorView.configurationDeliveryForTesting else {
+            Issue.record("Expected SyntaxEditorView to expose its production configuration delivery")
+            return
+        }
+        let stopsDrawingBackground = await delivery.values {
+            editorView.drawsBackground == false
+                && editorView.textView.drawsBackground == false
+                && syntaxEditorUITestColorsEqual(editorView.backgroundColor, background)
+                && syntaxEditorUITestColorsEqual(editorView.textView.backgroundColor, background)
+        }
+
+        #expect(editorView.drawsBackground)
+        #expect(!editorView.textView.drawsBackground)
+        #expect(syntaxEditorUITestColorsEqual(editorView.backgroundColor, background))
+        #expect(syntaxEditorUITestColorsEqual(editorView.textView.backgroundColor, background))
+
+        model.configuration.drawsBackground = false
+
+        #expect(await stopsDrawingBackground.waitUntilValue(true))
     }
 
     @Test("SyntaxEditorView resets nested empty-style macOS tokens to the base theme")
