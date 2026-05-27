@@ -5524,6 +5524,62 @@ struct SyntaxEditorUITests {
         #expect(macEditorFont(editorView, at: middleLocation) != nil)
     }
 
+    @Test("SyntaxEditorView defers chunked macOS highlight when selection changes between chunks")
+    @MainActor
+    func syntaxEditorViewMacDefersChunkedHighlightWhenSelectionChangesBetweenChunks() async {
+        let fixture = syntaxEditorDenseHighlightFixture(tokenCount: 1_500)
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x102030),
+            comment: syntaxEditorUITestColor(hex: 0x305070),
+            string: syntaxEditorUITestColor(hex: 0x507030),
+            keyword: syntaxEditorUITestColor(hex: 0x703050)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(tokens: fixture.tokens)
+        let model = SyntaxEditorTestContext(
+            text: fixture.source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        let deferredLocation = 1_000
+        var didSelectDuringChunking = false
+        editorView.highlightChunkDidApplyForTesting = { [weak editorView] _ in
+            guard !didSelectDuringChunking,
+                  let editorView
+            else {
+                return
+            }
+            didSelectDuringChunking = true
+            editorView.textView.setSelectedRange(NSRange(location: 0, length: 1))
+            editorView.textViewDidChangeSelection(
+                Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+            )
+        }
+
+        await editorView.waitForPendingHighlightForTesting()
+        editorView.highlightChunkDidApplyForTesting = nil
+
+        #expect(didSelectDuringChunking)
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorForegroundColor(editorView, at: deferredLocation),
+                theme.baseForeground
+            )
+        )
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        editorView.textViewDidChangeSelection(
+            Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+        )
+
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorForegroundColor(editorView, at: deferredLocation),
+                syntaxEditorDenseHighlightColor(in: theme, at: deferredLocation)
+            )
+        )
+    }
+
     @Test("SyntaxEditorView preserves macOS non-syntax attributes while applying delayed highlight")
     @MainActor
     func syntaxEditorViewMacDelayedHighlightPreservesNonSyntaxAttributes() async {

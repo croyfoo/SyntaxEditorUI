@@ -241,6 +241,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     private let configurationObservations = ObservationScope()
     var documentDeliveryForTesting: ObservationDelivery?
     var configurationDeliveryForTesting: ObservationDelivery?
+    var highlightChunkDidApplyForTesting: ((Int) -> Void)?
 
     private var scrollView: NSScrollView { self }
 
@@ -1123,14 +1124,15 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             pendingHighlightApplication = nil
             return false
         }
+        let pendingApplication = PendingMacHighlightApplication(
+            tokens: tokens,
+            expectedRevision: expectedRevision,
+            source: expectedSource,
+            language: expectedLanguage,
+            refreshRange: refreshRange
+        )
         guard textView.selectedRange().length == 0 else {
-            pendingHighlightApplication = PendingMacHighlightApplication(
-                tokens: tokens,
-                expectedRevision: expectedRevision,
-                source: expectedSource,
-                language: expectedLanguage,
-                refreshRange: refreshRange
-            )
+            pendingHighlightApplication = pendingApplication
             clearMatchingBracketHighlight()
             return false
         }
@@ -1192,14 +1194,15 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             pendingHighlightApplication = nil
             return false
         }
+        let pendingApplication = PendingMacHighlightApplication(
+            tokens: tokens,
+            expectedRevision: expectedRevision,
+            source: expectedSource,
+            language: expectedLanguage,
+            refreshRange: refreshRange
+        )
         guard textView.selectedRange().length == 0 else {
-            pendingHighlightApplication = PendingMacHighlightApplication(
-                tokens: tokens,
-                expectedRevision: expectedRevision,
-                source: expectedSource,
-                language: expectedLanguage,
-                refreshRange: refreshRange
-            )
+            pendingHighlightApplication = pendingApplication
             clearMatchingBracketHighlight()
             return false
         }
@@ -1231,7 +1234,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             runs,
             targetRange: targetRange,
             baseAttributes: base,
-            expectedRevision: expectedRevision
+            expectedRevision: expectedRevision,
+            pendingApplication: pendingApplication
         ) else {
             return false
         }
@@ -1362,13 +1366,19 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         _ runs: [MacSyntaxHighlightAttributeRun],
         targetRange: NSRange,
         baseAttributes: [NSAttributedString.Key: Any],
-        expectedRevision: Int
+        expectedRevision: Int,
+        pendingApplication: PendingMacHighlightApplication
     ) async -> Bool {
         let chunkSize = 700
         var runIndex = 0
 
         while runIndex < runs.count || runIndex == 0 {
             guard !Task.isCancelled, document.revision == expectedRevision else {
+                return false
+            }
+            guard textView.selectedRange().length == 0 else {
+                pendingHighlightApplication = pendingApplication
+                clearMatchingBracketHighlight()
                 return false
             }
 
@@ -1388,6 +1398,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
                 return !Task.isCancelled && document.revision == expectedRevision
             }
 
+            highlightChunkDidApplyForTesting?(upperBound)
             runIndex = upperBound
             await Task.yield()
         }
