@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import ObservationBridge
 import SwiftUI
 import Testing
 @testable import SyntaxEditorUI
@@ -11,8 +12,6 @@ import UIKit
 #if canImport(AppKit)
 import AppKit
 #endif
-
-private func requireObservable<T: Observable>(_ value: T) {}
 
 @MainActor
 @Observable
@@ -127,6 +126,11 @@ private struct SyntaxEditorTestContext {
             colorTheme: colorTheme
         )
     }
+}
+
+private struct SyntaxEditorRenderedEditorState: Sendable, Equatable {
+    var isEditable: Bool
+    var wrapsLines: Bool
 }
 
 extension SyntaxEditorView {
@@ -994,17 +998,51 @@ struct SyntaxEditorUITests {
     }
 
 #if canImport(UIKit)
-    @Test("SyntaxEditorViewController preserves Observable conformance on iOS")
+    @Test("SyntaxEditorViewController renders source-of-truth state on iOS")
     @MainActor
-    func syntaxEditorViewControllerIOSObservableCompatibility() {
+    func syntaxEditorViewControllerIOSRendersSourceOfTruthState() async {
         let model = SyntaxEditorTestContext(text: "{}", language: SyntaxLanguage.javascript)
         let controller = SyntaxEditorViewController(testContext: model)
+        controller.loadViewIfNeeded()
 
-        requireObservable(controller)
         #expect(controller.document === model.document)
         #expect(controller.configuration === model.configuration)
         #expect(controller.editorView.document === model.document)
         #expect(controller.editorView.configuration === model.configuration)
+
+        guard let delivery = controller.editorView.documentDeliveryForTesting else {
+            Issue.record("Expected SyntaxEditorViewController to expose its production document delivery")
+            return
+        }
+        let renderedText = await delivery.values {
+            controller.editorView.text
+        }
+
+        #expect(await renderedText.waitUntilValue("{}"))
+
+        model.document.replaceText("{\"enabled\":true}")
+
+        #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
+
+        let originalEditorView = controller.editorView
+        let replacementDocument = SyntaxEditorDocument(text: "let replacement = true")
+        let replacementConfiguration = SyntaxEditorConfiguration(language: SyntaxLanguage.swift)
+
+        controller.update(document: replacementDocument, configuration: replacementConfiguration)
+
+        #expect(controller.editorView === originalEditorView)
+        #expect(controller.editorView.document === replacementDocument)
+        #expect(controller.editorView.configuration === replacementConfiguration)
+        #expect(delivery.isActive == false)
+
+        guard let replacementDelivery = controller.editorView.documentDeliveryForTesting else {
+            Issue.record("Expected replacement document delivery")
+            return
+        }
+        let replacementRenderedText = await replacementDelivery.values {
+            controller.editorView.text
+        }
+        #expect(await replacementRenderedText.waitUntilValue("let replacement = true"))
     }
 
     @Test("SyntaxEditorView is the iOS custom scroll text input surface")
@@ -1767,11 +1805,19 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewIOSTextObservation() async {
         let model = SyntaxEditorTestContext(text: "const answer = 42;", language: SyntaxLanguage.javascript)
         let editorView = SyntaxEditorView(testContext: model)
+        guard let delivery = editorView.documentDeliveryForTesting else {
+            Issue.record("Expected SyntaxEditorView to expose its production document delivery")
+            return
+        }
+        let renderedText = await delivery.values {
+            editorView.text
+        }
+
+        #expect(await renderedText.waitUntilValue("const answer = 42;"))
 
         model.document.replaceText("{\"enabled\":true}")
 
-        editorView.synchronizeDocumentForTesting()
-        #expect(editorView.text == "{\"enabled\":true}")
+        #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
     }
 
     @Test("SyntaxEditorView clamps iOS selection after setting shorter text")
@@ -2251,14 +2297,24 @@ struct SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: longIOSSyntaxEditorLine, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView)
+        guard let delivery = editorView.configurationDeliveryForTesting else {
+            Issue.record("Expected SyntaxEditorView to expose its production configuration delivery")
+            return
+        }
+        let renderedState = await delivery.values {
+            SyntaxEditorRenderedEditorState(
+                isEditable: editorView.isEditable,
+                wrapsLines: editorView.textContainer.widthTracksTextView
+            )
+        }
 
         model.configuration.isEditable = false
         model.configuration.lineWrappingEnabled = true
 
-        editorView.synchronizeDocumentForTesting()
         #expect(
-            editorView.isEditable == false
-                && editorView.textContainer.widthTracksTextView
+            await renderedState.waitUntilValue(
+                SyntaxEditorRenderedEditorState(isEditable: false, wrapsLines: true)
+            )
         )
         layoutIOSEditorView(editorView)
         #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
@@ -2267,8 +2323,11 @@ struct SyntaxEditorUITests {
 
         model.configuration.lineWrappingEnabled = false
 
-        editorView.synchronizeDocumentForTesting()
-        #expect(!editorView.textContainer.widthTracksTextView)
+        #expect(
+            await renderedState.waitUntilValue(
+                SyntaxEditorRenderedEditorState(isEditable: false, wrapsLines: false)
+            )
+        )
         layoutIOSEditorView(editorView)
         #expect(editorView.contentSize.width > editorView.bounds.width + 1)
         #expect(editorView.textContainer.size.width > editorView.bounds.width)
@@ -2279,8 +2338,17 @@ struct SyntaxEditorUITests {
 
         model.configuration.lineWrappingEnabled = true
 
-        editorView.synchronizeDocumentForTesting()
-        #expect(editorView.textContainer.widthTracksTextView)
+        let finalRenderedState = await delivery.values {
+            SyntaxEditorRenderedEditorState(
+                isEditable: editorView.isEditable,
+                wrapsLines: editorView.textContainer.widthTracksTextView
+            )
+        }
+        #expect(
+            await finalRenderedState.waitUntilValue(
+                SyntaxEditorRenderedEditorState(isEditable: false, wrapsLines: true)
+            )
+        )
         layoutIOSEditorView(editorView)
         #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
     }
@@ -4909,11 +4977,19 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewMacTextObservation() async {
         let model = SyntaxEditorTestContext(text: "const answer = 42;", language: SyntaxLanguage.javascript)
         let editorView = SyntaxEditorView(testContext: model)
+        guard let delivery = editorView.documentDeliveryForTesting else {
+            Issue.record("Expected SyntaxEditorView to expose its production document delivery")
+            return
+        }
+        let renderedText = await delivery.values {
+            editorView.textView.string
+        }
+
+        #expect(await renderedText.waitUntilValue("const answer = 42;"))
 
         model.document.replaceText("{\"enabled\":true}")
 
-        editorView.synchronizeDocumentForTesting()
-        #expect(editorView.textView.string == "{\"enabled\":true}")
+        #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
     }
 
     @Test("SyntaxEditorView enables macOS find bar by default")
@@ -6089,13 +6165,13 @@ struct SyntaxEditorUITests {
         #expect(textView.allowsUndo == true)
     }
 
-    @Test("SyntaxEditorViewController preserves Observable conformance on macOS")
+    @Test("SyntaxEditorViewController renders source-of-truth state on macOS")
     @MainActor
-    func syntaxEditorViewControllerMacObservableCompatibility() {
+    func syntaxEditorViewControllerMacRendersSourceOfTruthState() async {
         let model = SyntaxEditorTestContext(text: "{}", language: SyntaxLanguage.javascript)
         let controller = SyntaxEditorViewController(testContext: model)
+        controller.loadViewIfNeeded()
 
-        requireObservable(controller)
         requireNSTextViewDelegate(controller)
         #expect(controller.document === model.document)
         #expect(controller.configuration === model.configuration)
@@ -6106,6 +6182,20 @@ struct SyntaxEditorUITests {
                 replacementString: "a"
             )
         )
+
+        guard let delivery = controller.editorView.documentDeliveryForTesting else {
+            Issue.record("Expected SyntaxEditorViewController to expose its production document delivery")
+            return
+        }
+        let renderedText = await delivery.values {
+            controller.textView.string
+        }
+
+        #expect(await renderedText.waitUntilValue("{}"))
+
+        model.document.replaceText("{\"enabled\":true}")
+
+        #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
     }
 
     @Test("SyntaxEditorViewController reflects document text replacements on macOS")
@@ -6114,11 +6204,19 @@ struct SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: "const answer = 42;", language: SyntaxLanguage.javascript)
         let controller = SyntaxEditorViewController(testContext: model)
         controller.loadViewIfNeeded()
+        guard let delivery = controller.editorView.documentDeliveryForTesting else {
+            Issue.record("Expected SyntaxEditorViewController to expose its production document delivery")
+            return
+        }
+        let renderedText = await delivery.values {
+            controller.textView.string
+        }
+
+        #expect(await renderedText.waitUntilValue("const answer = 42;"))
 
         model.document.replaceText("{\"enabled\":true}")
 
-        controller.synchronizeDocumentForTesting()
-        #expect(controller.textView.string == "{\"enabled\":true}")
+        #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
     }
 
     @Test("SyntaxEditorViewController reflects editable and wrapping changes on macOS")
@@ -6127,20 +6225,33 @@ struct SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: "body {}", language: SyntaxLanguage.css)
         let controller = SyntaxEditorViewController(testContext: model)
         controller.loadViewIfNeeded()
+        guard let delivery = controller.editorView.configurationDeliveryForTesting else {
+            Issue.record("Expected SyntaxEditorViewController to expose its production configuration delivery")
+            return
+        }
+        let renderedState = await delivery.values {
+            SyntaxEditorRenderedEditorState(
+                isEditable: controller.textView.isEditable,
+                wrapsLines: controller.scrollView.hasHorizontalScroller == false
+            )
+        }
 
         model.configuration.isEditable = false
         model.configuration.lineWrappingEnabled = true
 
-        controller.synchronizeDocumentForTesting()
         #expect(
-            controller.textView.isEditable == false
-                && controller.scrollView.hasHorizontalScroller == false
+            await renderedState.waitUntilValue(
+                SyntaxEditorRenderedEditorState(isEditable: false, wrapsLines: true)
+            )
         )
 
         model.configuration.lineWrappingEnabled = false
 
-        controller.synchronizeDocumentForTesting()
-        #expect(controller.scrollView.hasHorizontalScroller == true)
+        #expect(
+            await renderedState.waitUntilValue(
+                SyntaxEditorRenderedEditorState(isEditable: false, wrapsLines: false)
+            )
+        )
     }
 
     @Test("SyntaxEditorViewController keeps synchronizing after language changes on macOS")

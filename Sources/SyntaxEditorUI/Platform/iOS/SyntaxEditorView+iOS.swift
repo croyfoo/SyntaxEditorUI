@@ -1,5 +1,4 @@
 #if canImport(UIKit)
-import Observation
 import ObservationBridge
 import SyntaxEditorCore
 import UIKit
@@ -65,6 +64,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var keyboardAccessoryView: UIView?
     let documentObservations = ObservationScope()
     let configurationObservations = ObservationScope()
+    var documentDeliveryForTesting: ObservationDelivery?
+    var configurationDeliveryForTesting: ObservationDelivery?
     var storage: NSTextStorage {
         guard let textStorage = textContentStorage.textStorage else {
             fatalError("SyntaxEditorView requires NSTextContentStorage-backed NSTextStorage")
@@ -249,6 +250,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     deinit {
         highlightTask?.cancel()
+        documentObservations.cancelAll()
+        configurationObservations.cancelAll()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -760,7 +763,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func startConfigurationObservation(schedulesInitialHighlight: Bool = true) {
-        configurationObservations.observe(configuration) { [weak self] event, configuration in
+        configurationDeliveryForTesting = configurationObservations.observe(configuration) { [weak self] event, configuration in
             guard let self else { return }
             self.applyObservedConfiguration(
                 language: configuration.language,
@@ -774,7 +777,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func startDocumentObservation() {
-        documentObservations.observe(document) { [weak self] event, document in
+        documentDeliveryForTesting = documentObservations.observe(document) { [weak self] event, document in
             guard let self else { return }
             self.applyObservedDocumentChange(
                 forceTextUpdate: event.kind == .initial,

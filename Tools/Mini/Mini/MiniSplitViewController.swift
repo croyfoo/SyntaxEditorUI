@@ -6,14 +6,13 @@ import UIKit
 
 @MainActor
 final class MiniSplitViewController: UISplitViewController {
-    private let model: MiniContentViewModel
+    private let model: MiniEditorSession
     private let presetListViewController: MiniPresetListViewController
     private let configurationObservations = ObservationScope()
-    private let editorObservations = ObservationScope()
     private var editorViewController: SyntaxEditorViewController?
     private var detailViewController: MiniEditorContainerViewController?
 
-    init(model: MiniContentViewModel) {
+    init(model: MiniEditorSession) {
         self.model = model
         self.presetListViewController = MiniPresetListViewController(model: model)
 
@@ -30,6 +29,10 @@ final class MiniSplitViewController: UISplitViewController {
         bindModel()
     }
 
+    isolated deinit {
+        configurationObservations.cancelAll()
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
@@ -38,16 +41,6 @@ final class MiniSplitViewController: UISplitViewController {
     private func bindModel() {
         configurationObservations.observe(model) { [weak self] _, _ in
             self?.renderDetail()
-        }
-        bindEditorModel()
-    }
-
-    private func bindEditorModel() {
-        editorObservations.observe(model.editorConfiguration) { [weak self] _, configuration in
-            self?.updateOverflowMenu(
-                lineWrappingEnabled: configuration.lineWrappingEnabled,
-                selectedThemePreset: configuration.colorTheme.preset ?? .default
-            )
         }
     }
 
@@ -60,7 +53,6 @@ final class MiniSplitViewController: UISplitViewController {
                 configuration: editorConfiguration
             )
             detailViewController?.title = model.currentPreset.title
-            updateOverflowMenu()
             return
         }
 
@@ -81,13 +73,9 @@ final class MiniSplitViewController: UISplitViewController {
         if isCollapsed {
             show(.secondary)
         }
-        updateOverflowMenu()
     }
 
-    private func makeOverflowItems(
-        lineWrappingEnabled: Bool? = nil,
-        selectedThemePreset: SyntaxEditorColorTheme.Preset? = nil
-    ) -> UIDeferredMenuElement {
+    private func makeOverflowItems() -> UIDeferredMenuElement {
         UIDeferredMenuElement.uncached { [weak self] completion in
             Task { @MainActor in
                 guard let self else {
@@ -95,9 +83,8 @@ final class MiniSplitViewController: UISplitViewController {
                     return
                 }
 
-                let lineWrappingEnabled = lineWrappingEnabled
-                    ?? self.model.editorConfiguration.lineWrappingEnabled
-                let selectedThemePreset = selectedThemePreset ?? self.model.selectedThemePreset
+                let lineWrappingEnabled = self.model.editorConfiguration.lineWrappingEnabled
+                let selectedThemePreset = self.model.selectedThemePreset
                 let lineWrappingAction = UIAction(
                     title: "Line Wrapping",
                     image: UIImage(systemName: "text.alignleft")
@@ -122,16 +109,6 @@ final class MiniSplitViewController: UISplitViewController {
                 completion([themeMenu, lineWrappingAction])
             }
         }
-    }
-
-    private func updateOverflowMenu(
-        lineWrappingEnabled: Bool? = nil,
-        selectedThemePreset: SyntaxEditorColorTheme.Preset? = nil
-    ) {
-        detailViewController?.navigationItem.additionalOverflowItems = makeOverflowItems(
-            lineWrappingEnabled: lineWrappingEnabled,
-            selectedThemePreset: selectedThemePreset
-        )
     }
 
     private func toggleLineWrapping() {
@@ -176,17 +153,21 @@ import AppKit
 
 @MainActor
 final class MiniSplitViewController: NSSplitViewController {
-    private let model: MiniContentViewModel
+    private let model: MiniEditorSession
     private let presetListViewController: MiniPresetListViewController
     private let configurationObservations = ObservationScope()
     private var editorViewController: SyntaxEditorViewController?
     private var detailSplitViewItem: NSSplitViewItem?
 
-    init(model: MiniContentViewModel) {
+    init(model: MiniEditorSession) {
         self.model = model
         self.presetListViewController = MiniPresetListViewController(model: model)
 
         super.init(nibName: nil, bundle: nil)
+    }
+
+    isolated deinit {
+        configurationObservations.cancelAll()
     }
 
     @available(*, unavailable)
