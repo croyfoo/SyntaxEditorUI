@@ -5614,6 +5614,48 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
 
+    @Test("SyntaxEditorView applies macOS font size delta while selection delays highlight")
+    @MainActor
+    func syntaxEditorViewMacFontSizeDeltaUpdatesSelectedTextBeforeDelayedHighlight() async throws {
+        let source = "let value = \"text\""
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
+        let initialHighlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let initialPlainFont = try #require(macEditorFont(editorView, at: 3))
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 3))
+        model.configuration.fontSizeDelta = 4
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(editorView.textView.selectedRange() == NSRange(location: 0, length: 3))
+        #expect(await highlighter.callCount() == initialCallCount)
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let plainFont = try #require(macEditorFont(editorView, at: 3))
+        #expect(abs(highlightedFont.pointSize - (initialHighlightedFont.pointSize + 4)) < 0.01)
+        #expect(abs(plainFont.pointSize - (initialPlainFont.pointSize + 4)) < 0.01)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), theme.baseForeground))
+    }
+
     @Test("SyntaxEditorView applies macOS base attributes before delayed highlight")
     @MainActor
     func syntaxEditorViewMacAppliesBaseAttributesBeforeDelayedHighlight() async throws {
@@ -5735,6 +5777,50 @@ struct SyntaxEditorUITests {
         let minimumPlainFont = try #require(macEditorFont(editorView, at: 4))
         #expect(abs(minimumHighlightedFont.pointSize - 4) < 0.01)
         #expect(abs(minimumPlainFont.pointSize - 4) < 0.01)
+    }
+
+    @Test("SyntaxEditorView recomputes selected macOS font size after delta overshoot")
+    @MainActor
+    func syntaxEditorViewMacRecomputesSelectedFontSizeAfterDeltaOvershoot() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge,
+            fontSizeDelta: 100
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let maximumPlainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(maximumPlainFont.pointSize - 64) < 0.01)
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 3))
+        model.configuration.decreaseFontSize()
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(model.configuration.fontSizeDelta == 35)
+        let decreasedHighlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let decreasedPlainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(decreasedHighlightedFont.pointSize - 63) < 0.01)
+        #expect(abs(decreasedPlainFont.pointSize - 63) < 0.01)
+
+        model.configuration.resetFontSize()
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(model.configuration.fontSizeDelta == 0)
+        let resetHighlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let resetPlainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(resetHighlightedFont.pointSize - 28) < 0.01)
+        #expect(abs(resetPlainFont.pointSize - 28) < 0.01)
     }
 
     @Test("SyntaxEditorView applies macOS base attributes to inserted text before delayed update highlight")

@@ -721,6 +721,9 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         lastAppliedColorTheme = colorTheme
         lastAppliedFontSizeDelta = fontSizeDelta
         updateTextViewFontAndTypingAttributes()
+        if fontSizeDeltaChanged {
+            applyResolvedFontsToExistingText()
+        }
         updateEditorBackgroundColor(drawsBackground: drawsBackground)
 
         if textView.isEditable != isEditable {
@@ -1136,6 +1139,41 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         guard insertedRange.length > 0 else { return }
 
         textStorage.addAttributes(baseAttributes(), range: insertedRange)
+    }
+
+    private func applyResolvedFontsToExistingText() {
+        let textRange = NSRange(location: 0, length: textStorage.length)
+        guard textRange.length > 0,
+              let baseFont = baseAttributes()[.font] as? NSFont
+        else {
+            return
+        }
+
+        var updates: [(range: NSRange, font: NSFont)] = []
+        let source = textView.string
+        if lastHighlightRevision == document.revision,
+           lastHighlightLanguage == configuration.language,
+           lastHighlightSource == source {
+            var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes())
+            let runs = syntaxHighlightAttributeRuns(
+                for: lastHighlightTokens,
+                targetRange: textRange,
+                textLength: textStorage.length,
+                resolver: &resolver
+            )
+            for run in runs {
+                guard let font = run.attributes[.font] as? NSFont else { continue }
+                updates.append((run.range, font))
+            }
+        }
+
+        textStorage.beginEditing()
+        textStorage.addAttribute(.font, value: baseFont, range: textRange)
+        for update in updates {
+            textStorage.addAttribute(.font, value: update.font, range: update.range)
+        }
+        textStorage.endEditing()
+        invalidateVisibleTextDisplay()
     }
 
     private func editsAreValid(_ edits: [SyntaxEditorTextEdit]) -> Bool {
