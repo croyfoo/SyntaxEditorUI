@@ -1748,7 +1748,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
             if var last = runs.last,
                last.key == resolved.key,
-               last.range.upperBound >= intersection.location {
+               last.range.upperBound >= intersection.location,
+               intersection.upperBound >= last.range.location {
                 let lowerBound = min(last.range.location, intersection.location)
                 let upperBound = max(last.range.upperBound, intersection.upperBound)
                 last.range = NSRange(

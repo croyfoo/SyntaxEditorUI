@@ -2022,6 +2022,44 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 6), theme.string))
     }
 
+    @Test("SyntaxEditorView keeps iOS empty-style gaps between separated same-style runs")
+    @MainActor
+    func syntaxEditorViewIOSKeepsEmptyStyleGapsBetweenSeparatedSameStyleRuns() async {
+        let source = "\"${value}\""
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: source.utf16.count),
+                    rawCaptureName: "editor.syntax.javascript.string"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: 4, length: 2),
+                    rawCaptureName: "editor.syntax.javascript.plain"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: 4, length: 1),
+                    rawCaptureName: "editor.syntax.javascript.string"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 4), theme.string))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 5), theme.baseForeground))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 6), theme.string))
+    }
+
     @Test("SyntaxEditorView reapplies cached iOS syntax colors without highlighting")
     @MainActor
     func syntaxEditorViewIOSColorThemeReusesCachedHighlightTokens() async {
@@ -5316,6 +5354,44 @@ struct SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), theme.baseForeground))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 6), theme.string))
+    }
+
+    @Test("SyntaxEditorView keeps macOS empty-style gaps between separated same-style runs")
+    @MainActor
+    func syntaxEditorViewMacKeepsEmptyStyleGapsBetweenSeparatedSameStyleRuns() async {
+        let source = "\"${value}\""
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: source.utf16.count),
+                    rawCaptureName: "editor.syntax.javascript.string"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: 4, length: 2),
+                    rawCaptureName: "editor.syntax.javascript.plain"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: 4, length: 1),
+                    rawCaptureName: "editor.syntax.javascript.string"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 4), theme.string))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 5), theme.baseForeground))
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 6), theme.string))
     }
 
