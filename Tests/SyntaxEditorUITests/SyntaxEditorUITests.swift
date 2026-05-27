@@ -117,7 +117,8 @@ private struct SyntaxEditorTestContext {
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
         colorTheme: SyntaxEditorColorTheme = .default,
-        drawsBackground: Bool = true
+        drawsBackground: Bool = true,
+        fontSizeDelta: Int = 0
     ) {
         self.document = SyntaxEditorDocument(text: text)
         self.configuration = SyntaxEditorConfiguration(
@@ -125,7 +126,8 @@ private struct SyntaxEditorTestContext {
             isEditable: isEditable,
             lineWrappingEnabled: lineWrappingEnabled,
             colorTheme: colorTheme,
-            drawsBackground: drawsBackground
+            drawsBackground: drawsBackground,
+            fontSizeDelta: fontSizeDelta
         )
     }
 }
@@ -2105,9 +2107,9 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
 
-    @Test("SyntaxEditorView preserves cached iOS syntax colors after font changes")
+    @Test("SyntaxEditorView preserves cached iOS syntax colors after font size delta changes")
     @MainActor
-    func syntaxEditorViewIOSFontChangePreservesCachedHighlightTokens() async {
+    func syntaxEditorViewIOSFontSizeDeltaPreservesCachedHighlightTokens() async throws {
         let source = "let value = \"text\""
         let theme = syntaxEditorUITestColorTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
@@ -2130,10 +2132,16 @@ struct SyntaxEditorUITests {
 
         await editorView.waitForPendingHighlightForTesting()
         let initialCallCount = await highlighter.callCount()
+        let initialFont = try #require(iOSEditorFont(editorView, at: 0))
 
-        editorView.font = UIFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+        model.configuration.fontSizeDelta = 4
+        editorView.synchronizeDocumentForTesting()
 
         #expect(await highlighter.callCount() == initialCallCount)
+        let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
+        let plainFont = try #require(iOSEditorFont(editorView, at: 3))
+        #expect(abs(highlightedFont.pointSize - (initialFont.pointSize + 4)) < 0.01)
+        #expect(abs(plainFont.pointSize - highlightedFont.pointSize) < 0.01)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
@@ -2163,6 +2171,69 @@ struct SyntaxEditorUITests {
         let plainFont = try #require(iOSEditorFont(editorView, at: 4))
         #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
         #expect(abs(plainFont.pointSize - 28) < 0.01)
+    }
+
+    @Test("SyntaxEditorView applies iOS font size delta to built-in theme fonts")
+    @MainActor
+    func syntaxEditorViewIOSAppliesFontSizeDeltaToBuiltInThemeFonts() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge,
+            fontSizeDelta: 3
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
+        let plainFont = try #require(iOSEditorFont(editorView, at: 4))
+        #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
+        #expect(abs(plainFont.pointSize - 31) < 0.01)
+    }
+
+    @Test("SyntaxEditorView clamps iOS font size delta")
+    @MainActor
+    func syntaxEditorViewIOSClampsFontSizeDelta() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge,
+            fontSizeDelta: 100
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let maximumHighlightedFont = try #require(iOSEditorFont(editorView, at: 0))
+        let maximumPlainFont = try #require(iOSEditorFont(editorView, at: 4))
+        #expect(abs(maximumHighlightedFont.pointSize - 64) < 0.01)
+        #expect(abs(maximumPlainFont.pointSize - 64) < 0.01)
+
+        model.configuration.fontSizeDelta = -100
+        editorView.synchronizeDocumentForTesting()
+
+        let minimumHighlightedFont = try #require(iOSEditorFont(editorView, at: 0))
+        let minimumPlainFont = try #require(iOSEditorFont(editorView, at: 4))
+        #expect(abs(minimumHighlightedFont.pointSize - 4) < 0.01)
+        #expect(abs(minimumPlainFont.pointSize - 4) < 0.01)
     }
 
     @Test("SyntaxEditorView applies iOS base attributes before delayed highlight")
@@ -4846,12 +4917,21 @@ struct SyntaxEditorUITests {
         #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "/", modifierFlags: [.command]))
         #expect(!hasSyntaxEditorKeyCommand(readOnlyCommands, input: "v", modifierFlags: [.command]))
         #expect(hasSyntaxEditorKeyCommand(readOnlyCommands, input: "l", modifierFlags: [.control, .shift, .command]))
+        #expect(hasSyntaxEditorKeyCommand(readOnlyCommands, input: "+", modifierFlags: [.command]))
+        #expect(hasSyntaxEditorKeyCommand(readOnlyCommands, input: "-", modifierFlags: [.command]))
+        #expect(hasSyntaxEditorKeyCommand(readOnlyCommands, input: "0", modifierFlags: [.control, .command]))
 
         let readOnlyLineWrappingActionTarget = editorView.target(
             forAction: NSSelectorFromString("handleToggleLineWrappingCommand"),
             withSender: nil
         ) as AnyObject?
         #expect(readOnlyLineWrappingActionTarget === editorView)
+
+        let readOnlyIncreaseFontSizeActionTarget = editorView.target(
+            forAction: NSSelectorFromString("handleIncreaseFontSizeCommand"),
+            withSender: nil
+        ) as AnyObject?
+        #expect(readOnlyIncreaseFontSizeActionTarget === editorView)
 
         model.configuration.isEditable = true
 
@@ -4865,6 +4945,9 @@ struct SyntaxEditorUITests {
         #expect(pasteCommand != nil)
         #expect(pasteCommand?.wantsPriorityOverSystemBehavior == true)
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "l", modifierFlags: [.control, .shift, .command]))
+        #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "+", modifierFlags: [.command]))
+        #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "-", modifierFlags: [.command]))
+        #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "0", modifierFlags: [.control, .command]))
 
         let indentActionTarget = editorView.target(
             forAction: NSSelectorFromString("handleIndentCommand"),
@@ -4883,6 +4966,23 @@ struct SyntaxEditorUITests {
             withSender: nil
         ) as AnyObject?
         #expect(pasteActionTarget === editorView)
+    }
+
+    @Test("SyntaxEditorView applies iOS font size key commands")
+    @MainActor
+    func syntaxEditorViewIOSFontSizeKeyCommands() {
+        let model = SyntaxEditorTestContext(text: "let answer = 42", language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+
+        #expect(performSyntaxEditorSelector("handleIncreaseFontSizeCommand", on: editorView))
+        #expect(model.configuration.fontSizeDelta == 1)
+
+        #expect(performSyntaxEditorSelector("handleDecreaseFontSizeCommand", on: editorView))
+        #expect(model.configuration.fontSizeDelta == 0)
+
+        model.configuration.fontSizeDelta = 5
+        #expect(performSyntaxEditorSelector("handleResetFontSizeCommand", on: editorView))
+        #expect(model.configuration.fontSizeDelta == 0)
     }
 
     @Test("SyntaxEditorView applies iOS paste payload repeatedly")
@@ -5475,6 +5575,45 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView preserves cached macOS syntax colors after font size delta changes")
+    @MainActor
+    func syntaxEditorViewMacFontSizeDeltaPreservesCachedHighlightTokens() async throws {
+        let source = "let value = \"text\""
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
+        let initialFont = try #require(macEditorFont(editorView, at: 0))
+
+        model.configuration.fontSizeDelta = 4
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(await highlighter.callCount() == initialCallCount)
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let plainFont = try #require(macEditorFont(editorView, at: 3))
+        #expect(abs(highlightedFont.pointSize - (initialFont.pointSize + 4)) < 0.01)
+        #expect(abs(plainFont.pointSize - highlightedFont.pointSize) < 0.01)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), theme.baseForeground))
+    }
+
     @Test("SyntaxEditorView applies macOS base attributes before delayed highlight")
     @MainActor
     func syntaxEditorViewMacAppliesBaseAttributesBeforeDelayedHighlight() async throws {
@@ -5533,6 +5672,69 @@ struct SyntaxEditorUITests {
         let plainFont = try #require(macEditorFont(editorView, at: 4))
         #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
         #expect(abs(plainFont.pointSize - 28) < 0.01)
+    }
+
+    @Test("SyntaxEditorView applies macOS font size delta to built-in theme fonts")
+    @MainActor
+    func syntaxEditorViewMacAppliesFontSizeDeltaToBuiltInThemeFonts() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge,
+            fontSizeDelta: 3
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let plainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
+        #expect(abs(plainFont.pointSize - 31) < 0.01)
+    }
+
+    @Test("SyntaxEditorView clamps macOS font size delta")
+    @MainActor
+    func syntaxEditorViewMacClampsFontSizeDelta() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge,
+            fontSizeDelta: 100
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let maximumHighlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let maximumPlainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(maximumHighlightedFont.pointSize - 64) < 0.01)
+        #expect(abs(maximumPlainFont.pointSize - 64) < 0.01)
+
+        model.configuration.fontSizeDelta = -100
+        editorView.synchronizeDocumentForTesting()
+
+        let minimumHighlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let minimumPlainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(minimumHighlightedFont.pointSize - 4) < 0.01)
+        #expect(abs(minimumPlainFont.pointSize - 4) < 0.01)
     }
 
     @Test("SyntaxEditorView applies macOS base attributes to inserted text before delayed update highlight")
@@ -6345,6 +6547,21 @@ struct SyntaxEditorUITests {
         #expect(model.configuration.lineWrappingEnabled)
         #expect(editorView.textView.string == source)
 
+        for (character, modifiers) in [
+            ("+", NSEvent.ModifierFlags.command),
+            ("-", NSEvent.ModifierFlags.command),
+            ("0", NSEvent.ModifierFlags([.control, .command])),
+        ] {
+            guard let event = makeMacCommandKeyEvent(character, modifierFlags: modifiers) else {
+                Issue.record("Failed to create font size key event for \(character)")
+                continue
+            }
+
+            #expect(editorView.textView.performKeyEquivalent(with: event))
+            #expect(model.document.textSnapshot() == source)
+            #expect(editorView.textView.string == source)
+        }
+
         for character in ["/", "]", "["] {
             guard let event = makeMacCommandKeyEvent(character) else {
                 Issue.record("Failed to create command key event for \(character)")
@@ -6384,6 +6601,31 @@ struct SyntaxEditorUITests {
         #expect(!model.configuration.lineWrappingEnabled)
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.hasHorizontalScroller)
+    }
+
+    @Test("SyntaxEditorView applies macOS font size key equivalents")
+    @MainActor
+    func syntaxEditorViewMacFontSizeKeyEquivalents() {
+        let model = SyntaxEditorTestContext(text: "let answer = 42", language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+
+        guard let increaseEvent = makeMacCommandKeyEvent("+"),
+              let decreaseEvent = makeMacCommandKeyEvent("-"),
+              let resetEvent = makeMacCommandKeyEvent("0", modifierFlags: [.control, .command])
+        else {
+            Issue.record("Failed to create font size key events")
+            return
+        }
+
+        #expect(editorView.textView.performKeyEquivalent(with: increaseEvent))
+        #expect(model.configuration.fontSizeDelta == 1)
+
+        #expect(editorView.textView.performKeyEquivalent(with: decreaseEvent))
+        #expect(model.configuration.fontSizeDelta == 0)
+
+        model.configuration.fontSizeDelta = 5
+        #expect(editorView.textView.performKeyEquivalent(with: resetEvent))
+        #expect(model.configuration.fontSizeDelta == 0)
     }
 
     @Test("SyntaxEditorView uses native macOS undo stack for text input")

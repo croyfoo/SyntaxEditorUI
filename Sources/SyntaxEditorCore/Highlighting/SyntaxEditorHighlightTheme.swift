@@ -308,23 +308,61 @@ package struct SyntaxEditorFontDescriptor: Hashable, Sendable {
     }
 
 #if canImport(UIKit)
-    package func platformFont(fallback: UIFont) -> UIFont {
+    package func platformFont(fallback: UIFont, fontSizeDelta: Int = 0) -> UIFont {
+        let pointSize = SyntaxEditorFontSize.pointSize(size, applying: fontSizeDelta)
         if let family,
-           let font = UIFont(name: family, size: size) {
+           let font = UIFont(name: family, size: pointSize) {
             return font.applying(weight: weight)
         }
-        return UIFont(descriptor: fallback.fontDescriptor, size: size).applying(weight: weight)
+        return UIFont(descriptor: fallback.fontDescriptor, size: pointSize).applying(weight: weight)
     }
 #elseif canImport(AppKit)
-    package func platformFont(fallback: NSFont) -> NSFont {
+    package func platformFont(fallback: NSFont, fontSizeDelta: Int = 0) -> NSFont {
+        let pointSize = SyntaxEditorFontSize.pointSize(size, applying: fontSizeDelta)
         if let family,
-           let font = NSFont(name: family, size: size) {
+           let font = NSFont(name: family, size: pointSize) {
             return font.applying(weight: weight)
         }
-        return NSFont(descriptor: fallback.fontDescriptor, size: size)?.applying(weight: weight)
-            ?? fallback
+        return NSFont(descriptor: fallback.fontDescriptor, size: pointSize)?.applying(weight: weight)
+            ?? fallback.withSize(pointSize).applying(weight: weight)
     }
 #endif
+}
+
+package enum SyntaxEditorFontSize {
+    package static let minimum: CGFloat = 4
+    package static let maximum: CGFloat = 64
+    #if os(macOS)
+    package static let defaultEditorPointSize: CGFloat = 13
+    #else
+    package static let defaultEditorPointSize: CGFloat = 14
+    #endif
+
+    package static func pointSize(_ basePointSize: CGFloat, applying delta: Int) -> CGFloat {
+        min(max(basePointSize + CGFloat(delta), minimum), maximum)
+    }
+
+    package static func increasedDelta(_ delta: Int, forBasePointSize basePointSize: CGFloat) -> Int {
+        let bounds = deltaBounds(forBasePointSize: basePointSize)
+        if delta < bounds.lowerBound {
+            return min(bounds.lowerBound + 1, bounds.upperBound)
+        }
+        return min(delta + 1, bounds.upperBound)
+    }
+
+    package static func decreasedDelta(_ delta: Int, forBasePointSize basePointSize: CGFloat) -> Int {
+        let bounds = deltaBounds(forBasePointSize: basePointSize)
+        if delta > bounds.upperBound {
+            return max(bounds.upperBound - 1, bounds.lowerBound)
+        }
+        return max(delta - 1, bounds.lowerBound)
+    }
+
+    private static func deltaBounds(forBasePointSize basePointSize: CGFloat) -> ClosedRange<Int> {
+        let lowerBound = Int(ceil(minimum - basePointSize))
+        let upperBound = Int(floor(maximum - basePointSize))
+        return lowerBound...upperBound
+    }
 }
 
 package enum SyntaxEditorFontWeight: String, Sendable {

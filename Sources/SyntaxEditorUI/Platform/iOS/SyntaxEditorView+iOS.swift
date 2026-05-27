@@ -25,6 +25,7 @@ private struct IOSSyntaxHighlightAttributeResolver {
     let defaultLanguage: SyntaxLanguage
     let appearance: SyntaxEditorThemeAppearance
     let baseFont: UIFont
+    let fontSizeDelta: Int
     let resolveColor: (UIColor) -> UIColor
 
     private var attributeCache: [IOSSyntaxHighlightAttributeKey: [NSAttributedString.Key: Any]] = [:]
@@ -36,12 +37,14 @@ private struct IOSSyntaxHighlightAttributeResolver {
         defaultLanguage: SyntaxLanguage,
         appearance: SyntaxEditorThemeAppearance,
         baseFont: UIFont,
+        fontSizeDelta: Int,
         resolveColor: @escaping (UIColor) -> UIColor
     ) {
         self.colorTheme = colorTheme
         self.defaultLanguage = defaultLanguage
         self.appearance = appearance
         self.baseFont = baseFont
+        self.fontSizeDelta = fontSizeDelta
         self.resolveColor = resolveColor
     }
 
@@ -83,7 +86,7 @@ private struct IOSSyntaxHighlightAttributeResolver {
         if let cached = fontCache[descriptor] {
             return cached
         }
-        let font = descriptor.platformFont(fallback: baseFont)
+        let font = descriptor.platformFont(fallback: baseFont, fontSizeDelta: fontSizeDelta)
         fontCache[descriptor] = font
         return font
     }
@@ -103,7 +106,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     let nonEditableTextInteraction = UITextInteraction(for: .nonEditable)
     var findCoordinator: SyntaxEditorFindCoordinator?
     static let estimatedTabColumnWidth = 4
-    static let defaultEditorFont = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+    static let defaultEditorFont = UIFont.monospacedSystemFont(
+        ofSize: SyntaxEditorFontSize.defaultEditorPointSize,
+        weight: .regular
+    )
 
     let highlighter: any SyntaxHighlighting
     let commandEngine = EditorCommandEngine()
@@ -120,6 +126,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var matchedBracketRanges: [NSRange] = []
     var lastAppliedLineWrappingEnabled: Bool
     var lastAppliedColorTheme: SyntaxEditorColorTheme
+    var lastAppliedFontSizeDelta: Int
     var isApplyingEditorOwnedScroll = false
     var isIgnoringTextInteractionHorizontalOffsetPreservation = false
     var preservedTextInteractionHorizontalOffset: CGFloat?
@@ -209,23 +216,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
     }
 
-    private var customFont: UIFont?
-
-    public var font: UIFont {
-        get {
-            resolvedBaseFont()
-        }
-        set {
-            let oldFont = font
-            customFont = newValue
-            guard font != oldFont else { return }
-            invalidateHorizontalMeasurement()
-            updateTypingAttributes()
-            applyBaseAttributesToExistingText()
-            reapplyCachedHighlight()
-            updateTextContainerForCurrentWrappingMode()
-            invalidateTextLayout()
-        }
+    var font: UIFont {
+        resolvedBaseFont()
     }
 
     public var isEditable: Bool {
@@ -311,6 +303,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         self.highlighter = highlighter
         self.lastAppliedLineWrappingEnabled = configuration.lineWrappingEnabled
         self.lastAppliedColorTheme = configuration.colorTheme
+        self.lastAppliedFontSizeDelta = configuration.fontSizeDelta
         self.lastAppliedDocumentRevision = document.revision
 
         super.init(frame: .zero)
@@ -377,7 +370,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             isEditable: configuration.isEditable,
             lineWrappingEnabled: configuration.lineWrappingEnabled,
             colorTheme: configuration.colorTheme,
-            drawsBackground: configuration.drawsBackground
+            drawsBackground: configuration.drawsBackground,
+            fontSizeDelta: configuration.fontSizeDelta
         )
         applyObservedDocumentChange()
     }
@@ -475,6 +469,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         if isLineWrappingCommandAction(action) {
+            return true
+        }
+
+        if isFontSizeCommandAction(action) {
             return true
         }
 
@@ -746,6 +744,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func editorKeyCommands() -> [UIKeyCommand]? {
         var commands = [
             makeKeyCommand(input: "l", modifierFlags: [.control, .shift, .command], action: #selector(handleToggleLineWrappingCommand), title: "Wrap Lines"),
+            makeKeyCommand(input: "+", modifierFlags: [.command], action: #selector(handleIncreaseFontSizeCommand), title: "Increase Font Size"),
+            makeKeyCommand(input: "-", modifierFlags: [.command], action: #selector(handleDecreaseFontSizeCommand), title: "Decrease Font Size"),
+            makeKeyCommand(input: "0", modifierFlags: [.control, .command], action: #selector(handleResetFontSizeCommand), title: "Reset Font Size"),
         ]
 
         guard configuration.isEditable else {
@@ -778,6 +779,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func isLineWrappingCommandAction(_ action: Selector) -> Bool {
         action == #selector(handleToggleLineWrappingCommand)
+    }
+
+    func isFontSizeCommandAction(_ action: Selector) -> Bool {
+        action == #selector(handleIncreaseFontSizeCommand)
+            || action == #selector(handleDecreaseFontSizeCommand)
+            || action == #selector(handleResetFontSizeCommand)
     }
 
     func isFindCommandAction(_ action: Selector) -> Bool {
@@ -852,6 +859,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 lineWrappingEnabled: configuration.lineWrappingEnabled,
                 colorTheme: configuration.colorTheme,
                 drawsBackground: configuration.drawsBackground,
+                fontSizeDelta: configuration.fontSizeDelta,
                 forceLanguageRefresh: event.kind == .initial,
                 schedulesHighlight: event.kind != .initial || schedulesInitialHighlight
             )
@@ -938,6 +946,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         lineWrappingEnabled: Bool,
         colorTheme: SyntaxEditorColorTheme,
         drawsBackground: Bool,
+        fontSizeDelta: Int,
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
@@ -946,11 +955,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         let previousColorTheme = lastAppliedColorTheme
         let colorThemeChanged = previousColorTheme != colorTheme
-        if colorThemeChanged {
+        let fontSizeDeltaChanged = lastAppliedFontSizeDelta != fontSizeDelta
+        if colorThemeChanged || fontSizeDeltaChanged {
             invalidateHorizontalMeasurement()
+        }
+        if colorThemeChanged {
             applyBaseForegroundColorChange(from: previousColorTheme, to: colorTheme)
         }
         lastAppliedColorTheme = colorTheme
+        lastAppliedFontSizeDelta = fontSizeDelta
         updateEditorBackgroundColor(drawsBackground: drawsBackground)
 
         updateTextInteractions()
@@ -965,6 +978,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
 
         updateTypingAttributes()
+        if fontSizeDeltaChanged {
+            applyBaseAttributesToExistingText()
+        }
         if languageChanged && schedulesHighlight {
             scheduleHighlight(
                 source: text,
@@ -972,7 +988,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 revision: document.revision,
                 refreshStartUTF16: 0
             )
-        } else if colorThemeChanged && schedulesHighlight {
+        } else if (colorThemeChanged || fontSizeDeltaChanged) && schedulesHighlight {
             reapplyCachedHighlight()
         }
         refreshKeyboardAccessoryState()
@@ -1485,6 +1501,18 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         configuration.lineWrappingEnabled.toggle()
     }
 
+    @objc private func handleIncreaseFontSizeCommand() {
+        configuration.increaseFontSize()
+    }
+
+    @objc private func handleDecreaseFontSizeCommand() {
+        configuration.decreaseFontSize()
+    }
+
+    @objc private func handleResetFontSizeCommand() {
+        configuration.resetFontSize()
+    }
+
     @objc private func handleUndoCommand() {
         guard configuration.isEditable else {
             refreshKeyboardAccessoryState()
@@ -1720,6 +1748,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             defaultLanguage: configuration.language,
             appearance: currentThemeAppearance,
             baseFont: (baseAttributes[.font] as? UIFont) ?? resolvedBaseFont(),
+            fontSizeDelta: configuration.fontSizeDelta,
             resolveColor: { [weak self] color in
                 self?.resolvedSyntaxColor(color) ?? color
             }
@@ -1984,12 +2013,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func resolvedBaseFont(for theme: SyntaxEditorResolvedColorTheme? = nil) -> UIFont {
-        if let customFont {
-            return customFont
-        }
-
         let theme = theme ?? resolvedColorTheme()
-        return theme.base.font?.platformFont(fallback: Self.defaultEditorFont) ?? Self.defaultEditorFont
+        return theme.base.font?.platformFont(
+            fallback: Self.defaultEditorFont,
+            fontSizeDelta: configuration.fontSizeDelta
+        ) ?? Self.defaultEditorFont.syntaxEditorFontSizeAdjusted(by: configuration.fontSizeDelta)
     }
 
     func baseParagraphStyle() -> NSParagraphStyle {
@@ -2793,6 +2821,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func offset(for position: UITextPosition) -> Int? {
         guard let position = position as? SyntaxEditorTextPosition else { return nil }
         return min(max(0, position.offset), text.utf16.count)
+    }
+}
+
+private extension UIFont {
+    func syntaxEditorFontSizeAdjusted(by delta: Int) -> UIFont {
+        withSize(SyntaxEditorFontSize.pointSize(pointSize, applying: delta))
     }
 }
 #endif

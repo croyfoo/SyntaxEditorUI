@@ -159,4 +159,28 @@ struct SyntaxEditorCorePlatformTests {
         #expect(font.familyName == fallback.familyName)
         #expect(abs(font.pointSize - 13) < 0.01)
     }
+
+    @Test("SyntaxEditorFontDescriptor applies font size delta with clamp")
+    func syntaxEditorFontDescriptorAppliesFontSizeDeltaWithClamp() {
+        let descriptor = SyntaxEditorFontDescriptor(family: nil, size: 13, weight: .regular)
+
+#if canImport(UIKit)
+        let fallback = UIFont(name: "Courier", size: 18)
+            ?? UIFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+        let increasedFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: 4)
+        let minimumFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: -20)
+        let maximumFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: 100)
+#elseif canImport(AppKit)
+        let fallback = NSFont(name: "Courier", size: 18)
+            ?? NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+        let increasedFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: 4)
+        let minimumFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: -20)
+        let maximumFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: 100)
+#endif
+
+        #expect(increasedFont.familyName == fallback.familyName)
+        #expect(abs(increasedFont.pointSize - 17) < 0.01)
+        #expect(abs(minimumFont.pointSize - 4) < 0.01)
+        #expect(abs(maximumFont.pointSize - 64) < 0.01)
+    }
 }

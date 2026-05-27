@@ -17,7 +17,7 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
   - matching bracket highlight
 - Keyboard shortcuts for common editor actions.
 - iOS accessory controls for undo, redo, and keyboard dismissal.
-- Programmatic control over text, language, editability, line wrapping, color theme, and background drawing.
+- Programmatic control over text, language, editability, line wrapping, color theme, font size, and background drawing.
 
 ## Shortcuts
 
@@ -27,6 +27,9 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 - `Cmd+[` : Outdent
 - `Cmd+/`: Toggle comment (HTML/JavaScript/CSS/Objective-C/Swift/TOML/XML)
 - `Ctrl+Shift+Cmd+L`: Toggle line wrapping
+- `Cmd++`: Increase font size
+- `Cmd+-`: Decrease font size
+- `Ctrl+Cmd+0`: Reset font size
 - `Cmd+Z`: Undo
 - `Shift+Cmd+Z`: Redo
 - `Cmd+F`: Find
@@ -49,7 +52,7 @@ let editorView = SyntaxEditorView(document: document, configuration: configurati
 
 Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
 
-Set `configuration.drawsBackground = false` when the surrounding view should provide the editor background while syntax colors and editor decorations remain active.
+Set `configuration.drawsBackground = false` when the surrounding view should provide the editor background while syntax colors and editor decorations remain active. Use `configuration.fontSizeDelta`, `increaseFontSize()`, `decreaseFontSize()`, and `resetFontSize()` for Xcode-style point-size adjustments relative to the selected theme.
 
 ### iPad Pointer Input
 
@@ -69,6 +72,10 @@ GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `
 `Mini` is a lightweight manual verification app for iOS/macOS. It is not a public product and does not own package regression tests.
 
 ## Migration
+
+### Next
+
+- `SyntaxEditorView.font` has been removed from the public iOS API. Use `SyntaxEditorConfiguration.fontSizeDelta` or the font-size command methods to adjust editor text size.
 
 ### v0.8.0
 
