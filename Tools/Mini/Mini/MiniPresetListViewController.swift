@@ -5,13 +5,17 @@ import UIKit
 
 @MainActor
 final class MiniPresetListViewController: UICollectionViewController {
-    private let model: MiniContentViewModel
+    private let model: MiniEditorSession
     private let observations = ObservationScope()
     private var dataSource: UICollectionViewDiffableDataSource<String, String>!
 
-    init(model: MiniContentViewModel) {
+    init(model: MiniEditorSession) {
         self.model = model
         super.init(collectionViewLayout: Self.makeLayout())
+    }
+
+    isolated deinit {
+        observations.cancelAll()
     }
 
     @available(*, unavailable)
@@ -35,7 +39,7 @@ final class MiniPresetListViewController: UICollectionViewController {
         else {
             return
         }
-        model.selectedPresetID = presetID
+        model.selectPreset(presetID)
     }
 
     private func bindModel() {
@@ -84,7 +88,7 @@ final class MiniPresetListViewController: UICollectionViewController {
             collectionView.deselectItem(at: $0, animated: false)
         }
 
-        guard let indexPath = dataSource.indexPath(for: model.currentPresetID.rawValue) else {
+        guard let indexPath = dataSource.indexPath(for: model.selectedPresetID.rawValue) else {
             return
         }
 
@@ -108,15 +112,19 @@ import AppKit
 
 @MainActor
 final class MiniPresetListViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
-    private let model: MiniContentViewModel
+    private let model: MiniEditorSession
     private let observations = ObservationScope()
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
 
-    init(model: MiniContentViewModel) {
+    init(model: MiniEditorSession) {
         self.model = model
         super.init(nibName: nil, bundle: nil)
         title = "Languages"
+    }
+
+    isolated deinit {
+        observations.cancelAll()
     }
 
     @available(*, unavailable)
@@ -194,7 +202,7 @@ final class MiniPresetListViewController: NSViewController, NSTableViewDataSourc
     func tableViewSelectionDidChange(_ notification: Notification) {
         let selectedRow = tableView.selectedRow
         guard MiniPreviewPreset.all.indices.contains(selectedRow) else { return }
-        model.selectedPresetID = MiniPreviewPreset.all[selectedRow].id
+        model.selectPreset(MiniPreviewPreset.all[selectedRow].id)
     }
 
     private func bindModel() {
@@ -204,7 +212,7 @@ final class MiniPresetListViewController: NSViewController, NSTableViewDataSourc
     }
 
     private func renderSelection() {
-        guard let selectedIndex = MiniPreviewPreset.all.firstIndex(where: { $0.id == model.currentPresetID }) else {
+        guard let selectedIndex = MiniPreviewPreset.all.firstIndex(where: { $0.id == model.selectedPresetID }) else {
             tableView.deselectAll(nil)
             return
         }

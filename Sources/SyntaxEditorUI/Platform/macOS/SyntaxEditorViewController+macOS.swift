@@ -1,6 +1,5 @@
 #if canImport(AppKit)
 import AppKit
-import Observation
 import ObservationBridge
 import SyntaxEditorCore
 
@@ -124,7 +123,6 @@ private final class SyntaxEditorNativeTextView: NSTextView {
 }
 
 @MainActor
-@Observable
 public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     public private(set) var document: SyntaxEditorDocument
     public private(set) var configuration: SyntaxEditorConfiguration
@@ -136,61 +134,36 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         }
     }
 
-    @ObservationIgnored
     private let fallbackUndoManager = UndoManager()
-    @ObservationIgnored
     private let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
-    @ObservationIgnored
     private let textStorage: NSTextStorage
-    @ObservationIgnored
     private let layoutManager: NSLayoutManager
-    @ObservationIgnored
     private let textContainer: NSTextContainer
 
-    @ObservationIgnored
     private let highlighter: any SyntaxHighlighting
-    @ObservationIgnored
     private let commandEngine = EditorCommandEngine()
-    @ObservationIgnored
     private var highlightTask: Task<Void, Never>?
-    @ObservationIgnored
     private var lastHighlightTokens: [SyntaxHighlightToken] = []
-    @ObservationIgnored
     private var lastHighlightSource: String?
-    @ObservationIgnored
     private var lastHighlightRevision: Int?
-    @ObservationIgnored
     private var lastHighlightLanguage: SyntaxLanguage?
-    @ObservationIgnored
     private var isApplyingModel = false
-    @ObservationIgnored
     private var isApplyingHighlight = false
-    @ObservationIgnored
     private var lastAppliedLanguageIdentifier: String?
-    @ObservationIgnored
     private var pendingEditStartUTF16: Int?
-    @ObservationIgnored
     private var pendingHighlightMutation: SyntaxHighlightMutation?
-    @ObservationIgnored
     private var pendingHighlightApplication: PendingMacHighlightApplication?
-    @ObservationIgnored
     private var matchedBracketRanges: [NSRange] = []
-    @ObservationIgnored
     private var isApplyingUndoRedo = false
-    @ObservationIgnored
     private var isApplyingCommandSelection = false
-    @ObservationIgnored
     private var isApplyingLineWrappingConfiguration = false
-    @ObservationIgnored
     private var isScrollViewConfigured = false
-    @ObservationIgnored
     private var lastAppliedColorTheme: SyntaxEditorColorTheme?
-    @ObservationIgnored
     private var lastAppliedDocumentRevision = 0
-    @ObservationIgnored
     private let documentObservations = ObservationScope()
-    @ObservationIgnored
     private let configurationObservations = ObservationScope()
+    var documentDeliveryForTesting: ObservationDelivery?
+    var configurationDeliveryForTesting: ObservationDelivery?
 
     private var scrollView: NSScrollView { self }
 
@@ -298,6 +271,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
     deinit {
         highlightTask?.cancel()
+        documentObservations.cancelAll()
+        configurationObservations.cancelAll()
     }
 
     public override func layout() {
@@ -538,7 +513,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func startConfigurationObservation(schedulesInitialHighlight: Bool = true) {
-        configurationObservations.observe(configuration) { [weak self] event, configuration in
+        configurationDeliveryForTesting = configurationObservations.observe(configuration) { [weak self] event, configuration in
             guard let self else { return }
             self.applyObservedConfiguration(
                 language: configuration.language,
@@ -552,7 +527,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func startDocumentObservation() {
-        documentObservations.observe(document) { [weak self] event, document in
+        documentDeliveryForTesting = documentObservations.observe(document) { [weak self] event, document in
             guard let self else { return }
             self.applyObservedDocumentChange(
                 forceTextUpdate: event.kind == .initial,
@@ -1461,11 +1436,9 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 }
 
 @MainActor
-@Observable
 public final class SyntaxEditorViewController: NSViewController, NSTextViewDelegate {
     public private(set) var document: SyntaxEditorDocument
     public private(set) var configuration: SyntaxEditorConfiguration
-    @ObservationIgnored
     public let editorView: SyntaxEditorView
 
     public var textView: NSTextView {

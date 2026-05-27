@@ -34,7 +34,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = MiniSplitViewController(
-            model: MiniContentViewModel(configuration: .current)
+            model: MiniEditorSession(configuration: .current)
         )
         self.window = window
         window.makeKeyAndVisible()
@@ -69,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installStandardMainMenuIfNeeded()
 
         let windowController = MiniWindowController(
-            model: MiniContentViewModel(configuration: .current)
+            model: MiniEditorSession(configuration: .current)
         )
         self.windowController = windowController
         windowController.showWindow(nil)
@@ -209,14 +209,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 final class MiniWindowController: NSWindowController, NSToolbarDelegate {
-    private let model: MiniContentViewModel
+    private let model: MiniEditorSession
     private let splitViewController: MiniSplitViewController
     private let configurationObservations = ObservationScope()
     private let editorObservations = ObservationScope()
     private var lineWrappingItem: NSToolbarItemGroup?
     private var themePopUpButton: NSPopUpButton?
 
-    init(model: MiniContentViewModel) {
+    init(model: MiniEditorSession) {
         self.model = model
         self.splitViewController = MiniSplitViewController(model: model)
 
@@ -240,6 +240,11 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    isolated deinit {
+        configurationObservations.cancelAll()
+        editorObservations.cancelAll()
     }
 
     private func configureToolbar() {

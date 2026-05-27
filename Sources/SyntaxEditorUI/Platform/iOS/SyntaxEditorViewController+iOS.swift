@@ -1,15 +1,11 @@
 #if canImport(UIKit)
-import Observation
-import ObservationBridge
 import SyntaxEditorCore
 import UIKit
 
 @MainActor
-@Observable
 public final class SyntaxEditorViewController: UIViewController {
     public private(set) var document: SyntaxEditorDocument
     public private(set) var configuration: SyntaxEditorConfiguration
-    @ObservationIgnored
     public let editorView: SyntaxEditorView
 
     public init(
