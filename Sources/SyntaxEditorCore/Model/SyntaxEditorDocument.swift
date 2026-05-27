@@ -8,17 +8,20 @@ public final class SyntaxEditorConfiguration {
     public var isEditable: Bool
     public var lineWrappingEnabled: Bool
     public var colorTheme: SyntaxEditorColorTheme
+    public var drawsBackground: Bool
 
     public init(
         language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .default
+        colorTheme: SyntaxEditorColorTheme = .default,
+        drawsBackground: Bool = true
     ) {
         self.language = language
         self.isEditable = isEditable
         self.lineWrappingEnabled = lineWrappingEnabled
         self.colorTheme = colorTheme
+        self.drawsBackground = drawsBackground
     }
 }
 

@@ -17,7 +17,7 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
   - matching bracket highlight
 - Keyboard shortcuts for common editor actions.
 - iOS accessory controls for undo, redo, and keyboard dismissal.
-- Programmatic control over text, language, editability, line wrapping, and color theme.
+- Programmatic control over text, language, editability, line wrapping, color theme, and background drawing.
 
 ## Shortcuts
 
@@ -48,6 +48,8 @@ let editorView = SyntaxEditorView(document: document, configuration: configurati
 ```
 
 Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
+
+Set `configuration.drawsBackground = false` when the surrounding view should provide the editor background while syntax colors and editor decorations remain active.
 
 ### iPad Pointer Input
 
