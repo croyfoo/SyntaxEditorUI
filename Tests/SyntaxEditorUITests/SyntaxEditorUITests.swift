@@ -356,6 +356,38 @@ private actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {
     }
 }
 
+private func syntaxEditorDenseHighlightFixture(
+    tokenCount: Int = 2_400
+) -> (source: String, tokens: [SyntaxHighlightToken]) {
+    let source = String(repeating: "x", count: tokenCount)
+    let tokens = (0..<tokenCount).map { index in
+        SyntaxHighlightToken(
+            range: NSRange(location: index, length: 1),
+            rawCaptureName: syntaxEditorDenseHighlightCaptureName(at: index)
+        )
+    }
+    return (source, tokens)
+}
+
+private func syntaxEditorDenseHighlightCaptureName(at index: Int) -> String {
+    switch index % 3 {
+    case 0: "editor.syntax.swift.keyword"
+    case 1: "editor.syntax.swift.string"
+    default: "editor.syntax.swift.comment"
+    }
+}
+
+private func syntaxEditorDenseHighlightColor(
+    in theme: SyntaxEditorColorTheme,
+    at index: Int
+) -> SyntaxEditorColor {
+    switch index % 3 {
+    case 0: theme.keyword
+    case 1: theme.string
+    default: theme.comment
+    }
+}
+
 #if canImport(UIKit)
 private let syntaxEditorKeyCommandModifierMask: UIKeyModifierFlags = [
     .command,
@@ -2190,6 +2222,48 @@ struct SyntaxEditorUITests {
 
         #expect(editorView.text == insertedPrefix + source)
         #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: insertedPrefix.utf16.count), baseFont))
+    }
+
+    @Test("SyntaxEditorView applies dense iOS highlight tokens across the document")
+    @MainActor
+    func syntaxEditorViewIOSAppliesDenseHighlightTokensAcrossDocument() async {
+        let fixture = syntaxEditorDenseHighlightFixture()
+        let theme = syntaxEditorUITestColorTheme(
+            comment: syntaxEditorUITestColor(hex: 0x305070),
+            string: syntaxEditorUITestColor(hex: 0x507030),
+            keyword: syntaxEditorUITestColor(hex: 0x703050)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(tokens: fixture.tokens)
+        let model = SyntaxEditorTestContext(
+            text: fixture.source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        let middleLocation = fixture.source.utf16.count / 2
+        let lastLocation = fixture.source.utf16.count - 1
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                iOSEditorForegroundColor(editorView, at: 0),
+                syntaxEditorDenseHighlightColor(in: theme, at: 0)
+            )
+        )
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                iOSEditorForegroundColor(editorView, at: middleLocation),
+                syntaxEditorDenseHighlightColor(in: theme, at: middleLocation)
+            )
+        )
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                iOSEditorForegroundColor(editorView, at: lastLocation),
+                syntaxEditorDenseHighlightColor(in: theme, at: lastLocation)
+            )
+        )
+        #expect(iOSEditorFont(editorView, at: middleLocation) != nil)
     }
 
     @Test("SyntaxEditorView preserves iOS paragraph style while reapplying cached highlight")
@@ -5406,6 +5480,48 @@ struct SyntaxEditorUITests {
 
         #expect(editorView.textView.string == insertedPrefix + source)
         #expect(syntaxEditorUITestFontsEqual(macEditorFont(editorView, at: insertedPrefix.utf16.count), baseFont))
+    }
+
+    @Test("SyntaxEditorView applies dense macOS highlight tokens across the document")
+    @MainActor
+    func syntaxEditorViewMacAppliesDenseHighlightTokensAcrossDocument() async {
+        let fixture = syntaxEditorDenseHighlightFixture()
+        let theme = syntaxEditorUITestColorTheme(
+            comment: syntaxEditorUITestColor(hex: 0x305070),
+            string: syntaxEditorUITestColor(hex: 0x507030),
+            keyword: syntaxEditorUITestColor(hex: 0x703050)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(tokens: fixture.tokens)
+        let model = SyntaxEditorTestContext(
+            text: fixture.source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        let middleLocation = fixture.source.utf16.count / 2
+        let lastLocation = fixture.source.utf16.count - 1
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorForegroundColor(editorView, at: 0),
+                syntaxEditorDenseHighlightColor(in: theme, at: 0)
+            )
+        )
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorForegroundColor(editorView, at: middleLocation),
+                syntaxEditorDenseHighlightColor(in: theme, at: middleLocation)
+            )
+        )
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorForegroundColor(editorView, at: lastLocation),
+                syntaxEditorDenseHighlightColor(in: theme, at: lastLocation)
+            )
+        )
+        #expect(macEditorFont(editorView, at: middleLocation) != nil)
     }
 
     @Test("SyntaxEditorView preserves macOS non-syntax attributes while applying delayed highlight")
