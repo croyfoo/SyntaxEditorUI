@@ -9,19 +9,44 @@ public final class SyntaxEditorConfiguration {
     public var lineWrappingEnabled: Bool
     public var colorTheme: SyntaxEditorColorTheme
     public var drawsBackground: Bool
+    public var fontSizeDelta: Int
 
     public init(
         language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
         colorTheme: SyntaxEditorColorTheme = .default,
-        drawsBackground: Bool = true
+        drawsBackground: Bool = true,
+        fontSizeDelta: Int = 0
     ) {
         self.language = language
         self.isEditable = isEditable
         self.lineWrappingEnabled = lineWrappingEnabled
         self.colorTheme = colorTheme
         self.drawsBackground = drawsBackground
+        self.fontSizeDelta = fontSizeDelta
+    }
+
+    public func increaseFontSize() {
+        fontSizeDelta = SyntaxEditorFontSize.increasedDelta(
+            fontSizeDelta,
+            forBasePointSize: fontSizeCommandBasePointSize
+        )
+    }
+
+    public func decreaseFontSize() {
+        fontSizeDelta = SyntaxEditorFontSize.decreasedDelta(
+            fontSizeDelta,
+            forBasePointSize: fontSizeCommandBasePointSize
+        )
+    }
+
+    public func resetFontSize() {
+        fontSizeDelta = 0
+    }
+
+    private var fontSizeCommandBasePointSize: CGFloat {
+        colorTheme.resolved(for: language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
     }
 }
 

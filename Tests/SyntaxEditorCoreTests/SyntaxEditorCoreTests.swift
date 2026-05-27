@@ -397,12 +397,16 @@ struct SyntaxEditorCoreTests {
         #expect(configuration.lineWrappingEnabled == false)
         #expect(configuration.colorTheme == .default)
         #expect(configuration.drawsBackground == true)
+        #expect(configuration.fontSizeDelta == 0)
 
         document.replaceText("body { color: red; }")
         configuration.language = SyntaxLanguage.css
         configuration.isEditable = false
         configuration.lineWrappingEnabled = true
         configuration.drawsBackground = false
+        configuration.increaseFontSize()
+        configuration.increaseFontSize()
+        configuration.decreaseFontSize()
 
         #expect(document.textSnapshot() == "body { color: red; }")
         #expect(document.revision == 1)
@@ -411,6 +415,57 @@ struct SyntaxEditorCoreTests {
         #expect(configuration.lineWrappingEnabled == true)
         #expect(configuration.colorTheme == .default)
         #expect(configuration.drawsBackground == false)
+        #expect(configuration.fontSizeDelta == 1)
+
+        configuration.resetFontSize()
+        #expect(configuration.fontSizeDelta == 0)
+    }
+
+    @Test("SyntaxEditorConfiguration font size commands clamp at rendered bounds")
+    @MainActor
+    func syntaxEditorConfigurationFontSizeCommandsClampAtRenderedBounds() {
+        let configuration = SyntaxEditorConfiguration(colorTheme: .presentationLarge)
+        let basePointSize = configuration.colorTheme.resolved(for: configuration.language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
+        let minimumDelta = Int(ceil(SyntaxEditorFontSize.minimum - basePointSize))
+        let maximumDelta = Int(floor(SyntaxEditorFontSize.maximum - basePointSize))
+
+        for _ in 0..<100 {
+            configuration.increaseFontSize()
+        }
+        #expect(configuration.fontSizeDelta == maximumDelta)
+
+        configuration.increaseFontSize()
+        #expect(configuration.fontSizeDelta == maximumDelta)
+
+        configuration.decreaseFontSize()
+        #expect(configuration.fontSizeDelta == maximumDelta - 1)
+
+        for _ in 0..<100 {
+            configuration.decreaseFontSize()
+        }
+        #expect(configuration.fontSizeDelta == minimumDelta)
+
+        configuration.decreaseFontSize()
+        #expect(configuration.fontSizeDelta == minimumDelta)
+
+        configuration.increaseFontSize()
+        #expect(configuration.fontSizeDelta == minimumDelta + 1)
+    }
+
+    @Test("SyntaxEditorConfiguration font size commands recover from explicit overshoot")
+    @MainActor
+    func syntaxEditorConfigurationFontSizeCommandsRecoverFromExplicitOvershoot() {
+        let configuration = SyntaxEditorConfiguration(colorTheme: .presentationLarge, fontSizeDelta: 100)
+        let basePointSize = configuration.colorTheme.resolved(for: configuration.language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
+        let minimumDelta = Int(ceil(SyntaxEditorFontSize.minimum - basePointSize))
+        let maximumDelta = Int(floor(SyntaxEditorFontSize.maximum - basePointSize))
+
+        configuration.decreaseFontSize()
+        #expect(configuration.fontSizeDelta == maximumDelta - 1)
+
+        configuration.fontSizeDelta = -100
+        configuration.increaseFontSize()
+        #expect(configuration.fontSizeDelta == minimumDelta + 1)
     }
 
     @Test("SyntaxEditorDocument text snapshots participate in observation")

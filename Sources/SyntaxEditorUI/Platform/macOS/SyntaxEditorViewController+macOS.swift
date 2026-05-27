@@ -8,6 +8,9 @@ private enum MacEditorShortcutAction {
     case outdent
     case toggleComment
     case toggleLineWrapping
+    case increaseFontSize
+    case decreaseFontSize
+    case resetFontSize
 }
 
 private struct PendingMacHighlightApplication {
@@ -34,6 +37,7 @@ private struct MacSyntaxHighlightAttributeResolver {
     let defaultLanguage: SyntaxLanguage
     let appearance: SyntaxEditorThemeAppearance
     let baseFont: NSFont
+    let fontSizeDelta: Int
 
     private var attributeCache: [MacSyntaxHighlightAttributeKey: [NSAttributedString.Key: Any]] = [:]
     private var missingAttributeKeys: Set<MacSyntaxHighlightAttributeKey> = []
@@ -43,12 +47,14 @@ private struct MacSyntaxHighlightAttributeResolver {
         colorTheme: SyntaxEditorColorTheme,
         defaultLanguage: SyntaxLanguage,
         appearance: SyntaxEditorThemeAppearance,
-        baseFont: NSFont
+        baseFont: NSFont,
+        fontSizeDelta: Int
     ) {
         self.colorTheme = colorTheme
         self.defaultLanguage = defaultLanguage
         self.appearance = appearance
         self.baseFont = baseFont
+        self.fontSizeDelta = fontSizeDelta
     }
 
     mutating func attributes(
@@ -89,7 +95,7 @@ private struct MacSyntaxHighlightAttributeResolver {
         if let cached = fontCache[descriptor] {
             return cached
         }
-        let font = descriptor.platformFont(fallback: baseFont)
+        let font = descriptor.platformFont(fallback: baseFont, fontSizeDelta: fontSizeDelta)
         fontCache[descriptor] = font
         return font
     }
@@ -170,11 +176,34 @@ private final class SyntaxEditorNativeTextView: NSTextView {
             }
         }
 
+        if key == "0",
+           modifiers.contains(.command),
+           modifiers.contains(.control),
+           !modifiers.contains(.option),
+           !modifiers.contains(.shift)
+        {
+            if shortcutHandler?(.resetFontSize) == true {
+                return true
+            }
+        }
+
         guard modifiers.contains(.command),
               !modifiers.contains(.control),
               !modifiers.contains(.option)
         else {
             return super.performKeyEquivalent(with: event)
+        }
+
+        if key == "+" || key == "=" {
+            if shortcutHandler?(.increaseFontSize) == true {
+                return true
+            }
+        }
+
+        if key == "-" {
+            if shortcutHandler?(.decreaseFontSize) == true {
+                return true
+            }
         }
 
         if key == "/" {
@@ -236,6 +265,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     private var isApplyingLineWrappingConfiguration = false
     private var isScrollViewConfigured = false
     private var lastAppliedColorTheme: SyntaxEditorColorTheme?
+    private var lastAppliedFontSizeDelta: Int
     private var lastAppliedDocumentRevision = 0
     private let documentObservations = ObservationScope()
     private let configurationObservations = ObservationScope()
@@ -279,6 +309,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         self.layoutManager = layoutManager
         self.textContainer = textContainer
         self.textView = nativeTextView
+        self.lastAppliedFontSizeDelta = configuration.fontSizeDelta
 
         super.init(frame: .zero)
 
@@ -330,7 +361,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             isEditable: configuration.isEditable,
             lineWrappingEnabled: configuration.lineWrappingEnabled,
             colorTheme: configuration.colorTheme,
-            drawsBackground: configuration.drawsBackground
+            drawsBackground: configuration.drawsBackground,
+            fontSizeDelta: configuration.fontSizeDelta
         )
         applyObservedDocumentChange()
     }
@@ -600,6 +632,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
                 lineWrappingEnabled: configuration.lineWrappingEnabled,
                 colorTheme: configuration.colorTheme,
                 drawsBackground: configuration.drawsBackground,
+                fontSizeDelta: configuration.fontSizeDelta,
                 forceLanguageRefresh: event.kind == .initial,
                 schedulesHighlight: event.kind != .initial || schedulesInitialHighlight
             )
@@ -675,16 +708,22 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         lineWrappingEnabled: Bool,
         colorTheme: SyntaxEditorColorTheme,
         drawsBackground: Bool,
+        fontSizeDelta: Int,
         forceLanguageRefresh: Bool = false,
         schedulesHighlight: Bool = true
     ) {
         let previousColorTheme = lastAppliedColorTheme
         let colorThemeChanged = previousColorTheme.map { $0 != colorTheme } ?? true
+        let fontSizeDeltaChanged = lastAppliedFontSizeDelta != fontSizeDelta
         if colorThemeChanged {
             applyBaseForegroundColorChange(from: previousColorTheme, to: colorTheme)
         }
         lastAppliedColorTheme = colorTheme
+        lastAppliedFontSizeDelta = fontSizeDelta
         updateTextViewFontAndTypingAttributes()
+        if fontSizeDeltaChanged {
+            applyResolvedFontsToExistingText()
+        }
         updateEditorBackgroundColor(drawsBackground: drawsBackground)
 
         if textView.isEditable != isEditable {
@@ -703,7 +742,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
                 revision: document.revision,
                 refreshStartUTF16: 0
             )
-        } else if colorThemeChanged && schedulesHighlight {
+        } else if (colorThemeChanged || fontSizeDeltaChanged) && schedulesHighlight {
             reapplyCachedHighlight()
         }
     }
@@ -888,6 +927,15 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             return runToggleCommentCommand()
         case .toggleLineWrapping:
             return runToggleLineWrappingCommand()
+        case .increaseFontSize:
+            configuration.increaseFontSize()
+            return true
+        case .decreaseFontSize:
+            configuration.decreaseFontSize()
+            return true
+        case .resetFontSize:
+            configuration.resetFontSize()
+            return true
         }
     }
 
@@ -1093,6 +1141,41 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         textStorage.addAttributes(baseAttributes(), range: insertedRange)
     }
 
+    private func applyResolvedFontsToExistingText() {
+        let textRange = NSRange(location: 0, length: textStorage.length)
+        guard textRange.length > 0,
+              let baseFont = baseAttributes()[.font] as? NSFont
+        else {
+            return
+        }
+
+        var updates: [(range: NSRange, font: NSFont)] = []
+        let source = textView.string
+        if lastHighlightRevision == document.revision,
+           lastHighlightLanguage == configuration.language,
+           lastHighlightSource == source {
+            var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes())
+            let runs = syntaxHighlightAttributeRuns(
+                for: lastHighlightTokens,
+                targetRange: textRange,
+                textLength: textStorage.length,
+                resolver: &resolver
+            )
+            for run in runs {
+                guard let font = run.attributes[.font] as? NSFont else { continue }
+                updates.append((run.range, font))
+            }
+        }
+
+        textStorage.beginEditing()
+        textStorage.addAttribute(.font, value: baseFont, range: textRange)
+        for update in updates {
+            textStorage.addAttribute(.font, value: update.font, range: update.range)
+        }
+        textStorage.endEditing()
+        invalidateVisibleTextDisplay()
+    }
+
     private func editsAreValid(_ edits: [SyntaxEditorTextEdit]) -> Bool {
         let textLength = textStorage.length
         return edits.allSatisfy { edit in
@@ -1259,7 +1342,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
             colorTheme: configuration.colorTheme,
             defaultLanguage: configuration.language,
             appearance: currentThemeAppearance,
-            baseFont: (baseAttributes[.font] as? NSFont) ?? resolvedBaseFont()
+            baseFont: (baseAttributes[.font] as? NSFont) ?? resolvedBaseFont(),
+            fontSizeDelta: configuration.fontSizeDelta
         )
     }
 
@@ -1524,9 +1608,15 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     }
 
     private func resolvedBaseFont(for theme: SyntaxEditorResolvedColorTheme? = nil) -> NSFont {
-        let fallbackFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let fallbackFont = NSFont.monospacedSystemFont(
+            ofSize: SyntaxEditorFontSize.defaultEditorPointSize,
+            weight: .regular
+        )
         let theme = theme ?? resolvedColorTheme()
-        return theme.base.font?.platformFont(fallback: fallbackFont) ?? fallbackFont
+        return theme.base.font?.platformFont(
+            fallback: fallbackFont,
+            fontSizeDelta: configuration.fontSizeDelta
+        ) ?? fallbackFont.syntaxEditorFontSizeAdjusted(by: configuration.fontSizeDelta)
     }
 
     private var currentThemeAppearance: SyntaxEditorThemeAppearance {
@@ -1813,6 +1903,12 @@ private extension NSAppearance {
             || match == .accessibilityHighContrastVibrantDark
             ? .dark
             : .light
+    }
+}
+
+private extension NSFont {
+    func syntaxEditorFontSizeAdjusted(by delta: Int) -> NSFont {
+        withSize(SyntaxEditorFontSize.pointSize(pointSize, applying: delta))
     }
 }
 
