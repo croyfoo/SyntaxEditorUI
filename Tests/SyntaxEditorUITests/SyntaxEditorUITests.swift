@@ -420,6 +420,28 @@ private func hasSyntaxEditorKeyCommand(
 }
 
 @MainActor
+private func syntaxEditorChildMenu(_ menu: UIMenu, title: String) -> UIMenu? {
+    menu.children.compactMap { $0 as? UIMenu }.first { $0.title == title }
+}
+
+@MainActor
+private func syntaxEditorChildKeyCommand(_ menu: UIMenu, title: String) -> UIKeyCommand? {
+    for child in menu.children {
+        if let command = child as? UIKeyCommand,
+           command.title == title {
+            return command
+        }
+
+        if let submenu = child as? UIMenu,
+           let command = syntaxEditorChildKeyCommand(submenu, title: title) {
+            return command
+        }
+    }
+
+    return nil
+}
+
+@MainActor
 @discardableResult
 private func performSyntaxEditorSelector(_ selectorName: String, on view: SyntaxEditorView) -> Bool {
     let selector = NSSelectorFromString(selectorName)
@@ -428,7 +450,7 @@ private func performSyntaxEditorSelector(_ selectorName: String, on view: Syntax
         return false
     }
 
-    _ = view.perform(selector)
+    _ = view.perform(selector, with: nil)
     return true
 }
 
@@ -701,6 +723,13 @@ private func iOSEditorUnderlineColor(_ editorView: SyntaxEditorView, at location
 #endif
 
 #if canImport(AppKit)
+private let syntaxEditorMenuItemModifierMask: NSEvent.ModifierFlags = [
+    .command,
+    .control,
+    .option,
+    .shift,
+]
+
 private func requireNSTextViewDelegate(_ value: any NSTextViewDelegate) {}
 
 private final class SyntaxEditorNotificationRecorder: NSObject {
@@ -799,6 +828,11 @@ private func makeMacCommandKeyEvent(
         isARepeat: false,
         keyCode: 0
     )
+}
+
+@MainActor
+private func syntaxEditorSubmenu(_ menu: NSMenu, title: String) -> NSMenu? {
+    menu.item(withTitle: title)?.submenu
 }
 #endif
 
@@ -4899,6 +4933,61 @@ struct SyntaxEditorUITests {
         #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
     }
 
+    @Test("SyntaxEditorMenu builds UIKit Editor menu commands")
+    @MainActor
+    func syntaxEditorMenuBuildsUIKitEditorMenuCommands() {
+        let menu = SyntaxEditorMenu.makeEditorMenu()
+        #expect(menu.title == "Editor")
+        #expect(menu.identifier == SyntaxEditorMenu.editorMenuIdentifier)
+
+        let structureMenu = syntaxEditorChildMenu(menu, title: "Structure")
+        #expect(structureMenu != nil)
+        #expect(structureMenu?.children.compactMap { $0 as? UIMenu }.map(\.options) == [
+            [.displayInline],
+            [.displayInline],
+        ])
+        let shiftRight = structureMenu.flatMap { syntaxEditorChildKeyCommand($0, title: "Shift Right") }
+        #expect(shiftRight?.input == "]")
+        #expect(shiftRight?.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == [.command])
+        #expect(shiftRight?.action == NSSelectorFromString("syntaxEditorShiftRight:"))
+
+        let shiftLeft = structureMenu.flatMap { syntaxEditorChildKeyCommand($0, title: "Shift Left") }
+        #expect(shiftLeft?.input == "[")
+        #expect(shiftLeft?.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == [.command])
+        #expect(shiftLeft?.action == NSSelectorFromString("syntaxEditorShiftLeft:"))
+
+        let commentSelection = structureMenu.flatMap { syntaxEditorChildKeyCommand($0, title: "Comment Selection") }
+        #expect(commentSelection?.input == "/")
+        #expect(commentSelection?.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == [.command])
+        #expect(commentSelection?.action == NSSelectorFromString("syntaxEditorCommentSelection:"))
+
+        let fontSizeMenu = syntaxEditorChildMenu(menu, title: "Font Size")
+        #expect(fontSizeMenu != nil)
+        #expect(fontSizeMenu?.children.compactMap { $0 as? UIMenu }.map(\.options) == [
+            [.displayInline],
+            [.displayInline],
+        ])
+        let increase = fontSizeMenu.flatMap { syntaxEditorChildKeyCommand($0, title: "Increase") }
+        #expect(increase?.input == "+")
+        #expect(increase?.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == [.command])
+        #expect(increase?.action == NSSelectorFromString("syntaxEditorIncreaseFontSize:"))
+
+        let decrease = fontSizeMenu.flatMap { syntaxEditorChildKeyCommand($0, title: "Decrease") }
+        #expect(decrease?.input == "-")
+        #expect(decrease?.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == [.command])
+        #expect(decrease?.action == NSSelectorFromString("syntaxEditorDecreaseFontSize:"))
+
+        let reset = fontSizeMenu.flatMap { syntaxEditorChildKeyCommand($0, title: "Reset") }
+        #expect(reset?.input == "0")
+        #expect(reset?.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == [.control, .command])
+        #expect(reset?.action == NSSelectorFromString("syntaxEditorResetFontSize:"))
+
+        let wrapLines = syntaxEditorChildKeyCommand(menu, title: "Wrap Lines")
+        #expect(wrapLines?.input == "l")
+        #expect(wrapLines?.modifierFlags.intersection(syntaxEditorKeyCommandModifierMask) == [.control, .shift, .command])
+        #expect(wrapLines?.action == NSSelectorFromString("syntaxEditorToggleLineWrapping:"))
+    }
+
     @Test("SyntaxEditorView omits editing key commands while read-only on iOS")
     @MainActor
     func syntaxEditorViewIOSReadOnlyOmitsEditingKeyCommands() {
@@ -4922,16 +5011,38 @@ struct SyntaxEditorUITests {
         #expect(hasSyntaxEditorKeyCommand(readOnlyCommands, input: "0", modifierFlags: [.control, .command]))
 
         let readOnlyLineWrappingActionTarget = editorView.target(
-            forAction: NSSelectorFromString("handleToggleLineWrappingCommand"),
+            forAction: NSSelectorFromString("syntaxEditorToggleLineWrapping:"),
             withSender: nil
         ) as AnyObject?
         #expect(readOnlyLineWrappingActionTarget === editorView)
 
         let readOnlyIncreaseFontSizeActionTarget = editorView.target(
-            forAction: NSSelectorFromString("handleIncreaseFontSizeCommand"),
+            forAction: NSSelectorFromString("syntaxEditorIncreaseFontSize:"),
             withSender: nil
         ) as AnyObject?
         #expect(readOnlyIncreaseFontSizeActionTarget === editorView)
+
+        let editorMenu = SyntaxEditorMenu.makeEditorMenu()
+        if let structureMenu = syntaxEditorChildMenu(editorMenu, title: "Structure"),
+           let shiftRightCommand = syntaxEditorChildKeyCommand(structureMenu, title: "Shift Right") {
+            editorView.validate(shiftRightCommand)
+            #expect(shiftRightCommand.attributes.contains(.disabled))
+        } else {
+            Issue.record("Expected Structure > Shift Right command")
+        }
+
+        if let wrapLinesCommand = syntaxEditorChildKeyCommand(editorMenu, title: "Wrap Lines") {
+            editorView.validate(wrapLinesCommand)
+            #expect(!wrapLinesCommand.attributes.contains(.disabled))
+            #expect(wrapLinesCommand.state == .off)
+
+            model.configuration.lineWrappingEnabled = true
+            editorView.validate(wrapLinesCommand)
+            #expect(!wrapLinesCommand.attributes.contains(.disabled))
+            #expect(wrapLinesCommand.state == .on)
+        } else {
+            Issue.record("Expected Wrap Lines command")
+        }
 
         model.configuration.isEditable = true
 
@@ -4950,7 +5061,7 @@ struct SyntaxEditorUITests {
         #expect(hasSyntaxEditorKeyCommand(editableCommands, input: "0", modifierFlags: [.control, .command]))
 
         let indentActionTarget = editorView.target(
-            forAction: NSSelectorFromString("handleIndentCommand"),
+            forAction: NSSelectorFromString("syntaxEditorShiftRight:"),
             withSender: nil
         ) as AnyObject?
         #expect(indentActionTarget === editorView)
@@ -4974,14 +5085,14 @@ struct SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: "let answer = 42", language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(testContext: model)
 
-        #expect(performSyntaxEditorSelector("handleIncreaseFontSizeCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorIncreaseFontSize:", on: editorView))
         #expect(model.configuration.fontSizeDelta == 1)
 
-        #expect(performSyntaxEditorSelector("handleDecreaseFontSizeCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorDecreaseFontSize:", on: editorView))
         #expect(model.configuration.fontSizeDelta == 0)
 
         model.configuration.fontSizeDelta = 5
-        #expect(performSyntaxEditorSelector("handleResetFontSizeCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorResetFontSize:", on: editorView))
         #expect(model.configuration.fontSizeDelta == 0)
     }
 
@@ -5008,12 +5119,12 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView)
 
-        #expect(performSyntaxEditorSelector("handleToggleLineWrappingCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorToggleLineWrapping:", on: editorView))
         #expect(model.configuration.lineWrappingEnabled)
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textContainer.widthTracksTextView)
 
-        #expect(performSyntaxEditorSelector("handleToggleLineWrappingCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorToggleLineWrapping:", on: editorView))
         #expect(!model.configuration.lineWrappingEnabled)
         editorView.synchronizeDocumentForTesting()
         #expect(!editorView.textContainer.widthTracksTextView)
@@ -5033,10 +5144,10 @@ struct SyntaxEditorUITests {
 
         editorView.insertText("\t")
         #expect(performSyntaxEditorSelector("handleInsertTabCommand", on: editorView))
-        #expect(performSyntaxEditorSelector("handleIndentCommand", on: editorView))
-        #expect(performSyntaxEditorSelector("handleOutdentCommand", on: editorView))
-        #expect(performSyntaxEditorSelector("handleToggleCommentCommand", on: editorView))
-        #expect(performSyntaxEditorSelector("handleToggleLineWrappingCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorShiftRight:", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorShiftLeft:", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorCommentSelection:", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorToggleLineWrapping:", on: editorView))
 
         #expect(model.document.textSnapshot() == source)
         #expect(editorView.text == source)
@@ -5108,7 +5219,7 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         editorView.selectedRange = NSRange(location: 0, length: 0)
 
-        #expect(performSyntaxEditorSelector("handleIndentCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorShiftRight:", on: editorView))
         let indentedSource = "    \(source)"
         #expect(model.document.textSnapshot() == indentedSource)
         #expect(editorView.text == indentedSource)
@@ -5153,7 +5264,7 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model)
         editorView.selectedRange = NSRange(location: 4, length: 0)
 
-        #expect(performSyntaxEditorSelector("handleIndentCommand", on: editorView))
+        #expect(performSyntaxEditorSelector("syntaxEditorShiftRight:", on: editorView))
         let indentedSource = "    \(source)"
         let indentedSelection = NSRange(location: 8, length: 0)
         #expect(model.document.textSnapshot() == indentedSource)
@@ -6557,6 +6668,114 @@ struct SyntaxEditorUITests {
 
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textView.string == "{\"answer\":42}")
+    }
+
+    @Test("SyntaxEditorMenu builds AppKit Editor menu item commands")
+    @MainActor
+    func syntaxEditorMenuBuildsAppKitEditorMenuItemCommands() throws {
+        let menuItem = SyntaxEditorMenu.makeEditorMenuItem()
+        #expect(menuItem.title == "Editor")
+        let menu = try #require(menuItem.submenu)
+
+        let structureMenu = try #require(syntaxEditorSubmenu(menu, title: "Structure"))
+        let shiftRight = structureMenu.item(withTitle: "Shift Right")
+        #expect(shiftRight?.action == NSSelectorFromString("syntaxEditorShiftRight:"))
+        #expect(shiftRight?.target == nil)
+        #expect(shiftRight?.keyEquivalent == "]")
+        #expect(shiftRight?.keyEquivalentModifierMask.intersection(syntaxEditorMenuItemModifierMask) == [.command])
+
+        let shiftLeft = structureMenu.item(withTitle: "Shift Left")
+        #expect(shiftLeft?.action == NSSelectorFromString("syntaxEditorShiftLeft:"))
+        #expect(shiftLeft?.target == nil)
+        #expect(shiftLeft?.keyEquivalent == "[")
+        #expect(shiftLeft?.keyEquivalentModifierMask.intersection(syntaxEditorMenuItemModifierMask) == [.command])
+
+        let commentSelection = structureMenu.item(withTitle: "Comment Selection")
+        #expect(structureMenu.items.firstIndex(where: { $0.isSeparatorItem }) == 2)
+        #expect(commentSelection?.action == NSSelectorFromString("syntaxEditorCommentSelection:"))
+        #expect(commentSelection?.target == nil)
+        #expect(commentSelection?.keyEquivalent == "/")
+        #expect(commentSelection?.keyEquivalentModifierMask.intersection(syntaxEditorMenuItemModifierMask) == [.command])
+
+        let fontSizeMenu = try #require(syntaxEditorSubmenu(menu, title: "Font Size"))
+        let increase = fontSizeMenu.item(withTitle: "Increase")
+        #expect(increase?.action == NSSelectorFromString("syntaxEditorIncreaseFontSize:"))
+        #expect(increase?.target == nil)
+        #expect(increase?.keyEquivalent == "+")
+        #expect(increase?.keyEquivalentModifierMask.intersection(syntaxEditorMenuItemModifierMask) == [.command])
+
+        let decrease = fontSizeMenu.item(withTitle: "Decrease")
+        #expect(decrease?.action == NSSelectorFromString("syntaxEditorDecreaseFontSize:"))
+        #expect(decrease?.target == nil)
+        #expect(decrease?.keyEquivalent == "-")
+        #expect(decrease?.keyEquivalentModifierMask.intersection(syntaxEditorMenuItemModifierMask) == [.command])
+
+        let reset = fontSizeMenu.item(withTitle: "Reset")
+        #expect(fontSizeMenu.items.firstIndex(where: { $0.isSeparatorItem }) == 2)
+        #expect(reset?.action == NSSelectorFromString("syntaxEditorResetFontSize:"))
+        #expect(reset?.target == nil)
+        #expect(reset?.keyEquivalent == "0")
+        #expect(reset?.keyEquivalentModifierMask.intersection(syntaxEditorMenuItemModifierMask) == [.control, .command])
+
+        let wrapLines = menu.item(withTitle: "Wrap Lines")
+        #expect(wrapLines?.action == NSSelectorFromString("syntaxEditorToggleLineWrapping:"))
+        #expect(wrapLines?.target == nil)
+        #expect(wrapLines?.keyEquivalent == "l")
+        #expect(wrapLines?.keyEquivalentModifierMask.intersection(syntaxEditorMenuItemModifierMask) == [.control, .shift, .command])
+    }
+
+    @Test("SyntaxEditorView validates and handles AppKit Editor menu actions")
+    @MainActor
+    func syntaxEditorViewMacValidatesAndHandlesEditorMenuActions() throws {
+        let source = "let answer = 42"
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            isEditable: false
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        let menu = try #require(SyntaxEditorMenu.makeEditorMenuItem().submenu)
+        let structureMenu = try #require(syntaxEditorSubmenu(menu, title: "Structure"))
+        let shiftRight = try #require(structureMenu.item(withTitle: "Shift Right"))
+        let wrapLines = try #require(menu.item(withTitle: "Wrap Lines"))
+
+        #expect(!editorView.textView.validateUserInterfaceItem(shiftRight))
+        #expect(editorView.textView.validateUserInterfaceItem(wrapLines))
+        #expect(wrapLines.state == .off)
+        model.configuration.lineWrappingEnabled = true
+        #expect(editorView.textView.validateUserInterfaceItem(wrapLines))
+        #expect(wrapLines.state == .on)
+
+        model.configuration.lineWrappingEnabled = false
+        model.configuration.isEditable = true
+        editorView.synchronizeDocumentForTesting()
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = editorView
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(editorView.textView)
+        defer { window.orderOut(nil) }
+
+        #expect(NSApplication.shared.sendAction(
+            NSSelectorFromString("syntaxEditorShiftRight:"),
+            to: editorView.textView,
+            from: shiftRight
+        ))
+        #expect(model.document.textSnapshot() == "    \(source)")
+        #expect(editorView.textView.string == "    \(source)")
+
+        #expect(NSApplication.shared.sendAction(
+            NSSelectorFromString("syntaxEditorToggleLineWrapping:"),
+            to: editorView.textView,
+            from: wrapLines
+        ))
+        #expect(model.configuration.lineWrappingEnabled)
     }
 
     @Test("SyntaxEditorView read-only delegate commands do not mutate text on macOS")

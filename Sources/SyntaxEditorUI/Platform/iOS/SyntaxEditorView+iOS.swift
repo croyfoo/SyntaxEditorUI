@@ -503,6 +503,17 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
     }
 
+    public override func validate(_ command: UICommand) {
+        super.validate(command)
+
+        guard let editorCommand = SyntaxEditorMenuCommand(selector: command.action) else {
+            return
+        }
+
+        command.attributes = canPerformAction(command.action, withSender: command) ? [] : .disabled
+        command.state = editorCommand == .wrapLines && configuration.lineWrappingEnabled ? .on : .off
+    }
+
     public override func copy(_ sender: Any?) {
         guard selectedRange.length > 0,
               let selectedText = string(in: selectedRange)
@@ -742,12 +753,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func editorKeyCommands() -> [UIKeyCommand]? {
-        var commands = [
-            makeKeyCommand(input: "l", modifierFlags: [.control, .shift, .command], action: #selector(handleToggleLineWrappingCommand), title: "Wrap Lines"),
-            makeKeyCommand(input: "+", modifierFlags: [.command], action: #selector(handleIncreaseFontSizeCommand), title: "Increase Font Size"),
-            makeKeyCommand(input: "-", modifierFlags: [.command], action: #selector(handleDecreaseFontSizeCommand), title: "Decrease Font Size"),
-            makeKeyCommand(input: "0", modifierFlags: [.control, .command], action: #selector(handleResetFontSizeCommand), title: "Reset Font Size"),
-        ]
+        var commands = SyntaxEditorMenu.makeKeyCommands(includeEditingCommands: configuration.isEditable)
 
         guard configuration.isEditable else {
             return commands
@@ -756,9 +762,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         commands.append(contentsOf: [
             makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleInsertTabCommand), title: "Insert Tab"),
             makeKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleOutdentCommand), title: "Outdent"),
-            makeKeyCommand(input: "/", modifierFlags: [.command], action: #selector(handleToggleCommentCommand), title: "Toggle Comment"),
-            makeKeyCommand(input: "]", modifierFlags: [.command], action: #selector(handleIndentCommand), title: "Indent"),
-            makeKeyCommand(input: "[", modifierFlags: [.command], action: #selector(handleOutdentCommand), title: "Outdent"),
             makeKeyCommand(
                 input: "v",
                 modifierFlags: [.command],
@@ -770,21 +773,26 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func isEditorCommandAction(_ action: Selector) -> Bool {
-        action == #selector(handleInsertTabCommand)
-            || action == #selector(handleIndentCommand)
+        if let command = SyntaxEditorMenuCommand(selector: action) {
+            return command.isEditingCommand
+        }
+
+        return action == #selector(handleInsertTabCommand)
             || action == #selector(handleOutdentCommand)
-            || action == #selector(handleToggleCommentCommand)
             || action == #selector(handlePasteCommand)
     }
 
     func isLineWrappingCommandAction(_ action: Selector) -> Bool {
-        action == #selector(handleToggleLineWrappingCommand)
+        SyntaxEditorMenuCommand(selector: action) == .wrapLines
     }
 
     func isFontSizeCommandAction(_ action: Selector) -> Bool {
-        action == #selector(handleIncreaseFontSizeCommand)
-            || action == #selector(handleDecreaseFontSizeCommand)
-            || action == #selector(handleResetFontSizeCommand)
+        switch SyntaxEditorMenuCommand(selector: action) {
+        case .increaseFontSize, .decreaseFontSize, .resetFontSize:
+            true
+        case .shiftRight, .shiftLeft, .commentSelection, .wrapLines, nil:
+            false
+        }
     }
 
     func isFindCommandAction(_ action: Selector) -> Bool {
@@ -1442,6 +1450,34 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             previousText: previousText
         )
         return mutation
+    }
+
+    @objc public func syntaxEditorShiftRight(_ sender: Any?) {
+        handleIndentCommand()
+    }
+
+    @objc public func syntaxEditorShiftLeft(_ sender: Any?) {
+        handleOutdentCommand()
+    }
+
+    @objc public func syntaxEditorCommentSelection(_ sender: Any?) {
+        handleToggleCommentCommand()
+    }
+
+    @objc public func syntaxEditorToggleLineWrapping(_ sender: Any?) {
+        handleToggleLineWrappingCommand()
+    }
+
+    @objc public func syntaxEditorIncreaseFontSize(_ sender: Any?) {
+        handleIncreaseFontSizeCommand()
+    }
+
+    @objc public func syntaxEditorDecreaseFontSize(_ sender: Any?) {
+        handleDecreaseFontSizeCommand()
+    }
+
+    @objc public func syntaxEditorResetFontSize(_ sender: Any?) {
+        handleResetFontSizeCommand()
     }
 
     @objc private func handleIndentCommand() {

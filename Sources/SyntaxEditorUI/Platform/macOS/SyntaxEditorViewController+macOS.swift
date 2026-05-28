@@ -13,6 +13,27 @@ private enum MacEditorShortcutAction {
     case resetFontSize
 }
 
+private extension MacEditorShortcutAction {
+    init?(command: SyntaxEditorMenuCommand) {
+        switch command {
+        case .shiftRight:
+            self = .indent
+        case .shiftLeft:
+            self = .outdent
+        case .commentSelection:
+            self = .toggleComment
+        case .wrapLines:
+            self = .toggleLineWrapping
+        case .increaseFontSize:
+            self = .increaseFontSize
+        case .decreaseFontSize:
+            self = .decreaseFontSize
+        case .resetFontSize:
+            self = .resetFontSize
+        }
+    }
+}
+
 private struct PendingMacHighlightApplication {
     let tokens: [SyntaxHighlightToken]
     let expectedRevision: Int
@@ -131,6 +152,8 @@ private final class SyntaxEditorReadOnlyGuardedUndoManager: UndoManager {
 
 private final class SyntaxEditorNativeTextView: NSTextView {
     var shortcutHandler: ((MacEditorShortcutAction) -> Bool)?
+    var shortcutValidator: ((MacEditorShortcutAction) -> Bool)?
+    var lineWrappingStateProvider: (() -> Bool)?
     var guardedUndoManager: UndoManager?
 
     override class var isCompatibleWithResponsiveScrolling: Bool {
@@ -149,6 +172,34 @@ private final class SyntaxEditorNativeTextView: NSTextView {
         undoManager?.redo()
     }
 
+    @objc func syntaxEditorShiftRight(_ sender: Any?) {
+        _ = shortcutHandler?(.indent)
+    }
+
+    @objc func syntaxEditorShiftLeft(_ sender: Any?) {
+        _ = shortcutHandler?(.outdent)
+    }
+
+    @objc func syntaxEditorCommentSelection(_ sender: Any?) {
+        _ = shortcutHandler?(.toggleComment)
+    }
+
+    @objc func syntaxEditorToggleLineWrapping(_ sender: Any?) {
+        _ = shortcutHandler?(.toggleLineWrapping)
+    }
+
+    @objc func syntaxEditorIncreaseFontSize(_ sender: Any?) {
+        _ = shortcutHandler?(.increaseFontSize)
+    }
+
+    @objc func syntaxEditorDecreaseFontSize(_ sender: Any?) {
+        _ = shortcutHandler?(.decreaseFontSize)
+    }
+
+    @objc func syntaxEditorResetFontSize(_ sender: Any?) {
+        _ = shortcutHandler?(.resetFontSize)
+    }
+
     override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
         if item.action == #selector(undo(_:)) {
             return undoManager?.canUndo ?? false
@@ -156,6 +207,16 @@ private final class SyntaxEditorNativeTextView: NSTextView {
 
         if item.action == #selector(redo(_:)) {
             return undoManager?.canRedo ?? false
+        }
+
+        if let command = SyntaxEditorMenuCommand(selector: item.action),
+           let shortcutAction = MacEditorShortcutAction(command: command)
+        {
+            if command == .wrapLines,
+               let menuItem = item as? NSMenuItem {
+                menuItem.state = lineWrappingStateProvider?() == true ? .on : .off
+            }
+            return shortcutValidator?(shortcutAction) ?? true
         }
 
         return super.validateUserInterfaceItem(item)
@@ -320,6 +381,13 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         nativeTextView.shortcutHandler = { [weak self] action in
             guard let self else { return false }
             return self.handleShortcut(action)
+        }
+        nativeTextView.shortcutValidator = { [weak self] action in
+            guard let self else { return false }
+            return self.canHandleShortcut(action)
+        }
+        nativeTextView.lineWrappingStateProvider = { [weak self] in
+            self?.configuration.lineWrappingEnabled ?? false
         }
 
         configureScrollView()
@@ -915,6 +983,15 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         guard applyStorageTextEdits(edits) else { return false }
         textView.didChangeText()
         return true
+    }
+
+    private func canHandleShortcut(_ action: MacEditorShortcutAction) -> Bool {
+        switch action {
+        case .indent, .outdent, .toggleComment:
+            configuration.isEditable
+        case .toggleLineWrapping, .increaseFontSize, .decreaseFontSize, .resetFontSize:
+            true
+        }
     }
 
     private func handleShortcut(_ action: MacEditorShortcutAction) -> Bool {

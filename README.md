@@ -54,6 +54,24 @@ Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScrip
 
 Set `configuration.drawsBackground = false` when the surrounding view should provide the editor background while syntax colors and editor decorations remain active. Use `configuration.fontSizeDelta`, `increaseFontSize()`, `decreaseFontSize()`, and `resetFontSize()` for Xcode-style point-size adjustments relative to the selected theme.
 
+Use `SyntaxEditorMenu` when an app wants to expose editor shortcuts in an `Editor` menu. On iOS 26 and later, install it from the app delegate's main menu configuration:
+
+```swift
+if #available(iOS 26.0, *) {
+    UIMainMenuSystem.shared.setBuildConfiguration(UIMainMenuSystem.Configuration()) { builder in
+        SyntaxEditorMenu.insertEditorMenu(into: builder)
+    }
+}
+```
+
+On iPadOS, first-responder key commands can also appear under Help > Other Keyboard Shortcuts; install the `Editor` menu through the main menu builder when the commands should appear as a menu bar menu.
+
+On macOS, insert the menu item into the app's main menu:
+
+```swift
+SyntaxEditorMenu.insertEditorMenuItem(into: NSApp.mainMenu!)
+```
+
 ### iPad Pointer Input
 
 Apps that use `SyntaxEditorView` on iPadOS should enable `UIApplicationSupportsIndirectInputEvents` in their `Info.plist`. With this key enabled, mouse and trackpad click-drags are handled by UIKit text selection instead of scroll dragging, while finger drag scrolling and trackpad or mouse wheel scrolling continue to work.

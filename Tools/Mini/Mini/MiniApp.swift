@@ -8,6 +8,18 @@ import UIKit
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        if #available(iOS 26.0, *) {
+            UIMainMenuSystem.shared.setBuildConfiguration(UIMainMenuSystem.Configuration()) { builder in
+                SyntaxEditorMenu.insertEditorMenu(into: builder)
+            }
+        }
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
         configurationForConnecting connectingSceneSession: UISceneSession,
         options: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {
@@ -167,6 +179,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(findMenuItem)
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
+
+        SyntaxEditorMenu.insertEditorMenuItem(into: mainMenu)
 
         let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
