@@ -91,7 +91,9 @@ GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `
 
 ## Migration
 
-### Next
+### v0.10.0
+
+These notes apply when upgrading from `v0.9.x` or earlier to `v0.10.0`.
 
 - `SyntaxEditorView.font` has been removed from the public iOS API. Use `SyntaxEditorConfiguration.fontSizeDelta` or the font-size command methods to adjust editor text size.
 
