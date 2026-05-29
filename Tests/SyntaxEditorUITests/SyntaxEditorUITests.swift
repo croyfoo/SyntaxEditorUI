@@ -147,6 +147,31 @@ private final class SyntaxEditorObservationPassCounter {
     }
 }
 
+@MainActor
+private func syntaxEditorDrainMainActorObservationDelivery<Value>(
+    recording values: ObservedValues<Value>,
+    stablePassCount: Int = 2,
+    maximumDrainPasses: Int = 8
+) async {
+    var previousCount = values.snapshot().count
+    var stableCount = 0
+
+    for _ in 0..<maximumDrainPasses {
+        await Task { @MainActor in }.value
+
+        let currentCount = values.snapshot().count
+        if currentCount == previousCount {
+            stableCount += 1
+            if stableCount >= stablePassCount {
+                return
+            }
+        } else {
+            previousCount = currentCount
+            stableCount = 0
+        }
+    }
+}
+
 extension SyntaxEditorView {
     fileprivate convenience init(testContext: SyntaxEditorTestContext) {
         self.init(document: testContext.document, configuration: testContext.configuration)
@@ -246,10 +271,79 @@ private func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: Syn
         && abs(lhsAlpha - rhsAlpha) < 0.002
 }
 
+private actor ManualSyntaxHighlightGate {
+    private struct SuspensionWaiter {
+        let minimumCount: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private var suspensionCount = 0
+    private var suspensionWaiters: [SuspensionWaiter] = []
+    private var resumeContinuations: [CheckedContinuation<Void, Never>] = []
+
+    func suspend() async {
+        suspensionCount += 1
+        resumeReadySuspensionWaiters()
+
+        await withCheckedContinuation { continuation in
+            resumeContinuations.append(continuation)
+        }
+    }
+
+    func currentSuspensionCount() -> Int {
+        suspensionCount
+    }
+
+    func waitUntilSuspended(_ minimumCount: Int = 1) async {
+        guard suspensionCount < minimumCount else { return }
+
+        await withCheckedContinuation { continuation in
+            suspensionWaiters.append(
+                SuspensionWaiter(minimumCount: minimumCount, continuation: continuation)
+            )
+        }
+    }
+
+    func waitUntilSuspended(after previousCount: Int) async {
+        await waitUntilSuspended(previousCount + 1)
+    }
+
+    func resumeOne() {
+        guard !resumeContinuations.isEmpty else { return }
+        let continuation = resumeContinuations.removeFirst()
+        continuation.resume()
+    }
+
+    func resumeAll() {
+        let continuations = resumeContinuations
+        resumeContinuations.removeAll()
+
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+
+    private func resumeReadySuspensionWaiters() {
+        var readyContinuations: [CheckedContinuation<Void, Never>] = []
+        suspensionWaiters.removeAll { waiter in
+            guard suspensionCount >= waiter.minimumCount else {
+                return false
+            }
+            readyContinuations.append(waiter.continuation)
+            return true
+        }
+
+        for continuation in readyContinuations {
+            continuation.resume()
+        }
+    }
+}
+
 private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     private let tokens: [SyntaxHighlightToken]
     private let updateTokens: [SyntaxHighlightToken]?
-    private let delayNanoseconds: UInt64
+    private let resetGate: ManualSyntaxHighlightGate?
+    private let updateGate: ManualSyntaxHighlightGate?
     private let updateRefreshRange: NSRange?
     private var resetCount = 0
     private var updateCount = 0
@@ -257,18 +351,22 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     init(
         tokens: [SyntaxHighlightToken] = [],
         updateTokens: [SyntaxHighlightToken]? = nil,
-        delayNanoseconds: UInt64 = 0,
+        resetGate: ManualSyntaxHighlightGate? = nil,
+        updateGate: ManualSyntaxHighlightGate? = nil,
         updateRefreshRange: NSRange? = nil
     ) {
         self.tokens = tokens
         self.updateTokens = updateTokens
-        self.delayNanoseconds = delayNanoseconds
+        self.resetGate = resetGate
+        self.updateGate = updateGate
         self.updateRefreshRange = updateRefreshRange
     }
 
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
         resetCount += 1
-        await delayIfNeeded()
+        if let resetGate {
+            await resetGate.suspend()
+        }
         return result(source: source, language: language, revision: revision, refreshRange: nil)
     }
 
@@ -279,7 +377,9 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
         revision: Int
     ) async -> SyntaxHighlightResult {
         updateCount += 1
-        await delayIfNeeded()
+        if let updateGate {
+            await updateGate.suspend()
+        }
         return result(
             tokens: updateTokens ?? tokens,
             source: source,
@@ -291,11 +391,6 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
 
     func callCount() -> Int {
         resetCount + updateCount
-    }
-
-    private func delayIfNeeded() async {
-        guard delayNanoseconds > 0 else { return }
-        try? await Task.sleep(nanoseconds: delayNanoseconds)
     }
 
     private func result(
@@ -318,20 +413,25 @@ private actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
 private actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {
     private let swiftTokens: [SyntaxHighlightToken]
     private let jsonTokens: [SyntaxHighlightToken]
-    private let delayNanoseconds: UInt64
+    private let resetGate: ManualSyntaxHighlightGate?
+    private let updateGate: ManualSyntaxHighlightGate?
 
     init(
         swiftTokens: [SyntaxHighlightToken],
         jsonTokens: [SyntaxHighlightToken],
-        delayNanoseconds: UInt64 = 0
+        resetGate: ManualSyntaxHighlightGate? = nil,
+        updateGate: ManualSyntaxHighlightGate? = nil
     ) {
         self.swiftTokens = swiftTokens
         self.jsonTokens = jsonTokens
-        self.delayNanoseconds = delayNanoseconds
+        self.resetGate = resetGate
+        self.updateGate = updateGate
     }
 
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
-        await delayIfNeeded()
+        if let resetGate {
+            await resetGate.suspend()
+        }
         return result(source: source, language: language, revision: revision)
     }
 
@@ -341,13 +441,10 @@ private actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {
         mutation: SyntaxHighlightMutation,
         revision: Int
     ) async -> SyntaxHighlightResult {
-        await delayIfNeeded()
+        if let updateGate {
+            await updateGate.suspend()
+        }
         return result(source: source, language: language, revision: revision)
-    }
-
-    private func delayIfNeeded() async {
-        guard delayNanoseconds > 0 else { return }
-        try? await Task.sleep(nanoseconds: delayNanoseconds)
     }
 
     private func result(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxHighlightResult {
@@ -1036,6 +1133,7 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x654321),
             keyword: syntaxEditorUITestColor(hex: 0x876543)
         )
+        let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -1043,7 +1141,7 @@ struct SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            delayNanoseconds: 30_000_000
+            resetGate: resetGate
         )
         let model = SyntaxEditorTestContext(
             text: "let old = 1",
@@ -1054,26 +1152,36 @@ struct SyntaxEditorUITests {
 
 #if canImport(UIKit)
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await resetGate.waitUntilSuspended()
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
 
+        let previousSuspensionCount = await resetGate.currentSuspensionCount()
         editorView.update(document: replacementDocument, configuration: model.configuration)
         model.configuration.colorTheme = updatedTheme
         editorView.synchronizeDocumentForTesting()
 
+        await resetGate.waitUntilSuspended(after: previousSuspensionCount)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.baseForeground))
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
 #elseif canImport(AppKit)
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await resetGate.waitUntilSuspended()
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
 
+        let previousSuspensionCount = await resetGate.currentSuspensionCount()
         editorView.update(document: replacementDocument, configuration: model.configuration)
         model.configuration.colorTheme = updatedTheme
         editorView.synchronizeDocumentForTesting()
 
+        await resetGate.waitUntilSuspended(after: previousSuspensionCount)
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.baseForeground))
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
 #endif
@@ -1930,7 +2038,8 @@ struct SyntaxEditorUITests {
         model.document.replaceText("{\"enabled\":true}")
 
         #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
-        #expect(await configurationPasses.waitUntilValue(3, timeout: .milliseconds(100)) == false)
+        await syntaxEditorDrainMainActorObservationDelivery(recording: configurationPasses)
+        #expect(configurationPasses.snapshot() == [1, 2])
     }
 
     @Test("SyntaxEditorView clamps iOS selection after setting shorter text")
@@ -2319,6 +2428,7 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x654321)
         )
+        let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -2326,7 +2436,7 @@ struct SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            delayNanoseconds: 20_000_000
+            resetGate: resetGate
         )
         let model = SyntaxEditorTestContext(
             text: source,
@@ -2336,10 +2446,12 @@ struct SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
+        await resetGate.waitUntilSuspended()
         #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: 0), editorView.font))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.baseForeground))
         #expect(iOSEditorLineBreakMode(editorView) == .byCharWrapping)
 
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
@@ -2355,6 +2467,7 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x654321)
         )
+        let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -2363,7 +2476,7 @@ struct SyntaxEditorUITests {
                 ),
             ],
             updateTokens: [],
-            delayNanoseconds: 20_000_000,
+            updateGate: updateGate,
             updateRefreshRange: NSRange(location: 0, length: source.utf16.count + insertedPrefix.utf16.count)
         )
         let model = SyntaxEditorTestContext(
@@ -2375,12 +2488,15 @@ struct SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
 
         editorView.selectedRange = NSRange(location: 0, length: 0)
+        let previousSuspensionCount = await updateGate.currentSuspensionCount()
         editorView.insertText(insertedPrefix)
 
+        await updateGate.waitUntilSuspended(after: previousSuspensionCount)
         #expect(editorView.text == insertedPrefix + source)
         #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: 0), editorView.font))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.baseForeground))
 
+        await updateGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
     }
 
@@ -2546,6 +2662,7 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
+        let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -2553,7 +2670,7 @@ struct SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            delayNanoseconds: 1_000_000
+            resetGate: resetGate
         )
         let model = SyntaxEditorTestContext(
             text: source,
@@ -2564,8 +2681,10 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
         layoutIOSEditorView(editorView, width: 393, height: 658)
+        await resetGate.waitUntilSuspended()
         #expect(syntaxEditorUITestColorsEqual(iOSEditorLineFragmentForegroundColor(editorView, at: 0), theme.baseForeground))
 
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         layoutIOSEditorView(editorView, width: 393, height: 658)
 
@@ -2582,6 +2701,8 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
+        let resetGate = ManualSyntaxHighlightGate()
+        let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -2593,7 +2714,8 @@ struct SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            delayNanoseconds: 20_000_000,
+            resetGate: resetGate,
+            updateGate: updateGate,
             updateRefreshRange: NSRange(location: firstPaste.utf16.count, length: secondPaste.utf16.count)
         )
         let model = SyntaxEditorTestContext(
@@ -2604,10 +2726,17 @@ struct SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
         layoutIOSEditorView(editorView, width: 393, height: 658)
+        await resetGate.waitUntilSuspended()
 
+        let firstSuspensionCount = await updateGate.currentSuspensionCount()
         editorView.insertPastedText(firstPaste)
+        await updateGate.waitUntilSuspended(after: firstSuspensionCount)
+        let secondSuspensionCount = await updateGate.currentSuspensionCount()
         editorView.insertPastedText(secondPaste)
+        await updateGate.waitUntilSuspended(after: secondSuspensionCount)
 
+        await resetGate.resumeAll()
+        await updateGate.resumeAll()
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(editorView.text == firstPaste + secondPaste)
@@ -3757,7 +3886,8 @@ struct SyntaxEditorUITests {
             "}",
         ]
         let source = sourceLines.joined(separator: "\n")
-        let highlighter = SyntaxEditorUITestHighlighter(delayNanoseconds: 1_000_000)
+        let updateGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorUITestHighlighter(updateGate: updateGate)
         let model = SyntaxEditorTestContext(
             text: source,
             language: SyntaxLanguage.javascript,
@@ -3781,7 +3911,9 @@ struct SyntaxEditorUITests {
 
         var previousCaretX = editorView.caretRect(for: SyntaxEditorTextPosition(offset: insertionOffset)).midX
         for insertedSpaceCount in 1...12 {
+            let previousSuspensionCount = await updateGate.currentSuspensionCount()
             editorView.insertText(" ")
+            await updateGate.waitUntilSuspended(after: previousSuspensionCount)
             layoutIOSEditorView(editorView, width: 393, height: 658)
             await Task.yield()
 
@@ -3796,6 +3928,7 @@ struct SyntaxEditorUITests {
             previousCaretX = caretRect.midX
         }
 
+        await updateGate.resumeAll()
         await editorView.waitForPendingHighlightForTesting()
         guard let finalCaretPosition = editorView.selectedTextRange?.start else {
             Issue.record("SyntaxEditorView did not expose a selected text range after highlighting")
@@ -5816,6 +5949,7 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x654321)
         )
+        let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -5823,7 +5957,7 @@ struct SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            delayNanoseconds: 20_000_000
+            resetGate: resetGate
         )
         let model = SyntaxEditorTestContext(
             text: source,
@@ -5833,9 +5967,11 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
         let baseFont = try #require(editorView.textView.font)
 
+        await resetGate.waitUntilSuspended()
         #expect(syntaxEditorUITestFontsEqual(macEditorFont(editorView, at: 0), baseFont))
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
 
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
@@ -5984,6 +6120,7 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x654321)
         )
+        let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -5992,7 +6129,7 @@ struct SyntaxEditorUITests {
                 ),
             ],
             updateTokens: [],
-            delayNanoseconds: 20_000_000,
+            updateGate: updateGate,
             updateRefreshRange: NSRange(location: 0, length: source.utf16.count + insertedPrefix.utf16.count)
         )
         let model = SyntaxEditorTestContext(
@@ -6004,12 +6141,15 @@ struct SyntaxEditorUITests {
         let baseFont = try #require(editorView.textView.font)
         await editorView.waitForPendingHighlightForTesting()
 
+        let previousSuspensionCount = await updateGate.currentSuspensionCount()
         editorView.textView.insertText(insertedPrefix, replacementRange: NSRange(location: 0, length: 0))
 
+        await updateGate.waitUntilSuspended(after: previousSuspensionCount)
         #expect(editorView.textView.string == insertedPrefix + source)
         #expect(syntaxEditorUITestFontsEqual(macEditorFont(editorView, at: 0), baseFont))
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
 
+        await updateGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
     }
 
@@ -6178,6 +6318,7 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x654321)
         )
+        let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -6185,7 +6326,7 @@ struct SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            delayNanoseconds: 20_000_000
+            resetGate: resetGate
         )
         let model = SyntaxEditorTestContext(
             text: source,
@@ -6199,9 +6340,11 @@ struct SyntaxEditorUITests {
             range: NSRange(location: 4, length: 5)
         )
 
+        await resetGate.waitUntilSuspended()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
         #expect(macEditorUnderlineStyle(editorView, at: 4) == NSUnderlineStyle.single.rawValue)
 
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
@@ -6258,6 +6401,7 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x654321)
         )
+        let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -6265,7 +6409,7 @@ struct SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            delayNanoseconds: 20_000_000
+            resetGate: resetGate
         )
         let model = SyntaxEditorTestContext(
             text: source,
@@ -6273,11 +6417,13 @@ struct SyntaxEditorUITests {
             colorTheme: theme
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await resetGate.waitUntilSuspended()
 
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 2))
         editorView.textViewDidChangeSelection(
             Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
         )
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(editorView.bracketHighlightRangesForTesting.isEmpty)
@@ -6305,6 +6451,7 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x654321)
         )
+        let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorLanguageAwareTestHighlighter(
             swiftTokens: [
                 SyntaxHighlightToken(
@@ -6313,7 +6460,7 @@ struct SyntaxEditorUITests {
                 ),
             ],
             jsonTokens: [],
-            delayNanoseconds: 20_000_000
+            resetGate: resetGate
         )
         let model = SyntaxEditorTestContext(
             text: source,
@@ -6321,22 +6468,27 @@ struct SyntaxEditorUITests {
             colorTheme: theme
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await resetGate.waitUntilSuspended()
 
         editorView.textView.setSelectedRange(NSRange(location: 0, length: source.utf16.count))
         editorView.textViewDidChangeSelection(
             Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
         )
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
 
+        let previousSuspensionCount = await resetGate.currentSuspensionCount()
         model.configuration.language = SyntaxLanguage.json
         editorView.synchronizeDocumentForTesting()
+        await resetGate.waitUntilSuspended(after: previousSuspensionCount)
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
         editorView.textViewDidChangeSelection(
             Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
         )
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
 
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
     }
@@ -6349,6 +6501,8 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x654321)
         )
+        let resetGate = ManualSyntaxHighlightGate()
+        let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -6356,7 +6510,8 @@ struct SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            delayNanoseconds: 20_000_000,
+            resetGate: resetGate,
+            updateGate: updateGate,
             updateRefreshRange: NSRange(location: 0, length: 3)
         )
         let model = SyntaxEditorTestContext(
@@ -6365,15 +6520,20 @@ struct SyntaxEditorUITests {
             colorTheme: theme
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await resetGate.waitUntilSuspended()
 
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 3))
         editorView.textViewDidChangeSelection(
             Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
         )
+        await resetGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 4), theme.baseForeground))
 
+        let previousSuspensionCount = await updateGate.currentSuspensionCount()
         editorView.textView.insertText("var", replacementRange: NSRange(location: 0, length: 3))
+        await updateGate.waitUntilSuspended(after: previousSuspensionCount)
+        await updateGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(editorView.textView.string == "var\nlet")
@@ -6492,6 +6652,8 @@ struct SyntaxEditorUITests {
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
+        let resetGate = ManualSyntaxHighlightGate()
+        let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
@@ -6503,7 +6665,8 @@ struct SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            delayNanoseconds: 20_000_000,
+            resetGate: resetGate,
+            updateGate: updateGate,
             updateRefreshRange: NSRange(location: firstPaste.utf16.count, length: secondPaste.utf16.count)
         )
         let model = SyntaxEditorTestContext(
@@ -6512,15 +6675,22 @@ struct SyntaxEditorUITests {
             colorTheme: theme
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        await resetGate.waitUntilSuspended()
 
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        let firstSuspensionCount = await updateGate.currentSuspensionCount()
         editorView.textView.insertText(firstPaste, replacementRange: NSRange(location: 0, length: 0))
+        await updateGate.waitUntilSuspended(after: firstSuspensionCount)
         editorView.textView.setSelectedRange(NSRange(location: firstPaste.utf16.count, length: 0))
+        let secondSuspensionCount = await updateGate.currentSuspensionCount()
         editorView.textView.insertText(
             secondPaste,
             replacementRange: NSRange(location: firstPaste.utf16.count, length: 0)
         )
+        await updateGate.waitUntilSuspended(after: secondSuspensionCount)
 
+        await resetGate.resumeAll()
+        await updateGate.resumeAll()
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(editorView.textView.string == firstPaste + secondPaste)
@@ -7224,7 +7394,8 @@ struct SyntaxEditorUITests {
         model.document.replaceText("{\"enabled\":true}")
 
         #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
-        #expect(await configurationPasses.waitUntilValue(3, timeout: .milliseconds(100)) == false)
+        await syntaxEditorDrainMainActorObservationDelivery(recording: configurationPasses)
+        #expect(configurationPasses.snapshot() == [1, 2])
     }
 
     @Test("SyntaxEditorViewController reflects editable and wrapping changes on macOS")
