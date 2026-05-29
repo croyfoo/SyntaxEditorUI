@@ -859,7 +859,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func startConfigurationObservation(schedulesInitialHighlight: Bool = true) {
-        configurationDeliveryForTesting = configurationObservations.observe(configuration) { [weak self] event, configuration in
+        configurationDeliveryForTesting = configurationObservations.observe(configuration, tracking: { configuration in
+            _ = configuration.language
+            _ = configuration.isEditable
+            _ = configuration.lineWrappingEnabled
+            _ = configuration.colorTheme
+            _ = configuration.drawsBackground
+            _ = configuration.fontSizeDelta
+        }) { [weak self] event, configuration in
             guard let self else { return }
             self.applyObservedConfiguration(
                 language: configuration.language,
@@ -875,7 +882,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func startDocumentObservation() {
-        documentDeliveryForTesting = documentObservations.observe(document) { [weak self] event, document in
+        documentDeliveryForTesting = documentObservations.observe(document, tracking: { document in
+            _ = document.revision
+        }) { [weak self] event, document in
             guard let self else { return }
             self.applyObservedDocumentChange(
                 forceTextUpdate: event.kind == .initial,

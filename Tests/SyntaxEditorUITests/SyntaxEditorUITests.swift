@@ -137,6 +137,16 @@ private struct SyntaxEditorRenderedEditorState: Sendable, Equatable {
     var wrapsLines: Bool
 }
 
+@MainActor
+private final class SyntaxEditorObservationPassCounter {
+    private var value = 0
+
+    func next() -> Int {
+        value += 1
+        return value
+    }
+}
+
 extension SyntaxEditorView {
     fileprivate convenience init(testContext: SyntaxEditorTestContext) {
         self.init(document: testContext.document, configuration: testContext.configuration)
@@ -1890,6 +1900,37 @@ struct SyntaxEditorUITests {
         model.document.replaceText("{\"enabled\":true}")
 
         #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
+    }
+
+    @Test("SyntaxEditorView does not rerun iOS configuration observation for document changes")
+    @MainActor
+    func syntaxEditorViewIOSConfigurationObservationIgnoresDocumentChanges() async {
+        let model = SyntaxEditorTestContext(text: "const answer = 42;", language: SyntaxLanguage.javascript)
+        let editorView = SyntaxEditorView(testContext: model)
+        guard let configurationDelivery = editorView.configurationDeliveryForTesting,
+              let documentDelivery = editorView.documentDeliveryForTesting
+        else {
+            Issue.record("Expected SyntaxEditorView to expose its production deliveries")
+            return
+        }
+        let configurationPassCounter = SyntaxEditorObservationPassCounter()
+        let configurationPasses = await configurationDelivery.values {
+            configurationPassCounter.next()
+        }
+        let renderedText = await documentDelivery.values {
+            editorView.text
+        }
+
+        #expect(await configurationPasses.waitUntilValue(1))
+
+        model.configuration.language = SyntaxLanguage.json
+
+        #expect(await configurationPasses.waitUntilValue(2))
+
+        model.document.replaceText("{\"enabled\":true}")
+
+        #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
+        #expect(await configurationPasses.waitUntilValue(3, timeout: .milliseconds(100)) == false)
     }
 
     @Test("SyntaxEditorView clamps iOS selection after setting shorter text")
@@ -7152,6 +7193,38 @@ struct SyntaxEditorUITests {
         model.document.replaceText("{\"enabled\":true}")
 
         #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
+    }
+
+    @Test("SyntaxEditorViewController does not rerun macOS configuration observation for document changes")
+    @MainActor
+    func syntaxEditorViewControllerMacConfigurationObservationIgnoresDocumentChanges() async {
+        let model = SyntaxEditorTestContext(text: "const answer = 42;", language: SyntaxLanguage.javascript)
+        let controller = SyntaxEditorViewController(testContext: model)
+        controller.loadViewIfNeeded()
+        guard let configurationDelivery = controller.editorView.configurationDeliveryForTesting,
+              let documentDelivery = controller.editorView.documentDeliveryForTesting
+        else {
+            Issue.record("Expected SyntaxEditorViewController to expose its production deliveries")
+            return
+        }
+        let configurationPassCounter = SyntaxEditorObservationPassCounter()
+        let configurationPasses = await configurationDelivery.values {
+            configurationPassCounter.next()
+        }
+        let renderedText = await documentDelivery.values {
+            controller.textView.string
+        }
+
+        #expect(await configurationPasses.waitUntilValue(1))
+
+        model.configuration.language = SyntaxLanguage.json
+
+        #expect(await configurationPasses.waitUntilValue(2))
+
+        model.document.replaceText("{\"enabled\":true}")
+
+        #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
+        #expect(await configurationPasses.waitUntilValue(3, timeout: .milliseconds(100)) == false)
     }
 
     @Test("SyntaxEditorViewController reflects editable and wrapping changes on macOS")
