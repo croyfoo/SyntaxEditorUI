@@ -1486,14 +1486,6 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if let textKit2System {
-            SyntaxEditorTextKit2HighlightRenderer.validateRenderingAttributes(
-                layoutManager: textKit2System.layoutManager,
-                textContentStorage: textKit2System.textContentStorage,
-                renderStore: textKit2System.renderStore,
-                fragment: layoutFragment
-            )
-        }
         drawFindCandidateHighlights(in: dirtyRect)
         if let selectionHighlightColor {
             selectionHighlightColor.setFill()
