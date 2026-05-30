@@ -5,6 +5,7 @@ import SwiftTreeSitter
 // captures alone, such as MARK comments and URLs inside comments.
 struct SwiftSemanticOverlayState: SyntaxOverlayState {
     fileprivate var index: SwiftFileSymbolIndex?
+    fileprivate var indexedSourceUTF16Length: Int
 }
 
 typealias SwiftSemanticOverlayResult = SyntaxOverlayResult
@@ -125,11 +126,14 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
         let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
-        let shouldRebuildIndex = targetRange == nil || state?.index == nil
+        let shouldRebuildIndex = targetRange == nil
+            || state?.index == nil
+            || state?.indexedSourceUTF16Length != nsSource.length
         let index: SwiftFileSymbolIndex
+        var rebuiltState: SwiftSemanticOverlayState?
         if shouldRebuildIndex {
             index = SwiftFileSymbolIndex(source: nsSource, tokens: preparation.baseTokensForIndex, rootNode: rootNode)
-            state = SwiftSemanticOverlayState(index: index)
+            rebuiltState = SwiftSemanticOverlayState(index: index, indexedSourceUTF16Length: nsSource.length)
         } else {
             index = state!.index!
         }
@@ -159,6 +163,9 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 index: index,
                 targetRange: targetRange
             )
+        if let rebuiltState {
+            state = rebuiltState
+        }
         guard overlayTokens.isEmpty == false else {
             return SwiftSemanticOverlayResult(
                 tokens: preparation.outputBaseTokens,

@@ -379,7 +379,7 @@ private final class SyntaxHighlightSession {
             resolveSublayers: setup.supportsLayeredHighlighting
         )
         guard !Task.isCancelled else {
-            return cancelledUpdateResult(revision: revision)
+            return cancelledUpdateResultAfterInvalidatingIncrementalState(revision: revision)
         }
         let nextSourceLength = nextLayeredSource.utf16.count
         let queryRange = SyntaxHighlightInvalidation.queryRange(
@@ -409,7 +409,7 @@ private final class SyntaxHighlightSession {
             source: nextLayeredSource
         )
         guard !Task.isCancelled else {
-            return cancelledUpdateResult(revision: revision)
+            return cancelledUpdateResultAfterInvalidatingIncrementalState(revision: revision)
         }
         let replacementMergeRange = semanticPartialRefreshRange ?? replacementHighlight.range
         let replacementTokens = semanticPartialRefreshRange.map { targetRange in
@@ -433,7 +433,7 @@ private final class SyntaxHighlightSession {
             refreshRange: semanticPartialRefreshRange
         )
         guard !semanticResult.isCancelled, !Task.isCancelled else {
-            return cancelledUpdateResult(revision: revision)
+            return cancelledUpdateResultAfterInvalidatingIncrementalState(revision: revision)
         }
         let classifiedTokens = semanticResult.tokens
         let resultRefreshRange = semanticResult.refreshRangeOverride.map {
@@ -563,6 +563,13 @@ private extension SyntaxHighlightSession {
             revision: revision,
             refreshRange: NSRange(location: 0, length: 0)
         )
+    }
+
+    func cancelledUpdateResultAfterInvalidatingIncrementalState(revision: Int) -> SyntaxHighlightResult {
+        layer = nil
+        swiftSemanticState = nil
+        objectiveCSemanticState = nil
+        return cancelledUpdateResult(revision: revision)
     }
 
     static func highlightCoverageRange(

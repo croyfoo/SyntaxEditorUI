@@ -198,6 +198,44 @@ struct SyntaxEditorUICommonTests {
         #expect(operations.colorOperations.isEmpty)
     }
 
+    @Test("Highlight style store resets shrinking font runs before applying replacement style")
+    func resetsShrinkingFontRunsBeforeApplyingReplacementStyle() {
+        let store = HighlightStyleStore()
+        let baseFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let boldFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 13, weight: .bold)
+
+        _ = store.apply(
+            HighlightRunSet(
+                colorRuns: [],
+                fontRuns: [HighlightFontRun(range: NSRange(location: 0, length: 10), font: boldFont)]
+            ),
+            refreshedRange: NSRange(location: 0, length: 10),
+            mutation: nil,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: baseFont
+        )
+
+        let operations = store.apply(
+            HighlightRunSet(
+                colorRuns: [],
+                fontRuns: [HighlightFontRun(range: NSRange(location: 0, length: 5), font: boldFont)]
+            ),
+            refreshedRange: NSRange(location: 0, length: 10),
+            mutation: nil,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: baseFont
+        )
+
+        #expect(operations.fontOperations.map(\.range) == [
+            NSRange(location: 0, length: 10),
+            NSRange(location: 0, length: 5),
+        ])
+        #expect(operations.fontOperations.first?.font == baseFont)
+        #expect(operations.fontOperations.last?.font == boldFont)
+    }
+
     @Test("Highlight style store resets logical state without repaint operations")
     func resetsLogicalStateWithoutRepaintOperations() {
         let store = HighlightStyleStore()

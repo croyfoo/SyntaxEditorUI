@@ -5816,6 +5816,48 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds Swift semantic index after source-length edits")
+    func highlighterRebuildsSwiftSemanticIndexAfterSourceLengthEdits() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item + 1
+        }
+        """
+        let prefix = "// inserted comment\n"
+        let prefixedSource = prefix + source
+        let updatedSource = prefixedSource.replacingOccurrences(of: "item + 1", with: "item + 2")
+        let referenceMutation = try #require(TextMutation.diff(from: prefixedSource, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: prefixedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: prefixedSource,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(referenceMutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "item",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return item + 2"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine removes stale Swift overlays after identifier typing edits")
     func highlighterRemovesStaleSwiftOverlaysAfterIdentifierTypingEdits() async throws {
         let source = """
@@ -9156,6 +9198,53 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "self.name42.length"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after source-length edits")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterSourceLengthEdits() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length + 1;
+        }
+        @end
+        """
+        let prefix = "// inserted comment\n"
+        let prefixedSource = prefix + source
+        let updatedSource = prefixedSource.replacingOccurrences(of: "self.name.length + 1", with: "self.name.length + 2")
+        let referenceMutation = try #require(TextMutation.diff(from: prefixedSource, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: prefixedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: prefixedSource,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(referenceMutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name.length"
         )
     }
 

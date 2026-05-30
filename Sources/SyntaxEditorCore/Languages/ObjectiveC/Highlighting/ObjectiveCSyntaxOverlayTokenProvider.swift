@@ -7,6 +7,7 @@ private typealias ObjectiveCSyntaxIDMask = SyntaxOverlaySyntaxIDMask
 
 struct ObjectiveCSemanticOverlayState: SyntaxOverlayState {
     fileprivate var index: ObjectiveCFileSymbolIndex?
+    fileprivate var indexedSourceUTF16Length: Int
 }
 
 typealias ObjectiveCSemanticOverlayResult = SyntaxOverlayResult
@@ -148,7 +149,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
         let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
-        let shouldRebuildIndex = targetRange == nil || state?.index == nil
+        let shouldRebuildIndex = targetRange == nil
+            || state?.index == nil
+            || state?.indexedSourceUTF16Length != nsSource.length
         let index: ObjectiveCFileSymbolIndex
         var rebuiltState: ObjectiveCSemanticOverlayState?
         if shouldRebuildIndex {
@@ -165,7 +168,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 )
             }
             index = rebuiltIndex
-            rebuiltState = ObjectiveCSemanticOverlayState(index: rebuiltIndex)
+            rebuiltState = ObjectiveCSemanticOverlayState(index: rebuiltIndex, indexedSourceUTF16Length: nsSource.length)
         } else {
             index = state!.index!
         }

@@ -600,18 +600,30 @@ package final class HighlightStyleStore {
     ) -> [HighlightFontOperation] {
         let nextKeys = Set(nextRuns.map(FontRunKey.init))
         let previousKeys = Set(previousRuns.map(FontRunKey.init))
-        var operations: [HighlightFontOperation] = []
-        operations.reserveCapacity(previousRuns.count + nextRuns.count)
+        var resetOperations: [HighlightFontOperation] = []
+        var styledOperations: [HighlightFontOperation] = []
+        resetOperations.reserveCapacity(previousRuns.count)
+        styledOperations.reserveCapacity(nextRuns.count)
 
         if let baseFont {
             for run in previousRuns where !nextKeys.contains(FontRunKey(run)) {
-                operations.append(HighlightFontOperation(range: run.range, font: baseFont))
+                resetOperations.append(HighlightFontOperation(range: run.range, font: baseFont))
             }
         }
         for run in nextRuns where !previousKeys.contains(FontRunKey(run)) {
-            operations.append(HighlightFontOperation(range: run.range, font: run.font))
+            styledOperations.append(HighlightFontOperation(range: run.range, font: run.font))
         }
 
+        let resetCount = resetOperations.count
+        var operations = sortedFontOperations(resetOperations)
+        operations.reserveCapacity(resetCount + styledOperations.count)
+        operations.append(contentsOf: sortedFontOperations(styledOperations))
+        return operations
+    }
+
+    private static func sortedFontOperations(
+        _ operations: [HighlightFontOperation]
+    ) -> [HighlightFontOperation] {
         return operations.sorted { lhs, rhs in
             if lhs.range.location == rhs.range.location {
                 lhs.range.length < rhs.range.length
