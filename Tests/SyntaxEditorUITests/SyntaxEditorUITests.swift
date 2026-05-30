@@ -7444,6 +7444,40 @@ struct SyntaxEditorUITests {
         #expect(window.firstResponder === editorView.textView)
     }
 
+    @Test("SyntaxEditorView shows the macOS insertion indicator for caret selections")
+    @MainActor
+    func syntaxEditorViewMacShowsInsertionIndicatorForCaretSelections() {
+        let source = "let value = 1"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        #expect(window.makeFirstResponder(editorView.textView))
+        editorView.textView.setSelectedRange(NSRange(location: 4, length: 0))
+
+        #expect(editorView.textView.insertionIndicatorDisplayModeForTesting == .automatic)
+        #expect(!editorView.textView.insertionIndicatorIsHiddenForTesting)
+        #expect(!editorView.textView.insertionIndicatorFrameForTesting.isEmpty)
+    }
+
+    @Test("SyntaxEditorView draws macOS selection overlay in rendered fragments")
+    @MainActor
+    func syntaxEditorViewMacDrawsSelectionOverlayInRenderedFragments() {
+        let source = "let value = 1"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        #expect(window.makeFirstResponder(editorView.textView))
+        editorView.textView.setSelectedRange((source as NSString).range(of: "value"))
+
+        #expect(!editorView.textView.selectionHighlightRectsForTesting.isEmpty)
+        #expect(editorView.textView.insertionIndicatorDisplayModeForTesting == .hidden)
+        #expect(editorView.textView.insertionIndicatorIsHiddenForTesting)
+    }
+
     @Test("SyntaxEditorView resolves macOS text input character indexes from screen points")
     @MainActor
     func syntaxEditorViewMacResolvesCharacterIndexFromScreenPoint() {

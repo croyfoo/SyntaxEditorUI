@@ -7,6 +7,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     let textKit2System: SyntaxEditorTextKit2System
     let textContentView = MacSyntaxEditorTextContentView()
     private let textFinder = NSTextFinder()
+    private let insertionIndicator = NSTextInsertionIndicator(frame: .zero)
 
     var guardedUndoManager: UndoManager?
     var shortcutHandler: ((MacEditorShortcutAction) -> Bool)?
@@ -70,7 +71,10 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         layer?.backgroundColor = NSColor.clear.cgColor
         unsafe textFinder.client = self
         textKit2System.layoutManager.textViewportLayoutController.delegate = self
+        insertionIndicator.displayMode = .hidden
+        insertionIndicator.isHidden = true
         addSubview(textContentView)
+        addSubview(insertionIndicator)
     }
 
     @available(*, unavailable)
@@ -101,6 +105,20 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         }
         return [NSValue(range: NSRange(location: 0, length: storage.length))]
     }
+    var insertionIndicatorDisplayModeForTesting: NSTextInsertionIndicator.DisplayMode {
+        insertionIndicator.displayMode
+    }
+    var insertionIndicatorFrameForTesting: NSRect {
+        insertionIndicator.frame
+    }
+    var insertionIndicatorIsHiddenForTesting: Bool {
+        insertionIndicator.isHidden
+    }
+    var selectionHighlightRectsForTesting: [CGRect] {
+        textContentView.subviews
+            .compactMap { $0 as? MacSyntaxEditorTextLayoutFragmentView }
+            .flatMap(\.selectionHighlightRects)
+    }
 
     var textStorage: NSTextStorage? { storage }
     private var storage: NSTextStorage { textKit2System.textStorage }
@@ -127,6 +145,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         guard clamped != selectedRangeStorage else { return }
         updateSelectedRangeStorage(clamped)
         syncTextLayoutSelection()
+        updateSelectionRendering()
         needsDisplay = true
     }
 
@@ -264,6 +283,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         super.layout()
         textContentView.frame = bounds
         layoutVisibleViewport()
+        updateSelectionRenderingForVisibleFragments()
     }
 
     override func viewDidMoveToSuperview() {
@@ -281,6 +301,19 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         configureTextFinder()
+        updateSelectionRendering()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let becameFirstResponder = super.becomeFirstResponder()
+        updateSelectionRendering()
+        return becameFirstResponder
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resignedFirstResponder = super.resignFirstResponder()
+        updateSelectionRendering()
+        return resignedFirstResponder
     }
 
     override func keyDown(with event: NSEvent) {
@@ -459,6 +492,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
 
     func unmarkText() {
         markedTextRangeStorage = nil
+        updateSelectionRendering()
         needsDisplay = true
     }
 
@@ -573,6 +607,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         textLayoutManager.invalidateLayout(for: textContentStorage.documentRange)
         textLayoutManager.textSelectionNavigation.flushLayoutCache()
         layoutVisibleViewport()
+        updateSelectionRenderingForVisibleFragments()
         setNeedsDisplayForVisibleTextFragments()
     }
 
@@ -671,6 +706,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
             fragmentViewMap.setObject(fragmentView, forKey: textLayoutFragment)
         }
 
+        configureSelectionHighlights(for: fragmentView)
         configureBracketHighlights(for: fragmentView)
         if fragmentView.frame != layoutFragmentFrame {
             fragmentView.frame = layoutFragmentFrame
@@ -686,6 +722,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
             staleView.removeFromSuperview()
         }
         lastUsedFragmentViews.removeAll()
+        updateInsertionIndicator()
     }
 
     private func replaceText(in range: NSRange, with replacement: String, selectedRange: NSRange) {
@@ -812,7 +849,11 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
 
     private func syncTextLayoutSelection() {
         guard let textRange = textRange(forUTF16Range: selectedRangeStorage) else { return }
-        textLayoutManager.textSelections = [NSTextSelection(range: textRange, affinity: .downstream, granularity: .character)]
+        let affinity: NSTextSelection.Affinity = selectedRangeStorage.length == 0
+            && isHardLineBreakCaretLocation(selectedRangeStorage.location)
+            ? .upstream
+            : .downstream
+        textLayoutManager.textSelections = [NSTextSelection(range: textRange, affinity: affinity, granularity: .character)]
     }
 
     private func characterIndex(at point: NSPoint) -> Int {
@@ -938,6 +979,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         textLayoutManager.textSelections = selections
         guard let range = nsRange(for: selections.first) else { return }
         updateSelectedRangeStorage(range)
+        updateSelectionRendering()
         needsDisplay = true
     }
 
@@ -987,6 +1029,256 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         return rects
     }
 
+    private func updateSelectionRendering() {
+        layoutVisibleViewport()
+        updateSelectionRenderingForVisibleFragments()
+    }
+
+    private func updateSelectionRenderingForVisibleFragments() {
+        for case let fragmentView as MacSyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            configureSelectionHighlights(for: fragmentView)
+        }
+        updateInsertionIndicator()
+    }
+
+    private func updateInsertionIndicator() {
+        guard unsafe window?.firstResponder === self,
+              isEditable,
+              selectedRangeStorage.length == 0,
+              let caretRect = caretRect(forUTF16Location: selectedRangeStorage.location)
+        else {
+            insertionIndicator.displayMode = .hidden
+            insertionIndicator.isHidden = true
+            return
+        }
+
+        insertionIndicator.frame = caretRect
+        insertionIndicator.isHidden = false
+        insertionIndicator.displayMode = .automatic
+    }
+
+    private func caretRect(forUTF16Location location: Int) -> CGRect? {
+        guard let textLocation = textLocation(forUTF16Offset: location) else { return nil }
+        let textRange = NSTextRange(location: textLocation)
+
+        textLayoutManager.ensureLayout(for: textRange)
+        let lineLookupOffset = textLineFragmentLookupUTF16Location(forUTF16Location: location)
+        let lineLookupLocation = self.textLocation(forUTF16Offset: lineLookupOffset) ?? textLocation
+        if let caretRect = textLayoutLineCaretRect(
+            forUTF16Location: location,
+            lineLookupUTF16Location: lineLookupOffset,
+            textLocation: lineLookupLocation
+        ) {
+            return caretRect
+        }
+
+        var options: NSTextLayoutManager.SegmentOptions = [.rangeNotRequired]
+        if isHardLineBreakCaretLocation(location) {
+            options.insert(.upstreamAffinity)
+        }
+        var caretRect: CGRect?
+        textLayoutManager.enumerateTextSegments(
+            in: textRange,
+            type: .standard,
+            options: options
+        ) { _, rect, _, _ in
+            caretRect = rect
+            return false
+        }
+        return caretRect
+    }
+
+    private func textLineFragmentLookupUTF16Location(forUTF16Location location: Int) -> Int {
+        let textLength = storage.length
+        let clampedLocation = min(max(0, location), textLength)
+
+        if isHardLineBreakCaretLocation(clampedLocation),
+           clampedLocation > 0,
+           !isHardLineBreakCaretLocation(clampedLocation - 1) {
+            return clampedLocation - 1
+        }
+
+        if clampedLocation == textLength,
+           textLength > 0,
+           !isHardLineBreakCaretLocation(textLength - 1) {
+            return textLength - 1
+        }
+
+        return clampedLocation
+    }
+
+    private func textLayoutLineCaretRect(
+        forUTF16Location location: Int,
+        lineLookupUTF16Location: Int,
+        textLocation: NSTextLocation
+    ) -> CGRect? {
+        guard let (layoutFragment, lineFragment) = textLayoutLineFragment(
+                containingUTF16Offset: lineLookupUTF16Location,
+                preferredTextLocation: textLocation
+              ),
+              let lineStartLocation = textContentStorage.location(
+                layoutFragment.rangeInElement.location,
+                offsetBy: lineFragment.characterRange.location
+              )
+        else {
+            return nil
+        }
+
+        let clampedLocation = min(max(0, location), storage.length)
+        var lineEndCaretX: CGFloat?
+        var exactCaretX: CGFloat?
+        var resolvedCaretX: CGFloat?
+        var closestDistance = Int.max
+        unsafe textLayoutManager.enumerateCaretOffsetsInLineFragment(at: lineStartLocation) { caretOffset, caretLocation, _, stop in
+            lineEndCaretX = max(lineEndCaretX ?? caretOffset, caretOffset)
+            let caretUTF16Offset = utf16Offset(for: caretLocation)
+            let distance = abs(caretUTF16Offset - clampedLocation)
+            if distance < closestDistance {
+                closestDistance = distance
+                resolvedCaretX = caretOffset
+            }
+
+            if caretUTF16Offset == clampedLocation {
+                exactCaretX = caretOffset
+                if !usesLineEndCaretX(forUTF16Location: clampedLocation) {
+                    unsafe stop.pointee = true
+                }
+            }
+        }
+
+        let caretX = usesLineEndCaretX(forUTF16Location: clampedLocation)
+            ? lineEndCaretX
+            : exactCaretX ?? resolvedCaretX
+        guard let caretX,
+              caretX.isFinite
+        else {
+            return nil
+        }
+        let lineFrame = lineFragment.typographicBounds.offsetBy(
+            dx: layoutFragment.layoutFragmentFrame.minX,
+            dy: layoutFragment.layoutFragmentFrame.minY
+        )
+        let lineHeight = font.map { max(1, ceil($0.ascender - $0.descender + $0.leading)) } ?? lineFrame.height
+        let indicatorWidth = max(2, 1 / max(unsafe window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2, 1))
+        return CGRect(
+            x: caretX,
+            y: lineFrame.minY,
+            width: indicatorWidth,
+            height: max(lineHeight, lineFrame.height)
+        )
+    }
+
+    private func textLayoutLineFragment(
+        containingUTF16Offset offset: Int,
+        preferredTextLocation: NSTextLocation
+    ) -> (NSTextLayoutFragment, NSTextLineFragment)? {
+        if let layoutFragment = textLayoutManager.textLayoutFragment(for: preferredTextLocation),
+           let lineFragment = textLineFragment(containingUTF16Offset: offset, in: layoutFragment) {
+            return (layoutFragment, lineFragment)
+        }
+
+        var result: (NSTextLayoutFragment, NSTextLineFragment)?
+        textLayoutManager.enumerateTextLayoutFragments(
+            from: textContentStorage.documentRange.location,
+            options: [.ensuresLayout]
+        ) { layoutFragment in
+            let fragmentStart = utf16Offset(for: layoutFragment.rangeInElement.location)
+            guard fragmentStart <= offset else {
+                return false
+            }
+
+            let fragmentEnd = utf16Offset(for: layoutFragment.rangeInElement.endLocation)
+            guard offset <= fragmentEnd else {
+                return true
+            }
+
+            if let lineFragment = textLineFragment(containingUTF16Offset: offset, in: layoutFragment) {
+                result = (layoutFragment, lineFragment)
+                return false
+            }
+            return true
+        }
+
+        return result
+    }
+
+    private func usesLineEndCaretX(forUTF16Location location: Int) -> Bool {
+        if isHardLineBreakCaretLocation(location) {
+            return true
+        }
+
+        let textLength = storage.length
+        return location == textLength
+            && textLength > 0
+            && !isHardLineBreakCaretLocation(textLength - 1)
+    }
+
+    private func textLineFragment(
+        containingUTF16Offset offset: Int,
+        in layoutFragment: NSTextLayoutFragment
+    ) -> NSTextLineFragment? {
+        let fragmentStart = utf16Offset(for: layoutFragment.rangeInElement.location)
+        let textLength = storage.length
+        let clampedOffset = min(max(0, offset), textLength)
+        var documentEndLineFragment: NSTextLineFragment?
+
+        for lineFragment in layoutFragment.textLineFragments {
+            let lineStart = fragmentStart + lineFragment.characterRange.location
+            let lineEnd = lineStart + lineFragment.characterRange.length
+
+            if lineFragment.characterRange.length == 0 {
+                if clampedOffset == lineStart {
+                    return lineFragment
+                }
+                continue
+            }
+
+            if clampedOffset >= lineStart && clampedOffset < lineEnd {
+                return lineFragment
+            }
+
+            if clampedOffset == lineEnd {
+                if clampedOffset < textLength && isHardLineBreakCaretLocation(clampedOffset) {
+                    return lineFragment
+                }
+                if clampedOffset == textLength {
+                    documentEndLineFragment = lineFragment
+                }
+            }
+        }
+
+        return documentEndLineFragment
+    }
+
+    private func configureSelectionHighlights(for fragmentView: MacSyntaxEditorTextLayoutFragmentView) {
+        guard selectedRangeStorage.length > 0 else {
+            fragmentView.setSelectionHighlights(rects: [], color: nil)
+            return
+        }
+
+        let fragmentRange = textRange(for: fragmentView.layoutFragment)
+        let intersection = NSIntersectionRange(selectedRangeStorage, fragmentRange)
+        guard intersection.length > 0,
+              let textRange = textRange(forUTF16Range: intersection)
+        else {
+            fragmentView.setSelectionHighlights(rects: [], color: nil)
+            return
+        }
+
+        textLayoutManager.ensureLayout(for: textRange)
+        var rects: [CGRect] = []
+        textLayoutManager.enumerateTextSegments(
+            in: textRange,
+            type: .selection,
+            options: [.upstreamAffinity]
+        ) { _, rect, _, _ in
+            rects.append(rect.offsetBy(dx: -fragmentView.frame.minX, dy: -fragmentView.frame.minY))
+            return true
+        }
+
+        fragmentView.setSelectionHighlights(rects: rects, color: .selectedTextBackgroundColor)
+    }
+
     private func configureBracketHighlights(for fragmentView: MacSyntaxEditorTextLayoutFragmentView) {
         guard !bracketHighlightRanges.isEmpty,
               let bracketHighlightColor
@@ -1022,6 +1314,8 @@ final class MacSyntaxEditorTextContentView: NSView {
 final class MacSyntaxEditorTextLayoutFragmentView: NSView {
     let layoutFragment: NSTextLayoutFragment
     weak var textKit2System: SyntaxEditorTextKit2System?
+    var selectionHighlightRects: [CGRect] = []
+    var selectionHighlightColor: NSColor?
     var bracketHighlightRects: [CGRect] = []
     var bracketHighlightColor: NSColor?
 
@@ -1043,6 +1337,17 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
         nil
     }
 
+    func setSelectionHighlights(rects: [CGRect], color: NSColor?) {
+        guard selectionHighlightRects != rects
+            || !colorsEqual(selectionHighlightColor, color)
+        else {
+            return
+        }
+        selectionHighlightRects = rects
+        selectionHighlightColor = color
+        needsDisplay = true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         if let textKit2System {
             SyntaxEditorTextKit2HighlightRenderer.validateRenderingAttributes(
@@ -1052,6 +1357,12 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
                 fragment: layoutFragment
             )
         }
+        if let selectionHighlightColor {
+            selectionHighlightColor.setFill()
+            for rect in selectionHighlightRects where rect.intersects(dirtyRect) {
+                rect.fill()
+            }
+        }
         if let bracketHighlightColor {
             bracketHighlightColor.setFill()
             for rect in bracketHighlightRects where rect.intersects(dirtyRect) {
@@ -1060,6 +1371,17 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
         }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         layoutFragment.draw(at: .zero, in: context)
+    }
+
+    private func colorsEqual(_ lhs: NSColor?, _ rhs: NSColor?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (lhs?, rhs?):
+            return lhs.isEqual(rhs)
+        default:
+            return false
+        }
     }
 }
 #endif
