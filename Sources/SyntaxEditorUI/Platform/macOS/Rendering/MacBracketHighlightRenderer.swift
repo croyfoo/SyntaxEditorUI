@@ -21,24 +21,21 @@ extension SyntaxEditorView {
         }
 
         let previousRanges = matchedBracketRanges
-        let renderer = MacBracketHighlightRenderer(layoutManager: layoutManager, textStorage: textStorage)
-        renderer.apply(
-            oldRanges: previousRanges,
-            newRanges: newRanges,
+        matchedBracketRanges = newRanges
+        textView.updateBracketHighlights(
+            ranges: newRanges,
             color: NSColor.syntaxEditorAlpha(resolvedColorTheme().bracketBackground, alpha: 0.24)
         )
-        matchedBracketRanges = newRanges
-        renderer.invalidateDisplay(for: previousRanges + newRanges)
+        textView.setNeedsDisplayForTextRanges(previousRanges + newRanges)
     }
 
     func clearMatchingBracketHighlight() {
         guard !matchedBracketRanges.isEmpty else { return }
 
         let previousRanges = matchedBracketRanges
-        let renderer = MacBracketHighlightRenderer(layoutManager: layoutManager, textStorage: textStorage)
-        renderer.clear(ranges: previousRanges)
         matchedBracketRanges = []
-        renderer.invalidateDisplay(for: previousRanges)
+        textView.updateBracketHighlights(ranges: [], color: nil)
+        textView.setNeedsDisplayForTextRanges(previousRanges)
     }
 }
 #endif

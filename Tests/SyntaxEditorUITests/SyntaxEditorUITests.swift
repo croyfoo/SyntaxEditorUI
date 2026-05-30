@@ -729,6 +729,10 @@ private func iOSEditorForegroundColor(_ editorView: SyntaxEditorView, at locatio
         return nil
     }
 
+    if let color = editorView.syntaxForegroundColorForTesting(at: location) {
+        return color
+    }
+
     return attributedText.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor
 }
 
@@ -752,6 +756,10 @@ private func syntaxEditorUITestFontsEqual(_ lhs: UIFont?, _ rhs: UIFont?) -> Boo
 
 @MainActor
 private func iOSEditorLineFragmentForegroundColor(_ editorView: SyntaxEditorView, at location: Int) -> UIColor? {
+    if let color = editorView.syntaxForegroundColorForTesting(at: location) {
+        return color
+    }
+
     guard let textLayoutManager = editorView.textLayoutManager,
           let textLocation = editorView.textLocation(forUTF16Offset: location)
     else {
@@ -837,8 +845,6 @@ private let syntaxEditorMenuItemModifierMask: NSEvent.ModifierFlags = [
     .shift,
 ]
 
-private func requireNSTextViewDelegate(_ value: any NSTextViewDelegate) {}
-
 private final class SyntaxEditorNotificationRecorder: NSObject {
     private(set) var count = 0
 
@@ -860,11 +866,7 @@ private func macEditorForegroundColor(_ editorView: SyntaxEditorView, at locatio
     }
 
     editorView.materializeSyntaxForegroundForTesting(in: NSRange(location: location, length: 1))
-    if let color = editorView.textView.layoutManager?.temporaryAttribute(
-        .foregroundColor,
-        atCharacterIndex: location,
-        effectiveRange: nil
-    ) as? NSColor {
+    if let color = editorView.syntaxForegroundColorForTesting(at: location) {
         return color
     }
 
@@ -947,7 +949,10 @@ private func macEditorBackgroundColor(_ editorView: SyntaxEditorView, at locatio
 
 @MainActor
 private func macEditorHasBackgroundAttribute(_ editorView: SyntaxEditorView, at location: Int) -> Bool {
-    macEditorBackgroundColor(editorView, at: location) != nil
+    if editorView.bracketHighlightRangesForTesting.contains(where: { NSLocationInRange(location, $0) }) {
+        return true
+    }
+    return macEditorBackgroundColor(editorView, at: location) != nil
 }
 
 @MainActor
@@ -964,9 +969,22 @@ private func macEditorTextStorageBackgroundColor(_ editorView: SyntaxEditorView,
     return textStorage.attribute(.backgroundColor, at: location, effectiveRange: nil) as? NSColor
 }
 
+@MainActor
+private func macEditorVisibleFragmentViews(_ editorView: SyntaxEditorView) -> [MacSyntaxEditorTextLayoutFragmentView] {
+    editorView.textView.layoutVisibleViewport()
+    return editorView.textView.textContentView.subviews.compactMap { $0 as? MacSyntaxEditorTextLayoutFragmentView }
+}
+
 private func makeMacCommandKeyEvent(
     _ character: String,
     modifierFlags: NSEvent.ModifierFlags = [.command]
+) -> NSEvent? {
+    makeMacKeyEvent(character, modifierFlags: modifierFlags)
+}
+
+private func makeMacKeyEvent(
+    _ character: String,
+    modifierFlags: NSEvent.ModifierFlags = []
 ) -> NSEvent? {
     NSEvent.keyEvent(
         with: .keyDown,
@@ -6504,6 +6522,48 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.string))
     }
 
+    @Test("SyntaxEditorView redraws visible macOS text fragments after language resets")
+    @MainActor
+    func syntaxEditorViewMacRedrawsVisibleTextFragmentsAfterLanguageResets() async {
+        let source = (0..<12)
+            .map { "let value\($0) = \"text\"" }
+            .joined(separator: "\n")
+        var lineStart = 0
+        let swiftTokens = source.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            defer {
+                lineStart += line.utf16.count + 1
+            }
+            return SyntaxHighlightToken(
+                range: NSRange(location: lineStart, length: 3),
+                rawCaptureName: "editor.syntax.swift.keyword"
+            )
+        }
+        let highlighter = SyntaxEditorLanguageAwareTestHighlighter(
+            swiftTokens: swiftTokens,
+            jsonTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: source.utf16.count),
+                    rawCaptureName: "editor.syntax.json.string"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        editorView.frame = NSRect(x: 0, y: 0, width: 640, height: 260)
+        editorView.layoutSubtreeIfNeeded()
+
+        await editorView.waitForPendingHighlightForTesting()
+        let initialFragments = macEditorVisibleFragmentViews(editorView)
+        #expect(!initialFragments.isEmpty)
+        let fragmentInvalidationCount = editorView.fragmentDisplayInvalidationCountForTesting
+
+        model.configuration.language = SyntaxLanguage.json
+        editorView.synchronizeDocumentForTesting()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.fragmentDisplayInvalidationCountForTesting > fragmentInvalidationCount)
+    }
+
     @Test("SyntaxEditorView preserves macOS non-syntax attributes while applying delayed highlight")
     @MainActor
     func syntaxEditorViewMacDelayedHighlightPreservesNonSyntaxAttributes() async {
@@ -7238,6 +7298,78 @@ struct SyntaxEditorUITests {
         #expect(editorView.textView.selectedRange() == NSRange(location: 4, length: 0))
     }
 
+    @Test("SyntaxEditorView accepts macOS first responder keyboard input")
+    @MainActor
+    func syntaxEditorViewMacAcceptsFirstResponderKeyboardInput() {
+        let source = "let"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = editorView
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        #expect(window.makeFirstResponder(editorView))
+        #expect(window.firstResponder === editorView.textView)
+
+        editorView.textView.setSelectedRange(NSRange(location: source.utf16.count, length: 0))
+        guard let event = makeMacKeyEvent("x") else {
+            Issue.record("Failed to create macOS key event")
+            return
+        }
+
+        editorView.textView.keyDown(with: event)
+
+        #expect(model.document.textSnapshot() == "letx")
+        #expect(editorView.textView.string == "letx")
+        #expect(editorView.textView.selectedRange() == NSRange(location: 4, length: 0))
+    }
+
+    @Test("SyntaxEditorView focuses macOS text input through rendered fragments")
+    @MainActor
+    func syntaxEditorViewMacFocusesTextInputThroughRenderedFragments() {
+        let model = SyntaxEditorTestContext(text: "let value = 1", language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = editorView
+        window.makeKeyAndOrderFront(nil)
+        editorView.frame = window.contentView?.bounds ?? .zero
+        editorView.layoutSubtreeIfNeeded()
+        editorView.textView.layoutVisibleViewport()
+        defer { window.orderOut(nil) }
+
+        let clickPoint = NSPoint(x: 12, y: 12)
+        #expect(editorView.textView.hitTest(clickPoint) === editorView.textView)
+        guard let event = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: editorView.textView.convert(clickPoint, to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ) else {
+            Issue.record("Failed to create macOS mouse event")
+            return
+        }
+
+        editorView.textView.mouseDown(with: event)
+
+        #expect(window.firstResponder === editorView.textView)
+    }
+
     @Test("SyntaxEditorView read-only key equivalents do not mutate text on macOS")
     @MainActor
     func syntaxEditorViewMacReadOnlyKeyEquivalentsDoNotMutateText() {
@@ -7517,7 +7649,6 @@ struct SyntaxEditorUITests {
         let controller = SyntaxEditorViewController(testContext: model)
         controller.loadViewIfNeeded()
 
-        requireNSTextViewDelegate(controller)
         #expect(controller.document === model.document)
         #expect(controller.configuration === model.configuration)
         #expect(

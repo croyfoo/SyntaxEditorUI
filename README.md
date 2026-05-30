@@ -91,6 +91,13 @@ GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `
 
 ## Migration
 
+### v0.11.0
+
+These notes apply when upgrading from `v0.10.x` or earlier to `v0.11.0`.
+
+- On macOS, `SyntaxEditorView` no longer exposes the underlying editor as `NSTextView`. The editor surface is implemented directly with TextKit 2, matching the iOS architecture. Use `SyntaxEditorView.text`, `SyntaxEditorView.selectedRange`, `SyntaxEditorView.isEditable`, `SyntaxEditorView.document`, and `SyntaxEditorView.configuration` instead of reaching through `textView`.
+- `SyntaxEditorViewController.textView` is no longer public on macOS. Access the editor through `SyntaxEditorViewController.editorView`, `document`, and `configuration`.
+
 ### v0.10.0
 
 These notes apply when upgrading from `v0.9.x` or earlier to `v0.10.0`.
