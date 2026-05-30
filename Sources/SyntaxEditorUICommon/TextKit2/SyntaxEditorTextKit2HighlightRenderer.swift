@@ -58,7 +58,7 @@ package final class SyntaxEditorTextKit2RenderStore {
     ) {
         textLength = max(0, nextTextLength)
         baseForeground = nextBaseForeground
-        colorRuns = nextColorRuns
+        let sortedColorRuns = nextColorRuns
             .map { run in
                 SyntaxEditorTextKit2ColorRun(
                     range: SyntaxEditorRangeUtilities.clampedRange(run.range, utf16Length: textLength),
@@ -73,6 +73,7 @@ package final class SyntaxEditorTextKit2RenderStore {
                     lhs.range.location < rhs.range.location
                 }
             }
+        colorRuns = Self.coalescedColorRuns(sortedColorRuns)
         epoch += 1
     }
 
@@ -127,7 +128,9 @@ package final class SyntaxEditorTextKit2RenderStore {
         guard clampedRequestedRange.length > 0 else { return }
 
         materializationCount += 1
-        applier(clampedRequestedRange, baseForeground)
+        if let baseForeground {
+            applier(clampedRequestedRange, baseForeground)
+        }
 
         var runIndex = lowerBoundColorRunIndex(for: clampedRequestedRange.location)
         while runIndex < colorRuns.count {
@@ -207,6 +210,29 @@ package final class SyntaxEditorTextKit2RenderStore {
             }
         }
         return lowerBound
+    }
+
+    private static func coalescedColorRuns(
+        _ runs: [SyntaxEditorTextKit2ColorRun]
+    ) -> [SyntaxEditorTextKit2ColorRun] {
+        var coalescedRuns: [SyntaxEditorTextKit2ColorRun] = []
+        coalescedRuns.reserveCapacity(runs.count)
+
+        for run in runs {
+            if var last = coalescedRuns.last,
+               last.color.isEqual(run.color),
+               last.range.upperBound >= run.range.location,
+               run.range.upperBound >= last.range.location {
+                let lowerBound = min(last.range.location, run.range.location)
+                let upperBound = max(last.range.upperBound, run.range.upperBound)
+                last.range = NSRange(location: lowerBound, length: upperBound - lowerBound)
+                coalescedRuns[coalescedRuns.count - 1] = last
+            } else {
+                coalescedRuns.append(run)
+            }
+        }
+
+        return coalescedRuns
     }
 
     private func shiftedColorRuns(

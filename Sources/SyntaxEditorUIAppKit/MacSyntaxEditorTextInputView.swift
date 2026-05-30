@@ -73,6 +73,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
         unsafe textFinder.client = self
+        textKit2System.layoutManager.renderingAttributesValidator = nil
         textKit2System.layoutManager.textViewportLayoutController.delegate = self
         textContentView.textInputView = self
         insertionIndicator.displayMode = .hidden
@@ -813,7 +814,6 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
                 layoutFragment: textLayoutFragment,
                 frame: layoutFragmentFrame
             )
-            fragmentView.textKit2System = textKit2System
             fragmentViewMap.setObject(fragmentView, forKey: textLayoutFragment)
         }
 
@@ -1537,7 +1537,6 @@ final class MacSyntaxEditorTextContentView: NSView {
 
 final class MacSyntaxEditorTextLayoutFragmentView: NSView {
     let layoutFragment: NSTextLayoutFragment
-    weak var textKit2System: SyntaxEditorTextKit2System?
     fileprivate static var findCandidateHighlightFillColor: NSColor {
         NSColor.textColor.withAlphaComponent(0.14)
     }
@@ -1550,7 +1549,6 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
     var selectionHighlightColor: NSColor?
     var bracketHighlightRects: [CGRect] = []
     var bracketHighlightColor: NSColor?
-    private var validatedSyntaxForegroundEpoch: Int?
 
     init(layoutFragment: NSTextLayoutFragment, frame: CGRect) {
         self.layoutFragment = layoutFragment
@@ -1603,22 +1601,7 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
             }
         }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        validateSyntaxForegroundIfNeeded()
         layoutFragment.draw(at: .zero, in: context)
-    }
-
-    private func validateSyntaxForegroundIfNeeded() {
-        guard let textKit2System else { return }
-        let epoch = textKit2System.renderStore.epoch
-        guard validatedSyntaxForegroundEpoch != epoch else { return }
-
-        SyntaxEditorTextKit2HighlightRenderer.validateRenderingAttributes(
-            layoutManager: textKit2System.layoutManager,
-            textContentStorage: textKit2System.textContentStorage,
-            renderStore: textKit2System.renderStore,
-            fragment: layoutFragment
-        )
-        validatedSyntaxForegroundEpoch = epoch
     }
 
     private func drawFindCandidateHighlights(in dirtyRect: NSRect) {
