@@ -232,6 +232,21 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         if item.action == #selector(redo(_:)) {
             return undoManager?.canRedo ?? false
         }
+        if item.action == #selector(copy(_:)) {
+            return canCopySelection
+        }
+        if item.action == #selector(cut(_:)) {
+            return canCutSelection
+        }
+        if item.action == #selector(paste(_:)) {
+            return canPaste
+        }
+        if item.action == #selector(delete(_:)) {
+            return isEditable && selectedRangeStorage.length > 0
+        }
+        if item.action == #selector(selectAll(_:)) {
+            return isSelectable
+        }
         if let command = SyntaxEditorMenuCommand(selector: item.action),
            let action = MacEditorShortcutAction(command: command) {
             let canHandle = shortcutValidator?(action) ?? true
@@ -286,6 +301,22 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         }
         if key == "[" {
             return shortcutHandler?(.outdent) == true || super.performKeyEquivalent(with: event)
+        }
+        if key.lowercased() == "c", canCopySelection {
+            copy(nil)
+            return true
+        }
+        if key.lowercased() == "x", canCutSelection {
+            cut(nil)
+            return true
+        }
+        if key.lowercased() == "v", canPaste {
+            paste(nil)
+            return true
+        }
+        if key.lowercased() == "a", isSelectable {
+            selectAll(nil)
+            return true
         }
 
         return super.performKeyEquivalent(with: event)
@@ -481,6 +512,50 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     override func selectAll(_ sender: Any?) {
         guard isSelectable else { return }
         setSelectedRange(NSRange(location: 0, length: storage.length))
+    }
+
+    @objc func copy(_ sender: Any?) {
+        copySelectionToPasteboard()
+    }
+
+    @objc func cut(_ sender: Any?) {
+        guard isEditable,
+              copySelectionToPasteboard()
+        else {
+            return
+        }
+        replaceText(
+            in: selectedRangeStorage,
+            with: "",
+            selectedRange: NSRange(location: selectedRangeStorage.location, length: 0)
+        )
+    }
+
+    @objc func paste(_ sender: Any?) {
+        guard isEditable,
+              let pastedString = NSPasteboard.general.string(forType: .string)
+        else {
+            return
+        }
+        let range = selectedRangeStorage
+        replaceText(
+            in: range,
+            with: pastedString,
+            selectedRange: NSRange(location: range.location + pastedString.utf16.count, length: 0)
+        )
+    }
+
+    @objc func delete(_ sender: Any?) {
+        guard isEditable,
+              selectedRangeStorage.length > 0
+        else {
+            return
+        }
+        replaceText(
+            in: selectedRangeStorage,
+            with: "",
+            selectedRange: NSRange(location: selectedRangeStorage.location, length: 0)
+        )
     }
 
     override func insertText(_ insertString: Any) {
@@ -806,6 +881,32 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
             let range = source.rangeOfComposedCharacterSequence(at: selectedRangeStorage.location)
             replaceText(in: range, with: "", selectedRange: NSRange(location: range.location, length: 0))
         }
+    }
+
+    private var canCopySelection: Bool {
+        isSelectable && selectedRangeStorage.length > 0
+    }
+
+    private var canCutSelection: Bool {
+        isEditable && canCopySelection
+    }
+
+    private var canPaste: Bool {
+        isEditable && NSPasteboard.general.canReadItem(withDataConformingToTypes: [NSPasteboard.PasteboardType.string.rawValue])
+    }
+
+    @discardableResult
+    private func copySelectionToPasteboard() -> Bool {
+        guard canCopySelection else { return false }
+        let clampedRange = SyntaxEditorRangeUtilities.clampedRange(
+            selectedRangeStorage,
+            utf16Length: storage.length
+        )
+        guard clampedRange.length > 0 else { return false }
+
+        let selectedString = (storage.string as NSString).substring(with: clampedRange)
+        NSPasteboard.general.clearContents()
+        return NSPasteboard.general.setString(selectedString, forType: .string)
     }
 
     private func moveSelection(
@@ -1449,6 +1550,7 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
     var selectionHighlightColor: NSColor?
     var bracketHighlightRects: [CGRect] = []
     var bracketHighlightColor: NSColor?
+    private var validatedSyntaxForegroundEpoch: Int?
 
     init(layoutFragment: NSTextLayoutFragment, frame: CGRect) {
         self.layoutFragment = layoutFragment
@@ -1501,7 +1603,22 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
             }
         }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        validateSyntaxForegroundIfNeeded()
         layoutFragment.draw(at: .zero, in: context)
+    }
+
+    private func validateSyntaxForegroundIfNeeded() {
+        guard let textKit2System else { return }
+        let epoch = textKit2System.renderStore.epoch
+        guard validatedSyntaxForegroundEpoch != epoch else { return }
+
+        SyntaxEditorTextKit2HighlightRenderer.validateRenderingAttributes(
+            layoutManager: textKit2System.layoutManager,
+            textContentStorage: textKit2System.textContentStorage,
+            renderStore: textKit2System.renderStore,
+            fragment: layoutFragment
+        )
+        validatedSyntaxForegroundEpoch = epoch
     }
 
     private func drawFindCandidateHighlights(in dirtyRect: NSRect) {
