@@ -861,11 +861,6 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         layoutVisibleViewport()
     }
 
-    func invalidateRenderingAttributes(for range: NSRange) {
-        textSystem.invalidateRenderingAttributes(for: range)
-        setNeedsDisplayForTextRanges([range])
-    }
-
     func setNeedsDisplayForTextRanges(_ ranges: [NSRange]) {
         guard !ranges.isEmpty else { return }
 
@@ -1654,10 +1649,6 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         fragmentView.needsDisplay = true
     }
 
-    fileprivate func applySyntaxRenderingAttributesForDrawing(_ layoutFragment: NSTextLayoutFragment) {
-        textSystem.applySyntaxRenderingAttributes(for: layoutFragment)
-        syntaxRenderingAttributeApplicationCountForTesting += 1
-    }
 }
 
 final class SyntaxEditorTextContentView: NSView {
@@ -1774,7 +1765,6 @@ final class SyntaxEditorTextLayoutFragmentView: NSView {
             }
         }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        textInputView?.applySyntaxRenderingAttributesForDrawing(layoutFragment)
         if let syntaxLayoutFragment = layoutFragment as? SyntaxEditorTextLayoutFragment {
             syntaxLayoutFragment.draw(at: .zero, in: context, dirtyRect: dirtyRect)
         } else {

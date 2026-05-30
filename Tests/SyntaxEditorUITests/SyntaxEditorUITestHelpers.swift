@@ -875,7 +875,6 @@ func macEditorForegroundColor(_ editorView: SyntaxEditorView, at location: Int) 
         return nil
     }
 
-    editorView.materializeSyntaxForegroundForTesting(in: NSRange(location: location, length: 1))
     if let color = editorView.syntaxForegroundColorForTesting(at: location) {
         return color
     }

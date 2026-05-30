@@ -361,7 +361,6 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     internal func materializeSyntaxForegroundForTesting(in range: NSRange) {
-        textSystem.invalidateRenderingAttributes(for: range)
         textView.setNeedsDisplayForTextRanges([range])
     }
 
@@ -833,6 +832,12 @@ public final class SyntaxEditorView: NSScrollView {
             .resolved(for: configuration.language, appearance: currentThemeAppearance)
             .baseForeground
         textSystem.styleStore.updateBaseForeground(nextBaseForeground, textLength: textStorage.length)
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+        if fullRange.length > 0 {
+            TextEditingTransaction.perform(on: textSystem.textContentStorage) { textStorage in
+                textStorage.addAttribute(.foregroundColor, value: nextBaseForeground, range: fullRange)
+            }
+        }
         invalidateVisibleTextDisplay()
     }
 
@@ -1474,7 +1479,6 @@ public final class SyntaxEditorView: NSScrollView {
             return
         }
         TextEditingTransaction.apply(operations, to: textSystem.textContentStorage)
-        textSystem.invalidateRenderingAttributes(for: targetRange)
     }
 
     private func installSyntaxHighlightRenderingIncrementally(
@@ -1500,7 +1504,6 @@ public final class SyntaxEditorView: NSScrollView {
             shouldContinue: { document.revision == expectedRevision }
         )
         guard didApply else { return false }
-        textSystem.invalidateRenderingAttributes(for: targetRange)
         return true
     }
 
@@ -1712,9 +1715,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func storageBaseAttributes() -> [NSAttributedString.Key: Any] {
-        var attributes = baseAttributes()
-        attributes.removeValue(forKey: .foregroundColor)
-        return attributes
+        baseAttributes()
     }
 
     private func resolvedBaseFont(for theme: SyntaxEditorResolvedColorTheme? = nil) -> NSFont {

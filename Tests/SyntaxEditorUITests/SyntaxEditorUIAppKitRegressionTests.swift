@@ -867,9 +867,9 @@ extension SyntaxEditorUITests {
         #expect(macEditorFont(editorView, at: middleLocation) != nil)
     }
 
-    @Test("SyntaxEditorView stores macOS syntax colors outside permanent storage before draw")
+    @Test("SyntaxEditorView applies macOS syntax colors outside draw")
     @MainActor
-    func syntaxEditorViewMacStoresSyntaxColorsOutsidePermanentStorageBeforeDraw() async {
+    func syntaxEditorViewMacAppliesSyntaxColorsOutsideDraw() async {
         let fixture = syntaxEditorDenseHighlightFixture(tokenCount: 1_500)
         let theme = syntaxEditorUITestColorTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x102030),
@@ -894,12 +894,17 @@ extension SyntaxEditorUITests {
                 syntaxEditorDenseHighlightColor(in: theme, at: deferredLocation)
             )
         )
-        #expect(macEditorPermanentForegroundColor(editorView, at: deferredLocation) == nil)
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorPermanentForegroundColor(editorView, at: deferredLocation),
+                syntaxEditorDenseHighlightColor(in: theme, at: deferredLocation)
+            )
+        )
     }
 
-    @Test("SyntaxEditorView draws macOS fragment colors without scroll-time materialization")
+    @Test("SyntaxEditorView draws macOS fragment colors without rendering attribute application")
     @MainActor
-    func syntaxEditorViewMacDrawsFragmentColorsWithoutScrollTimeMaterialization() async throws {
+    func syntaxEditorViewMacDrawsFragmentColorsWithoutRenderingAttributeApplication() async throws {
         let source = "let value = 1"
         let theme = syntaxEditorUITestColorTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x102030),
@@ -935,10 +940,10 @@ extension SyntaxEditorUITests {
         #expect(editorView.syntaxForegroundMaterializationCountForTesting == styleEpoch)
         #expect(
             editorView.syntaxRenderingAttributeApplicationCountForTesting
-                > renderingAttributeApplicationCount
+                == renderingAttributeApplicationCount
         )
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
-        #expect(macEditorPermanentForegroundColor(editorView, at: 0) == nil)
+        #expect(syntaxEditorUITestColorsEqual(macEditorPermanentForegroundColor(editorView, at: 0), theme.keyword))
     }
 
     @Test("SyntaxEditorView replaces stale macOS syntax colors after new highlight epochs")
@@ -975,7 +980,7 @@ extension SyntaxEditorUITests {
         editorView.synchronizeDocumentForTesting()
 
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
-        #expect(macEditorPermanentForegroundColor(editorView, at: 0) == nil)
+        #expect(syntaxEditorUITestColorsEqual(macEditorPermanentForegroundColor(editorView, at: 0), updatedTheme.keyword))
     }
 
     @Test("SyntaxEditorView keeps macOS syntax colors while typing awaits highlight")

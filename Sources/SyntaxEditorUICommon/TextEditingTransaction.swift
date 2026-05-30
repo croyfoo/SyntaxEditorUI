@@ -24,10 +24,15 @@ package enum TextEditingTransaction {
         _ operations: HighlightStyleOperations,
         to textContentStorage: NSTextContentStorage
     ) {
-        guard !operations.fontOperations.isEmpty else { return }
+        guard !operations.isEmpty else { return }
 
         perform(on: textContentStorage) { textStorage in
             let textLength = textStorage.length
+            for operation in operations.colorOperations {
+                let range = SyntaxEditorRangeUtilities.clampedRange(operation.range, utf16Length: textLength)
+                guard range.length > 0 else { continue }
+                textStorage.addAttribute(.foregroundColor, value: operation.color, range: range)
+            }
             for operation in operations.fontOperations {
                 let range = SyntaxEditorRangeUtilities.clampedRange(operation.range, utf16Length: textLength)
                 guard range.length > 0 else { continue }
@@ -45,7 +50,35 @@ package enum TextEditingTransaction {
         guard !operations.isEmpty else { return true }
 
         let maximumOperationsPerTransaction = max(1, maximumOperationsPerTransaction)
+        var colorIndex = operations.colorOperations.startIndex
         var fontIndex = operations.fontOperations.startIndex
+
+        while colorIndex < operations.colorOperations.endIndex {
+            guard !Task.isCancelled, shouldContinue() else { return false }
+
+            let colorCount = min(
+                maximumOperationsPerTransaction,
+                operations.colorOperations.distance(from: colorIndex, to: operations.colorOperations.endIndex)
+            )
+
+            let colorEndIndex = operations.colorOperations.index(colorIndex, offsetBy: colorCount)
+            let chunk = HighlightStyleOperations(
+                colorOperations: Array(operations.colorOperations[colorIndex..<colorEndIndex]),
+                fontOperations: []
+            )
+
+            autoreleasepool {
+                apply(chunk, to: textContentStorage)
+            }
+
+            colorIndex = colorEndIndex
+
+            guard !Task.isCancelled, shouldContinue() else { return false }
+
+            if colorIndex < operations.colorOperations.endIndex || !operations.fontOperations.isEmpty {
+                await Task.yield()
+            }
+        }
 
         while fontIndex < operations.fontOperations.endIndex {
             guard !Task.isCancelled, shouldContinue() else { return false }

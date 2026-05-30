@@ -19,7 +19,7 @@ struct SyntaxEditorUICommonTests {
         #expect(system.styleStore.appliedFontRunsForTesting.isEmpty)
         #expect(system.layoutManager.textContainer === system.container)
         #expect(system.container.textLayoutManager === system.layoutManager)
-        #expect(system.layoutManager.renderingAttributesValidator != nil)
+        #expect(system.layoutManager.renderingAttributesValidator == nil)
     }
 
     @Test("Editor text system centralizes UTF-16 range conversion")
@@ -51,8 +51,8 @@ struct SyntaxEditorUICommonTests {
         #expect(TextLayoutGeometry.ranges(ranges, intersecting: NSRange(location: 20, length: 2)).isEmpty)
     }
 
-    @Test("Text editing transaction applies layout-affecting font operations incrementally")
-    func appliesFontOperationsIncrementally() async {
+    @Test("Text editing transaction applies style operations incrementally")
+    func appliesStyleOperationsIncrementally() async {
         let system = EditorTextSystem()
         TextEditingTransaction.perform(on: system.textContentStorage) { storage in
             storage.setAttributedString(NSAttributedString(string: "abcdef"))
@@ -69,7 +69,7 @@ struct SyntaxEditorUICommonTests {
         )
 
         #expect(completed)
-        #expect(system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) == nil)
+        #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorColor)?.isEqual(redColor) == true)
         #expect((system.textStorage.attribute(.font, at: 1, effectiveRange: nil) as? SyntaxEditorFont) == font)
     }
 

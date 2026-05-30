@@ -1042,8 +1042,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let fullRange = NSRange(location: 0, length: storage.length)
         guard fullRange.length > 0 else { return }
 
-        var attributes = storageBaseAttributes()
-        attributes.removeValue(forKey: .foregroundColor)
+        let attributes = storageBaseAttributes()
         TextEditingTransaction.perform(on: textContentStorage) { storage in
             storage.addAttributes(attributes, range: fullRange)
         }
@@ -1059,6 +1058,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 .baseForeground
         )
         highlightStyleStore.updateBaseForeground(nextBaseForeground, textLength: storage.length)
+        let fullRange = NSRange(location: 0, length: storage.length)
+        if fullRange.length > 0 {
+            TextEditingTransaction.perform(on: textContentStorage) { storage in
+                storage.addAttribute(.foregroundColor, value: nextBaseForeground, range: fullRange)
+            }
+        }
         setNeedsDisplayForVisibleTextFragments()
     }
 
@@ -1993,7 +1998,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return
         }
         TextEditingTransaction.apply(operations, to: textContentStorage)
-        textSystem.invalidateRenderingAttributes(for: targetRange)
     }
 
     private func syntaxHighlightOperations(
@@ -2111,7 +2115,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             shouldContinue: { document.revision == expectedRevision }
         )
         guard didApply else { return false }
-        textSystem.invalidateRenderingAttributes(for: targetRange)
         await Task.yield()
         return !Task.isCancelled && document.revision == expectedRevision
     }
@@ -2180,9 +2183,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func storageBaseAttributes() -> [NSAttributedString.Key: Any] {
-        var attributes = baseAttributes()
-        attributes.removeValue(forKey: .foregroundColor)
-        return attributes
+        baseAttributes()
     }
 
     func resolvedBaseFont(for theme: SyntaxEditorResolvedColorTheme? = nil) -> UIFont {
@@ -2546,10 +2547,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         layoutManager.textSelectionNavigation.flushLayoutCache()
     }
 
-    func invalidateRenderingAttributes(for range: NSRange) {
-        textSystem.invalidateRenderingAttributes(for: range)
-    }
-
     func invalidateHorizontalMeasurement() {
         setNeedsLayout()
     }
@@ -2823,7 +2820,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         _ textViewportLayoutController: NSTextViewportLayoutController,
         configureRenderingSurfaceFor textLayoutFragment: NSTextLayoutFragment
     ) {
-        textSystem.applySyntaxRenderingAttributes(for: textLayoutFragment)
         let layoutFragmentFrame = textLayoutFragment.layoutFragmentFrame
         let fragmentView: SyntaxEditorTextLayoutFragmentView
         if let cachedFragmentView = fragmentViewMap.object(forKey: textLayoutFragment) {

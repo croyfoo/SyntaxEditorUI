@@ -28,11 +28,6 @@ package final class EditorTextSystem {
         layoutManager.textContainer = container
         textContentStorage.addTextLayoutManager(layoutManager)
         textContentStorage.primaryTextLayoutManager = layoutManager
-        layoutManager.renderingAttributesValidator = { [weak self] layoutManager, layoutFragment in
-            MainActor.assumeIsolated {
-                self?.applySyntaxRenderingAttributes(layoutManager: layoutManager, layoutFragment: layoutFragment)
-            }
-        }
     }
 
     package var textStorage: NSTextStorage {
@@ -66,34 +61,5 @@ package final class EditorTextSystem {
         rangeConverter.utf16Range(for: layoutFragment)
     }
 
-    package func invalidateRenderingAttributes(for range: NSRange) {
-        guard let textRange = textRange(forUTF16Range: range) else { return }
-        layoutManager.invalidateRenderingAttributes(for: textRange)
-    }
-
-    package func applySyntaxRenderingAttributes(for layoutFragment: NSTextLayoutFragment) {
-        applySyntaxRenderingAttributes(layoutManager: layoutManager, layoutFragment: layoutFragment)
-    }
-
-    private func applySyntaxRenderingAttributes(
-        layoutManager: NSTextLayoutManager,
-        layoutFragment: NSTextLayoutFragment
-    ) {
-        let fragmentRange = utf16Range(for: layoutFragment)
-        guard fragmentRange.length > 0,
-              let fragmentTextRange = textRange(forUTF16Range: fragmentRange)
-        else {
-            return
-        }
-
-        layoutManager.removeRenderingAttribute(.foregroundColor, for: fragmentTextRange)
-        if let baseForeground = styleStore.baseForeground {
-            layoutManager.addRenderingAttribute(.foregroundColor, value: baseForeground, for: fragmentTextRange)
-        }
-        styleStore.forEachColorRun(in: fragmentRange) { run in
-            guard let runTextRange = textRange(forUTF16Range: run.range) else { return }
-            layoutManager.addRenderingAttribute(.foregroundColor, value: run.color, for: runTextRange)
-        }
-    }
 }
 #endif
