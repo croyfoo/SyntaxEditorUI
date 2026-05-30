@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import ObservationBridge
 import SyntaxEditorCore
+import SyntaxEditorUICommon
 import UIKit
 
 struct SyntaxEditorMarkedTextUndoAnchor {

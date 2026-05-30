@@ -2,6 +2,7 @@
 import AppKit
 import ObservationBridge
 import SyntaxEditorCore
+import SyntaxEditorUICommon
 
 enum MacEditorShortcutAction {
     case indent

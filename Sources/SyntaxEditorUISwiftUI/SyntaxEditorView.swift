@@ -2,6 +2,12 @@ import SwiftUI
 import SyntaxEditorCore
 
 #if canImport(UIKit)
+import SyntaxEditorUIUIKit
+#elseif canImport(AppKit)
+import SyntaxEditorUIAppKit
+#endif
+
+#if canImport(UIKit)
 private struct SyntaxEditorContainer: UIViewRepresentable {
     let document: SyntaxEditorDocument
     let configuration: SyntaxEditorConfiguration

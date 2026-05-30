@@ -11,7 +11,7 @@ public enum SyntaxEditorMenu {
     private static let editorMenuTitle = "Editor"
 }
 
-enum SyntaxEditorMenuCommand: CaseIterable {
+package enum SyntaxEditorMenuCommand: CaseIterable {
     case shiftRight
     case shiftLeft
     case commentSelection
@@ -20,7 +20,7 @@ enum SyntaxEditorMenuCommand: CaseIterable {
     case resetFontSize
     case wrapLines
 
-    var title: String {
+    package var title: String {
         switch self {
         case .shiftRight:
             "Shift Right"
@@ -39,7 +39,7 @@ enum SyntaxEditorMenuCommand: CaseIterable {
         }
     }
 
-    var selector: Selector {
+    package var selector: Selector {
         switch self {
         case .shiftRight:
             NSSelectorFromString("syntaxEditorShiftRight:")
@@ -58,7 +58,7 @@ enum SyntaxEditorMenuCommand: CaseIterable {
         }
     }
 
-    var isEditingCommand: Bool {
+    package var isEditingCommand: Bool {
         switch self {
         case .shiftRight, .shiftLeft, .commentSelection:
             true
@@ -67,7 +67,7 @@ enum SyntaxEditorMenuCommand: CaseIterable {
         }
     }
 
-    init?(selector: Selector?) {
+    package init?(selector: Selector?) {
         guard let selector else { return nil }
         guard let command = Self.allCases.first(where: { $0.selector == selector }) else {
             return nil
@@ -127,7 +127,7 @@ extension SyntaxEditorMenu {
         }
     }
 
-    static func makeKeyCommands(includeEditingCommands: Bool) -> [UIKeyCommand] {
+    package static func makeKeyCommands(includeEditingCommands: Bool) -> [UIKeyCommand] {
         SyntaxEditorMenuCommand.allCases.compactMap { command in
             guard includeEditingCommands || !command.isEditingCommand else {
                 return nil
@@ -136,7 +136,7 @@ extension SyntaxEditorMenu {
         }
     }
 
-    static func makeKeyCommand(for command: SyntaxEditorMenuCommand) -> UIKeyCommand {
+    package static func makeKeyCommand(for command: SyntaxEditorMenuCommand) -> UIKeyCommand {
         let keyCommand = UIKeyCommand(
             title: command.title,
             image: nil,
@@ -243,7 +243,7 @@ extension SyntaxEditorMenu {
         return menu
     }
 
-    static func makeMenuItem(for command: SyntaxEditorMenuCommand) -> NSMenuItem {
+    package static func makeMenuItem(for command: SyntaxEditorMenuCommand) -> NSMenuItem {
         let item = NSMenuItem(
             title: command.title,
             action: command.selector,

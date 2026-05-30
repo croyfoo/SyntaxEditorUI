@@ -8,35 +8,50 @@ import UIKit
 import AppKit
 #endif
 
-struct SyntaxEditorTextKit2ColorRun {
-    var range: NSRange
-    let color: SyntaxEditorColor
+package struct SyntaxEditorTextKit2ColorRun {
+    package var range: NSRange
+    package let color: SyntaxEditorColor
+
+    package init(range: NSRange, color: SyntaxEditorColor) {
+        self.range = range
+        self.color = color
+    }
 }
 
-struct SyntaxEditorTextKit2FontRun {
-    var range: NSRange
-    let font: SyntaxEditorFont
+package struct SyntaxEditorTextKit2FontRun {
+    package var range: NSRange
+    package let font: SyntaxEditorFont
+
+    package init(range: NSRange, font: SyntaxEditorFont) {
+        self.range = range
+        self.font = font
+    }
 }
 
-struct SyntaxEditorTextKit2RunSet {
-    let colorRuns: [SyntaxEditorTextKit2ColorRun]
-    let fontRuns: [SyntaxEditorTextKit2FontRun]
+package struct SyntaxEditorTextKit2RunSet {
+    package let colorRuns: [SyntaxEditorTextKit2ColorRun]
+    package let fontRuns: [SyntaxEditorTextKit2FontRun]
+
+    package init(colorRuns: [SyntaxEditorTextKit2ColorRun], fontRuns: [SyntaxEditorTextKit2FontRun]) {
+        self.colorRuns = colorRuns
+        self.fontRuns = fontRuns
+    }
 }
 
 @MainActor
-final class SyntaxEditorTextKit2RenderStore {
-    private(set) var epoch = 0
-    private(set) var materializationCount = 0
+package final class SyntaxEditorTextKit2RenderStore {
+    package private(set) var epoch = 0
+    package private(set) var materializationCount = 0
     private var textLength = 0
     private var baseForeground: SyntaxEditorColor?
     private var colorRuns: [SyntaxEditorTextKit2ColorRun] = []
     private var foregroundExclusionRanges: [NSRange] = []
 
-    var hasForegroundRuns: Bool {
+    package var hasForegroundRuns: Bool {
         baseForeground != nil || !colorRuns.isEmpty
     }
 
-    func installForeground(
+    package func installForeground(
         colorRuns nextColorRuns: [SyntaxEditorTextKit2ColorRun],
         baseForeground nextBaseForeground: SyntaxEditorColor?,
         textLength nextTextLength: Int
@@ -61,7 +76,7 @@ final class SyntaxEditorTextKit2RenderStore {
         epoch += 1
     }
 
-    func clearForeground(textLength nextTextLength: Int) {
+    package func clearForeground(textLength nextTextLength: Int) {
         textLength = max(0, nextTextLength)
         baseForeground = nil
         colorRuns = []
@@ -69,7 +84,7 @@ final class SyntaxEditorTextKit2RenderStore {
         epoch += 1
     }
 
-    func setForegroundExclusionRanges(_ ranges: [NSRange], textLength nextTextLength: Int) {
+    package func setForegroundExclusionRanges(_ ranges: [NSRange], textLength nextTextLength: Int) {
         textLength = max(0, nextTextLength)
         foregroundExclusionRanges = ranges
             .map { SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: textLength) }
@@ -78,7 +93,7 @@ final class SyntaxEditorTextKit2RenderStore {
         epoch += 1
     }
 
-    func prepareForegroundForPendingTextMutation(
+    package func prepareForegroundForPendingTextMutation(
         _ mutation: SyntaxHighlightMutation,
         sourceLength nextTextLength: Int,
         invalidatedRange: NSRange
@@ -101,7 +116,7 @@ final class SyntaxEditorTextKit2RenderStore {
         epoch += 1
     }
 
-    func materializeForeground(
+    package func materializeForeground(
         in requestedRange: NSRange,
         using applier: (NSRange, SyntaxEditorColor?) -> Void
     ) {
@@ -139,7 +154,7 @@ final class SyntaxEditorTextKit2RenderStore {
         }
     }
 
-    func foregroundColor(at location: Int) -> SyntaxEditorColor? {
+    package func foregroundColor(at location: Int) -> SyntaxEditorColor? {
         var foregroundColor: SyntaxEditorColor?
         materializeForeground(in: NSRange(location: location, length: 1)) { _, color in
             foregroundColor = color
@@ -278,13 +293,13 @@ final class SyntaxEditorTextKit2RenderStore {
 }
 
 @MainActor
-final class SyntaxEditorTextKit2System {
-    let textContentStorage: NSTextContentStorage
-    let layoutManager: NSTextLayoutManager
-    let container: NSTextContainer
-    let renderStore: SyntaxEditorTextKit2RenderStore
+package final class SyntaxEditorTextKit2System {
+    package let textContentStorage: NSTextContentStorage
+    package let layoutManager: NSTextLayoutManager
+    package let container: NSTextContainer
+    package let renderStore: SyntaxEditorTextKit2RenderStore
 
-    init(
+    package init(
         textContentStorage: NSTextContentStorage = NSTextContentStorage(),
         layoutManager: NSTextLayoutManager = NSTextLayoutManager(),
         container: NSTextContainer = NSTextContainer(),
@@ -312,14 +327,14 @@ final class SyntaxEditorTextKit2System {
         }
     }
 
-    var textStorage: NSTextStorage {
+    package var textStorage: NSTextStorage {
         guard let textStorage = textContentStorage.textStorage else {
             fatalError("SyntaxEditorTextKit2System requires NSTextContentStorage-backed NSTextStorage")
         }
         return textStorage
     }
 
-    func textLocation(forUTF16Offset offset: Int) -> NSTextLocation? {
+    package func textLocation(forUTF16Offset offset: Int) -> NSTextLocation? {
         let clampedOffset = min(max(0, offset), textStorage.length)
         return textContentStorage.location(
             textContentStorage.documentRange.location,
@@ -327,14 +342,14 @@ final class SyntaxEditorTextKit2System {
         )
     }
 
-    func utf16Offset(for textLocation: NSTextLocation) -> Int {
+    package func utf16Offset(for textLocation: NSTextLocation) -> Int {
         textContentStorage.offset(
             from: textContentStorage.documentRange.location,
             to: textLocation
         )
     }
 
-    func textRange(forUTF16Range range: NSRange) -> NSTextRange? {
+    package func textRange(forUTF16Range range: NSRange) -> NSTextRange? {
         let clampedRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textStorage.length)
         guard let startLocation = textLocation(forUTF16Offset: clampedRange.location),
               let endLocation = textLocation(forUTF16Offset: clampedRange.location + clampedRange.length)
@@ -344,7 +359,7 @@ final class SyntaxEditorTextKit2System {
         return NSTextRange(location: startLocation, end: endLocation)
     }
 
-    func utf16Range(for textRange: NSTextRange) -> NSRange {
+    package func utf16Range(for textRange: NSTextRange) -> NSRange {
         NSRange(
             location: textContentStorage.offset(
                 from: textContentStorage.documentRange.location,
@@ -357,15 +372,15 @@ final class SyntaxEditorTextKit2System {
         )
     }
 
-    func invalidateRenderingAttributes(for range: NSRange) {
+    package func invalidateRenderingAttributes(for range: NSRange) {
         guard let textRange = textRange(forUTF16Range: range) else { return }
         layoutManager.invalidateRenderingAttributes(for: textRange)
     }
 }
 
-enum SyntaxEditorTextKit2HighlightRenderer {
+package enum SyntaxEditorTextKit2HighlightRenderer {
     @MainActor
-    static func validateRenderingAttributes(
+    package static func validateRenderingAttributes(
         layoutManager: NSTextLayoutManager,
         textContentStorage: NSTextContentStorage,
         renderStore: SyntaxEditorTextKit2RenderStore,

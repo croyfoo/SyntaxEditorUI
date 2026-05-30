@@ -7,10 +7,12 @@ import Testing
 
 #if canImport(UIKit)
 import UIKit
+@testable import SyntaxEditorUIUIKit
 #endif
 
 #if canImport(AppKit)
 import AppKit
+@testable import SyntaxEditorUIAppKit
 #endif
 
 @MainActor

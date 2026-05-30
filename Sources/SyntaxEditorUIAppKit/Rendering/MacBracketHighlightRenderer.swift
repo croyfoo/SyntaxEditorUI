@@ -1,5 +1,6 @@
 #if canImport(AppKit)
 import AppKit
+import SyntaxEditorCore
 
 extension SyntaxEditorView {
     func applyMatchingBracketHighlight(force: Bool = false) {

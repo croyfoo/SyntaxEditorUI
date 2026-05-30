@@ -1,6 +1,7 @@
 #if canImport(AppKit)
 import AppKit
 import SyntaxEditorCore
+import SyntaxEditorUICommon
 
 @MainActor
 final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient, @preconcurrency NSTextFinderClient, @preconcurrency NSTextViewportLayoutControllerDelegate {
