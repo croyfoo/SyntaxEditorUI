@@ -98,6 +98,25 @@ struct SwiftFileSymbolIndex {
         let declarationRange: NSRange
     }
 
+    private struct TreeValueDeclaration {
+        let range: NSRange
+        let bindingKeywordUpperBound: Int
+    }
+
+    private struct TreeDeclarationFacts {
+        var typeDeclarations: [TypeDeclaration] = []
+        var extensionScopeCandidates: [(qualifiedName: String, bodyRange: NSRange)] = []
+        var functionDeclarations: [FunctionDeclaration] = []
+        var functionScopes: [FunctionScope] = []
+        var typeAliasNameRanges: [NSRange] = []
+        var valueDeclarations: [TreeValueDeclaration] = []
+        var closureRanges: [NSRange] = []
+        var macroNameRanges: [NSRange] = []
+        var operatorNameRanges: [NSRange] = []
+        var enumCaseNameRanges: [NSRange] = []
+        var genericParameterEntries: [(nameRange: NSRange, scopeRange: NSRange)] = []
+    }
+
     private let source: NSString
     private let maskedSource: NSString
     private(set) var entries: [Entry] = []
@@ -111,24 +130,57 @@ struct SwiftFileSymbolIndex {
     private var enumCasesByName: [String: [Entry]] = [:]
     private var genericParametersByName: [String: [Entry]] = [:]
     private var braceRanges: [NSRange] = []
+    private var extensionScopeCandidates: [(qualifiedName: String, bodyRange: NSRange)] = []
 
     init(source: NSString, tokens: [SyntaxHighlightToken], rootNode: Node? = nil) {
         self.source = source
         self.maskedSource = Self.maskedSource(from: source, tokens: tokens)
         self.braceRanges = Self.braceRanges(from: rootNode, in: maskedSource)
 
-        collectTypeDeclarationCandidates()
-        collectFunctionLikeDeclarations()
+        let treeFacts = rootNode.map { collectTreeDeclarationFacts(from: $0) }
+        if let treeFacts {
+            typeDeclarations = treeFacts.typeDeclarations
+            functionDeclarations = treeFacts.functionDeclarations
+            functionScopes = treeFacts.functionScopes
+            extensionScopeCandidates = treeFacts.extensionScopeCandidates
+        } else {
+            collectTypeDeclarationCandidates()
+            collectFunctionLikeDeclarations()
+            extensionScopeCandidates = regexExtensionScopeCandidates()
+        }
+
         collectExtensionScopes()
         collectTypeDeclarations()
-        collectTypeAliasDeclarations()
+        if let treeFacts {
+            collectTypeAliasDeclarations(from: treeFacts.typeAliasNameRanges)
+        } else {
+            collectTypeAliasDeclarations()
+        }
         collectFunctionDeclarationEntries()
-        collectMacroDeclarations()
+        if treeFacts != nil {
+            collectFunctionParameters()
+        }
+        if let treeFacts {
+            collectMacroDeclarations(from: treeFacts.macroNameRanges)
+            collectOperatorDeclarations(from: treeFacts.operatorNameRanges)
+        } else {
+            collectMacroDeclarations()
+        }
         collectPatternBoundLocals()
-        collectClosureParameters()
-        collectValueDeclarations()
-        collectEnumCases()
-        collectGenericParameters()
+        if let treeFacts {
+            collectClosureParameters(from: treeFacts.closureRanges)
+            collectValueDeclarations(from: treeFacts.valueDeclarations)
+        } else {
+            collectClosureParameters()
+            collectValueDeclarations()
+        }
+        if let treeFacts {
+            collectEnumCases(from: treeFacts.enumCaseNameRanges)
+            collectGenericParameters(from: treeFacts.genericParameterEntries)
+        } else {
+            collectEnumCases()
+            collectGenericParameters()
+        }
         rebuildLookupTables()
     }
 
@@ -253,6 +305,259 @@ private extension SwiftFileSymbolIndex {
         genericParametersByName = Dictionary(grouping: entries.lazy.filter { $0.role == .genericParameter }, by: \.name)
     }
 
+    private func collectTreeDeclarationFacts(from rootNode: Node) -> TreeDeclarationFacts {
+        var facts = TreeDeclarationFacts()
+        collectTreeDeclarationFacts(from: rootNode, into: &facts)
+        return facts
+    }
+
+    private func collectTreeDeclarationFacts(from node: Node, into facts: inout TreeDeclarationFacts) {
+        switch node.nodeType {
+        case "class_declaration":
+            collectClassDeclarationFacts(from: node, into: &facts)
+        case "protocol_declaration":
+            collectProtocolDeclarationFacts(from: node, into: &facts)
+        case "precedence_group_declaration":
+            collectPrecedenceGroupFacts(from: node, into: &facts)
+        case "typealias_declaration", "associatedtype_declaration":
+            if let nameRange = node.child(byFieldName: "name")?.range {
+                facts.typeAliasNameRanges.append(nameRange)
+            }
+        case "property_declaration", "protocol_property_declaration":
+            if let binding = firstDescendant(in: node, nodeType: "value_binding_pattern") {
+                facts.valueDeclarations.append(TreeValueDeclaration(
+                    range: node.range,
+                    bindingKeywordUpperBound: binding.range.upperBound
+                ))
+            }
+        case "value_binding_pattern":
+            if let declaration = conditionalValueDeclaration(for: node) {
+                facts.valueDeclarations.append(declaration)
+            }
+        case "function_declaration", "protocol_function_declaration":
+            collectFunctionDeclarationFacts(from: node, into: &facts)
+        case "init_declaration", "deinit_declaration", "subscript_declaration":
+            collectFunctionScopeFacts(from: node, into: &facts)
+        case "operator_declaration":
+            if let nameRange = operatorNameRange(in: node) {
+                facts.operatorNameRanges.append(nameRange)
+            }
+        case "macro_declaration":
+            collectMacroDeclarationFacts(from: node, into: &facts)
+        case "enum_entry":
+            facts.enumCaseNameRanges.append(contentsOf: childRanges(in: node, fieldName: "name"))
+        case "lambda_literal":
+            facts.closureRanges.append(node.range)
+        default:
+            break
+        }
+
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index) else { continue }
+            collectTreeDeclarationFacts(from: child, into: &facts)
+        }
+    }
+
+    private func collectClassDeclarationFacts(from node: Node, into facts: inout TreeDeclarationFacts) {
+        guard let kindRange = node.child(byFieldName: "declaration_kind")?.range,
+              let kind = sourceText(in: kindRange),
+              let nameNode = node.child(byFieldName: "name")
+        else {
+            return
+        }
+
+        if kind == "extension" {
+            guard let qualifiedName = qualifiedExtensionName(in: nameNode.range),
+                  let bodyRange = node.child(byFieldName: "body")?.range
+            else {
+                return
+            }
+            facts.extensionScopeCandidates.append((qualifiedName: qualifiedName, bodyRange: bodyRange))
+            return
+        }
+
+        facts.typeDeclarations.append(TypeDeclaration(
+            name: maskedSource.substring(with: nameNode.range),
+            kind: kind,
+            nameRange: nameNode.range,
+            bodyRange: node.child(byFieldName: "body")?.range
+        ))
+        collectTypeGenericParameterFacts(from: node, into: &facts)
+    }
+
+    private func collectProtocolDeclarationFacts(from node: Node, into facts: inout TreeDeclarationFacts) {
+        guard let nameNode = node.child(byFieldName: "name") else {
+            return
+        }
+
+        facts.typeDeclarations.append(TypeDeclaration(
+            name: maskedSource.substring(with: nameNode.range),
+            kind: "protocol",
+            nameRange: nameNode.range,
+            bodyRange: node.child(byFieldName: "body")?.range
+        ))
+        collectTypeGenericParameterFacts(from: node, into: &facts)
+    }
+
+    private func collectPrecedenceGroupFacts(from node: Node, into facts: inout TreeDeclarationFacts) {
+        guard let nameNode = directChild(in: node, nodeType: "simple_identifier") else {
+            return
+        }
+
+        facts.typeDeclarations.append(TypeDeclaration(
+            name: maskedSource.substring(with: nameNode.range),
+            kind: "precedencegroup",
+            nameRange: nameNode.range,
+            bodyRange: bodyRange(after: nameNode.range.upperBound)
+        ))
+    }
+
+    private func collectFunctionDeclarationFacts(from node: Node, into facts: inout TreeDeclarationFacts) {
+        guard let nameNode = node.child(byFieldName: "name") else {
+            return
+        }
+
+        facts.functionDeclarations.append(FunctionDeclaration(
+            name: maskedSource.substring(with: nameNode.range),
+            nameRange: nameNode.range
+        ))
+
+        if let bodyRange = node.child(byFieldName: "body")?.range {
+            let parameterListRange = parameterListRange(in: node, after: nameNode.range.upperBound)
+            facts.functionScopes.append(FunctionScope(
+                bodyRange: bodyRange,
+                parameterListRange: parameterListRange
+            ))
+            collectFunctionGenericParameterFacts(from: node, bodyRange: bodyRange, into: &facts)
+        }
+    }
+
+    private func collectFunctionScopeFacts(from node: Node, into facts: inout TreeDeclarationFacts) {
+        let bodyRange = node.child(byFieldName: "body")?.range
+            ?? directChild(in: node, nodeType: "computed_property")?.range
+        guard let bodyRange else {
+            return
+        }
+
+        facts.functionScopes.append(FunctionScope(
+            bodyRange: bodyRange,
+            parameterListRange: parameterListRange(in: node, after: node.range.location)
+        ))
+    }
+
+    private func collectMacroDeclarationFacts(from node: Node, into facts: inout TreeDeclarationFacts) {
+        guard let nameNode = directChild(in: node, nodeType: "simple_identifier") else {
+            return
+        }
+
+        facts.macroNameRanges.append(nameNode.range)
+    }
+
+    private func collectTypeGenericParameterFacts(from node: Node, into facts: inout TreeDeclarationFacts) {
+        guard let typeParameters = directChild(in: node, nodeType: "type_parameters") else {
+            return
+        }
+
+        let scope = node.child(byFieldName: "body")?.range ?? fullRange
+        appendGenericParameterFacts(in: typeParameters, scope: scope, into: &facts)
+    }
+
+    private func collectFunctionGenericParameterFacts(
+        from node: Node,
+        bodyRange: NSRange,
+        into facts: inout TreeDeclarationFacts
+    ) {
+        guard let typeParameters = directChild(in: node, nodeType: "type_parameters") else {
+            return
+        }
+
+        appendGenericParameterFacts(
+            in: typeParameters,
+            scope: NSRange(
+                location: typeParameters.range.location,
+                length: bodyRange.upperBound - typeParameters.range.location
+            ),
+            into: &facts
+        )
+    }
+
+    private func appendGenericParameterFacts(
+        in typeParameters: Node,
+        scope: NSRange,
+        into facts: inout TreeDeclarationFacts
+    ) {
+        for typeParameter in descendants(of: typeParameters, nodeType: "type_parameter") {
+            guard let nameNode = firstDescendant(in: typeParameter, nodeType: "type_identifier") else {
+                continue
+            }
+            facts.genericParameterEntries.append((nameRange: nameNode.range, scopeRange: scope))
+        }
+    }
+
+    private func conditionalValueDeclaration(for binding: Node) -> TreeValueDeclaration? {
+        let bindingText = sourceText(in: binding.range)
+        guard !hasAncestor(binding, nodeTypes: ["property_declaration", "protocol_property_declaration"]),
+              let statement = ancestor(of: binding, nodeTypes: ["if_statement", "while_statement", "guard_statement"]),
+              bindingText == "let" || bindingText == "var",
+              previousIdentifier(before: binding.range.location) != "case"
+        else {
+            return nil
+        }
+
+        let upperBound = conditionalValueDeclarationUpperBound(
+            after: binding.range.upperBound,
+            before: statement.range.upperBound
+        )
+        guard upperBound > binding.range.upperBound else {
+            return nil
+        }
+
+        return TreeValueDeclaration(
+            range: NSRange(location: binding.range.location, length: upperBound - binding.range.location),
+            bindingKeywordUpperBound: binding.range.upperBound
+        )
+    }
+
+    private func conditionalValueDeclarationUpperBound(after location: Int, before upperBound: Int) -> Int {
+        var scan = max(0, min(location, maskedSource.length))
+        let limit = min(upperBound, maskedSource.length)
+        var parenDepth = 0
+        var bracketDepth = 0
+        var braceDepth = 0
+
+        while scan < limit {
+            let character = maskedSource.substring(with: NSRange(location: scan, length: 1))
+            switch character {
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth = max(0, parenDepth - 1)
+            case "[":
+                bracketDepth += 1
+            case "]":
+                bracketDepth = max(0, bracketDepth - 1)
+            case "{":
+                if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
+                    return scan
+                }
+                braceDepth += 1
+            case "}":
+                braceDepth = max(0, braceDepth - 1)
+            default:
+                if parenDepth == 0,
+                   bracketDepth == 0,
+                   braceDepth == 0,
+                   isKeyword("else", at: scan)
+                {
+                    return scan
+                }
+            }
+            scan += 1
+        }
+
+        return limit
+    }
+
     mutating func collectTypeDeclarationCandidates() {
         let sourceString = maskedSource as String
         for match in Self.typeDeclarationRegex.matches(in: sourceString, range: fullRange) {
@@ -341,25 +646,18 @@ private extension SwiftFileSymbolIndex {
         let localTypeNames = localQualifiedTypeNames()
         guard !localTypeNames.isEmpty else { return }
 
-        let sourceString = maskedSource as String
-        for match in Self.extensionRegex.matches(in: sourceString, range: fullRange) {
-            guard match.numberOfRanges > 1 else { continue }
-            let nameRange = match.range(at: 1)
-            guard nameRange.location != NSNotFound else { continue }
-
-            let qualifiedName = maskedSource.substring(with: nameRange)
+        for candidate in extensionScopeCandidates {
+            let qualifiedName = candidate.qualifiedName
             guard localTypeNames.contains(qualifiedName),
-                  let bodyRange = bodyRange(after: match.range.upperBound)
-            else {
-                continue
-            }
+                  candidate.bodyRange.length > 0
+            else { continue }
             let name = qualifiedName.split(separator: ".").last.map(String.init) ?? qualifiedName
 
             typeScopes.append(TypeScope(
                 name: name,
                 qualifiedName: qualifiedName,
                 kind: "extension",
-                bodyRange: bodyRange
+                bodyRange: candidate.bodyRange
             ))
         }
     }
@@ -371,45 +669,13 @@ private extension SwiftFileSymbolIndex {
             let nameRange = match.range(at: 2)
             guard nameRange.location != NSNotFound else { continue }
 
-            let name = maskedSource.substring(with: nameRange)
-            if let functionScope = innermostFunctionScope(containing: nameRange) {
-                entries.append(Entry(
-                    name: name,
-                    kind: .type,
-                    role: .local,
-                    declarationRange: nameRange,
-                    scopeRange: localDeclarationScope(
-                        containing: nameRange,
-                        within: functionScope
-                    )
-                ))
-            } else if let localExecutableScope = localExecutableBraceRange(
-                containing: nameRange,
-                containingTypeScope: innermostTypeScope(containing: nameRange)
-            ) {
-                entries.append(Entry(
-                    name: name,
-                    kind: .type,
-                    role: .local,
-                    declarationRange: nameRange,
-                    scopeRange: localExecutableScope
-                ))
-            } else if let typeScope = innermostTypeScope(containing: nameRange) {
-                appendMemberEntries(
-                    name: name,
-                    kind: .type,
-                    declarationRange: nameRange,
-                    ownerTypeScope: typeScope
-                )
-            } else {
-                entries.append(Entry(
-                    name: name,
-                    kind: .type,
-                    role: .file,
-                    declarationRange: nameRange,
-                    scopeRange: fullRange
-                ))
-            }
+            appendTypeAliasDeclaration(nameRange: nameRange)
+        }
+    }
+
+    mutating func collectTypeAliasDeclarations(from nameRanges: [NSRange]) {
+        for nameRange in nameRanges {
+            appendTypeAliasDeclaration(nameRange: nameRange)
         }
     }
 
@@ -500,6 +766,18 @@ private extension SwiftFileSymbolIndex {
         }
     }
 
+    mutating func collectOperatorDeclarations(from nameRanges: [NSRange]) {
+        for nameRange in nameRanges {
+            entries.append(Entry(
+                name: maskedSource.substring(with: nameRange),
+                kind: .function,
+                role: .file,
+                declarationRange: nameRange,
+                scopeRange: fullRange
+            ))
+        }
+    }
+
     mutating func collectInitAndSubscriptScopes(in sourceString: String) {
         for match in Self.initRegex.matches(in: sourceString, range: fullRange) {
             guard isInitializerDeclaration(at: match.range.location) else {
@@ -574,6 +852,18 @@ private extension SwiftFileSymbolIndex {
         }
     }
 
+    mutating func collectMacroDeclarations(from nameRanges: [NSRange]) {
+        for nameRange in nameRanges {
+            entries.append(Entry(
+                name: maskedSource.substring(with: nameRange),
+                kind: .macro,
+                role: .file,
+                declarationRange: nameRange,
+                scopeRange: fullRange
+            ))
+        }
+    }
+
     mutating func collectValueDeclarations() {
         let sourceString = maskedSource as String
         for match in Self.valueDeclarationRegex.matches(in: sourceString, range: fullRange) {
@@ -582,6 +872,24 @@ private extension SwiftFileSymbolIndex {
             }
 
             let declarationRange = valueDeclarationContentRange(after: match.range.upperBound)
+            for segmentRange in topLevelCommaSeparatedRanges(in: declarationRange) {
+                for nameRange in valuePatternNameRanges(in: segmentRange) {
+                    indexValueDeclarationName(
+                        at: nameRange,
+                        segmentRange: segmentRange,
+                        declarationRange: declarationRange
+                    )
+                }
+            }
+        }
+    }
+
+    private mutating func collectValueDeclarations(from declarations: [TreeValueDeclaration]) {
+        for declaration in declarations {
+            let declarationRange = NSRange(
+                location: declaration.bindingKeywordUpperBound,
+                length: max(0, declaration.range.upperBound - declaration.bindingKeywordUpperBound)
+            )
             for segmentRange in topLevelCommaSeparatedRanges(in: declarationRange) {
                 for nameRange in valuePatternNameRanges(in: segmentRange) {
                     indexValueDeclarationName(
@@ -1106,6 +1414,28 @@ private extension SwiftFileSymbolIndex {
         }
     }
 
+    mutating func collectClosureParameters(from closureRanges: [NSRange]) {
+        for closureRange in closureRanges {
+            guard let openBrace = firstLocation(of: "{", after: closureRange.location - 1),
+                  openBrace < closureRange.upperBound,
+                  let closeBrace = matchingLocation(opening: "{", closing: "}", at: openBrace),
+                  closeBrace < closureRange.upperBound,
+                  let parameterListRange = closureParameterListRange(openBrace: openBrace, closeBrace: closeBrace)
+            else {
+                continue
+            }
+
+            let closureScope = NSRange(location: openBrace, length: closeBrace - openBrace + 1)
+            for nameRange in closureParameterNameRanges(in: parameterListRange) {
+                appendLocalVariable(
+                    nameRange: nameRange,
+                    localScope: closureScope,
+                    startLocation: openBrace
+                )
+            }
+        }
+    }
+
     mutating func collectEnumCases() {
         var location = 0
         while location < maskedSource.length {
@@ -1147,6 +1477,25 @@ private extension SwiftFileSymbolIndex {
         }
     }
 
+    mutating func collectEnumCases(from nameRanges: [NSRange]) {
+        for nameRange in nameRanges {
+            guard let typeScope = innermostTypeScope(containing: nameRange),
+                  typeScope.kind == "enum"
+            else {
+                continue
+            }
+
+            entries.append(Entry(
+                name: maskedSource.substring(with: nameRange),
+                kind: .constant,
+                role: .member,
+                declarationRange: nameRange,
+                scopeRange: fullRange,
+                ownerQualifiedName: typeScope.qualifiedName
+            ))
+        }
+    }
+
     mutating func collectGenericParameters() {
         let sourceString = maskedSource as String
         for match in Self.typeDeclarationRegex.matches(in: sourceString, range: fullRange) {
@@ -1183,6 +1532,18 @@ private extension SwiftFileSymbolIndex {
         }
     }
 
+    mutating func collectGenericParameters(from genericParameters: [(nameRange: NSRange, scopeRange: NSRange)]) {
+        for genericParameter in genericParameters {
+            entries.append(Entry(
+                name: maskedSource.substring(with: genericParameter.nameRange),
+                kind: .type,
+                role: .genericParameter,
+                declarationRange: genericParameter.nameRange,
+                scopeRange: genericParameter.scopeRange
+            ))
+        }
+    }
+
     mutating func appendGenericParameterEntries(in genericRange: NSRange, scope: NSRange) {
         for parameterRange in genericParameterNameRanges(in: genericRange) {
             entries.append(Entry(
@@ -1191,6 +1552,48 @@ private extension SwiftFileSymbolIndex {
                 role: .genericParameter,
                 declarationRange: parameterRange,
                 scopeRange: scope
+            ))
+        }
+    }
+
+    private mutating func appendTypeAliasDeclaration(nameRange: NSRange) {
+        let name = maskedSource.substring(with: nameRange)
+        if let functionScope = innermostFunctionScope(containing: nameRange) {
+            entries.append(Entry(
+                name: name,
+                kind: .type,
+                role: .local,
+                declarationRange: nameRange,
+                scopeRange: localDeclarationScope(
+                    containing: nameRange,
+                    within: functionScope
+                )
+            ))
+        } else if let localExecutableScope = localExecutableBraceRange(
+            containing: nameRange,
+            containingTypeScope: innermostTypeScope(containing: nameRange)
+        ) {
+            entries.append(Entry(
+                name: name,
+                kind: .type,
+                role: .local,
+                declarationRange: nameRange,
+                scopeRange: localExecutableScope
+            ))
+        } else if let typeScope = innermostTypeScope(containing: nameRange) {
+            appendMemberEntries(
+                name: name,
+                kind: .type,
+                declarationRange: nameRange,
+                ownerTypeScope: typeScope
+            )
+        } else {
+            entries.append(Entry(
+                name: name,
+                kind: .type,
+                role: .file,
+                declarationRange: nameRange,
+                scopeRange: fullRange
             ))
         }
     }
@@ -1289,6 +1692,142 @@ private extension SwiftFileSymbolIndex {
 private extension SwiftFileSymbolIndex {
     var fullRange: NSRange {
         NSRange(location: 0, length: maskedSource.length)
+    }
+
+    func sourceText(in range: NSRange) -> String? {
+        guard range.location != NSNotFound,
+              range.location >= 0,
+              range.upperBound <= maskedSource.length
+        else {
+            return nil
+        }
+
+        return maskedSource.substring(with: range)
+    }
+
+    func qualifiedExtensionName(in range: NSRange) -> String? {
+        let trimmed = trimmedRange(range)
+        guard let text = sourceText(in: trimmed) else {
+            return nil
+        }
+
+        let nsText = text as NSString
+        guard let match = Self.qualifiedIdentifierRegex.firstMatch(
+            in: text,
+            range: NSRange(location: 0, length: nsText.length)
+        ),
+              match.range.location == 0
+        else {
+            return nil
+        }
+
+        return nsText.substring(with: match.range)
+    }
+
+    func directChild(in node: Node, nodeType: String) -> Node? {
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index),
+                  child.nodeType == nodeType
+            else {
+                continue
+            }
+            return child
+        }
+        return nil
+    }
+
+    func childRanges(in node: Node, fieldName: String) -> [NSRange] {
+        var ranges: [NSRange] = []
+        for index in 0..<node.childCount {
+            guard node.fieldNameForChild(at: index) == fieldName,
+                  let child = node.child(at: index)
+            else {
+                continue
+            }
+            ranges.append(child.range)
+        }
+        return ranges
+    }
+
+    func ancestor(of node: Node, nodeTypes: Set<String>) -> Node? {
+        var current = node.parent
+        while let node = current {
+            if let nodeType = node.nodeType,
+               nodeTypes.contains(nodeType) {
+                return node
+            }
+            current = node.parent
+        }
+        return nil
+    }
+
+    func hasAncestor(_ node: Node, nodeTypes: Set<String>) -> Bool {
+        ancestor(of: node, nodeTypes: nodeTypes) != nil
+    }
+
+    func previousIdentifier(before location: Int) -> String? {
+        let prefixRange = statementPrefixRange(endingAt: location)
+        return lastIdentifier(in: prefixRange)
+    }
+
+    func descendants(of node: Node, nodeType: String) -> [Node] {
+        var matches: [Node] = []
+        collectDescendants(of: node, nodeType: nodeType, into: &matches)
+        return matches
+    }
+
+    func collectDescendants(of node: Node, nodeType: String, into matches: inout [Node]) {
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index) else { continue }
+            if child.nodeType == nodeType {
+                matches.append(child)
+            }
+            collectDescendants(of: child, nodeType: nodeType, into: &matches)
+        }
+    }
+
+    func firstDescendant(in node: Node, nodeType: String) -> Node? {
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index) else { continue }
+            if child.nodeType == nodeType {
+                return child
+            }
+            if let descendant = firstDescendant(in: child, nodeType: nodeType) {
+                return descendant
+            }
+        }
+        return nil
+    }
+
+    func parameterListRange(in node: Node, after location: Int) -> NSRange? {
+        guard let range = balancedRange(opening: "(", closing: ")", after: location - 1),
+              Self.range(node.range, contains: range)
+        else {
+            return nil
+        }
+        return range
+    }
+
+    func operatorNameRange(in node: Node) -> NSRange? {
+        var sawOperatorKeyword = false
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index),
+                  let text = sourceText(in: child.range)
+            else {
+                continue
+            }
+
+            if text == "operator" {
+                sawOperatorKeyword = true
+                continue
+            }
+
+            if sawOperatorKeyword,
+               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return child.range
+            }
+        }
+        return nil
     }
 
     static func range(_ outer: NSRange, contains inner: NSRange) -> Bool {
@@ -1427,7 +1966,7 @@ private extension SwiftFileSymbolIndex {
             return nestedExecutableBraceRange(containing: range, within: containingTypeScope)
         }
 
-        if extensionScopeCandidates().contains(where: { Self.range($0.bodyRange, contains: range) }) {
+        if extensionScopeCandidates.contains(where: { Self.range($0.bodyRange, contains: range) }) {
             return nil
         }
 
@@ -1439,7 +1978,6 @@ private extension SwiftFileSymbolIndex {
     }
 
     private func localQualifiedTypeNames() -> Set<String> {
-        let extensionCandidates = extensionScopeCandidates()
         var knownNames: Set<String> = []
 
         while true {
@@ -1447,7 +1985,7 @@ private extension SwiftFileSymbolIndex {
             var nextNames: Set<String> = []
 
             for declaration in typeDeclarations {
-                let activeExtensionScopes = extensionCandidates.filter {
+                let activeExtensionScopes = extensionScopeCandidates.filter {
                     (knownNames.contains($0.qualifiedName) || nextNames.contains($0.qualifiedName))
                         && Self.range($0.bodyRange, contains: declaration.nameRange)
                 }
@@ -1475,7 +2013,7 @@ private extension SwiftFileSymbolIndex {
         }
     }
 
-    private func extensionScopeCandidates() -> [(qualifiedName: String, bodyRange: NSRange)] {
+    private func regexExtensionScopeCandidates() -> [(qualifiedName: String, bodyRange: NSRange)] {
         let sourceString = maskedSource as String
         return Self.extensionRegex.matches(in: sourceString, range: fullRange).compactMap { match in
             guard match.numberOfRanges > 1 else { return nil }
@@ -2407,6 +2945,7 @@ private extension SwiftFileSymbolIndex {
     static let qualifiedIdentifierPattern = #"\#(identifierPattern)(?:\.\#(identifierPattern))*"#
 
     static let identifierRegex = try! NSRegularExpression(pattern: identifierPattern)
+    static let qualifiedIdentifierRegex = try! NSRegularExpression(pattern: qualifiedIdentifierPattern)
 
     static let typeDeclarationRegex = try! NSRegularExpression(
         pattern: #"\b(class|struct|enum|actor|protocol|precedencegroup)\s+(\#(identifierPattern))"#
