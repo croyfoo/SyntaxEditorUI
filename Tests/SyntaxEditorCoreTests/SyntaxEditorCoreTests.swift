@@ -5808,6 +5808,41 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine removes stale Swift overlays after identifier typing edits")
+    func highlighterRemovesStaleSwiftOverlaysAfterIdentifierTypingEdits() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "return item", with: "return items")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(
+            syntaxIDs(
+                in: incremental.tokens,
+                source: updatedSource,
+                text: "items",
+                inOccurrenceOf: "return items"
+            ).last != .identifierVariable
+        )
+    }
+
     @Test("SyntaxHighlighterEngine reapplies Swift semantic overlays after distant declaration edits")
     func highlighterReappliesSwiftSemanticOverlaysAfterDistantDeclarationEdits() async throws {
         let source = """
@@ -7454,11 +7489,11 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(languageChange.tokens, fullJSON.tokens))
     }
 
-    @Test("SyntaxHighlighterEngine resets when mutation is not based on the current session source")
-    func highlighterResetsWhenMutationBaseDoesNotMatchSessionSource() async throws {
-        let sessionSource = "const value = 1;"
-        let stalePreviousSource = "let value = 1;"
-        let updatedSource = "let value = 2;"
+    @Test("SyntaxHighlighterEngine coalesces stale mutations against the current session source")
+    func highlighterCoalescesMutationBaseMismatchAgainstSessionSource() async throws {
+        let sessionSource = "const value = 1;\nconst other = 2;"
+        let stalePreviousSource = "const value = 2;\nconst other = 2;"
+        let updatedSource = "const value = 3;\nconst other = 2;"
         let staleMutation = try #require(TextMutation.diff(from: stalePreviousSource, to: updatedSource))
         let engine = SyntaxHighlighterEngine()
 
@@ -7473,7 +7508,8 @@ struct SyntaxHighlighterEngineTests {
             .reset(source: updatedSource, language: SyntaxLanguage.javascript, revision: 2)
 
         #expect(highlightTokensMatch(staleUpdate.tokens, full.tokens))
-        #expect(staleUpdate.refreshRange == NSRange(location: 0, length: updatedSource.utf16.count))
+        #expect(staleUpdate.refreshRange.location == 0)
+        #expect(staleUpdate.refreshRange.length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")

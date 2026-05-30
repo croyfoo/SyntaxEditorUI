@@ -12,7 +12,79 @@ typealias SwiftSemanticOverlayResult = SyntaxOverlayResult
 private struct SwiftOverlayPreparation {
     let baseTokensForIndex: [SyntaxHighlightToken]
     let outputBaseTokens: [SyntaxHighlightToken]
+    let tokenIndex: SwiftTokenIndex
     let excludedPreprocessorRanges: [NSRange]
+}
+
+private struct SwiftIndexedToken {
+    let range: NSRange
+    let text: String
+}
+
+private struct SwiftTokenIndex {
+    private let semanticCandidateTokens: [SwiftIndexedToken]
+
+    init(tokens: [SyntaxHighlightToken], source: NSString, targetRange: NSRange?) {
+        var semanticCandidateTokens: [SwiftIndexedToken] = []
+        semanticCandidateTokens.reserveCapacity(tokens.count / 3)
+
+        for token in tokens {
+            guard token.language == .swift || token.language == nil,
+                  token.syntaxID == .plain,
+                  token.range.location >= 0,
+                  token.range.length > 0,
+                  token.range.upperBound <= source.length,
+                  targetRange.map({ Self.rangesIntersect(token.range, $0) }) ?? true
+            else {
+                continue
+            }
+
+            let text = source.substring(with: token.range)
+            guard SwiftSyntaxOverlayTokenProvider.isSwiftIdentifier(text) else {
+                continue
+            }
+            semanticCandidateTokens.append(SwiftIndexedToken(range: token.range, text: text))
+        }
+
+        self.semanticCandidateTokens = semanticCandidateTokens.sorted {
+            if $0.range.location != $1.range.location {
+                return $0.range.location < $1.range.location
+            }
+            return $0.range.length < $1.range.length
+        }
+    }
+
+    func semanticTokens(intersecting targetRange: NSRange?) -> ArraySlice<SwiftIndexedToken> {
+        guard let targetRange else {
+            return semanticCandidateTokens[...]
+        }
+
+        let lowerBound = lowerBoundForLocation(targetRange.location)
+        var upperBound = lowerBound
+        while upperBound < semanticCandidateTokens.count,
+              semanticCandidateTokens[upperBound].range.location < targetRange.upperBound {
+            upperBound += 1
+        }
+        return semanticCandidateTokens[lowerBound..<upperBound]
+    }
+
+    private func lowerBoundForLocation(_ location: Int) -> Int {
+        var lower = 0
+        var upper = semanticCandidateTokens.count
+        while lower < upper {
+            let midpoint = (lower + upper) / 2
+            if semanticCandidateTokens[midpoint].range.upperBound <= location {
+                lower = midpoint + 1
+            } else {
+                upper = midpoint
+            }
+        }
+        return lower
+    }
+
+    private static func rangesIntersect(_ lhs: NSRange, _ rhs: NSRange) -> Bool {
+        max(lhs.location, rhs.location) < min(lhs.upperBound, rhs.upperBound)
+    }
 }
 
 enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
@@ -49,8 +121,8 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             )
         }
 
-        let targetRange = refreshRange.flatMap {
-            semanticTargetRange($0, in: nsSource)
+        let targetRange = refreshRange.map {
+            SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
         let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
         let shouldRebuildIndex = targetRange == nil || state?.index == nil
@@ -83,7 +155,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             ) +
             tokensInSemanticSymbolRanges(
                 source: nsSource,
-                existingTokens: preparation.baseTokensForIndex,
+                tokenIndex: preparation.tokenIndex,
                 index: index,
                 targetRange: targetRange
             )
@@ -209,7 +281,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static func tokensInSemanticSymbolRanges(
         source: NSString,
-        existingTokens: [SyntaxHighlightToken],
+        tokenIndex: SwiftTokenIndex,
         index: SwiftFileSymbolIndex,
         targetRange: NSRange?
     ) -> [SyntaxHighlightToken] {
@@ -219,23 +291,14 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
         var tokens: [SyntaxHighlightToken] = []
 
-        for token in existingTokens {
-            guard token.language == .swift || token.language == nil,
-                  token.syntaxID == .plain,
-                  token.range.upperBound <= source.length,
-                  targetRange.map({ rangesIntersect(token.range, $0) }) ?? true,
-                  !isPreprocessorLine(containing: token.range, in: source)
+        for token in tokenIndex.semanticTokens(intersecting: targetRange) {
+            guard !isPreprocessorLine(containing: token.range, in: source)
             else {
                 continue
             }
 
-            let text = source.substring(with: token.range)
-            guard isSwiftIdentifier(text) else {
-                continue
-            }
-
             let overlays = semanticOverlays(
-                    for: text,
+                    for: token.text,
                     range: token.range,
                     in: source,
                     index: index
@@ -738,7 +801,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             .hasPrefix("#")
     }
 
-    private static func isSwiftIdentifier(_ text: String) -> Bool {
+    fileprivate static func isSwiftIdentifier(_ text: String) -> Bool {
         var iterator = text.utf8.makeIterator()
         guard let first = iterator.next(),
               isSwiftIdentifierStartByte(first)
@@ -785,6 +848,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return SwiftOverlayPreparation(
             baseTokensForIndex: baseTokensForIndex,
             outputBaseTokens: outputBaseTokens,
+            tokenIndex: SwiftTokenIndex(tokens: baseTokensForIndex, source: source, targetRange: targetRange),
             excludedPreprocessorRanges: mergedExcludedPreprocessorRanges(existingTokens: baseTokensForIndex)
         )
     }

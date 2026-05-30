@@ -144,8 +144,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             )
         }
 
-        let targetRange = refreshRange.flatMap {
-            semanticTargetRange($0, in: nsSource)
+        let targetRange = refreshRange.map {
+            SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
         let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
         let shouldRebuildIndex = targetRange == nil || state?.index == nil

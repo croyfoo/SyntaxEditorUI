@@ -302,15 +302,20 @@ private final class SyntaxHighlightSession {
             return nil
         }
 
-        guard Self.mutationMatchesSourceTransition(
-            originalMutation,
-            previousSource: source,
-            nextSource: nextSource
-        ) else {
+        guard let layer else {
             return nil
         }
 
-        guard let layer else {
+        let effectiveOriginalMutation: SyntaxHighlightMutation
+        if Self.mutationMatchesSourceTransition(
+            originalMutation,
+            previousSource: source,
+            nextSource: nextSource
+        ) {
+            effectiveOriginalMutation = originalMutation
+        } else if let coalescedMutation = TextMutation.diff(from: source, to: nextSource) {
+            effectiveOriginalMutation = SyntaxHighlightMutation(coalescedMutation)
+        } else {
             return nil
         }
 
@@ -327,13 +332,13 @@ private final class SyntaxHighlightSession {
                     revision: revision,
                     refreshRange: refreshRange(
                         in: nextSource,
-                        from: originalMutation.location
+                        from: effectiveOriginalMutation.location
                     )
                 )
             }
             layeredMutation = SyntaxHighlightMutation(mutation)
         } else {
-            layeredMutation = originalMutation
+            layeredMutation = effectiveOriginalMutation
         }
 
         if setup.supportsLayeredHighlighting,
@@ -381,7 +386,16 @@ private final class SyntaxHighlightSession {
             source: nextLayeredSource,
             refreshRange: semanticRefreshSeedRange
         )
-        let replacementHighlight = highlightTokensCoveringQueryRange(
+        let replacementHighlight = semanticPartialRefreshRange.flatMap {
+            Self.lexicallyAdjustedReplacementHighlight(
+                existingTokens: tokens,
+                refreshedRange: $0,
+                mutation: layeredMutation,
+                previousSource: previousLayeredSource,
+                nextSource: nextLayeredSource,
+                language: language
+            )
+        } ?? highlightTokensCoveringQueryRange(
             semanticPartialRefreshRange ?? queryRange,
             source: nextLayeredSource
         )
@@ -633,6 +647,139 @@ private extension SyntaxHighlightSession {
         return ((before + replacementTokens + after).sorted(by: SyntaxHighlightTokenOrdering.displayOrder), refreshRange)
     }
 
+    static func lexicallyAdjustedReplacementHighlight(
+        existingTokens: [SyntaxHighlightToken],
+        refreshedRange: NSRange,
+        mutation: SyntaxHighlightMutation,
+        previousSource: String,
+        nextSource: String,
+        language: SyntaxLanguage
+    ) -> (tokens: [SyntaxHighlightToken], range: NSRange)? {
+        guard language == .swift,
+              mutation.replacement.rangeOfCharacter(from: .newlines) == nil
+        else {
+            return nil
+        }
+
+        let previousNSString = previousSource as NSString
+        let nextNSString = nextSource as NSString
+        guard mutation.location >= 0,
+              mutation.location + mutation.length <= previousNSString.length,
+              mutation.location + mutation.replacement.utf16.count <= nextNSString.length
+        else {
+            return nil
+        }
+        if mutation.length > 0 {
+            let replacedText = previousNSString.substring(with: NSRange(location: mutation.location, length: mutation.length))
+            guard replacedText.rangeOfCharacter(from: .newlines) == nil else {
+                return nil
+            }
+        }
+
+        let oldRefreshRange = oldRange(
+            correspondingTo: refreshedRange,
+            mutation: mutation,
+            previousSourceUTF16Length: previousNSString.length,
+            nextSourceUTF16Length: nextNSString.length
+        )
+        guard oldRefreshRange.length > 0 else {
+            return nil
+        }
+
+        var affectedToken: SyntaxHighlightToken?
+        for token in existingTokens where isSwiftLexicalFastPathSyntaxID(token.syntaxID) {
+            guard token.language == .swift || token.language == nil,
+                  token.range.location >= 0,
+                  token.range.upperBound <= previousNSString.length,
+                  tokenContainsMutation(token.range, mutation: mutation)
+            else {
+                continue
+            }
+            guard affectedToken == nil else {
+                return nil
+            }
+            affectedToken = token
+        }
+        guard let affectedToken,
+              let affectedNewRange = lexicalRangeAfterApplyingMutation(
+                  affectedToken.range,
+                  mutation: mutation,
+                  nextSourceUTF16Length: nextNSString.length
+              ),
+              affectedNewRange.length > 0,
+              swiftLexicalToken(
+                  syntaxID: affectedToken.syntaxID,
+                  remainsStableFrom: affectedToken.range,
+                  in: previousNSString,
+                  to: affectedNewRange,
+                  in: nextNSString
+              )
+        else {
+            return nil
+        }
+
+        var replacementTokens: [SyntaxHighlightToken] = []
+        replacementTokens.reserveCapacity(32)
+
+        for token in existingTokens {
+            guard token.language == .swift || token.language == nil,
+                  !isSwiftSemanticOverlaySyntaxID(token.syntaxID),
+                  token.range.location >= 0,
+                  token.range.upperBound <= previousNSString.length,
+                  SyntaxEditorRangeUtilities.intersection(of: token.range, and: oldRefreshRange).length > 0
+            else {
+                continue
+            }
+
+            let adjustedRange: NSRange?
+            if token.range == affectedToken.range,
+               token.syntaxID == affectedToken.syntaxID,
+               token.rawCaptureName == affectedToken.rawCaptureName {
+                adjustedRange = affectedNewRange
+            } else if SyntaxEditorRangeUtilities.intersection(
+                of: token.range,
+                and: NSRange(location: mutation.location, length: mutation.length)
+            ).length > 0 {
+                return nil
+            } else {
+                adjustedRange = rangeAfterApplyingMutation(
+                    token.range,
+                    mutation: mutation,
+                    nextSourceUTF16Length: nextNSString.length
+                )
+            }
+
+            guard let adjustedRange,
+                  adjustedRange.length > 0,
+                  adjustedRange.location >= refreshedRange.location,
+                  adjustedRange.upperBound <= refreshedRange.upperBound
+            else {
+                return nil
+            }
+            replacementTokens.append(
+                SyntaxHighlightToken(
+                    range: adjustedRange,
+                    syntaxID: token.syntaxID,
+                    language: token.language,
+                    rawCaptureName: token.rawCaptureName
+                )
+            )
+        }
+
+        guard replacementTokens.contains(where: {
+            $0.range == affectedNewRange
+                && $0.syntaxID == affectedToken.syntaxID
+                && $0.rawCaptureName == affectedToken.rawCaptureName
+        }) else {
+            return nil
+        }
+
+        return (
+            replacementTokens.sorted(by: SyntaxHighlightTokenOrdering.displayOrder),
+            refreshedRange
+        )
+    }
+
     func semanticClassifiedTokensIfNeeded(
         _ tokens: [SyntaxHighlightToken],
         source: String,
@@ -872,6 +1019,118 @@ private extension SyntaxHighlightSession {
         let clampedUpper = min(max(clampedLocation, upper), nextSourceUTF16Length)
         guard clampedUpper > clampedLocation else { return nil }
         return NSRange(location: clampedLocation, length: clampedUpper - clampedLocation)
+    }
+
+    static func tokenContainsMutation(_ range: NSRange, mutation: SyntaxHighlightMutation) -> Bool {
+        let mutationUpperBound = mutation.location + mutation.length
+        if mutation.length == 0 {
+            return range.location <= mutation.location && mutation.location <= range.upperBound
+        }
+        return range.location <= mutation.location && mutationUpperBound <= range.upperBound
+    }
+
+    static func lexicalRangeAfterApplyingMutation(
+        _ range: NSRange,
+        mutation: SyntaxHighlightMutation,
+        nextSourceUTF16Length: Int
+    ) -> NSRange? {
+        let replacementLength = mutation.replacement.utf16.count
+        if mutation.length == 0,
+           range.location <= mutation.location,
+           mutation.location <= range.upperBound {
+            let adjustedRange = NSRange(
+                location: range.location,
+                length: range.length + replacementLength
+            )
+            return SyntaxEditorRangeUtilities.clampedRange(
+                adjustedRange,
+                utf16Length: nextSourceUTF16Length
+            )
+        }
+        return rangeForRefreshAfterApplyingMutation(
+            range,
+            mutation: mutation,
+            nextSourceUTF16Length: nextSourceUTF16Length
+        )
+    }
+
+    static func isSwiftLexicalFastPathSyntaxID(_ syntaxID: EditorSourceSyntaxID) -> Bool {
+        syntaxID == .plain || syntaxID == .number
+    }
+
+    static func isSwiftSemanticOverlaySyntaxID(_ syntaxID: EditorSourceSyntaxID) -> Bool {
+        switch syntaxID {
+        case .identifierType,
+             .identifierTypeSystem,
+             .identifierClass,
+             .identifierClassSystem,
+             .identifierFunction,
+             .identifierFunctionSystem,
+             .identifierMacro,
+             .identifierMacroSystem,
+             .identifierConstant,
+             .identifierConstantSystem,
+             .identifierVariable,
+             .identifierVariableSystem:
+            true
+        default:
+            false
+        }
+    }
+
+    static func swiftLexicalToken(
+        syntaxID: EditorSourceSyntaxID,
+        remainsStableFrom oldRange: NSRange,
+        in previousSource: NSString,
+        to newRange: NSRange,
+        in nextSource: NSString
+    ) -> Bool {
+        guard oldRange.location >= 0,
+              oldRange.upperBound <= previousSource.length,
+              newRange.location >= 0,
+              newRange.upperBound <= nextSource.length
+        else {
+            return false
+        }
+
+        let oldText = previousSource.substring(with: oldRange)
+        let newText = nextSource.substring(with: newRange)
+        switch syntaxID {
+        case .plain:
+            return isSimpleSwiftIdentifier(oldText) && isSimpleSwiftIdentifier(newText)
+        case .number:
+            return isSimpleDecimalNumber(oldText) && isSimpleDecimalNumber(newText)
+        default:
+            return false
+        }
+    }
+
+    static func isSimpleSwiftIdentifier(_ text: String) -> Bool {
+        var iterator = text.utf8.makeIterator()
+        guard let first = iterator.next(),
+              first == 95 || (first >= 65 && first <= 90) || (first >= 97 && first <= 122)
+        else {
+            return false
+        }
+
+        while let byte = iterator.next() {
+            guard byte == 95 || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    static func isSimpleDecimalNumber(_ text: String) -> Bool {
+        guard !text.isEmpty else {
+            return false
+        }
+        for byte in text.utf8 {
+            guard byte >= 48 && byte <= 57 else {
+                return false
+            }
+        }
+        return true
     }
 
     static func union(_ lhs: NSRange, _ rhs: NSRange) -> NSRange {
