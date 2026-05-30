@@ -7478,9 +7478,9 @@ struct SyntaxEditorUITests {
         #expect(editorView.textView.insertionIndicatorIsHiddenForTesting)
     }
 
-    @Test("SyntaxEditorView draws macOS incremental find highlights in rendered fragments")
+    @Test("SyntaxEditorView draws macOS incremental find candidates in rendered fragments")
     @MainActor
-    func syntaxEditorViewMacDrawsIncrementalFindHighlightsInRenderedFragments() {
+    func syntaxEditorViewMacDrawsIncrementalFindCandidatesInRenderedFragments() {
         let source = "m m m"
         let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(testContext: model)
@@ -7494,6 +7494,8 @@ struct SyntaxEditorUITests {
         ])
 
         #expect(editorView.textView.findHighlightRectsForTesting.count >= 3)
+        #expect(!editorView.textView.findCandidateHighlightFillColorForTesting.isEqual(NSColor.yellow))
+        #expect(editorView.textView.findCandidateHighlightCornerRadiusForTesting > 0)
 
         let invalidationCount = editorView.fragmentDisplayInvalidationCountForTesting
         editorView.textView.textContentView.setNeedsDisplay(editorView.textView.bounds)

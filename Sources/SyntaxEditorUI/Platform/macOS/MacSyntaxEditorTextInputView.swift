@@ -132,6 +132,12 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
             .compactMap { $0 as? MacSyntaxEditorTextLayoutFragmentView }
             .flatMap(\.findHighlightRects)
     }
+    var findCandidateHighlightFillColorForTesting: NSColor {
+        MacSyntaxEditorTextLayoutFragmentView.findCandidateHighlightFillColor
+    }
+    var findCandidateHighlightCornerRadiusForTesting: CGFloat {
+        MacSyntaxEditorTextLayoutFragmentView.findCandidateHighlightCornerRadius
+    }
 
     var textStorage: NSTextStorage? { storage }
     private var storage: NSTextStorage { textKit2System.textStorage }
@@ -1318,6 +1324,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         let fragmentRange = textRange(for: fragmentView.layoutFragment)
         let ranges = matchRanges.compactMap { range -> NSRange? in
             let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
+            guard !isCurrentFindMatch(clamped) else { return nil }
             let intersection = NSIntersectionRange(clamped, fragmentRange)
             return intersection.length > 0 ? intersection : nil
         }
@@ -1340,6 +1347,12 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
             }
         }
         fragmentView.setFindHighlights(rects: rects)
+    }
+
+    private func isCurrentFindMatch(_ range: NSRange) -> Bool {
+        selectedRangeStorage.length > 0
+            && selectedRangeStorage.location == range.location
+            && selectedRangeStorage.length == range.length
     }
 
     private func configureSelectionHighlights(for fragmentView: MacSyntaxEditorTextLayoutFragmentView) {
@@ -1423,6 +1436,13 @@ final class MacSyntaxEditorTextContentView: NSView {
 final class MacSyntaxEditorTextLayoutFragmentView: NSView {
     let layoutFragment: NSTextLayoutFragment
     weak var textKit2System: SyntaxEditorTextKit2System?
+    fileprivate static var findCandidateHighlightFillColor: NSColor {
+        NSColor.textColor.withAlphaComponent(0.14)
+    }
+    private static var findCandidateHighlightStrokeColor: NSColor {
+        NSColor.textColor.withAlphaComponent(0.32)
+    }
+    fileprivate static let findCandidateHighlightCornerRadius: CGFloat = 3
     var findHighlightRects: [CGRect] = []
     var selectionHighlightRects: [CGRect] = []
     var selectionHighlightColor: NSColor?
@@ -1474,9 +1494,7 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
                 fragment: layoutFragment
             )
         }
-        for rect in findHighlightRects where rect.intersects(dirtyRect) {
-            NSTextFinder.drawIncrementalMatchHighlight(in: rect)
-        }
+        drawFindCandidateHighlights(in: dirtyRect)
         if let selectionHighlightColor {
             selectionHighlightColor.setFill()
             for rect in selectionHighlightRects where rect.intersects(dirtyRect) {
@@ -1491,6 +1509,22 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
         }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         layoutFragment.draw(at: .zero, in: context)
+    }
+
+    private func drawFindCandidateHighlights(in dirtyRect: NSRect) {
+        Self.findCandidateHighlightFillColor.setFill()
+        Self.findCandidateHighlightStrokeColor.setStroke()
+        for rect in findHighlightRects where rect.intersects(dirtyRect) {
+            let highlightRect = rect.insetBy(dx: -2, dy: 1)
+            let path = NSBezierPath(
+                roundedRect: highlightRect,
+                xRadius: Self.findCandidateHighlightCornerRadius,
+                yRadius: Self.findCandidateHighlightCornerRadius
+            )
+            path.fill()
+            path.lineWidth = 1
+            path.stroke()
+        }
     }
 
     private func colorsEqual(_ lhs: NSColor?, _ rhs: NSColor?) -> Bool {
