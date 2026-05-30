@@ -396,7 +396,10 @@ private final class SyntaxHighlightSession {
             refreshRange: semanticRefreshSeedRange
         )
         let replacementHighlight = semanticPartialRefreshRange.flatMap {
-            Self.lexicallyAdjustedReplacementHighlight(
+            guard Self.range($0, contains: queryRange) else {
+                return nil
+            }
+            return Self.lexicallyAdjustedReplacementHighlight(
                 existingTokens: tokens,
                 refreshedRange: $0,
                 mutation: layeredMutation,
@@ -405,21 +408,19 @@ private final class SyntaxHighlightSession {
                 language: language
             )
         } ?? highlightTokensCoveringQueryRange(
-            semanticPartialRefreshRange ?? queryRange,
+            queryRange,
             source: nextLayeredSource
         )
         guard !Task.isCancelled else {
             return cancelledUpdateResultAfterInvalidatingIncrementalState(revision: revision)
         }
-        let replacementMergeRange = semanticPartialRefreshRange ?? replacementHighlight.range
-        let replacementTokens = semanticPartialRefreshRange.map { targetRange in
-            replacementHighlight.tokens.filter { token in
-                SyntaxEditorRangeUtilities.intersection(of: token.range, and: targetRange).length > 0
-            }
-        } ?? replacementHighlight.tokens
+        let replacementMergeRange = replacementHighlight.range
+        let semanticOverlayRefreshRange = semanticPartialRefreshRange.map {
+            Self.union($0, replacementMergeRange)
+        }
         let mergedHighlight = Self.mergedHighlightTokens(
             existingTokens: tokens,
-            replacementTokens: replacementTokens,
+            replacementTokens: replacementHighlight.tokens,
             refreshedRange: replacementMergeRange,
             mutation: layeredMutation,
             previousSourceUTF16Length: previousLayeredSource.utf16.count,
@@ -430,7 +431,7 @@ private final class SyntaxHighlightSession {
             mergedHighlight.tokens,
             source: nextLayeredSource,
             rootNode: semanticRootNodeSnapshot(),
-            refreshRange: semanticPartialRefreshRange
+            refreshRange: semanticOverlayRefreshRange
         )
         guard !semanticResult.isCancelled, !Task.isCancelled else {
             return cancelledUpdateResultAfterInvalidatingIncrementalState(revision: revision)
@@ -1153,6 +1154,10 @@ private extension SyntaxHighlightSession {
         let lower = min(lhs.location, rhs.location)
         let upper = max(lhs.upperBound, rhs.upperBound)
         return NSRange(location: lower, length: upper - lower)
+    }
+
+    static func range(_ outer: NSRange, contains inner: NSRange) -> Bool {
+        inner.location >= outer.location && inner.upperBound <= outer.upperBound
     }
 
     static func inputEdit(

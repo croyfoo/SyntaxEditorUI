@@ -5858,6 +5858,30 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine uses Swift parser invalidation beyond semantic line ranges")
+    func highlighterUsesSwiftParserInvalidationBeyondSemanticLineRanges() async throws {
+        let source = """
+        let first = 1
+        let second = 2
+        let third = 3
+        """
+        let updatedSource = source.replacingOccurrences(of: "let second = 2", with: "/* let second = 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
     @Test("SyntaxHighlighterEngine removes stale Swift overlays after identifier typing edits")
     func highlighterRemovesStaleSwiftOverlaysAfterIdentifierTypingEdits() async throws {
         let source = """
@@ -9246,6 +9270,30 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "self.name.length"
         )
+    }
+
+    @Test("SyntaxHighlighterEngine uses Objective-C parser invalidation beyond semantic line ranges")
+    func highlighterUsesObjectiveCParserInvalidationBeyondSemanticLineRanges() async throws {
+        let source = """
+        int first = 1;
+        int second = 2;
+        int third = 3;
+        """
+        let updatedSource = source.replacingOccurrences(of: "int second = 2;", with: "/* int second = 2;")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
     }
 
     @Test("SyntaxHighlighterEngine replaces Objective-C semantic overlays inside partial target range")
