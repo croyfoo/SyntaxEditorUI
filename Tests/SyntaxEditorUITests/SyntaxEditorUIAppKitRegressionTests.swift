@@ -1655,6 +1655,29 @@ extension SyntaxEditorUITests {
         #expect(editorView.visibleTextDisplayInvalidationCountForTesting == visibleInvalidationCount)
     }
 
+    @Test("SyntaxEditorView does not query offscreen macOS caret geometry while scrolling")
+    @MainActor
+    func syntaxEditorViewMacScrollDoesNotQueryOffscreenCaretGeometry() {
+        let model = SyntaxEditorTestContext(
+            text: String(repeating: "let value = 1\n", count: 1_200),
+            language: SyntaxLanguage.swift
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        #expect(window.makeFirstResponder(editorView.textView))
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        let initialQueryCount = editorView.textView.caretGeometryQueryCountForTesting
+
+        editorView.contentView.scroll(to: NSPoint(x: 0, y: 2_000))
+        editorView.reflectScrolledClipView(editorView.contentView)
+
+        #expect(editorView.textView.caretGeometryQueryCountForTesting == initialQueryCount)
+        #expect(editorView.textView.insertionIndicatorDisplayModeForTesting == .hidden)
+        #expect(editorView.textView.insertionIndicatorIsHiddenForTesting)
+    }
+
     @Test("SyntaxEditorView does not fan out macOS content invalidation to every text fragment")
     @MainActor
     func syntaxEditorViewMacContentInvalidationDoesNotInvalidateAllFragments() async {

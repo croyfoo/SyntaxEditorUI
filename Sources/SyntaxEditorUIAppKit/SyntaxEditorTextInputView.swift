@@ -150,6 +150,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     var insertionIndicatorIsHiddenForTesting: Bool {
         insertionIndicator.isHidden
     }
+    var caretGeometryQueryCountForTesting = 0
     var selectionHighlightRectsForTesting: [CGRect] {
         textContentView.subviews
             .compactMap { $0 as? SyntaxEditorTextLayoutFragmentView }
@@ -809,6 +810,22 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
 
     func visibleCharacterRange() -> NSRange? {
         layoutVisibleViewportIfNeeded()
+        if let range = viewportCharacterRange() {
+            return range
+        }
+        return visibleCharacterRangeFromFragments()
+    }
+
+    private func viewportCharacterRange() -> NSRange? {
+        guard let viewportRange = textLayoutManager.textViewportLayoutController.viewportRange else {
+            return nil
+        }
+        let range = utf16Range(for: viewportRange)
+        let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
+        return clamped.length > 0 ? clamped : nil
+    }
+
+    private func visibleCharacterRangeFromFragments() -> NSRange? {
         var visibleRange: NSRange?
         for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
             guard fragmentView.frame.intersects(currentViewportBounds) else { continue }
@@ -854,7 +871,6 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         _ textViewportLayoutController: NSTextViewportLayoutController,
         configureRenderingSurfaceFor textLayoutFragment: NSTextLayoutFragment
     ) {
-        textSystem.applySyntaxRenderingAttributes(for: textLayoutFragment)
         let layoutFragmentFrame = textLayoutFragment.layoutFragmentFrame
         let fragmentView: SyntaxEditorTextLayoutFragmentView
         if let cached = fragmentViewMap.object(forKey: textLayoutFragment) {
@@ -1251,6 +1267,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         guard unsafe window?.firstResponder === self,
               isEditable,
               selectedRangeStorage.length == 0,
+              isCaretVisibleInCurrentViewport(selectedRangeStorage.location),
               let caretRect = caretRect(forUTF16Location: selectedRangeStorage.location)
         else {
             insertionIndicator.displayMode = .hidden
@@ -1263,7 +1280,14 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         insertionIndicator.displayMode = .automatic
     }
 
+    private func isCaretVisibleInCurrentViewport(_ location: Int) -> Bool {
+        let visibleRange = viewportCharacterRange() ?? visibleCharacterRangeFromFragments()
+        guard let visibleRange else { return false }
+        return location >= visibleRange.location && location <= visibleRange.upperBound
+    }
+
     private func caretRect(forUTF16Location location: Int) -> CGRect? {
+        caretGeometryQueryCountForTesting += 1
         guard let textLocation = textLocation(forUTF16Offset: location) else { return nil }
         let textRange = NSTextRange(location: textLocation)
 
