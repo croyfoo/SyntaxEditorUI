@@ -3,9 +3,10 @@ import AppKit
 import SyntaxEditorCore
 
 @MainActor
-final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient, @preconcurrency NSTextViewportLayoutControllerDelegate {
+final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient, @preconcurrency NSTextFinderClient, @preconcurrency NSTextViewportLayoutControllerDelegate {
     let textKit2System: SyntaxEditorTextKit2System
     let textContentView = MacSyntaxEditorTextContentView()
+    private let textFinder = NSTextFinder()
 
     var guardedUndoManager: UndoManager?
     var shortcutHandler: ((MacEditorShortcutAction) -> Bool)?
@@ -20,9 +21,19 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     var isEditable = true
     var isSelectable = true
     var allowsUndo = true
-    var usesFindBar = false
+    var usesFindBar = false {
+        didSet {
+            guard usesFindBar != oldValue else { return }
+            configureTextFinder()
+        }
+    }
     var usesFindPanel = false
-    var isIncrementalSearchingEnabled = false
+    var isIncrementalSearchingEnabled = false {
+        didSet {
+            guard isIncrementalSearchingEnabled != oldValue else { return }
+            textFinder.isIncrementalSearchingEnabled = isIncrementalSearchingEnabled
+        }
+    }
     var drawsBackground = false
     var backgroundColor: NSColor = .clear {
         didSet {
@@ -38,6 +49,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     var textContainerOrigin: NSPoint { .zero }
     var selectedRangeStorage = NSRange(location: 0, length: 0)
     var markedTextRangeStorage: NSRange?
+    var mouseDraggingSelectionAnchors: [NSTextSelection]?
     var fragmentViewMap = NSMapTable<NSTextLayoutFragment, MacSyntaxEditorTextLayoutFragmentView>.weakToWeakObjects()
     var lastUsedFragmentViews: Set<MacSyntaxEditorTextLayoutFragmentView> = []
     var bracketHighlightRanges: [NSRange] = []
@@ -56,6 +68,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        unsafe textFinder.client = self
         textKit2System.layoutManager.textViewportLayoutController.delegate = self
         addSubview(textContentView)
     }
@@ -73,6 +86,21 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     override var canBecomeKeyView: Bool { true }
     override var isFlipped: Bool { true }
     override var undoManager: UndoManager? { guardedUndoManager ?? super.undoManager }
+    var allowsMultipleSelection: Bool { false }
+    var selectedRanges: [NSValue] {
+        get { [NSValue(range: selectedRangeStorage)] }
+        set {
+            guard let firstRange = newValue.first?.rangeValue else { return }
+            setSelectedRange(firstRange)
+        }
+    }
+    var firstSelectedRange: NSRange { selectedRangeStorage }
+    var visibleCharacterRanges: [NSValue] {
+        if let range = visibleCharacterRange() {
+            return [NSValue(range: range)]
+        }
+        return [NSValue(range: NSRange(location: 0, length: storage.length))]
+    }
 
     var textStorage: NSTextStorage? { storage }
     private var storage: NSTextStorage { textKit2System.textStorage }
@@ -84,6 +112,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     var string: String {
         get { storage.string }
         set {
+            textFinder.noteClientStringWillChange()
             textContentStorage.performEditingTransaction {
                 storage.setAttributedString(NSAttributedString(string: newValue, attributes: typingAttributes))
             }
@@ -96,9 +125,8 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     func setSelectedRange(_ range: NSRange) {
         let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
         guard clamped != selectedRangeStorage else { return }
-        selectedRangeStorage = clamped
+        updateSelectedRangeStorage(clamped)
         syncTextLayoutSelection()
-        didChangeSelection?()
         needsDisplay = true
     }
 
@@ -151,14 +179,11 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
 
     override func performTextFinderAction(_ sender: Any?) {
         guard usesFindBar else { return }
-        guard let item = sender as? NSMenuItem else {
-            enclosingScrollView?.isFindBarVisible = true
-            return
-        }
-
-        if item.tag == NSTextFinder.Action.showFindInterface.rawValue {
-            enclosingScrollView?.isFindBarVisible = true
-        }
+        configureTextFinder()
+        let action = (sender as? NSMenuItem)
+            .flatMap { NSTextFinder.Action(rawValue: $0.tag) }
+            ?? .showFindInterface
+        textFinder.performAction(action)
     }
 
     func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
@@ -241,6 +266,23 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         layoutVisibleViewport()
     }
 
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        configureTextFinder()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            clearTextFinderAttachments()
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        configureTextFinder()
+    }
+
     override func keyDown(with event: NSEvent) {
         if inputContext?.handleEvent(event) == true {
             return
@@ -249,11 +291,67 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard inputContext?.handleEvent(event) != true else {
+            return
+        }
         unsafe window?.makeFirstResponder(self)
-        guard isSelectable else { return }
+        guard isSelectable, event.type == .leftMouseDown else {
+            super.mouseDown(with: event)
+            return
+        }
 
         let location = convert(event.locationInWindow, from: nil)
-        setSelectedRange(NSRange(location: characterIndex(at: location), length: 0))
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let extendsSelection = modifiers.contains(.shift)
+        let usesVisualSelection = modifiers.contains(.option)
+
+        switch event.clickCount {
+        case 1:
+            updateTextSelection(
+                interactingAt: location,
+                anchors: extendsSelection ? textLayoutManager.textSelections : [],
+                extending: extendsSelection,
+                isDragging: false,
+                visual: usesVisualSelection
+            )
+        case 2:
+            updateTextSelection(interactingAt: location)
+            selectGranularity(.word)
+        case 3:
+            updateTextSelection(interactingAt: location)
+            selectGranularity(.paragraph)
+        default:
+            super.mouseDown(with: event)
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard inputContext?.handleEvent(event) != true else {
+            return
+        }
+        guard isSelectable else {
+            super.mouseDragged(with: event)
+            return
+        }
+
+        let location = convert(event.locationInWindow, from: nil)
+        if mouseDraggingSelectionAnchors == nil {
+            mouseDraggingSelectionAnchors = textLayoutManager.textSelections
+        }
+        updateTextSelection(
+            interactingAt: location,
+            inContainerAt: mouseDraggingSelectionAnchors?.first?.textRanges.first?.location,
+            anchors: mouseDraggingSelectionAnchors ?? [],
+            extending: true,
+            isDragging: true,
+            visual: event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.option)
+        )
+        autoscroll(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        mouseDraggingSelectionAnchors = nil
+        super.mouseUp(with: event)
     }
 
     override func doCommand(by selector: Selector) {
@@ -262,17 +360,74 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         }
 
         switch selector {
+        case #selector(selectAll(_:)):
+            selectAll(nil)
         case #selector(insertNewline(_:)):
             insertText("\n", replacementRange: NSRange(location: NSNotFound, length: 0))
         case #selector(deleteBackward(_:)):
             deleteBackward()
+        case #selector(deleteForward(_:)):
+            deleteForward()
         case #selector(moveLeft(_:)):
-            moveSelection(offset: -1, extending: false)
+            moveSelection(direction: .left, destination: .character, extending: false, confined: false)
+        case #selector(moveLeftAndModifySelection(_:)):
+            moveSelection(direction: .left, destination: .character, extending: true, confined: false)
         case #selector(moveRight(_:)):
-            moveSelection(offset: 1, extending: false)
+            moveSelection(direction: .right, destination: .character, extending: false, confined: false)
+        case #selector(moveRightAndModifySelection(_:)):
+            moveSelection(direction: .right, destination: .character, extending: true, confined: false)
+        case #selector(moveUp(_:)):
+            moveSelection(direction: .up, destination: .character, extending: false, confined: false)
+        case #selector(moveUpAndModifySelection(_:)):
+            moveSelection(direction: .up, destination: .character, extending: true, confined: false)
+        case #selector(moveDown(_:)):
+            moveSelection(direction: .down, destination: .character, extending: false, confined: false)
+        case #selector(moveDownAndModifySelection(_:)):
+            moveSelection(direction: .down, destination: .character, extending: true, confined: false)
+        case #selector(moveWordLeft(_:)):
+            moveSelection(direction: .left, destination: .word, extending: false, confined: false)
+        case #selector(moveWordLeftAndModifySelection(_:)):
+            moveSelection(direction: .left, destination: .word, extending: true, confined: false)
+        case #selector(moveWordRight(_:)):
+            moveSelection(direction: .right, destination: .word, extending: false, confined: false)
+        case #selector(moveWordRightAndModifySelection(_:)):
+            moveSelection(direction: .right, destination: .word, extending: true, confined: false)
+        case #selector(moveWordForward(_:)):
+            moveSelection(direction: .forward, destination: .word, extending: false, confined: false)
+        case #selector(moveWordForwardAndModifySelection(_:)):
+            moveSelection(direction: .forward, destination: .word, extending: true, confined: false)
+        case #selector(moveWordBackward(_:)):
+            moveSelection(direction: .backward, destination: .word, extending: false, confined: false)
+        case #selector(moveWordBackwardAndModifySelection(_:)):
+            moveSelection(direction: .backward, destination: .word, extending: true, confined: false)
+        case #selector(moveToBeginningOfLine(_:)),
+             #selector(moveToLeftEndOfLine(_:)):
+            moveSelection(direction: .backward, destination: .line, extending: false, confined: true)
+        case #selector(moveToBeginningOfLineAndModifySelection(_:)),
+             #selector(moveToLeftEndOfLineAndModifySelection(_:)):
+            moveSelection(direction: .backward, destination: .line, extending: true, confined: true)
+        case #selector(moveToEndOfLine(_:)),
+             #selector(moveToRightEndOfLine(_:)):
+            moveSelection(direction: .forward, destination: .line, extending: false, confined: true)
+        case #selector(moveToEndOfLineAndModifySelection(_:)),
+             #selector(moveToRightEndOfLineAndModifySelection(_:)):
+            moveSelection(direction: .forward, destination: .line, extending: true, confined: true)
+        case #selector(moveToBeginningOfDocument(_:)):
+            moveSelection(direction: .backward, destination: .document, extending: false, confined: false)
+        case #selector(moveToBeginningOfDocumentAndModifySelection(_:)):
+            moveSelection(direction: .backward, destination: .document, extending: true, confined: false)
+        case #selector(moveToEndOfDocument(_:)):
+            moveSelection(direction: .forward, destination: .document, extending: false, confined: false)
+        case #selector(moveToEndOfDocumentAndModifySelection(_:)):
+            moveSelection(direction: .forward, destination: .document, extending: true, confined: false)
         default:
             break
         }
+    }
+
+    override func selectAll(_ sender: Any?) {
+        guard isSelectable else { return }
+        setSelectedRange(NSRange(location: 0, length: storage.length))
     }
 
     override func insertText(_ insertString: Any) {
@@ -319,6 +474,58 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         return storage.attributedSubstring(from: clamped)
     }
 
+    func contentView(at index: Int, effectiveCharacterRange outRange: NSRangePointer) -> NSView {
+        unsafe outRange.pointee = NSRange(location: 0, length: storage.length)
+        return textContentView
+    }
+
+    func rects(forCharacterRange range: NSRange) -> [NSValue]? {
+        rectsForCharacterRange(range).map { NSValue(rect: $0) }
+    }
+
+    func drawCharacters(in range: NSRange, forContentView view: NSView) {
+        guard view === textContentView,
+              let targetTextRange = textRange(forUTF16Range: range)
+        else {
+            return
+        }
+        textLayoutManager.ensureLayout(for: targetTextRange)
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        textLayoutManager.enumerateTextLayoutFragments(from: targetTextRange.location, options: []) { [self] fragment in
+            guard NSIntersectionRange(textRange(for: fragment), range).length > 0 else {
+                return true
+            }
+            SyntaxEditorTextKit2HighlightRenderer.validateRenderingAttributes(
+                layoutManager: textLayoutManager,
+                textContentStorage: textContentStorage,
+                renderStore: textKit2System.renderStore,
+                fragment: fragment
+            )
+            fragment.draw(at: fragment.layoutFragmentFrame.origin, in: context)
+            return true
+        }
+    }
+
+    func scrollRangeToVisible(_ range: NSRange) {
+        scrollToVisible(rectForCharacterRange(range).insetBy(dx: -4, dy: -4))
+    }
+
+    func shouldReplaceCharacters(inRanges ranges: [NSValue], with strings: [String]) -> Bool {
+        let affectedRanges = ranges.map(\.rangeValue)
+        return shouldChangeText?(affectedRanges, strings) ?? true
+    }
+
+    func replaceCharacters(in range: NSRange, with string: String) {
+        let clampedRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
+        replaceText(
+            in: clampedRange,
+            with: string,
+            selectedRange: NSRange(location: clampedRange.location + string.utf16.count, length: 0)
+        )
+    }
+
+    func didReplaceCharacters() {}
+
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
         unsafe actualRange?.pointee = clamped
@@ -328,7 +535,8 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     }
 
     func characterIndex(for point: NSPoint) -> Int {
-        let localPoint = convert(point, from: nil)
+        let windowPoint = unsafe window?.convertPoint(fromScreen: point) ?? point
+        let localPoint = convert(windowPoint, from: nil)
         return characterIndex(at: localPoint)
     }
 
@@ -482,12 +690,26 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
 
     private func replaceText(in range: NSRange, with replacement: String, selectedRange: NSRange) {
         guard shouldChangeText(inRanges: [range], replacementStrings: [replacement]) else { return }
+        textFinder.noteClientStringWillChange()
         textContentStorage.performEditingTransaction {
             storage.replaceCharacters(in: range, with: NSAttributedString(string: replacement, attributes: typingAttributes))
         }
         setSelectedRange(selectedRange)
         invalidateTextLayout()
         didChangeTextNotification()
+    }
+
+    private func configureTextFinder() {
+        if !usesFindBar {
+            textFinder.cancelFindIndicator()
+        }
+        unsafe textFinder.findBarContainer = usesFindBar ? enclosingScrollView : nil
+        textFinder.isIncrementalSearchingEnabled = isIncrementalSearchingEnabled
+    }
+
+    private func clearTextFinderAttachments() {
+        textFinder.cancelFindIndicator()
+        unsafe textFinder.findBarContainer = nil
     }
 
     private func deleteBackward() {
@@ -500,9 +722,85 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         }
     }
 
-    private func moveSelection(offset: Int, extending: Bool) {
-        let nextLocation = min(max(0, selectedRangeStorage.location + offset), storage.length)
-        setSelectedRange(NSRange(location: nextLocation, length: 0))
+    private func deleteForward() {
+        if selectedRangeStorage.length > 0 {
+            replaceText(in: selectedRangeStorage, with: "", selectedRange: NSRange(location: selectedRangeStorage.location, length: 0))
+        } else if selectedRangeStorage.location < storage.length {
+            let source = string as NSString
+            let range = source.rangeOfComposedCharacterSequence(at: selectedRangeStorage.location)
+            replaceText(in: range, with: "", selectedRange: NSRange(location: range.location, length: 0))
+        }
+    }
+
+    private func moveSelection(
+        direction: NSTextSelectionNavigation.Direction,
+        destination: NSTextSelectionNavigation.Destination,
+        extending: Bool,
+        confined: Bool
+    ) {
+        guard isSelectable else { return }
+
+        let currentSelections = textLayoutManager.textSelections.isEmpty
+            ? textSelections(for: selectedRangeStorage)
+            : textLayoutManager.textSelections
+        let nextSelections = currentSelections.compactMap { selection in
+            textLayoutManager.textSelectionNavigation.destinationSelection(
+                for: selection,
+                direction: direction,
+                destination: destination,
+                extending: extending,
+                confined: confined
+            )
+        }
+        guard !nextSelections.isEmpty else { return }
+
+        applyTextSelections(nextSelections)
+    }
+
+    private func updateTextSelection(
+        interactingAt point: NSPoint,
+        inContainerAt location: NSTextLocation? = nil,
+        anchors: [NSTextSelection] = [],
+        extending: Bool = false,
+        isDragging: Bool = false,
+        visual: Bool = false
+    ) {
+        guard isSelectable else { return }
+
+        var modifiers: NSTextSelectionNavigation.Modifier = []
+        if extending {
+            modifiers.insert(.extend)
+        }
+        if visual {
+            modifiers.insert(.visual)
+        }
+
+        let selections = textLayoutManager.textSelectionNavigation.textSelections(
+            interactingAt: point,
+            inContainerAt: location ?? textContentStorage.documentRange.location,
+            anchors: anchors,
+            modifiers: modifiers,
+            selecting: isDragging,
+            bounds: textLayoutManager.usageBoundsForTextContainer
+        )
+        guard !selections.isEmpty else { return }
+
+        applyTextSelections(selections)
+    }
+
+    private func selectGranularity(_ granularity: NSTextSelection.Granularity) {
+        guard isSelectable,
+              let selection = textLayoutManager.textSelections.last
+        else {
+            return
+        }
+
+        applyTextSelections([
+            textLayoutManager.textSelectionNavigation.textSelection(
+                for: granularity,
+                enclosing: selection
+            ),
+        ])
     }
 
     private func effectiveReplacementRange(_ range: NSRange) -> NSRange {
@@ -518,25 +816,175 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     }
 
     private func characterIndex(at point: NSPoint) -> Int {
-        guard let fragment = textLayoutManager.textLayoutFragment(for: point) else {
-            return storage.length
+        if let location = caretTextLocation(interactingAt: point) {
+            return utf16Offset(for: location)
         }
-        let fragmentRange = textRange(for: fragment)
+
+        let selections = textLayoutManager.textSelectionNavigation.textSelections(
+            interactingAt: point,
+            inContainerAt: textContentStorage.documentRange.location,
+            anchors: [],
+            modifiers: [],
+            selecting: false,
+            bounds: textLayoutManager.usageBoundsForTextContainer
+        )
+        if let location = selections.first?.textRanges.first?.location {
+            return utf16Offset(for: location)
+        }
+
+        return point.y >= bounds.maxY ? storage.length : 0
+    }
+
+    private func caretTextLocation(interactingAt point: NSPoint) -> NSTextLocation? {
+        guard let lineFragmentRange = textLayoutManager.lineFragmentRange(
+            for: point,
+            inContainerAt: textContentStorage.documentRange.location
+        ) else {
+            return nil
+        }
+
+        if let layoutFragment = textLayoutManager.textLayoutFragment(for: point) {
+            let frame = layoutFragment.layoutFragmentFrame
+            if point.y < frame.minY || point.y > frame.maxY {
+                return nil
+            }
+        }
+
+        var closestDistance = CGFloat.greatestFiniteMagnitude
+        var closestLocation: NSTextLocation?
+        var maximumCaretOffset = -CGFloat.greatestFiniteMagnitude
+        let lineEndLocation = caretLineEndLocation(for: lineFragmentRange)
+        let lineEndOffset = utf16Offset(for: lineEndLocation)
+        unsafe textLayoutManager.enumerateCaretOffsetsInLineFragment(at: lineFragmentRange.location) { caretOffset, location, leadingEdge, stop in
+            maximumCaretOffset = max(maximumCaretOffset, caretOffset)
+            let distance = abs(caretOffset - point.x)
+            let locationOffset = utf16Offset(for: location)
+            let isLineEndTrailingEdge = !leadingEdge && isTrailingCaretOffsetAtLineEnd(
+                locationOffset,
+                lineEndOffset: lineEndOffset
+            )
+            guard leadingEdge || isLineEndTrailingEdge else { return }
+
+            if distance < closestDistance {
+                closestDistance = distance
+                closestLocation = isLineEndTrailingEdge ? lineEndLocation : location
+            } else if distance > closestDistance {
+                unsafe stop.pointee = true
+            }
+        }
+
+        if point.x > maximumCaretOffset {
+            return lineEndLocation
+        }
+
+        return closestLocation
+    }
+
+    private func caretLineEndLocation(for lineFragmentRange: NSTextRange) -> NSTextLocation {
+        let endOffset = utf16Offset(for: lineFragmentRange.endLocation)
+        if let lineBreakOffset = lineBreakCaretOffset(endingAt: endOffset),
+           let lineBreakLocation = textLocation(forUTF16Offset: lineBreakOffset) {
+            return lineBreakLocation
+        }
+        return lineFragmentRange.endLocation
+    }
+
+    private func lineBreakCaretOffset(endingAt endOffset: Int) -> Int? {
+        let lineBreakOffset = endOffset - 1
+        guard isHardLineBreakCaretLocation(lineBreakOffset) else { return nil }
+
+        let source = string as NSString
+        let character = source.character(at: lineBreakOffset)
+        if character == 0x0A, lineBreakOffset > 0 {
+            let previousCharacter = source.character(at: lineBreakOffset - 1)
+            if previousCharacter == 0x0D {
+                return lineBreakOffset - 1
+            }
+        }
+
+        return lineBreakOffset
+    }
+
+    private func isHardLineBreakCaretLocation(_ location: Int) -> Bool {
+        guard location >= 0, location < storage.length else { return false }
+        let character = (string as NSString).character(at: location)
+        return character == 0x0A || character == 0x0D
+    }
+
+    private func isTrailingCaretOffsetAtLineEnd(_ locationOffset: Int, lineEndOffset: Int) -> Bool {
+        if locationOffset == lineEndOffset {
+            return true
+        }
+
+        guard locationOffset >= 0,
+              locationOffset < lineEndOffset,
+              lineEndOffset <= storage.length
+        else {
+            return false
+        }
+
+        let characterRange = (string as NSString).rangeOfComposedCharacterSequence(at: locationOffset)
+        return characterRange.upperBound == lineEndOffset
+    }
+
+    private func textSelections(for range: NSRange) -> [NSTextSelection] {
+        guard let textRange = textRange(forUTF16Range: range) else { return [] }
+        return [NSTextSelection(range: textRange, affinity: .downstream, granularity: .character)]
+    }
+
+    private func applyTextSelections(_ selections: [NSTextSelection]) {
+        guard !selections.isEmpty else { return }
+
+        textLayoutManager.textSelections = selections
+        guard let range = nsRange(for: selections.first) else { return }
+        updateSelectedRangeStorage(range)
+        needsDisplay = true
+    }
+
+    private func nsRange(for selection: NSTextSelection?) -> NSRange? {
+        guard let selection,
+              let firstRange = selection.textRanges.first
+        else {
+            return nil
+        }
+
+        var lowerBound = utf16Offset(for: firstRange.location)
+        var upperBound = utf16Offset(for: firstRange.endLocation)
+        for textRange in selection.textRanges.dropFirst() {
+            lowerBound = min(lowerBound, utf16Offset(for: textRange.location))
+            upperBound = max(upperBound, utf16Offset(for: textRange.endLocation))
+        }
         return SyntaxEditorRangeUtilities.clampedRange(
-            NSRange(location: fragmentRange.location, length: 0),
+            NSRange(location: lowerBound, length: max(0, upperBound - lowerBound)),
             utf16Length: storage.length
-        ).location
+        )
+    }
+
+    private func updateSelectedRangeStorage(_ range: NSRange) {
+        let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
+        guard clamped != selectedRangeStorage else { return }
+
+        selectedRangeStorage = clamped
+        didChangeSelection?()
     }
 
     private func rectForCharacterRange(_ range: NSRange) -> NSRect {
-        guard let textRange = textRange(forUTF16Range: range) else { return .zero }
+        let rects = rectsForCharacterRange(range)
+        guard !rects.isEmpty else { return bounds }
+        return rects.reduce(NSRect.zero) { partialResult, rect in
+            partialResult == .zero ? rect : partialResult.union(rect)
+        }
+    }
+
+    private func rectsForCharacterRange(_ range: NSRange) -> [NSRect] {
+        guard let textRange = textRange(forUTF16Range: range) else { return [] }
         textLayoutManager.ensureLayout(for: textRange)
-        var rect = NSRect.zero
+        var rects: [NSRect] = []
         textLayoutManager.enumerateTextSegments(in: textRange, type: .standard, options: [.rangeNotRequired]) { _, segmentRect, _, _ in
-            rect = rect == .zero ? segmentRect : rect.union(segmentRect)
+            rects.append(segmentRect)
             return true
         }
-        return rect == .zero ? bounds : rect
+        return rects
     }
 
     private func configureBracketHighlights(for fragmentView: MacSyntaxEditorTextLayoutFragmentView) {

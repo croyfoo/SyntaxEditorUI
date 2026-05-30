@@ -5603,6 +5603,38 @@ struct SyntaxEditorUITests {
         abs(lhs - rhs) <= tolerance
     }
 
+    @MainActor
+    private func attachMacEditorWindow(_ editorView: SyntaxEditorView) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = editorView
+        window.makeKeyAndOrderFront(nil)
+        editorView.frame = window.contentView?.bounds ?? .zero
+        editorView.layoutSubtreeIfNeeded()
+        editorView.textView.layoutVisibleViewport()
+        return window
+    }
+
+    @MainActor
+    private func macEditorWindowPoint(
+        in window: NSWindow,
+        textView: MacSyntaxEditorTextInputView,
+        characterRange: NSRange,
+        xOffset: CGFloat = 1
+    ) -> NSPoint {
+        let screenRect = textView.firstRect(forCharacterRange: characterRange, actualRange: nil)
+        return window.convertPoint(
+            fromScreen: NSPoint(
+                x: screenRect.minX + xOffset,
+                y: screenRect.midY
+            )
+        )
+    }
+
     @Test("SyntaxEditorView reflects document text replacements on macOS")
     @MainActor
     func syntaxEditorViewMacTextObservation() async {
@@ -5648,6 +5680,58 @@ struct SyntaxEditorUITests {
         #expect(editorView.textView.usesFindBar)
         #expect(editorView.textView.isIncrementalSearchingEnabled)
         #expect(!editorView.textView.usesFindPanel)
+    }
+
+    @Test("SyntaxEditorView exposes macOS TextKit2 geometry to NSTextFinder")
+    @MainActor
+    func syntaxEditorViewMacExposesTextKit2GeometryToTextFinder() {
+        let source = "first line\nsecond line\nthird line"
+        let editorView = SyntaxEditorView(testContext: SyntaxEditorTestContext(text: source))
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        var effectiveRange = NSRange(location: NSNotFound, length: 0)
+        let contentView = editorView.textView.contentView(at: 0, effectiveCharacterRange: &effectiveRange)
+
+        #expect(contentView === editorView.textView.textContentView)
+        #expect(effectiveRange == NSRange(location: 0, length: (source as NSString).length))
+
+        let secondLineRange = (source as NSString).range(of: "second")
+        let rects = editorView.textView.rects(forCharacterRange: secondLineRange) ?? []
+
+        #expect(!rects.isEmpty)
+        #expect(rects.allSatisfy { !$0.rectValue.isEmpty })
+    }
+
+    @Test("SyntaxEditorView uses macOS NSTextFinder for match navigation")
+    @MainActor
+    func syntaxEditorViewMacUsesTextFinderForMatchNavigation() {
+        let editorView = SyntaxEditorView(testContext: SyntaxEditorTestContext(text: "alpha beta alpha"))
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        editorView.selectedRange = NSRange(location: 0, length: 5)
+        let setSearchStringItem = NSMenuItem()
+        setSearchStringItem.tag = NSTextFinder.Action.setSearchString.rawValue
+        editorView.textView.performTextFinderAction(setSearchStringItem)
+
+        let nextMatchItem = NSMenuItem()
+        nextMatchItem.tag = NSTextFinder.Action.nextMatch.rawValue
+        editorView.textView.performTextFinderAction(nextMatchItem)
+
+        #expect(editorView.selectedRange == NSRange(location: 11, length: 5))
+    }
+
+    @Test("SyntaxEditorView applies macOS NSTextFinder replacements through the editor pipeline")
+    @MainActor
+    func syntaxEditorViewMacAppliesTextFinderReplacementThroughEditorPipeline() {
+        let model = SyntaxEditorTestContext(text: "alpha beta")
+        let editorView = SyntaxEditorView(testContext: model)
+
+        editorView.textView.replaceCharacters(in: NSRange(location: 0, length: 5), with: "omega")
+
+        #expect(model.document.textSnapshot() == "omega beta")
+        #expect(editorView.selectedRange == NSRange(location: 5, length: 0))
     }
 
     @Test("SyntaxEditorView keeps macOS find bar available while read-only")
@@ -7335,17 +7419,7 @@ struct SyntaxEditorUITests {
     func syntaxEditorViewMacFocusesTextInputThroughRenderedFragments() {
         let model = SyntaxEditorTestContext(text: "let value = 1", language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(testContext: model)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = editorView
-        window.makeKeyAndOrderFront(nil)
-        editorView.frame = window.contentView?.bounds ?? .zero
-        editorView.layoutSubtreeIfNeeded()
-        editorView.textView.layoutVisibleViewport()
+        let window = attachMacEditorWindow(editorView)
         defer { window.orderOut(nil) }
 
         let clickPoint = NSPoint(x: 12, y: 12)
@@ -7368,6 +7442,97 @@ struct SyntaxEditorUITests {
         editorView.textView.mouseDown(with: event)
 
         #expect(window.firstResponder === editorView.textView)
+    }
+
+    @Test("SyntaxEditorView resolves macOS text input character indexes from screen points")
+    @MainActor
+    func syntaxEditorViewMacResolvesCharacterIndexFromScreenPoint() {
+        let source = "let value = 1"
+        let valueRange = (source as NSString).range(of: "value")
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        let screenRect = editorView.textView.firstRect(forCharacterRange: valueRange, actualRange: nil)
+        let screenPoint = NSPoint(x: screenRect.minX + 1, y: screenRect.midY)
+
+        #expect(editorView.textView.characterIndex(for: screenPoint) == valueRange.location)
+    }
+
+    @Test("SyntaxEditorView updates macOS mouse drag selections")
+    @MainActor
+    func syntaxEditorViewMacUpdatesMouseDragSelections() {
+        let source = "let value = 1"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        let startPoint = macEditorWindowPoint(
+            in: window,
+            textView: editorView.textView,
+            characterRange: NSRange(location: 0, length: 1)
+        )
+        let endPoint = macEditorWindowPoint(
+            in: window,
+            textView: editorView.textView,
+            characterRange: NSRange(location: 8, length: 1)
+        )
+        guard let mouseDown = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: startPoint,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ),
+            let mouseDragged = NSEvent.mouseEvent(
+                with: .leftMouseDragged,
+                location: endPoint,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 1,
+                clickCount: 1,
+                pressure: 1
+            )
+        else {
+            Issue.record("Failed to create macOS mouse events")
+            return
+        }
+
+        editorView.textView.mouseDown(with: mouseDown)
+        editorView.textView.mouseDragged(with: mouseDragged)
+
+        #expect(editorView.textView.selectedRange().location == 0)
+        #expect(editorView.textView.selectedRange().length > 0)
+    }
+
+    @Test("SyntaxEditorView uses TextKit navigation for macOS movement commands")
+    @MainActor
+    func syntaxEditorViewMacUsesTextKitNavigationForMovementCommands() {
+        let source = "abc def\nghi"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        editorView.textView.doCommand(by: #selector(NSResponder.moveWordRight(_:)))
+        #expect(editorView.textView.selectedRange().location > 0)
+
+        editorView.textView.doCommand(by: #selector(NSResponder.moveToEndOfLine(_:)))
+        #expect(editorView.textView.selectedRange() == NSRange(location: 7, length: 0))
+
+        editorView.textView.doCommand(by: #selector(NSResponder.moveToEndOfDocument(_:)))
+        #expect(editorView.textView.selectedRange() == NSRange(location: source.utf16.count, length: 0))
+
+        editorView.textView.doCommand(by: #selector(NSResponder.moveToBeginningOfDocumentAndModifySelection(_:)))
+        #expect(editorView.textView.selectedRange().location == 0)
+        #expect(editorView.textView.selectedRange().length == source.utf16.count)
     }
 
     @Test("SyntaxEditorView read-only key equivalents do not mutate text on macOS")
