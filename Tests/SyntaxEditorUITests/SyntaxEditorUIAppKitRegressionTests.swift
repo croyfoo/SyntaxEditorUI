@@ -1591,6 +1591,39 @@ extension SyntaxEditorUITests {
         }())
     }
 
+    @Test("SyntaxEditorView does not repaint all macOS text fragments while scrolling")
+    @MainActor
+    func syntaxEditorViewMacScrollDoesNotInvalidateVisibleFragments() async {
+        let model = SyntaxEditorTestContext(
+            text: String(repeating: "let value = 1\n", count: 400),
+            language: SyntaxLanguage.swift
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        layoutMacEditorView(editorView)
+
+        let visibleInvalidationCount = editorView.visibleTextDisplayInvalidationCountForTesting
+        editorView.contentView.scroll(to: NSPoint(x: 0, y: 400))
+        editorView.reflectScrolledClipView(editorView.contentView)
+
+        #expect(editorView.visibleTextDisplayInvalidationCountForTesting == visibleInvalidationCount)
+    }
+
+    @Test("SyntaxEditorView does not fan out macOS content invalidation to every text fragment")
+    @MainActor
+    func syntaxEditorViewMacContentInvalidationDoesNotInvalidateAllFragments() async {
+        let model = SyntaxEditorTestContext(
+            text: String(repeating: "let value = 1\n", count: 400),
+            language: SyntaxLanguage.swift
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        layoutMacEditorView(editorView)
+
+        let fragmentInvalidationCount = editorView.fragmentDisplayInvalidationCountForTesting
+        editorView.textView.textContentView.setNeedsDisplay(editorView.textView.bounds)
+
+        #expect(editorView.fragmentDisplayInvalidationCountForTesting == fragmentInvalidationCount)
+    }
+
     @Test("SyntaxEditorView wraps to unobscured macOS content width")
     @MainActor
     func syntaxEditorViewMacWrappingAccountsForContentInsets() async {
@@ -2053,7 +2086,7 @@ extension SyntaxEditorUITests {
         #expect(editorView.textView.findCandidateHighlightCornerRadiusForTesting > 0)
 
         let invalidationCount = editorView.fragmentDisplayInvalidationCountForTesting
-        editorView.textView.textContentView.setNeedsDisplay(editorView.textView.bounds)
+        editorView.textView.setNeedsDisplayForVisibleTextFragments()
         #expect(editorView.fragmentDisplayInvalidationCountForTesting > invalidationCount)
     }
 

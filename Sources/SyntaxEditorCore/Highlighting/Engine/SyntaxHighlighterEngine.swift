@@ -267,7 +267,16 @@ private final class SyntaxHighlightSession {
 
         do {
             let layer = try makeLayer()
-            layer.replaceContent(with: layeredSource)
+            guard let fullEdit = Self.fullReplacementInputEdit(for: layeredSource) else {
+                self.layer = nil
+                tokens = []
+                return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
+            }
+            _ = layer.didChangeContent(
+                Self.layerContent(for: layeredSource),
+                using: fullEdit,
+                resolveSublayers: true
+            )
             self.layer = layer
             let highlightTokens = highlightTokens(in: fullRange(for: layeredSource), source: layeredSource)
             let semanticResult = semanticClassifiedTokensIfNeeded(
@@ -365,7 +374,7 @@ private final class SyntaxHighlightSession {
         }
 
         let invalidatedSet = layer.didChangeContent(
-            .init(string: nextLayeredSource),
+            Self.layerContent(for: nextLayeredSource),
             using: inputEdit,
             resolveSublayers: setup.supportsLayeredHighlighting
         )
@@ -1176,6 +1185,53 @@ private extension SyntaxHighlightSession {
                 by: mutation.replacement
             )
         )
+    }
+
+    static func fullReplacementInputEdit(for source: String) -> InputEdit? {
+        let length = source.utf16.count
+        guard length <= Int(UInt32.max / 2) else {
+            return nil
+        }
+        return InputEdit(
+            startByte: 0,
+            oldEndByte: 0,
+            newEndByte: length * 2,
+            startPoint: .zero,
+            oldEndPoint: .zero,
+            newEndPoint: advancedPoint(from: .zero, by: source)
+        )
+    }
+
+    static func layerContent(for source: String) -> LanguageLayer.Content {
+        let limit = source.utf16.count
+        let chunkCodeUnits = 1024
+        let encoding = nativeUTF16Encoding
+        let readHandler: Parser.ReadBlock = { byteOffset, _ in
+            guard byteOffset >= 0 else { return nil }
+            let location = byteOffset / 2
+            guard location < limit else { return nil }
+
+            let end = min(location + chunkCodeUnits, limit)
+            guard end > location else { return nil }
+
+            let range = NSRange(location..<end)
+            guard let stringRange = Range(range, in: source) else {
+                return nil
+            }
+            return source[stringRange].data(using: encoding)
+        }
+        return LanguageLayer.Content(
+            readHandler: readHandler,
+            textProvider: source.predicateTextProvider
+        )
+    }
+
+    static var nativeUTF16Encoding: String.Encoding {
+#if _endian(little)
+        .utf16LittleEndian
+#else
+        .utf16BigEndian
+#endif
     }
 
     static func mutationMatchesSourceTransition(

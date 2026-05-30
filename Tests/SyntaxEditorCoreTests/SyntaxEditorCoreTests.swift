@@ -7512,6 +7512,46 @@ struct SyntaxHighlighterEngineTests {
         #expect(staleUpdate.refreshRange.length < updatedSource.utf16.count)
     }
 
+    @Test("SyntaxHighlighterEngine survives repeated paste-sized Swift updates")
+    func highlighterSurvivesRepeatedPasteSizedSwiftUpdates() async {
+        let engine = SyntaxHighlighterEngine()
+        var source = "struct PasteTarget {\n"
+        var result = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 1)
+
+        for index in 0..<8 {
+            let insertion = String(
+                repeating: "    let value\(index) = max(1, 2)\n",
+                count: 80
+            )
+            let mutation = SyntaxHighlightMutation(
+                location: source.utf16.count,
+                length: 0,
+                replacement: insertion
+            )
+            source += insertion
+            result = await engine.update(
+                source: source,
+                language: SyntaxLanguage.swift,
+                mutation: mutation,
+                revision: index + 2
+            )
+            #expect(result.source == source)
+            #expect(result.tokens.allSatisfy { $0.range.upperBound <= source.utf16.count })
+        }
+
+        source += "}\n"
+        result = await engine.update(
+            source: source,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(location: source.utf16.count - 2, length: 0, replacement: "}\n"),
+            revision: 20
+        )
+        let full = await SyntaxHighlighterEngine()
+            .reset(source: source, language: SyntaxLanguage.swift, revision: 20)
+
+        #expect(highlightTokensMatch(result.tokens, full.tokens))
+    }
+
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")
     func highlighterKeepsUnsupportedInjectionsDirect() async {
         let engine = SyntaxHighlighterEngine()

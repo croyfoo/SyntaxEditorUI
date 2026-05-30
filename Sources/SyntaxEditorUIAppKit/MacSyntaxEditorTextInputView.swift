@@ -4,7 +4,7 @@ import SyntaxEditorCore
 import SyntaxEditorUICommon
 
 @MainActor
-final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient, @preconcurrency NSTextFinderClient, @preconcurrency NSTextViewportLayoutControllerDelegate {
+final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient, @preconcurrency NSTextFinderClient, @preconcurrency NSTextLayoutManagerDelegate, @preconcurrency NSTextViewportLayoutControllerDelegate {
     let textKit2System: SyntaxEditorTextKit2System
     let textContentView = MacSyntaxEditorTextContentView()
     private let textFinder = NSTextFinder()
@@ -59,12 +59,38 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     var bracketHighlightRanges: [NSRange] = []
     var bracketHighlightColor: NSColor?
     var fragmentDisplayInvalidationCount = 0
-    private var viewportOverdraw: CGFloat {
-        max(200, bounds.height)
+    private var viewportPreparationExpansion: CGFloat {
+        min(max(64, bounds.height * 0.25), 240)
+    }
+    private var visibleViewportBounds: CGRect {
+        let visible = visibleRect.isEmpty ? bounds : visibleRect
+        var result = visible
+        if result.minX < 0 {
+            result.size.width += result.minX
+            result.origin.x = 0
+        }
+        if result.minY < 0 {
+            result.size.height += result.minY
+            result.origin.y = 0
+        }
+        result.size.width = max(result.width, bounds.width)
+        return result
     }
     private var currentViewportBounds: CGRect {
-        let visible = visibleRect.isEmpty ? bounds : visibleRect
-        return visible.insetBy(dx: 0, dy: -viewportOverdraw)
+        let visible = visibleViewportBounds
+        let prepared = preparedContentRect
+        guard !prepared.isEmpty, prepared.intersects(visible) else {
+            return visible
+        }
+
+        let minY = max(0, min(prepared.minY, visible.minY))
+        let maxY = max(prepared.maxY, visible.maxY)
+        return CGRect(
+            x: 0,
+            y: minY,
+            width: max(bounds.width, visible.width),
+            height: max(visible.height, maxY - minY)
+        )
     }
 
     init(textKit2System: SyntaxEditorTextKit2System) {
@@ -73,11 +99,11 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
         unsafe textFinder.client = self
-        textKit2System.layoutManager.renderingAttributesValidator = nil
         textKit2System.layoutManager.textViewportLayoutController.delegate = self
         textContentView.textInputView = self
         insertionIndicator.displayMode = .hidden
         insertionIndicator.isHidden = true
+        textKit2System.layoutManager.delegate = self
         addSubview(textContentView)
         addSubview(insertionIndicator)
         incrementalMatchRangesObservation = textFinder.observe(\.incrementalMatchRanges, options: [.new]) { [weak self] _, _ in
@@ -336,6 +362,25 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         textContentView.frame = bounds
         layoutVisibleViewport()
         updateDecorationRenderingForVisibleFragments()
+    }
+
+    override func prepareContent(in rect: NSRect) {
+        let oldPreparedContentRect = preparedContentRect
+        var preparedRect = rect
+        let expansion = viewportPreparationExpansion
+        if expansion > 0 {
+            let upwardShift = min(expansion, max(0, preparedRect.minY))
+            preparedRect.origin.y -= upwardShift
+            preparedRect.size.height += upwardShift
+        }
+        preparedRect.origin.x = 0
+        preparedRect.size.width = max(preparedRect.width, bounds.width)
+
+        super.prepareContent(in: preparedRect)
+
+        if oldPreparedContentRect != preparedContentRect {
+            layoutVisibleViewport()
+        }
     }
 
     override func viewDidMoveToSuperview() {
@@ -626,12 +671,6 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
             guard NSIntersectionRange(textRange(for: fragment), range).length > 0 else {
                 return true
             }
-            SyntaxEditorTextKit2HighlightRenderer.validateRenderingAttributes(
-                layoutManager: textLayoutManager,
-                textContentStorage: textContentStorage,
-                renderStore: textKit2System.renderStore,
-                fragment: fragment
-            )
             if drawsFindIndicator {
                 textLayoutManager.addRenderingAttribute(
                     .foregroundColor,
@@ -641,12 +680,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
             }
             fragment.draw(at: fragment.layoutFragmentFrame.origin, in: context)
             if drawsFindIndicator {
-                SyntaxEditorTextKit2HighlightRenderer.validateRenderingAttributes(
-                    layoutManager: textLayoutManager,
-                    textContentStorage: textContentStorage,
-                    renderStore: textKit2System.renderStore,
-                    fragment: fragment
-                )
+                textLayoutManager.removeRenderingAttribute(.foregroundColor, for: targetTextRange)
             }
             return true
         }
@@ -726,8 +760,17 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     func layoutVisibleViewport() {
         guard bounds.width > 0, bounds.height > 0 else { return }
 
-        textLayoutManager.ensureLayout(for: currentViewportBounds)
         textLayoutManager.textViewportLayoutController.layoutViewport()
+    }
+
+    func layoutVisibleViewportIfNeeded() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+
+        let viewportBounds = textLayoutManager.textViewportLayoutController.viewportBounds
+        if viewportBounds.contains(visibleViewportBounds) {
+            return
+        }
+        layoutVisibleViewport()
     }
 
     func invalidateRenderingAttributes(for range: NSRange) {
@@ -738,7 +781,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     func setNeedsDisplayForTextRanges(_ ranges: [NSRange]) {
         guard !ranges.isEmpty else { return }
 
-        layoutVisibleViewport()
+        layoutVisibleViewportIfNeeded()
         var didInvalidateFragment = false
         for case let fragmentView as MacSyntaxEditorTextLayoutFragmentView in textContentView.subviews {
             let fragmentRange = textRange(for: fragmentView.layoutFragment)
@@ -757,7 +800,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     }
 
     func setNeedsDisplayForVisibleTextFragments() {
-        layoutVisibleViewport()
+        layoutVisibleViewportIfNeeded()
         for case let fragmentView as MacSyntaxEditorTextLayoutFragmentView in textContentView.subviews {
             guard fragmentView.frame.intersects(currentViewportBounds) else { continue }
             fragmentView.needsDisplay = true
@@ -766,7 +809,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     }
 
     func visibleCharacterRange() -> NSRange? {
-        layoutVisibleViewport()
+        layoutVisibleViewportIfNeeded()
         var visibleRange: NSRange?
         for case let fragmentView as MacSyntaxEditorTextLayoutFragmentView in textContentView.subviews {
             guard fragmentView.frame.intersects(currentViewportBounds) else { continue }
@@ -788,6 +831,14 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         for case let fragmentView as MacSyntaxEditorTextLayoutFragmentView in textContentView.subviews {
             configureBracketHighlights(for: fragmentView)
         }
+    }
+
+    func textLayoutManager(
+        _ textLayoutManager: NSTextLayoutManager,
+        textLayoutFragmentFor location: NSTextLocation,
+        in textElement: NSTextElement
+    ) -> NSTextLayoutFragment {
+        MacSyntaxEditorTextLayoutFragment(textElement: textElement, range: textElement.elementRange)
     }
 
     func viewportBounds(for textViewportLayoutController: NSTextViewportLayoutController) -> CGRect {
@@ -834,6 +885,9 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
             staleView.removeFromSuperview()
         }
         lastUsedFragmentViews.removeAll()
+        if let viewportRange = textViewportLayoutController.viewportRange {
+            textLayoutManager.ensureLayout(for: viewportRange)
+        }
         updateInsertionIndicator()
     }
 
@@ -1515,23 +1569,38 @@ final class MacSyntaxEditorTextContentView: NSView {
 
     override var isFlipped: Bool { true }
 
-    override var needsDisplay: Bool {
-        get { super.needsDisplay }
-        set {
-            super.needsDisplay = newValue
-            if newValue {
-                textInputView?.setNeedsDisplayForVisibleTextFragments()
-            }
-        }
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        clipsToBounds = true
+        layer?.backgroundColor = NSColor.clear.cgColor
     }
 
-    override func setNeedsDisplay(_ invalidRect: NSRect) {
-        super.setNeedsDisplay(invalidRect)
-        textInputView?.setNeedsDisplayForContentRect(invalidRect)
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func makeBackingLayer() -> CALayer {
+        CATiledLayer()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
+    }
+}
+
+final class MacSyntaxEditorTextLayoutFragment: NSTextLayoutFragment {
+    override func draw(at point: CGPoint, in context: CGContext) {
+        context.saveGState()
+        for lineFragment in textLineFragments {
+            let lineOrigin = CGPoint(
+                x: point.x + lineFragment.typographicBounds.origin.x,
+                y: point.y + lineFragment.typographicBounds.origin.y
+            )
+            lineFragment.draw(at: lineOrigin, in: context)
+        }
+        context.restoreGState()
     }
 }
 
