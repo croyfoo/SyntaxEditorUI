@@ -7478,6 +7478,28 @@ struct SyntaxEditorUITests {
         #expect(editorView.textView.insertionIndicatorIsHiddenForTesting)
     }
 
+    @Test("SyntaxEditorView draws macOS incremental find highlights in rendered fragments")
+    @MainActor
+    func syntaxEditorViewMacDrawsIncrementalFindHighlightsInRenderedFragments() {
+        let source = "m m m"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        editorView.textView.setFindHighlightRangesForTesting([
+            NSRange(location: 0, length: 1),
+            NSRange(location: 2, length: 1),
+            NSRange(location: 4, length: 1),
+        ])
+
+        #expect(editorView.textView.findHighlightRectsForTesting.count >= 3)
+
+        let invalidationCount = editorView.fragmentDisplayInvalidationCountForTesting
+        editorView.textView.textContentView.setNeedsDisplay(editorView.textView.bounds)
+        #expect(editorView.fragmentDisplayInvalidationCountForTesting > invalidationCount)
+    }
+
     @Test("SyntaxEditorView resolves macOS text input character indexes from screen points")
     @MainActor
     func syntaxEditorViewMacResolvesCharacterIndexFromScreenPoint() {

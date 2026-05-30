@@ -8,6 +8,8 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
     let textContentView = MacSyntaxEditorTextContentView()
     private let textFinder = NSTextFinder()
     private let insertionIndicator = NSTextInsertionIndicator(frame: .zero)
+    private var incrementalMatchRangesObservation: NSKeyValueObservation?
+    private var findHighlightRangesOverrideForTesting: [NSRange]?
 
     var guardedUndoManager: UndoManager?
     var shortcutHandler: ((MacEditorShortcutAction) -> Bool)?
@@ -71,10 +73,16 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         layer?.backgroundColor = NSColor.clear.cgColor
         unsafe textFinder.client = self
         textKit2System.layoutManager.textViewportLayoutController.delegate = self
+        textContentView.textInputView = self
         insertionIndicator.displayMode = .hidden
         insertionIndicator.isHidden = true
         addSubview(textContentView)
         addSubview(insertionIndicator)
+        incrementalMatchRangesObservation = textFinder.observe(\.incrementalMatchRanges, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                self?.updateFindHighlightsForVisibleFragments()
+            }
+        }
     }
 
     @available(*, unavailable)
@@ -118,6 +126,11 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         textContentView.subviews
             .compactMap { $0 as? MacSyntaxEditorTextLayoutFragmentView }
             .flatMap(\.selectionHighlightRects)
+    }
+    var findHighlightRectsForTesting: [CGRect] {
+        textContentView.subviews
+            .compactMap { $0 as? MacSyntaxEditorTextLayoutFragmentView }
+            .flatMap(\.findHighlightRects)
     }
 
     var textStorage: NSTextStorage? { storage }
@@ -283,7 +296,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         super.layout()
         textContentView.frame = bounds
         layoutVisibleViewport()
-        updateSelectionRenderingForVisibleFragments()
+        updateDecorationRenderingForVisibleFragments()
     }
 
     override func viewDidMoveToSuperview() {
@@ -525,6 +538,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         }
         textLayoutManager.ensureLayout(for: targetTextRange)
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let drawsFindIndicator = view.isDrawingFindIndicator
         textLayoutManager.enumerateTextLayoutFragments(from: targetTextRange.location, options: []) { [self] fragment in
             guard NSIntersectionRange(textRange(for: fragment), range).length > 0 else {
                 return true
@@ -535,7 +549,22 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
                 renderStore: textKit2System.renderStore,
                 fragment: fragment
             )
+            if drawsFindIndicator {
+                textLayoutManager.addRenderingAttribute(
+                    .foregroundColor,
+                    value: NSColor.black,
+                    for: targetTextRange
+                )
+            }
             fragment.draw(at: fragment.layoutFragmentFrame.origin, in: context)
+            if drawsFindIndicator {
+                SyntaxEditorTextKit2HighlightRenderer.validateRenderingAttributes(
+                    layoutManager: textLayoutManager,
+                    textContentStorage: textContentStorage,
+                    renderStore: textKit2System.renderStore,
+                    fragment: fragment
+                )
+            }
             return true
         }
     }
@@ -607,7 +636,7 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         textLayoutManager.invalidateLayout(for: textContentStorage.documentRange)
         textLayoutManager.textSelectionNavigation.flushLayoutCache()
         layoutVisibleViewport()
-        updateSelectionRenderingForVisibleFragments()
+        updateDecorationRenderingForVisibleFragments()
         setNeedsDisplayForVisibleTextFragments()
     }
 
@@ -706,8 +735,6 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
             fragmentViewMap.setObject(fragmentView, forKey: textLayoutFragment)
         }
 
-        configureSelectionHighlights(for: fragmentView)
-        configureBracketHighlights(for: fragmentView)
         if fragmentView.frame != layoutFragmentFrame {
             fragmentView.frame = layoutFragmentFrame
             fragmentView.needsDisplay = true
@@ -715,6 +742,9 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         if unsafe fragmentView.superview != textContentView {
             textContentView.addSubview(fragmentView)
         }
+        configureFindHighlights(for: fragmentView)
+        configureSelectionHighlights(for: fragmentView)
+        configureBracketHighlights(for: fragmentView)
     }
 
     func textViewportLayoutControllerDidLayout(_ textViewportLayoutController: NSTextViewportLayoutController) {
@@ -742,11 +772,13 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         }
         unsafe textFinder.findBarContainer = usesFindBar ? enclosingScrollView : nil
         textFinder.isIncrementalSearchingEnabled = isIncrementalSearchingEnabled
+        updateFindHighlightsForVisibleFragments()
     }
 
     private func clearTextFinderAttachments() {
         textFinder.cancelFindIndicator()
         unsafe textFinder.findBarContainer = nil
+        updateFindHighlightsForVisibleFragments()
     }
 
     private func deleteBackward() {
@@ -1031,14 +1063,32 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
 
     private func updateSelectionRendering() {
         layoutVisibleViewport()
-        updateSelectionRenderingForVisibleFragments()
+        updateDecorationRenderingForVisibleFragments()
     }
 
-    private func updateSelectionRenderingForVisibleFragments() {
+    private func updateDecorationRenderingForVisibleFragments() {
         for case let fragmentView as MacSyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            configureFindHighlights(for: fragmentView)
             configureSelectionHighlights(for: fragmentView)
         }
         updateInsertionIndicator()
+    }
+
+    private func updateFindHighlightsForVisibleFragments() {
+        layoutVisibleViewport()
+        for case let fragmentView as MacSyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            configureFindHighlights(for: fragmentView)
+        }
+    }
+
+    func setNeedsDisplayForContentRect(_ rect: NSRect) {
+        guard !rect.isEmpty else { return }
+
+        for case let fragmentView as MacSyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            guard fragmentView.frame.intersects(rect) else { continue }
+            fragmentView.setNeedsDisplay(rect.offsetBy(dx: -fragmentView.frame.minX, dy: -fragmentView.frame.minY))
+            fragmentDisplayInvalidationCount += 1
+        }
     }
 
     private func updateInsertionIndicator() {
@@ -1250,6 +1300,48 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
         return documentEndLineFragment
     }
 
+    func setFindHighlightRangesForTesting(_ ranges: [NSRange]?) {
+        findHighlightRangesOverrideForTesting = ranges
+        updateFindHighlightsForVisibleFragments()
+    }
+
+    private func configureFindHighlights(for fragmentView: MacSyntaxEditorTextLayoutFragmentView) {
+        let matchRanges = findHighlightRangesOverrideForTesting
+            ?? (usesFindBar && textFinder.isIncrementalSearchingEnabled
+                ? textFinder.incrementalMatchRanges.map(\.rangeValue)
+                : [])
+        guard !matchRanges.isEmpty else {
+            fragmentView.setFindHighlights(rects: [])
+            return
+        }
+
+        let fragmentRange = textRange(for: fragmentView.layoutFragment)
+        let ranges = matchRanges.compactMap { range -> NSRange? in
+            let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
+            let intersection = NSIntersectionRange(clamped, fragmentRange)
+            return intersection.length > 0 ? intersection : nil
+        }
+        guard !ranges.isEmpty else {
+            fragmentView.setFindHighlights(rects: [])
+            return
+        }
+
+        var rects: [CGRect] = []
+        for range in ranges {
+            guard let textRange = textRange(forUTF16Range: range) else { continue }
+            textLayoutManager.ensureLayout(for: textRange)
+            textLayoutManager.enumerateTextSegments(
+                in: textRange,
+                type: .standard,
+                options: [.rangeNotRequired]
+            ) { _, rect, _, _ in
+                rects.append(rect.offsetBy(dx: -fragmentView.frame.minX, dy: -fragmentView.frame.minY))
+                return true
+            }
+        }
+        fragmentView.setFindHighlights(rects: rects)
+    }
+
     private func configureSelectionHighlights(for fragmentView: MacSyntaxEditorTextLayoutFragmentView) {
         guard selectedRangeStorage.length > 0 else {
             fragmentView.setSelectionHighlights(rects: [], color: nil)
@@ -1304,7 +1396,24 @@ final class MacSyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputCli
 }
 
 final class MacSyntaxEditorTextContentView: NSView {
+    weak var textInputView: MacSyntaxEditorTextInputView?
+
     override var isFlipped: Bool { true }
+
+    override var needsDisplay: Bool {
+        get { super.needsDisplay }
+        set {
+            super.needsDisplay = newValue
+            if newValue {
+                textInputView?.setNeedsDisplayForVisibleTextFragments()
+            }
+        }
+    }
+
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        super.setNeedsDisplay(invalidRect)
+        textInputView?.setNeedsDisplayForContentRect(invalidRect)
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
@@ -1314,6 +1423,7 @@ final class MacSyntaxEditorTextContentView: NSView {
 final class MacSyntaxEditorTextLayoutFragmentView: NSView {
     let layoutFragment: NSTextLayoutFragment
     weak var textKit2System: SyntaxEditorTextKit2System?
+    var findHighlightRects: [CGRect] = []
     var selectionHighlightRects: [CGRect] = []
     var selectionHighlightColor: NSColor?
     var bracketHighlightRects: [CGRect] = []
@@ -1337,6 +1447,13 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
         nil
     }
 
+    func setFindHighlights(rects: [CGRect]) {
+        guard findHighlightRects != rects else { return }
+
+        findHighlightRects = rects
+        needsDisplay = true
+    }
+
     func setSelectionHighlights(rects: [CGRect], color: NSColor?) {
         guard selectionHighlightRects != rects
             || !colorsEqual(selectionHighlightColor, color)
@@ -1356,6 +1473,9 @@ final class MacSyntaxEditorTextLayoutFragmentView: NSView {
                 renderStore: textKit2System.renderStore,
                 fragment: layoutFragment
             )
+        }
+        for rect in findHighlightRects where rect.intersects(dirtyRect) {
+            NSTextFinder.drawIncrementalMatchHighlight(in: rect)
         }
         if let selectionHighlightColor {
             selectionHighlightColor.setFill()
