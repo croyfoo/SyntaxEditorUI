@@ -3536,6 +3536,30 @@ extension SyntaxEditorUITests {
         #expect(model.document.textSnapshot().contains("let value42x = 42"))
     }
 
+    @Test("SyntaxEditorView does not rebuild iOS line metrics during resize")
+    @MainActor
+    func syntaxEditorViewIOSResizeDoesNotRebuildLineMetrics() {
+        let source = (0..<2_000)
+            .map { index in
+                index == 1_500 ? longSyntaxEditorLine : "let value\(index) = \(index)"
+            }
+            .joined(separator: "\n")
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        layoutIOSEditorView(editorView, width: 720, height: 300)
+
+        let rebuildCount = editorView.lineMetricsFullRebuildCountForTesting
+        layoutIOSEditorView(editorView, width: 360, height: 300)
+        layoutIOSEditorView(editorView, width: 640, height: 300)
+
+        #expect(editorView.lineMetricsFullRebuildCountForTesting == rebuildCount)
+        #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
+    }
+
     @Test("SyntaxEditorView keeps iOS scroll position while moving cursor")
     @MainActor
     func syntaxEditorViewIOSKeepsScrollPositionWhileMovingCursor() {

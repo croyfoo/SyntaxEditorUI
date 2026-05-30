@@ -360,6 +360,10 @@ public final class SyntaxEditorView: NSScrollView {
         textSystem.styleStore.appliedColorRunsForTesting.count
     }
 
+    internal var lineMetricsFullRebuildCountForTesting: Int {
+        textView.lineMetrics.fullRebuildCount
+    }
+
     internal func materializeSyntaxForegroundForTesting(in range: NSRange) {
         textView.setNeedsDisplayForTextRanges([range])
     }
@@ -1240,6 +1244,7 @@ public final class SyntaxEditorView: NSScrollView {
 
     private func replaceEntireStorageText(_ nextText: String) {
         resetSyntaxHighlightRenderingState(textLength: nextText.utf16.count)
+        textView.lineMetrics.reset(source: nextText)
         TextEditingTransaction.perform(on: textSystem.textContentStorage) { textStorage in
             textStorage.setAttributedString(NSAttributedString(string: nextText, attributes: storageBaseAttributes()))
         }
@@ -1250,12 +1255,14 @@ public final class SyntaxEditorView: NSScrollView {
         guard editsAreValid(edits) else { return false }
 
         let base = storageBaseAttributes()
+        let previousSource = textStorage.string
         TextEditingTransaction.perform(on: textSystem.textContentStorage) { textStorage in
             for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
                 let replacement = NSAttributedString(string: edit.replacement, attributes: base)
                 textStorage.replaceCharacters(in: edit.range, with: replacement)
             }
         }
+        textView.lineMetrics.apply(edits: edits, previousSource: previousSource)
         textView.invalidateTextLayout()
         return true
     }
@@ -1877,29 +1884,15 @@ public final class SyntaxEditorView: NSScrollView {
         minimumContentSize: NSSize,
         lineWrappingEnabled: Bool
     ) -> NSSize {
-        let source = textView.string
         let baseFont = textView.font ?? resolvedBaseFont()
         let lineHeight = max(1, ceil(baseFont.ascender - baseFont.descender + baseFont.leading))
         let estimatedColumnWidth = max(1, baseFont.pointSize * 0.65)
-        let horizontalPadding = textContainer.lineFragmentPadding * 2
-        let metrics = LineMetricsIndex(source: source, tabWidth: 4)
-        let estimatedWidth = metrics.horizontalDocumentWidth(
+        return textView.lineMetrics.estimatedDocumentSize(
+            minimumSize: minimumContentSize,
+            lineWrappingEnabled: lineWrappingEnabled,
+            lineHeight: lineHeight,
             columnWidth: estimatedColumnWidth,
-            textContainerInset: 0,
             lineFragmentPadding: textContainer.lineFragmentPadding
-        )
-        let lineCount = if lineWrappingEnabled {
-            metrics.estimatedWrappedLineCount(
-                maxColumnsPerLine: Int(floor(max(1, minimumContentSize.width - horizontalPadding) / estimatedColumnWidth))
-            )
-        } else {
-            metrics.lineCount
-        }
-        let estimatedHeight = ceil(CGFloat(lineCount) * lineHeight)
-
-        return NSSize(
-            width: max(minimumContentSize.width, estimatedWidth),
-            height: max(minimumContentSize.height, estimatedHeight)
         )
     }
 

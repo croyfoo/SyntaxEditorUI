@@ -51,6 +51,33 @@ struct SyntaxEditorUICommonTests {
         #expect(TextLayoutGeometry.ranges(ranges, intersecting: NSRange(location: 20, length: 2)).isEmpty)
     }
 
+    @Test("Document line metrics centralizes resize estimates without rebuilds")
+    func documentLineMetricsCachesResizeEstimates() {
+        let metrics = DocumentLineMetrics(
+            source: "let extremelyLongIdentifierName = value\nlet short = true",
+            tabWidth: 4
+        )
+        let rebuildCount = metrics.fullRebuildCount
+
+        let wide = metrics.estimatedDocumentSize(
+            minimumSize: CGSize(width: 360, height: 40),
+            lineWrappingEnabled: true,
+            lineHeight: 10,
+            columnWidth: 10,
+            lineFragmentPadding: 0
+        )
+        let narrow = metrics.estimatedDocumentSize(
+            minimumSize: CGSize(width: 80, height: 40),
+            lineWrappingEnabled: true,
+            lineHeight: 10,
+            columnWidth: 10,
+            lineFragmentPadding: 0
+        )
+
+        #expect(metrics.fullRebuildCount == rebuildCount)
+        #expect(narrow.height > wide.height)
+    }
+
     @Test("Text editing transaction applies style operations incrementally")
     func appliesStyleOperationsIncrementally() async {
         let system = EditorTextSystem()

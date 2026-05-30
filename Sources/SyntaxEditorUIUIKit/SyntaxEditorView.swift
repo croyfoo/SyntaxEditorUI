@@ -135,7 +135,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var isIgnoringTextInteractionHorizontalOffsetPreservation = false
     var preservedTextInteractionHorizontalOffset: CGFloat?
     var textInteractionHorizontalOffsetLockGeneration = 0
-    var lineMetricsIndex = LineMetricsIndex(tabWidth: SyntaxEditorView.estimatedTabColumnWidth)
+    var lineMetrics = DocumentLineMetrics(tabWidth: SyntaxEditorView.estimatedTabColumnWidth)
     var lastAppliedDocumentRevision = 0
     var isLayingOutText = false
     var needsTextRelayout = false
@@ -395,7 +395,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     internal var lineMetricsFullRebuildCountForTesting: Int {
-        lineMetricsIndex.fullRebuildCount
+        lineMetrics.fullRebuildCount
     }
 
     public override var canBecomeFirstResponder: Bool {
@@ -1027,7 +1027,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func replaceEntireStorageText(_ nextText: String) {
-        lineMetricsIndex.reset(source: nextText)
+        lineMetrics.reset(source: nextText)
         TextEditingTransaction.perform(on: textContentStorage) { storage in
             storage.setAttributedString(NSAttributedString(string: nextText, attributes: storageBaseAttributes()))
         }
@@ -1315,7 +1315,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 }
             }
         }
-        lineMetricsIndex.apply(edits: edits, previousSource: previousText)
+        lineMetrics.apply(edits: edits, previousSource: previousText)
         updateTextContainerForCurrentWrappingMode()
         updateContentSizeIfNeeded()
         invalidateFindResultsAfterTextChange()
@@ -2339,7 +2339,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             let horizontalInset = textContainerInset.left + textContainerInset.right
             return CGSize(
                 width: max(0, measuredHorizontalDocumentLayoutWidth() - horizontalInset),
-                height: CGFloat(lineMetricsIndex.lineCount) * resolvedBaseFont().lineHeight
+                height: CGFloat(lineMetrics.lineCount) * resolvedBaseFont().lineHeight
             )
         }
 
@@ -2347,7 +2347,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let font = resolvedBaseFont()
         let estimatedColumnWidth = Self.estimatedMonospacedColumnWidth(for: font)
         let availableLineWidth = max(1, container.size.width - container.lineFragmentPadding * 2)
-        let estimatedHeight = CGFloat(lineMetricsIndex.estimatedWrappedLineCount(
+        let estimatedHeight = CGFloat(lineMetrics.estimatedWrappedLineCount(
             maxColumnsPerLine: Int(floor(availableLineWidth / estimatedColumnWidth))
         )) * font.lineHeight
         return CGSize(
@@ -2524,7 +2524,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         return max(
             bounds.width,
-            lineMetricsIndex.horizontalDocumentWidth(
+            lineMetrics.horizontalDocumentWidth(
                 columnWidth: Self.estimatedMonospacedColumnWidth(for: resolvedBaseFont()),
                 textContainerInset: textContainerInset.left + textContainerInset.right,
                 lineFragmentPadding: container.lineFragmentPadding

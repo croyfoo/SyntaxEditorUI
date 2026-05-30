@@ -1872,6 +1872,34 @@ extension SyntaxEditorUITests {
         }())
     }
 
+    @Test("SyntaxEditorView does not rebuild macOS line metrics during resize")
+    @MainActor
+    func syntaxEditorViewMacResizeDoesNotRebuildLineMetrics() async {
+        let longLine = String(
+            repeating: "let extremelyLongIdentifierName = syntaxEditorHorizontalScrollValue; ",
+            count: 4
+        )
+        let source = (0..<2_000)
+            .map { index in
+                index == 1_500 ? longLine : "let value\(index) = \(index)"
+            }
+            .joined(separator: "\n")
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        layoutMacEditorView(editorView, width: 720, height: 300)
+
+        let rebuildCount = editorView.lineMetricsFullRebuildCountForTesting
+        layoutMacEditorView(editorView, width: 360, height: 300)
+        layoutMacEditorView(editorView, width: 640, height: 300)
+
+        #expect(editorView.lineMetricsFullRebuildCountForTesting == rebuildCount)
+        #expect(approximatelyEqual(editorView.textView.frame.width, editorView.contentSize.width))
+    }
+
     @Test("SyntaxEditorView keeps inset macOS wrapping geometry after resize")
     @MainActor
     func syntaxEditorViewMacWrappingTracksInsetContentWidthAfterResize() async {

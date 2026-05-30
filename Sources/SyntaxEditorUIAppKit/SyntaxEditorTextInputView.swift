@@ -60,6 +60,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     var bracketHighlightColor: NSColor?
     var fragmentDisplayInvalidationCount = 0
     var syntaxRenderingAttributeApplicationCountForTesting = 0
+    var lineMetrics = DocumentLineMetrics(tabWidth: 4)
     private var viewportPreparationExpansion: CGFloat {
         min(max(64, bounds.height * 0.25), 240)
     }
@@ -180,6 +181,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         get { storage.string }
         set {
             textFinder.noteClientStringWillChange()
+            lineMetrics.reset(source: newValue)
             textContentStorage.performEditingTransaction {
                 storage.setAttributedString(NSAttributedString(string: newValue, attributes: typingAttributes))
             }
@@ -819,29 +821,15 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         minimumContentSize: NSSize,
         lineWrappingEnabled: Bool
     ) -> NSSize {
-        let source = string
         let baseFont = font ?? (typingAttributes[.font] as? NSFont) ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let lineHeight = max(1, ceil(baseFont.ascender - baseFont.descender + baseFont.leading))
         let estimatedColumnWidth = max(1, baseFont.pointSize * 0.65)
-        let horizontalPadding = (textContainer?.lineFragmentPadding ?? 0) * 2
-        let metrics = LineMetricsIndex(source: source, tabWidth: 4)
-        let estimatedWidth = metrics.horizontalDocumentWidth(
+        return lineMetrics.estimatedDocumentSize(
+            minimumSize: minimumContentSize,
+            lineWrappingEnabled: lineWrappingEnabled,
+            lineHeight: lineHeight,
             columnWidth: estimatedColumnWidth,
-            textContainerInset: 0,
             lineFragmentPadding: textContainer?.lineFragmentPadding ?? 0
-        )
-        let lineCount = if lineWrappingEnabled {
-            metrics.estimatedWrappedLineCount(
-                maxColumnsPerLine: Int(floor(max(1, minimumContentSize.width - horizontalPadding) / estimatedColumnWidth))
-            )
-        } else {
-            metrics.lineCount
-        }
-        let estimatedHeight = ceil(CGFloat(lineCount) * lineHeight)
-
-        return NSSize(
-            width: max(minimumContentSize.width, estimatedWidth),
-            height: max(minimumContentSize.height, estimatedHeight)
         )
     }
 
@@ -989,10 +977,15 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     @discardableResult
     private func replaceText(in range: NSRange, with replacement: String, selectedRange: NSRange) -> Bool {
         guard shouldChangeText(inRanges: [range], replacementStrings: [replacement]) else { return false }
+        let previousSource = storage.string
         textFinder.noteClientStringWillChange()
         textContentStorage.performEditingTransaction {
             storage.replaceCharacters(in: range, with: NSAttributedString(string: replacement, attributes: typingAttributes))
         }
+        lineMetrics.apply(
+            edits: [SyntaxEditorTextEdit(range: range, replacement: replacement)],
+            previousSource: previousSource
+        )
         setSelectedRange(selectedRange)
         invalidateTextLayout()
         didChangeTextNotification()
