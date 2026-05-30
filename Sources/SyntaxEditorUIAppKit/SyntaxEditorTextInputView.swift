@@ -59,6 +59,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     var bracketHighlightRanges: [NSRange] = []
     var bracketHighlightColor: NSColor?
     var fragmentDisplayInvalidationCount = 0
+    var syntaxRenderingAttributeApplicationCountForTesting = 0
     private var viewportPreparationExpansion: CGFloat {
         min(max(64, bounds.height * 0.25), 240)
     }
@@ -883,6 +884,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             )
             fragmentViewMap.setObject(fragmentView, forKey: textLayoutFragment)
         }
+        fragmentView.textInputView = self
 
         if fragmentView.frame != layoutFragmentFrame {
             fragmentView.frame = layoutFragmentFrame
@@ -1564,6 +1566,11 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         fragmentView.bracketHighlightColor = bracketHighlightColor
         fragmentView.needsDisplay = true
     }
+
+    fileprivate func applySyntaxRenderingAttributesForDrawing(_ layoutFragment: NSTextLayoutFragment) {
+        textSystem.applySyntaxRenderingAttributes(for: layoutFragment)
+        syntaxRenderingAttributeApplicationCountForTesting += 1
+    }
 }
 
 final class SyntaxEditorTextContentView: NSView {
@@ -1614,6 +1621,7 @@ final class SyntaxEditorTextLayoutFragment: NSTextLayoutFragment {
 
 final class SyntaxEditorTextLayoutFragmentView: NSView {
     let layoutFragment: NSTextLayoutFragment
+    weak var textInputView: SyntaxEditorTextInputView?
     fileprivate static var findCandidateHighlightFillColor: NSColor {
         NSColor.textColor.withAlphaComponent(0.14)
     }
@@ -1679,6 +1687,7 @@ final class SyntaxEditorTextLayoutFragmentView: NSView {
             }
         }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        textInputView?.applySyntaxRenderingAttributesForDrawing(layoutFragment)
         if let syntaxLayoutFragment = layoutFragment as? SyntaxEditorTextLayoutFragment {
             syntaxLayoutFragment.draw(at: .zero, in: context, dirtyRect: dirtyRect)
         } else {

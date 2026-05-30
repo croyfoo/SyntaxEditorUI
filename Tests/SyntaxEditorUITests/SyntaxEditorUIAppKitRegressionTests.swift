@@ -923,14 +923,20 @@ extension SyntaxEditorUITests {
 
         await editorView.waitForPendingHighlightForTesting()
         let fragmentView = try #require(macEditorVisibleFragmentViews(editorView).first)
-        let materializationCount = editorView.syntaxForegroundMaterializationCountForTesting
+        let styleEpoch = editorView.syntaxForegroundMaterializationCountForTesting
+        let renderingAttributeApplicationCount = editorView
+            .syntaxRenderingAttributeApplicationCountForTesting
 
         let image = NSImage(size: fragmentView.bounds.size)
         image.lockFocus()
         fragmentView.draw(fragmentView.bounds)
         image.unlockFocus()
 
-        #expect(editorView.syntaxForegroundMaterializationCountForTesting == materializationCount)
+        #expect(editorView.syntaxForegroundMaterializationCountForTesting == styleEpoch)
+        #expect(
+            editorView.syntaxRenderingAttributeApplicationCountForTesting
+                > renderingAttributeApplicationCount
+        )
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(macEditorPermanentForegroundColor(editorView, at: 0) == nil)
     }

@@ -352,6 +352,10 @@ public final class SyntaxEditorView: NSScrollView {
         textSystem.styleStore.epoch
     }
 
+    internal var syntaxRenderingAttributeApplicationCountForTesting: Int {
+        textView.syntaxRenderingAttributeApplicationCountForTesting
+    }
+
     internal var syntaxColorRunCountForTesting: Int {
         textSystem.styleStore.appliedColorRunsForTesting.count
     }
