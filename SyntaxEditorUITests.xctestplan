@@ -32,6 +32,38 @@
       "parallelizable" : false,
       "target" : {
         "containerPath" : "container:",
+        "identifier" : "SyntaxEditorUICommonTests",
+        "name" : "SyntaxEditorUICommonTests"
+      }
+    },
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "SyntaxEditorUIAppKitTests",
+        "name" : "SyntaxEditorUIAppKitTests"
+      }
+    },
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "SyntaxEditorUIUIKitTests",
+        "name" : "SyntaxEditorUIUIKitTests"
+      }
+    },
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "SyntaxEditorUISwiftUITests",
+        "name" : "SyntaxEditorUISwiftUITests"
+      }
+    },
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:",
         "identifier" : "SyntaxEditorUITests",
         "name" : "SyntaxEditorUITests"
       }
