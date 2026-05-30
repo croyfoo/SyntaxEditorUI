@@ -43,7 +43,7 @@ extension SyntaxEditorUITests {
     @MainActor
     private func macEditorWindowPoint(
         in window: NSWindow,
-        textView: MacSyntaxEditorTextInputView,
+        textView: SyntaxEditorTextInputView,
         characterRange: NSRange,
         xOffset: CGFloat = 1
     ) -> NSPoint {
@@ -103,9 +103,9 @@ extension SyntaxEditorUITests {
         #expect(!editorView.textView.usesFindPanel)
     }
 
-    @Test("SyntaxEditorView exposes macOS TextKit2 geometry to NSTextFinder")
+    @Test("SyntaxEditorView exposes AppKit text layout geometry to NSTextFinder")
     @MainActor
-    func syntaxEditorViewMacExposesTextKit2GeometryToTextFinder() {
+    func syntaxEditorViewExposesTextLayoutGeometryToTextFinder() {
         let source = "first line\nsecond line\nthird line"
         let editorView = SyntaxEditorView(testContext: SyntaxEditorTestContext(text: source))
         let window = attachMacEditorWindow(editorView)
@@ -545,6 +545,51 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView resets macOS highlight state without repainting old text before document replacement")
+    @MainActor
+    func syntaxEditorViewMacResetsHighlightStateWithoutRepaintingOldTextBeforeDocumentReplacement() async {
+        let source = "let value = 1"
+        let replacement = "var pasted = 2\nprint(pasted)"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let resetGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            resetGate: resetGate
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await resetGate.waitUntilSuspended()
+        await resetGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(editorView.syntaxColorRunCountForTesting == 1)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        let suspensionCount = await resetGate.currentSuspensionCount()
+        model.document.replaceText(replacement)
+        editorView.synchronizeDocumentForTesting()
+
+        await resetGate.waitUntilSuspended(after: suspensionCount)
+        #expect(editorView.textView.string == replacement)
+        #expect(editorView.syntaxColorRunCountForTesting == 0)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        await resetGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+    }
+
     @Test("SyntaxEditorView applies built-in macOS theme base font to plain and highlighted text")
     @MainActor
     func syntaxEditorViewMacAppliesBuiltInThemeBaseFont() async throws {
@@ -822,9 +867,9 @@ extension SyntaxEditorUITests {
         #expect(macEditorFont(editorView, at: middleLocation) != nil)
     }
 
-    @Test("SyntaxEditorView stores macOS syntax colors before draw")
+    @Test("SyntaxEditorView stores macOS syntax colors outside permanent storage before draw")
     @MainActor
-    func syntaxEditorViewMacStoresSyntaxColorsBeforeDraw() async {
+    func syntaxEditorViewMacStoresSyntaxColorsOutsidePermanentStorageBeforeDraw() async {
         let fixture = syntaxEditorDenseHighlightFixture(tokenCount: 1_500)
         let theme = syntaxEditorUITestColorTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x102030),
@@ -845,10 +890,11 @@ extension SyntaxEditorUITests {
 
         #expect(
             syntaxEditorUITestColorsEqual(
-                macEditorPermanentForegroundColor(editorView, at: deferredLocation),
+                macEditorForegroundColor(editorView, at: deferredLocation),
                 syntaxEditorDenseHighlightColor(in: theme, at: deferredLocation)
             )
         )
+        #expect(macEditorPermanentForegroundColor(editorView, at: deferredLocation) == nil)
     }
 
     @Test("SyntaxEditorView draws macOS fragment colors without scroll-time materialization")
@@ -885,7 +931,8 @@ extension SyntaxEditorUITests {
         image.unlockFocus()
 
         #expect(editorView.syntaxForegroundMaterializationCountForTesting == materializationCount)
-        #expect(syntaxEditorUITestColorsEqual(macEditorPermanentForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(macEditorPermanentForegroundColor(editorView, at: 0) == nil)
     }
 
     @Test("SyntaxEditorView replaces stale macOS syntax colors after new highlight epochs")
@@ -922,7 +969,7 @@ extension SyntaxEditorUITests {
         editorView.synchronizeDocumentForTesting()
 
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
-        #expect(syntaxEditorUITestColorsEqual(macEditorPermanentForegroundColor(editorView, at: 0), updatedTheme.keyword))
+        #expect(macEditorPermanentForegroundColor(editorView, at: 0) == nil)
     }
 
     @Test("SyntaxEditorView keeps macOS syntax colors while typing awaits highlight")
@@ -1181,7 +1228,7 @@ extension SyntaxEditorUITests {
 
     @Test("SyntaxEditorView keeps macOS bracket highlight only for caret selections")
     @MainActor
-    func syntaxEditorViewMacBracketHighlightSkipsNonemptySelection() async {
+    func syntaxEditorViewAppKitBracketHighlightSkipsNonemptySelection() async {
         let source = "{}"
         let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
@@ -1918,6 +1965,46 @@ extension SyntaxEditorUITests {
         #expect(editorView.textView.validateUserInterfaceItem(copyItem))
         #expect(!editorView.textView.validateUserInterfaceItem(cutItem))
         #expect(!editorView.textView.validateUserInterfaceItem(pasteItem))
+    }
+
+    @Test("SyntaxEditorView leaves AppKit paste key equivalents to the active search field")
+    @MainActor
+    func syntaxEditorViewMacLeavesPasteKeyEquivalentToActiveSearchField() throws {
+        let source = "let answer = 42"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        let searchField = NSSearchField(frame: NSRect(x: 0, y: 200, width: 220, height: 24))
+        editorView.frame = NSRect(x: 0, y: 0, width: 320, height: 190)
+        container.addSubview(editorView)
+        container.addSubview(searchField)
+        window.contentView = container
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(searchField)
+        defer { window.orderOut(nil) }
+
+        let pasteboard = NSPasteboard.general
+        let previousPasteboardString = pasteboard.string(forType: .string)
+        defer {
+            pasteboard.clearContents()
+            if let previousPasteboardString {
+                pasteboard.setString(previousPasteboardString, forType: .string)
+            }
+        }
+        pasteboard.clearContents()
+        pasteboard.setString("pasted", forType: .string)
+
+        let pasteEvent = try #require(makeMacCommandKeyEvent("v"))
+        #expect(window.firstResponder !== editorView.textView)
+        #expect(!editorView.textView.performKeyEquivalent(with: pasteEvent))
+        #expect(model.document.textSnapshot() == source)
+        #expect(editorView.textView.string == source)
     }
 
     @Test("SyntaxEditorView read-only delegate commands do not mutate text on macOS")

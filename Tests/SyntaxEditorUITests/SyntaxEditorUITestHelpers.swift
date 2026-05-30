@@ -563,19 +563,19 @@ func performSyntaxEditorSelector(_ selectorName: String, on view: SyntaxEditorVi
     return true
 }
 
-let longIOSSyntaxEditorLine = String(
+let longSyntaxEditorLine = String(
     repeating: "let extremelyLongIdentifierName = syntaxEditorHorizontalScrollValue; ",
     count: 4
 )
 
-let longIOSSyntaxEditorMultilineText = """
+let longSyntaxEditorMultilineText = """
 const answer = 42;
 function greet(name) {
     \(String(repeating: "return HelloName; ", count: 10))
 }
 """
 
-let visibleMidIOSSyntaxEditorLocation = 20
+let visibleMidSyntaxEditorLocation = 20
 
 final class SyntaxEditorUITestInputDelegate: NSObject, UITextInputDelegate {
     var textWillChangeCount = 0
@@ -607,19 +607,19 @@ final class SyntaxEditorUITestInputDelegate: NSObject, UITextInputDelegate {
 
 final class SyntaxEditorUITestForeignTextPosition: UITextPosition {}
 
-let offscreenWideIOSSyntaxEditorText: String = {
+let offscreenWideSyntaxEditorText: String = {
     let leadingShortLines = (0..<20).map { "let short\($0) = true;" }
     let wideLine = [String(repeating: "let offscreenHorizontalScrollRange = value; ", count: 24)]
     let trailingShortLines = (20..<60).map { "let short\($0) = false;" }
     return (leadingShortLines + wideLine + trailingShortLines).joined(separator: "\n")
 }()
 
-let offscreenWideUnicodeIOSSyntaxEditorLine = String(repeating: "漢字🙂", count: 80)
+let offscreenWideUnicodeSyntaxEditorLine = String(repeating: "漢字🙂", count: 80)
 
-let offscreenWideUnicodeIOSSyntaxEditorText: String = {
+let offscreenWideUnicodeSyntaxEditorText: String = {
     let leadingShortLines = (0..<20).map { "let short\($0) = true;" }
     let trailingShortLines = (20..<60).map { "let short\($0) = false;" }
-    return (leadingShortLines + [offscreenWideUnicodeIOSSyntaxEditorLine] + trailingShortLines)
+    return (leadingShortLines + [offscreenWideUnicodeSyntaxEditorLine] + trailingShortLines)
         .joined(separator: "\n")
 }()
 
@@ -693,7 +693,7 @@ func iOSEditorVisibleTextContainerRect(_ editorView: SyntaxEditorView) -> CGRect
 }
 
 @MainActor
-func iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(_ editorView: SyntaxEditorView) -> Bool {
+func editorTextLayoutUsageBoundsCoverVisibleHorizontalViewport(_ editorView: SyntaxEditorView) -> Bool {
     guard let textLayoutManager = editorView.textLayoutManager else {
         return false
     }
@@ -705,7 +705,7 @@ func iOSEditorTextKit2UsageBoundsCoverVisibleHorizontalViewport(_ editorView: Sy
 }
 
 @MainActor
-func iOSEditorTextKit2Diagnostics(_ editorView: SyntaxEditorView) -> String {
+func editorTextLayoutDiagnostics(_ editorView: SyntaxEditorView) -> String {
     let visibleRect = iOSEditorVisibleTextContainerRect(editorView)
     let usageBounds = editorView.textLayoutManager?.usageBoundsForTextContainer ?? .null
     return "textLayoutManager=\(String(describing: editorView.textLayoutManager)) "
@@ -735,7 +735,11 @@ func iOSEditorForegroundColor(_ editorView: SyntaxEditorView, at location: Int) 
         return color
     }
 
-    return attributedText.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor
+    if let color = attributedText.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor {
+        return color
+    }
+
+    return editorView.baseForegroundColorForTesting()
 }
 
 @MainActor
@@ -780,7 +784,11 @@ func iOSEditorLineFragmentForegroundColor(_ editorView: SyntaxEditorView, at loc
     guard localLocation >= 0, localLocation < lineFragment.attributedString.length else {
         return nil
     }
-    return lineFragment.attributedString.attribute(.foregroundColor, at: localLocation, effectiveRange: nil) as? UIColor
+    if let color = lineFragment.attributedString.attribute(.foregroundColor, at: localLocation, effectiveRange: nil) as? UIColor {
+        return color
+    }
+
+    return editorView.baseForegroundColorForTesting()
 }
 
 @MainActor
@@ -872,7 +880,11 @@ func macEditorForegroundColor(_ editorView: SyntaxEditorView, at location: Int) 
         return color
     }
 
-    return textStorage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor
+    if let color = textStorage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor {
+        return color
+    }
+
+    return editorView.baseForegroundColorForTesting()
 }
 
 @MainActor
@@ -972,9 +984,9 @@ func macEditorTextStorageBackgroundColor(_ editorView: SyntaxEditorView, at loca
 }
 
 @MainActor
-func macEditorVisibleFragmentViews(_ editorView: SyntaxEditorView) -> [MacSyntaxEditorTextLayoutFragmentView] {
+func macEditorVisibleFragmentViews(_ editorView: SyntaxEditorView) -> [SyntaxEditorTextLayoutFragmentView] {
     editorView.textView.layoutVisibleViewport()
-    return editorView.textView.textContentView.subviews.compactMap { $0 as? MacSyntaxEditorTextLayoutFragmentView }
+    return editorView.textView.textContentView.subviews.compactMap { $0 as? SyntaxEditorTextLayoutFragmentView }
 }
 
 func makeMacCommandKeyEvent(

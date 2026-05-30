@@ -12,22 +12,72 @@ import AppKit
 
 @MainActor
 struct SyntaxEditorUICommonTests {
-    @Test("SyntaxEditorUICommon exposes TextKit 2 style storage")
-    func exposesTextKit2StyleStorage() {
-        let system = SyntaxEditorTextKit2System()
+    @Test("SyntaxEditorUICommon exposes highlight style storage")
+    func exposesHighlightStyleStorage() {
+        let system = EditorTextSystem()
         #expect(system.styleStore.appliedColorRunsForTesting.isEmpty)
         #expect(system.styleStore.appliedFontRunsForTesting.isEmpty)
         #expect(system.layoutManager.textContainer === system.container)
         #expect(system.container.textLayoutManager === system.layoutManager)
-        #expect(system.layoutManager.renderingAttributesValidator == nil)
+        #expect(system.layoutManager.renderingAttributesValidator != nil)
     }
 
-    @Test("TextKit 2 style store emits content attribute operations")
+    @Test("Editor text system centralizes UTF-16 range conversion")
+    func centralizesUTF16RangeConversion() throws {
+        let system = EditorTextSystem()
+        TextEditingTransaction.perform(on: system.textContentStorage) { storage in
+            storage.setAttributedString(NSAttributedString(string: "abcdef"))
+        }
+
+        let range = NSRange(location: 1, length: 3)
+        let textRange = try #require(system.textRange(forUTF16Range: range))
+
+        #expect(system.utf16Range(for: textRange) == range)
+        #expect(system.utf16Range(for: system.textContentStorage.documentRange) == NSRange(location: 0, length: 6))
+    }
+
+    @Test("Text layout geometry centralizes range intersection")
+    func centralizesRangeIntersection() {
+        let ranges = [
+            NSRange(location: 0, length: 3),
+            NSRange(location: 5, length: 4),
+            NSRange(location: 12, length: 2),
+        ]
+
+        #expect(TextLayoutGeometry.ranges(ranges, intersecting: NSRange(location: 2, length: 5)) == [
+            NSRange(location: 2, length: 1),
+            NSRange(location: 5, length: 2),
+        ])
+        #expect(TextLayoutGeometry.ranges(ranges, intersecting: NSRange(location: 20, length: 2)).isEmpty)
+    }
+
+    @Test("Text editing transaction applies layout-affecting font operations incrementally")
+    func appliesFontOperationsIncrementally() async {
+        let system = EditorTextSystem()
+        TextEditingTransaction.perform(on: system.textContentStorage) { storage in
+            storage.setAttributedString(NSAttributedString(string: "abcdef"))
+        }
+
+        let font = SyntaxEditorFont.monospacedSystemFont(ofSize: 18, weight: .bold)
+        await TextEditingTransaction.applyIncrementally(
+            HighlightStyleOperations(
+                colorOperations: [HighlightColorOperation(range: NSRange(location: 0, length: 6), color: redColor)],
+                fontOperations: [HighlightFontOperation(range: NSRange(location: 1, length: 3), font: font)]
+            ),
+            to: system.textContentStorage,
+            maximumOperationsPerTransaction: 1
+        )
+
+        #expect(system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) == nil)
+        #expect((system.textStorage.attribute(.font, at: 1, effectiveRange: nil) as? SyntaxEditorFont) == font)
+    }
+
+    @Test("Highlight style store emits content attribute operations")
     func emitsContentAttributeOperations() {
-        let store = SyntaxEditorTextKit2StyleStore()
+        let store = HighlightStyleStore()
         let operations = store.apply(
-            SyntaxEditorTextKit2RunSet(
-                colorRuns: [SyntaxEditorTextKit2ColorRun(range: NSRange(location: 1, length: 3), color: .red)],
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 1, length: 3), color: .red)],
                 fontRuns: []
             ),
             refreshedRange: NSRange(location: 0, length: 8),
@@ -43,14 +93,14 @@ struct SyntaxEditorUICommonTests {
         #expect(store.epoch == 1)
     }
 
-    @Test("TextKit 2 style store coalesces adjacent same-color foreground runs")
+    @Test("Highlight style store coalesces adjacent same-color foreground runs")
     func coalescesAdjacentSameColorForegroundRuns() {
-        let store = SyntaxEditorTextKit2StyleStore()
+        let store = HighlightStyleStore()
         let operations = store.apply(
-            SyntaxEditorTextKit2RunSet(
+            HighlightRunSet(
                 colorRuns: [
-                    SyntaxEditorTextKit2ColorRun(range: NSRange(location: 0, length: 2), color: redColor),
-                    SyntaxEditorTextKit2ColorRun(range: NSRange(location: 2, length: 3), color: redColor),
+                    HighlightColorRun(range: NSRange(location: 0, length: 2), color: redColor),
+                    HighlightColorRun(range: NSRange(location: 2, length: 3), color: redColor),
                 ],
                 fontRuns: []
             ),
@@ -66,14 +116,14 @@ struct SyntaxEditorUICommonTests {
         #expect(store.appliedColorRunsForTesting.count == 1)
     }
 
-    @Test("TextKit 2 style store diffs only refreshed foreground ranges")
+    @Test("Highlight style store diffs only refreshed foreground ranges")
     func diffsOnlyRefreshedForegroundRanges() {
-        let store = SyntaxEditorTextKit2StyleStore()
+        let store = HighlightStyleStore()
         _ = store.apply(
-            SyntaxEditorTextKit2RunSet(
+            HighlightRunSet(
                 colorRuns: [
-                    SyntaxEditorTextKit2ColorRun(range: NSRange(location: 0, length: 3), color: redColor),
-                    SyntaxEditorTextKit2ColorRun(range: NSRange(location: 10, length: 3), color: redColor),
+                    HighlightColorRun(range: NSRange(location: 0, length: 3), color: redColor),
+                    HighlightColorRun(range: NSRange(location: 10, length: 3), color: redColor),
                 ],
                 fontRuns: []
             ),
@@ -85,8 +135,8 @@ struct SyntaxEditorUICommonTests {
         )
 
         let unchangedOperations = store.apply(
-            SyntaxEditorTextKit2RunSet(
-                colorRuns: [SyntaxEditorTextKit2ColorRun(range: NSRange(location: 0, length: 3), color: redColor)],
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 3), color: redColor)],
                 fontRuns: []
             ),
             refreshedRange: NSRange(location: 0, length: 3),
@@ -98,8 +148,8 @@ struct SyntaxEditorUICommonTests {
         #expect(unchangedOperations.colorOperations.isEmpty)
 
         let changedOperations = store.apply(
-            SyntaxEditorTextKit2RunSet(
-                colorRuns: [SyntaxEditorTextKit2ColorRun(range: NSRange(location: 0, length: 3), color: blueColor)],
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 3), color: blueColor)],
                 fontRuns: []
             ),
             refreshedRange: NSRange(location: 0, length: 3),
@@ -118,12 +168,12 @@ struct SyntaxEditorUICommonTests {
         ])
     }
 
-    @Test("TextKit 2 style store records text mutation without repainting unaffected split runs")
+    @Test("Highlight style store records text mutation without repainting unaffected split runs")
     func recordsTextMutationWithoutRepaintingUnaffectedSplitRuns() {
-        let store = SyntaxEditorTextKit2StyleStore()
+        let store = HighlightStyleStore()
         _ = store.apply(
-            SyntaxEditorTextKit2RunSet(
-                colorRuns: [SyntaxEditorTextKit2ColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
                 fontRuns: []
             ),
             refreshedRange: NSRange(location: 0, length: 10),
@@ -134,7 +184,7 @@ struct SyntaxEditorUICommonTests {
         )
 
         let operations = store.apply(
-            SyntaxEditorTextKit2RunSet(colorRuns: [], fontRuns: []),
+            HighlightRunSet(colorRuns: [], fontRuns: []),
             refreshedRange: NSRange(location: 5, length: 2),
             mutation: SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
             textLength: 12,
@@ -146,6 +196,38 @@ struct SyntaxEditorUICommonTests {
             NSRange(location: 7, length: 5),
         ])
         #expect(operations.colorOperations.isEmpty)
+    }
+
+    @Test("Highlight style store resets logical state without repaint operations")
+    func resetsLogicalStateWithoutRepaintOperations() {
+        let store = HighlightStyleStore()
+        _ = store.apply(
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            refreshedRange: NSRange(location: 0, length: 10),
+            mutation: nil,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        store.reset(textLength: 40)
+
+        #expect(store.appliedColorRunsForTesting.isEmpty)
+        #expect(store.appliedFontRunsForTesting.isEmpty)
+        #expect(store.epoch == 2)
+
+        let operations = store.apply(
+            HighlightRunSet(colorRuns: [], fontRuns: []),
+            refreshedRange: NSRange(location: 0, length: 40),
+            mutation: nil,
+            textLength: 40,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+        #expect(operations.isEmpty)
     }
 }
 

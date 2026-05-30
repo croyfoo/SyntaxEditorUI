@@ -10,17 +10,17 @@ struct SyntaxEditorMarkedTextUndoAnchor {
     let refreshStartUTF16: Int
 }
 
-private struct IOSSyntaxHighlightAttributeKey: Hashable {
+private struct SyntaxHighlightAttributeKey: Hashable {
     let syntaxID: EditorSourceSyntaxID
     let language: SyntaxLanguage
 }
 
-private struct IOSSyntaxHighlightStyle {
+private struct SyntaxHighlightStyle {
     let foregroundColor: UIColor
     let font: UIFont?
 }
 
-private struct IOSSyntaxHighlightAttributeResolver {
+private struct SyntaxHighlightAttributeResolver {
     let colorTheme: SyntaxEditorColorTheme
     let defaultLanguage: SyntaxLanguage
     let appearance: SyntaxEditorThemeAppearance
@@ -28,8 +28,8 @@ private struct IOSSyntaxHighlightAttributeResolver {
     let fontSizeDelta: Int
     let resolveColor: (UIColor) -> UIColor
 
-    private var styleCache: [IOSSyntaxHighlightAttributeKey: IOSSyntaxHighlightStyle] = [:]
-    private var missingAttributeKeys: Set<IOSSyntaxHighlightAttributeKey> = []
+    private var styleCache: [SyntaxHighlightAttributeKey: SyntaxHighlightStyle] = [:]
+    private var missingAttributeKeys: Set<SyntaxHighlightAttributeKey> = []
     private var fontCache: [SyntaxEditorFontDescriptor: UIFont] = [:]
 
     init(
@@ -51,9 +51,9 @@ private struct IOSSyntaxHighlightAttributeResolver {
     mutating func style(
         for syntaxID: EditorSourceSyntaxID,
         language: SyntaxLanguage?
-    ) -> (key: IOSSyntaxHighlightAttributeKey, style: IOSSyntaxHighlightStyle)? {
+    ) -> (key: SyntaxHighlightAttributeKey, style: SyntaxHighlightStyle)? {
         let effectiveLanguage = language ?? defaultLanguage
-        let key = IOSSyntaxHighlightAttributeKey(syntaxID: syntaxID, language: effectiveLanguage)
+        let key = SyntaxHighlightAttributeKey(syntaxID: syntaxID, language: effectiveLanguage)
 
         if let cached = styleCache[key] {
             return (key, cached)
@@ -76,7 +76,7 @@ private struct IOSSyntaxHighlightAttributeResolver {
         if let fontDescriptor = style.font {
             font = platformFont(for: fontDescriptor)
         }
-        let resolvedStyle = IOSSyntaxHighlightStyle(
+        let resolvedStyle = SyntaxHighlightStyle(
             foregroundColor: resolveColor(style.foreground),
             font: font
         )
@@ -100,11 +100,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     public private(set) var configuration: SyntaxEditorConfiguration
 
     let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
-    let textKit2System = SyntaxEditorTextKit2System()
-    var textContentStorage: NSTextContentStorage { textKit2System.textContentStorage }
-    var layoutManager: NSTextLayoutManager { textKit2System.layoutManager }
-    var container: NSTextContainer { textKit2System.container }
-    var highlightStyleStore: SyntaxEditorTextKit2StyleStore { textKit2System.styleStore }
+    let textSystem = EditorTextSystem()
+    var textContentStorage: NSTextContentStorage { textSystem.textContentStorage }
+    var layoutManager: NSTextLayoutManager { textSystem.layoutManager }
+    var container: NSTextContainer { textSystem.container }
+    var highlightStyleStore: HighlightStyleStore { textSystem.styleStore }
     let textContentView = SyntaxEditorTextContentView()
     let editableTextInteraction = UITextInteraction(for: .editable)
     let nonEditableTextInteraction = UITextInteraction(for: .nonEditable)
@@ -158,7 +158,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var documentDeliveryForTesting: ObservationDelivery?
     var configurationDeliveryForTesting: ObservationDelivery?
     var storage: NSTextStorage {
-        textKit2System.textStorage
+        textSystem.textStorage
     }
 
     internal var textStorage: NSTextStorage {
@@ -203,7 +203,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         else {
             return nil
         }
-        return storage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor
+        return highlightStyleStore.foregroundColor(at: location)
+    }
+
+    internal func baseForegroundColorForTesting() -> UIColor? {
+        highlightStyleStore.baseForeground
     }
 
     public var isFindInteractionEnabled = true {
@@ -862,6 +866,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var typingAttributes: [NSAttributedString.Key: Any] = [:]
 
     func updateTypingAttributes() {
+        if let baseForeground = baseAttributes()[.foregroundColor] as? UIColor {
+            highlightStyleStore.updateBaseForeground(baseForeground, textLength: storage.length)
+        }
         typingAttributes = storageBaseAttributes()
     }
 
@@ -1021,14 +1028,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func replaceEntireStorageText(_ nextText: String) {
         lineMetricsIndex.reset(source: nextText)
-        SyntaxEditorTextKit2StyleApplier.performContentEditing(on: textContentStorage) { storage in
+        TextEditingTransaction.perform(on: textContentStorage) { storage in
             storage.setAttributedString(NSAttributedString(string: nextText, attributes: storageBaseAttributes()))
         }
-        _ = highlightStyleStore.clear(
-            textLength: nextText.utf16.count,
-            baseForeground: baseAttributes()[.foregroundColor] as? UIColor ?? UIColor.label,
-            baseFont: baseAttributes()[.font] as? UIFont
-        )
+        resetSyntaxHighlightRenderingState(textLength: nextText.utf16.count)
         invalidateFindResultsAfterTextChange()
         markedRange = nil
         markedTextUndoAnchor = nil
@@ -1041,44 +1044,22 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         var attributes = storageBaseAttributes()
         attributes.removeValue(forKey: .foregroundColor)
-        SyntaxEditorTextKit2StyleApplier.performContentEditing(on: textContentStorage) { storage in
+        TextEditingTransaction.perform(on: textContentStorage) { storage in
             storage.addAttributes(attributes, range: fullRange)
         }
     }
 
     func applyBaseForegroundColorChange(
-        from previousColorTheme: SyntaxEditorColorTheme,
+        from _: SyntaxEditorColorTheme,
         to colorTheme: SyntaxEditorColorTheme
     ) {
-        let textRange = NSRange(location: 0, length: storage.length)
-        guard textRange.length > 0 else { return }
-
-        let previousBaseForeground = resolvedSyntaxColor(
-            previousColorTheme
-                .resolved(for: configuration.language, appearance: currentThemeAppearance)
-                .baseForeground
-        )
         let nextBaseForeground = resolvedSyntaxColor(
             colorTheme
                 .resolved(for: configuration.language, appearance: currentThemeAppearance)
                 .baseForeground
         )
-        var rangesToUpdate: [NSRange] = []
-        unsafe storage.enumerateAttribute(.foregroundColor, in: textRange) { value, range, _ in
-            guard let color = value as? UIColor,
-                  color.isEqual(previousBaseForeground)
-            else {
-                return
-            }
-            rangesToUpdate.append(range)
-        }
-
-        guard !rangesToUpdate.isEmpty else { return }
-        SyntaxEditorTextKit2StyleApplier.performContentEditing(on: textContentStorage) { storage in
-            for range in rangesToUpdate {
-                storage.addAttribute(.foregroundColor, value: nextBaseForeground, range: range)
-            }
-        }
+        highlightStyleStore.updateBaseForeground(nextBaseForeground, textLength: storage.length)
+        setNeedsDisplayForVisibleTextFragments()
     }
 
     func applyUserReplacement(
@@ -1265,6 +1246,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 preservesMarkedTextUndoAnchor: preservesMarkedTextUndoAnchor
             )
         }
+        let shouldDeferSelectionGeometry = shouldDeferSelectionGeometryForTextInputEdits(edits)
 
         let change = document.commitEdits(
             edits,
@@ -1277,8 +1259,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         syncTextLayoutSelection()
         updateTypingAttributes()
         updateTextContainerForCurrentWrappingMode()
-        invalidateTextLayout()
-        layoutAndScrollSelectionForTextInputGeometry()
+        if shouldDeferSelectionGeometry {
+            setNeedsLayout()
+        } else {
+            layoutAndScrollSelectionForTextInputGeometry()
+        }
         isApplyingModel = false
 
         let refreshStart = min(
@@ -1299,6 +1284,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             inputDelegate?.textDidChange(self)
         }
         refreshKeyboardAccessoryState()
+    }
+
+    private func shouldDeferSelectionGeometryForTextInputEdits(_ edits: [SyntaxEditorTextEdit]) -> Bool {
+        edits.contains { edit in
+            edit.range.length > 4_096 || edit.replacement.utf16.count > 4_096
+        }
     }
 
     func performRawEdits(
@@ -1700,7 +1691,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         lastHighlightSource = nil
         lastHighlightRevision = nil
         lastHighlightLanguage = nil
-        clearSyntaxHighlightRendering()
+        resetSyntaxHighlightRenderingState(textLength: storage.length)
     }
 
     static func highlightMutation(_ change: SyntaxEditorDocumentChange) -> SyntaxHighlightMutation? {
@@ -1809,8 +1800,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     private func makeSyntaxHighlightAttributeResolver(
         baseAttributes: [NSAttributedString.Key: Any]
-    ) -> IOSSyntaxHighlightAttributeResolver {
-        IOSSyntaxHighlightAttributeResolver(
+    ) -> SyntaxHighlightAttributeResolver {
+        SyntaxHighlightAttributeResolver(
             colorTheme: lastAppliedColorTheme,
             defaultLanguage: configuration.language,
             appearance: currentThemeAppearance,
@@ -1826,10 +1817,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         for tokens: [SyntaxHighlightToken],
         renderRange: NSRange,
         textLength: Int,
-        resolver: inout IOSSyntaxHighlightAttributeResolver
-    ) -> SyntaxEditorTextKit2RunSet {
-        var colorRuns: [SyntaxEditorTextKit2ColorRun] = []
-        var fontRuns: [SyntaxEditorTextKit2FontRun] = []
+        resolver: inout SyntaxHighlightAttributeResolver
+    ) -> HighlightRunSet {
+        var colorRuns: [HighlightColorRun] = []
+        var fontRuns: [HighlightFontRun] = []
         colorRuns.reserveCapacity(min(tokens.count, 1024))
         fontRuns.reserveCapacity(min(tokens.count, 1024))
 
@@ -1859,7 +1850,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 colorRuns[colorRuns.count - 1] = last
             } else {
                 colorRuns.append(
-                    SyntaxEditorTextKit2ColorRun(
+                    HighlightColorRun(
                         range: intersection,
                         color: resolved.style.foregroundColor
                     )
@@ -1876,11 +1867,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 last.range = NSRange(location: lowerBound, length: upperBound - lowerBound)
                 fontRuns[fontRuns.count - 1] = last
             } else {
-                fontRuns.append(SyntaxEditorTextKit2FontRun(range: intersection, font: font))
+                fontRuns.append(HighlightFontRun(range: intersection, font: font))
             }
         }
 
-        return SyntaxEditorTextKit2RunSet(colorRuns: colorRuns, fontRuns: fontRuns)
+        return HighlightRunSet(colorRuns: colorRuns, fontRuns: fontRuns)
     }
 
     private func firstTokenIndex(
@@ -1902,8 +1893,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     private func subtractSyntaxHighlightRange(
         _ range: NSRange,
-        fromColorRuns colorRuns: inout [SyntaxEditorTextKit2ColorRun],
-        fontRuns: inout [SyntaxEditorTextKit2FontRun]
+        fromColorRuns colorRuns: inout [HighlightColorRun],
+        fontRuns: inout [HighlightFontRun]
     ) {
         subtractSyntaxHighlightRange(range, fromColorRuns: &colorRuns)
         subtractSyntaxHighlightRange(range, fromFontRuns: &fontRuns)
@@ -1911,7 +1902,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     private func subtractSyntaxHighlightRange(
         _ range: NSRange,
-        fromColorRuns runs: inout [SyntaxEditorTextKit2ColorRun]
+        fromColorRuns runs: inout [HighlightColorRun]
     ) {
         var index = runs.count
         while index > 0 {
@@ -1934,7 +1925,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             } else if resetEnd >= runEnd {
                 runs[index].range = NSRange(location: runStart, length: resetStart - runStart)
             } else {
-                let trailingRun = SyntaxEditorTextKit2ColorRun(
+                let trailingRun = HighlightColorRun(
                     range: NSRange(location: resetEnd, length: runEnd - resetEnd),
                     color: run.color
                 )
@@ -1946,7 +1937,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     private func subtractSyntaxHighlightRange(
         _ range: NSRange,
-        fromFontRuns runs: inout [SyntaxEditorTextKit2FontRun]
+        fromFontRuns runs: inout [HighlightFontRun]
     ) {
         var index = runs.count
         while index > 0 {
@@ -1969,7 +1960,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             } else if resetEnd >= runEnd {
                 runs[index].range = NSRange(location: runStart, length: resetStart - runStart)
             } else {
-                let trailingRun = SyntaxEditorTextKit2FontRun(
+                let trailingRun = HighlightFontRun(
                     range: NSRange(location: resetEnd, length: runEnd - resetEnd),
                     font: run.font
                 )
@@ -1980,14 +1971,34 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func applySyntaxHighlightRunSet(
-        _ runSet: SyntaxEditorTextKit2RunSet,
+        _ runSet: HighlightRunSet,
         targetRange: NSRange,
         baseAttributes: [NSAttributedString.Key: Any],
         textLength: Int,
         mutation: SyntaxHighlightMutation?
     ) {
-        guard let baseForeground = baseAttributes[.foregroundColor] as? UIColor else { return }
-        let operations = highlightStyleStore.apply(
+        guard let operations = syntaxHighlightOperations(
+            for: runSet,
+            targetRange: targetRange,
+            baseAttributes: baseAttributes,
+            textLength: textLength,
+            mutation: mutation
+        ) else {
+            return
+        }
+        TextEditingTransaction.apply(operations, to: textContentStorage)
+        textSystem.invalidateRenderingAttributes(for: targetRange)
+    }
+
+    private func syntaxHighlightOperations(
+        for runSet: HighlightRunSet,
+        targetRange: NSRange,
+        baseAttributes: [NSAttributedString.Key: Any],
+        textLength: Int,
+        mutation _: SyntaxHighlightMutation?
+    ) -> HighlightStyleOperations? {
+        guard let baseForeground = baseAttributes[.foregroundColor] as? UIColor else { return nil }
+        return highlightStyleStore.apply(
             runSet,
             refreshedRange: targetRange,
             mutation: nil,
@@ -1996,7 +2007,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             baseFont: baseAttributes[.font] as? UIFont,
             foregroundSuppressionRanges: foregroundSuppressionRanges(textLength: textLength)
         )
-        SyntaxEditorTextKit2StyleApplier.apply(operations, to: textContentStorage)
     }
 
     private func foregroundSuppressionRanges(textLength: Int) -> [NSRange] {
@@ -2021,24 +2031,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         if let baseForeground = baseAttributes()[.foregroundColor] as? UIColor {
             let base = baseAttributes()
             let mutationOperations = highlightStyleStore.apply(
-                SyntaxEditorTextKit2RunSet(colorRuns: [], fontRuns: []),
+                HighlightRunSet(colorRuns: [], fontRuns: []),
                 refreshedRange: invalidatedRange,
                 mutation: mutation,
                 textLength: textLength,
                 baseForeground: baseForeground,
                 baseFont: base[.font] as? UIFont
             )
-            let baseOperations = highlightStyleStore.baseOperations(
-                in: invalidatedRange,
-                textLength: textLength,
-                baseForeground: baseForeground,
-                baseFont: base[.font] as? UIFont
-            )
-            let operations = SyntaxEditorTextKit2StyleOperations(
-                colorOperations: mutationOperations.colorOperations + baseOperations.colorOperations,
-                fontOperations: mutationOperations.fontOperations + baseOperations.fontOperations
-            )
-            SyntaxEditorTextKit2StyleApplier.apply(operations, to: textContentStorage)
+            TextEditingTransaction.apply(mutationOperations, to: textContentStorage)
         }
         guard invalidatedRange.length > 0 else { return }
         setNeedsDisplayForVisibleTextFragments()
@@ -2052,8 +2052,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             baseForeground: baseForeground,
             baseFont: base[.font] as? UIFont
         )
-        SyntaxEditorTextKit2StyleApplier.apply(operations, to: textContentStorage)
+        TextEditingTransaction.apply(operations, to: textContentStorage)
         setNeedsDisplayForVisibleTextFragments()
+    }
+
+    private func resetSyntaxHighlightRenderingState(textLength: Int) {
+        highlightStyleStore.reset(textLength: textLength)
     }
 
     private func pendingTextMutationReplacementRange(
@@ -2074,7 +2078,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func applySyntaxHighlightRunSetInChunks(
-        _ runSet: SyntaxEditorTextKit2RunSet,
+        _ runSet: HighlightRunSet,
         targetRange: NSRange,
         baseAttributes: [NSAttributedString.Key: Any],
         textLength: Int,
@@ -2085,14 +2089,18 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return false
         }
         isApplyingHighlight = true
-        applySyntaxHighlightRunSet(
-            runSet,
+        defer { isApplyingHighlight = false }
+        guard let operations = syntaxHighlightOperations(
+            for: runSet,
             targetRange: targetRange,
             baseAttributes: baseAttributes,
             textLength: textLength,
             mutation: mutation
-        )
-        isApplyingHighlight = false
+        ) else {
+            return false
+        }
+        await TextEditingTransaction.applyIncrementally(operations, to: textContentStorage)
+        textSystem.invalidateRenderingAttributes(for: targetRange)
         await Task.yield()
         return !Task.isCancelled && document.revision == expectedRevision
     }
@@ -2112,7 +2120,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 refreshRange: targetRange
             )
         } else {
-            SyntaxEditorTextKit2StyleApplier.performContentEditing(on: textContentStorage) { storage in
+            TextEditingTransaction.perform(on: textContentStorage) { storage in
                 storage.addAttributes(storageBaseAttributes(), range: targetRange)
             }
             setNeedsDisplayForVisibleTextFragments()
@@ -2125,10 +2133,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let targetRange = SyntaxEditorRangeUtilities.clampedRange(markedRange, utf16Length: textLength)
         guard targetRange.length > 0 else { return }
 
-        SyntaxEditorTextKit2StyleApplier.performContentEditing(on: textContentStorage) { storage in
-            if let baseForeground = storageBaseAttributes()[.foregroundColor] {
-                storage.addAttribute(.foregroundColor, value: baseForeground, range: targetRange)
-            }
+        TextEditingTransaction.perform(on: textContentStorage) { storage in
             storage.addAttributes(markedTextAttributes(), range: targetRange)
         }
         setNeedsDisplayForVisibleTextFragments()
@@ -2139,7 +2144,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let targetRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
         guard targetRange.length > 0 else { return }
 
-        SyntaxEditorTextKit2StyleApplier.performContentEditing(on: textContentStorage) { storage in
+        TextEditingTransaction.perform(on: textContentStorage) { storage in
             storage.removeAttribute(.underlineStyle, range: targetRange)
             storage.removeAttribute(.underlineColor, range: targetRange)
         }
@@ -2164,7 +2169,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func storageBaseAttributes() -> [NSAttributedString.Key: Any] {
-        baseAttributes()
+        var attributes = baseAttributes()
+        attributes.removeValue(forKey: .foregroundColor)
+        return attributes
     }
 
     func resolvedBaseFont(for theme: SyntaxEditorResolvedColorTheme? = nil) -> UIFont {
@@ -2199,7 +2206,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         guard !updates.isEmpty else { return }
 
-        SyntaxEditorTextKit2StyleApplier.performContentEditing(on: textContentStorage) { storage in
+        TextEditingTransaction.perform(on: textContentStorage) { storage in
             for update in updates {
                 storage.addAttribute(.paragraphStyle, value: update.style, range: update.range)
             }
@@ -2324,29 +2331,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             )
         }
 
-        var estimatedSize = layoutManager.usageBoundsForTextContainer.size
-        let documentEndLocation = textContentStorage.documentRange.endLocation
-
-        layoutManager.enumerateTextLayoutFragments(
-            from: documentEndLocation,
-            options: [.reverse, .ensuresLayout, .ensuresExtraLineFragment]
-        ) { layoutFragment in
-            estimatedSize.width = max(estimatedSize.width, layoutFragment.layoutFragmentFrame.maxX)
-            return false
-        }
-
-        let endRange = NSTextRange(location: documentEndLocation)
-        layoutManager.ensureLayout(for: endRange)
-        layoutManager.enumerateTextSegments(
-            in: endRange,
-            type: .standard,
-            options: [.middleFragmentsExcluded]
-        ) { _, rect, _, _ in
-            estimatedSize.height = max(estimatedSize.height, rect.maxY)
-            return true
-        }
-
-        return estimatedSize
+        let measuredSize = layoutManager.usageBoundsForTextContainer.size
+        let estimatedHeight = CGFloat(lineMetricsIndex.lineCount) * resolvedBaseFont().lineHeight
+        return CGSize(
+            width: max(measuredSize.width, bounds.width),
+            height: max(measuredSize.height, estimatedHeight)
+        )
     }
 
     func updateFindHighlightFragmentViews() {
@@ -2369,11 +2359,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             let fragmentRange = textRange(for: fragmentView.layoutFragment)
             foundRects = textHighlightRects(
                 in: layoutFragmentFrame,
-                ranges: Self.ranges(findFoundRanges, intersecting: fragmentRange)
+                ranges: TextLayoutGeometry.ranges(findFoundRanges, intersecting: fragmentRange)
             )
             highlightedRects = textHighlightRects(
                 in: layoutFragmentFrame,
-                ranges: Self.ranges(findHighlightedRanges, intersecting: fragmentRange)
+                ranges: TextLayoutGeometry.ranges(findHighlightedRanges, intersecting: fragmentRange)
             )
         }
         let foundColor = foundRects.isEmpty
@@ -2404,17 +2394,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func textRange(for layoutFragment: NSTextLayoutFragment) -> NSRange {
-        let fragmentStart = utf16Offset(for: layoutFragment.rangeInElement.location)
-        let fragmentEnd = utf16Offset(for: layoutFragment.rangeInElement.endLocation)
-        return NSRange(location: fragmentStart, length: max(0, fragmentEnd - fragmentStart))
-    }
-
-    static func ranges(_ ranges: [NSRange], intersecting fragmentRange: NSRange) -> [NSRange] {
-        guard !ranges.isEmpty, fragmentRange.length > 0 else { return [] }
-        return ranges.compactMap { range in
-            let intersection = NSIntersectionRange(range, fragmentRange)
-            return intersection.length > 0 ? intersection : nil
-        }
+        textSystem.utf16Range(for: layoutFragment)
     }
 
     static func optionalColorsEqual(_ lhs: CGColor?, _ rhs: CGColor?) -> Bool {
@@ -2432,25 +2412,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guard !ranges.isEmpty else { return [] }
 
         let fragmentLocalBounds = CGRect(origin: .zero, size: layoutFragmentFrame.size)
-        var rects: [CGRect] = []
-        for nsRange in ranges {
-            guard let textRange = textRange(forUTF16Range: nsRange) else { continue }
-            layoutManager.ensureLayout(for: textRange)
-            layoutManager.enumerateTextSegments(
-                in: textRange,
-                type: .standard,
-                options: [.rangeNotRequired]
-            ) { _, segmentRect, _, _ in
-                let localRect = segmentRect.offsetBy(
-                    dx: -layoutFragmentFrame.minX,
-                    dy: -layoutFragmentFrame.minY
-                )
-                guard localRect.intersects(fragmentLocalBounds) else { return true }
-                rects.append(localRect)
-                return true
-            }
-        }
-        return rects
+        return TextLayoutGeometry.standardRects(
+            layoutManager: layoutManager,
+            rangeConverter: textSystem.rangeConverter,
+            ranges: ranges,
+            offsetBy: layoutFragmentFrame.origin
+        )
+        .filter { $0.intersects(fragmentLocalBounds) }
     }
 
     func decorateFindTextRange(_ range: NSRange, style: UITextSearchFoundTextStyle) {
@@ -2563,7 +2531,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func invalidateRenderingAttributes(for range: NSRange) {
-        textKit2System.invalidateRenderingAttributes(for: range)
+        textSystem.invalidateRenderingAttributes(for: range)
     }
 
     func invalidateHorizontalMeasurement() {
@@ -2587,16 +2555,17 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func setNeedsDisplayForTextRanges(_ ranges: [NSRange]) {
         guard !ranges.isEmpty else { return }
 
-        var invalidatedRect = CGRect.null
-        for range in ranges {
-            guard let rect = contentRectForScrollRange(range) else { continue }
-            invalidatedRect = invalidatedRect.union(rect.offsetBy(dx: -textContentView.frame.minX, dy: -textContentView.frame.minY))
+        var didInvalidateFragment = false
+        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            let fragmentRange = textRange(for: fragmentView.layoutFragment)
+            guard !TextLayoutGeometry.ranges(ranges, intersecting: fragmentRange).isEmpty else {
+                continue
+            }
+            fragmentView.setNeedsDisplay()
+            didInvalidateFragment = true
         }
-
-        if invalidatedRect.isNull {
-            setNeedsDisplayForVisibleTextFragments()
-        } else {
-            invalidateTextFragmentViews(intersecting: invalidatedRect.insetBy(dx: -2, dy: -2))
+        if !didInvalidateFragment {
+            setNeedsDisplay()
         }
     }
 
@@ -2838,6 +2807,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         _ textViewportLayoutController: NSTextViewportLayoutController,
         configureRenderingSurfaceFor textLayoutFragment: NSTextLayoutFragment
     ) {
+        textSystem.applySyntaxRenderingAttributes(for: textLayoutFragment)
         let layoutFragmentFrame = textLayoutFragment.layoutFragmentFrame
         let fragmentView: SyntaxEditorTextLayoutFragmentView
         if let cachedFragmentView = fragmentViewMap.object(forKey: textLayoutFragment) {
@@ -2875,41 +2845,19 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func textLocation(forUTF16Offset offset: Int) -> NSTextLocation? {
-        let clampedOffset = min(max(0, offset), text.utf16.count)
-        return textContentStorage.location(
-            textContentStorage.documentRange.location,
-            offsetBy: clampedOffset
-        )
+        textSystem.textLocation(forUTF16Offset: offset)
     }
 
     func utf16Offset(for textLocation: NSTextLocation) -> Int {
-        textContentStorage.offset(
-            from: textContentStorage.documentRange.location,
-            to: textLocation
-        )
+        textSystem.utf16Offset(for: textLocation)
     }
 
     func textRange(forUTF16Range range: NSRange) -> NSTextRange? {
-        let clampedRange = clampedTextRange(range)
-        guard let startLocation = textLocation(forUTF16Offset: clampedRange.location),
-              let endLocation = textLocation(forUTF16Offset: clampedRange.location + clampedRange.length)
-        else {
-            return nil
-        }
-        return NSTextRange(location: startLocation, end: endLocation)
+        textSystem.textRange(forUTF16Range: range)
     }
 
     func utf16Range(for textRange: NSTextRange) -> NSRange {
-        NSRange(
-            location: textContentStorage.offset(
-                from: textContentStorage.documentRange.location,
-                to: textRange.location
-            ),
-            length: textContentStorage.offset(
-                from: textRange.location,
-                to: textRange.endLocation
-            )
-        )
+        textSystem.utf16Range(for: textRange)
     }
 
     func clampedTextRange(_ range: NSRange) -> NSRange {

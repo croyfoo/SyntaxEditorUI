@@ -1,9 +1,10 @@
 #if canImport(UIKit)
 import UIKit
 import SyntaxEditorCore
+import SyntaxEditorUICommon
 
 @MainActor
-struct IOSBracketHighlightRenderer {
+struct BracketHighlightRenderer {
     static func apply(
         rects: [CGRect],
         color: CGColor?,
@@ -71,7 +72,7 @@ extension SyntaxEditorView {
             let fragmentRange = textRange(for: fragmentView.layoutFragment)
             rects = textHighlightRects(
                 in: layoutFragmentFrame,
-                ranges: Self.ranges(matchedBracketRanges, intersecting: fragmentRange)
+                ranges: TextLayoutGeometry.ranges(matchedBracketRanges, intersecting: fragmentRange)
             )
         }
         let color = rects.isEmpty
@@ -81,7 +82,7 @@ extension SyntaxEditorView {
                 .resolvedColor(with: traitCollection)
                 .cgColor
 
-        IOSBracketHighlightRenderer.apply(rects: rects, color: color, to: fragmentView)
+        BracketHighlightRenderer.apply(rects: rects, color: color, to: fragmentView)
     }
 
     func setNeedsDisplayForBracketHighlightRanges(_ ranges: [NSRange]) {

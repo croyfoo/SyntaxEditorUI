@@ -8,7 +8,7 @@ import UIKit
 import AppKit
 #endif
 
-package struct SyntaxEditorTextKit2ColorRun {
+package struct HighlightColorRun {
     package var range: NSRange
     package let color: SyntaxEditorColor
 
@@ -18,7 +18,7 @@ package struct SyntaxEditorTextKit2ColorRun {
     }
 }
 
-package struct SyntaxEditorTextKit2FontRun {
+package struct HighlightFontRun {
     package var range: NSRange
     package let font: SyntaxEditorFont
 
@@ -28,17 +28,17 @@ package struct SyntaxEditorTextKit2FontRun {
     }
 }
 
-package struct SyntaxEditorTextKit2RunSet {
-    package let colorRuns: [SyntaxEditorTextKit2ColorRun]
-    package let fontRuns: [SyntaxEditorTextKit2FontRun]
+package struct HighlightRunSet {
+    package let colorRuns: [HighlightColorRun]
+    package let fontRuns: [HighlightFontRun]
 
-    package init(colorRuns: [SyntaxEditorTextKit2ColorRun], fontRuns: [SyntaxEditorTextKit2FontRun]) {
+    package init(colorRuns: [HighlightColorRun], fontRuns: [HighlightFontRun]) {
         self.colorRuns = colorRuns
         self.fontRuns = fontRuns
     }
 }
 
-package struct SyntaxEditorTextKit2ColorOperation {
+package struct HighlightColorOperation {
     package let range: NSRange
     package let color: SyntaxEditorColor
 
@@ -48,7 +48,7 @@ package struct SyntaxEditorTextKit2ColorOperation {
     }
 }
 
-package struct SyntaxEditorTextKit2FontOperation {
+package struct HighlightFontOperation {
     package let range: NSRange
     package let font: SyntaxEditorFont
 
@@ -58,20 +58,20 @@ package struct SyntaxEditorTextKit2FontOperation {
     }
 }
 
-package struct SyntaxEditorTextKit2StyleOperations {
-    package let colorOperations: [SyntaxEditorTextKit2ColorOperation]
-    package let fontOperations: [SyntaxEditorTextKit2FontOperation]
+package struct HighlightStyleOperations {
+    package let colorOperations: [HighlightColorOperation]
+    package let fontOperations: [HighlightFontOperation]
 
     package init(
-        colorOperations: [SyntaxEditorTextKit2ColorOperation],
-        fontOperations: [SyntaxEditorTextKit2FontOperation]
+        colorOperations: [HighlightColorOperation],
+        fontOperations: [HighlightFontOperation]
     ) {
         self.colorOperations = colorOperations
         self.fontOperations = fontOperations
     }
 
-    package static var empty: SyntaxEditorTextKit2StyleOperations {
-        SyntaxEditorTextKit2StyleOperations(colorOperations: [], fontOperations: [])
+    package static var empty: HighlightStyleOperations {
+        HighlightStyleOperations(colorOperations: [], fontOperations: [])
     }
 
     package var isEmpty: Bool {
@@ -80,28 +80,83 @@ package struct SyntaxEditorTextKit2StyleOperations {
 }
 
 @MainActor
-package final class SyntaxEditorTextKit2StyleStore {
+package final class HighlightStyleStore {
     package private(set) var epoch = 0
+    package private(set) var baseForeground: SyntaxEditorColor?
     private var textLength = 0
-    private var colorRuns: [SyntaxEditorTextKit2ColorRun] = []
-    private var fontRuns: [SyntaxEditorTextKit2FontRun] = []
+    private var colorRuns: [HighlightColorRun] = []
+    private var fontRuns: [HighlightFontRun] = []
     private var foregroundSuppressionRanges: [NSRange] = []
 
-    package var appliedColorRunsForTesting: [SyntaxEditorTextKit2ColorRun] {
+    package var appliedColorRunsForTesting: [HighlightColorRun] {
         colorRuns
     }
 
-    package var appliedFontRunsForTesting: [SyntaxEditorTextKit2FontRun] {
+    package var appliedFontRunsForTesting: [HighlightFontRun] {
         fontRuns
     }
 
+    package func colorRuns(in range: NSRange) -> [HighlightColorRun] {
+        Self.clippedColorRuns(colorRuns, to: range)
+    }
+
+    package func foregroundColor(at location: Int) -> SyntaxEditorColor? {
+        guard location >= 0, location < textLength else { return nil }
+        let range = NSRange(location: location, length: 1)
+        let index = Self.firstColorRunIndex(intersecting: range, in: colorRuns)
+        guard index < colorRuns.count,
+              NSIntersectionRange(colorRuns[index].range, range).length > 0
+        else {
+            return nil
+        }
+        return colorRuns[index].color
+    }
+
+    package func effectiveForegroundColor(at location: Int) -> SyntaxEditorColor? {
+        foregroundColor(at: location) ?? baseForeground
+    }
+
+    package func updateBaseForeground(_ color: SyntaxEditorColor?, textLength nextTextLength: Int? = nil) {
+        let nextTextLength = nextTextLength.map { max(0, $0) } ?? textLength
+        let baseChanged: Bool
+        switch (baseForeground, color) {
+        case (.none, .none):
+            baseChanged = false
+        case let (.some(lhs), .some(rhs)):
+            baseChanged = !lhs.isEqual(rhs)
+        default:
+            baseChanged = true
+        }
+
+        let textLengthChanged = textLength != nextTextLength
+        textLength = nextTextLength
+        baseForeground = color
+        if baseChanged || textLengthChanged {
+            epoch += 1
+        }
+    }
+
+    package func forEachColorRun(
+        in range: NSRange,
+        _ body: (HighlightColorRun) -> Void
+    ) {
+        guard range.length > 0 else { return }
+        let startIndex = Self.firstColorRunIndex(intersecting: range, in: colorRuns)
+        for run in colorRuns[startIndex...] {
+            guard run.range.location < range.upperBound else { break }
+            let intersection = SyntaxEditorRangeUtilities.intersection(of: run.range, and: range)
+            guard intersection.length > 0 else { continue }
+            body(HighlightColorRun(range: intersection, color: run.color))
+        }
+    }
+
     package func replaceAll(
-        with runSet: SyntaxEditorTextKit2RunSet,
+        with runSet: HighlightRunSet,
         textLength nextTextLength: Int,
         baseForeground: SyntaxEditorColor,
         baseFont: SyntaxEditorFont?,
         foregroundSuppressionRanges nextForegroundSuppressionRanges: [NSRange] = []
-    ) -> SyntaxEditorTextKit2StyleOperations {
+    ) -> HighlightStyleOperations {
         apply(
             runSet,
             refreshedRange: NSRange(location: 0, length: max(0, nextTextLength)),
@@ -114,15 +169,16 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     package func apply(
-        _ runSet: SyntaxEditorTextKit2RunSet,
+        _ runSet: HighlightRunSet,
         refreshedRange: NSRange,
         mutation: SyntaxHighlightMutation?,
         textLength nextTextLength: Int,
         baseForeground: SyntaxEditorColor,
         baseFont: SyntaxEditorFont?,
         foregroundSuppressionRanges nextForegroundSuppressionRanges: [NSRange]? = nil
-    ) -> SyntaxEditorTextKit2StyleOperations {
+    ) -> HighlightStyleOperations {
         let nextTextLength = max(0, nextTextLength)
+        self.baseForeground = baseForeground
         if let mutation {
             recordTextMutation(mutation, textLength: nextTextLength)
         }
@@ -141,7 +197,7 @@ package final class SyntaxEditorTextKit2StyleStore {
                 Self.normalizedColorRuns(runSet.colorRuns, textLength: nextTextLength)
                     .flatMap { run in
                         Self.rangesBySubtracting(normalizedSuppressionRanges, from: run.range)
-                            .map { SyntaxEditorTextKit2ColorRun(range: $0, color: run.color) }
+                            .map { HighlightColorRun(range: $0, color: run.color) }
                     }
             ),
             to: clampedRefreshRange
@@ -171,7 +227,7 @@ package final class SyntaxEditorTextKit2StyleStore {
         foregroundSuppressionRanges = normalizedSuppressionRanges
         epoch += 1
 
-        return SyntaxEditorTextKit2StyleOperations(
+        return HighlightStyleOperations(
             colorOperations: colorOperations,
             fontOperations: fontOperations
         )
@@ -194,52 +250,44 @@ package final class SyntaxEditorTextKit2StyleStore {
         textLength nextTextLength: Int,
         baseForeground: SyntaxEditorColor,
         baseFont: SyntaxEditorFont?
-    ) -> SyntaxEditorTextKit2StyleOperations {
+    ) -> HighlightStyleOperations {
         let colorOperations = colorRuns.map { run in
-            SyntaxEditorTextKit2ColorOperation(range: run.range, color: baseForeground)
+            HighlightColorOperation(range: run.range, color: baseForeground)
         }
         let fontOperations = baseFont.map { baseFont in
             fontRuns.map { run in
-                SyntaxEditorTextKit2FontOperation(range: run.range, font: baseFont)
+                HighlightFontOperation(range: run.range, font: baseFont)
             }
         } ?? []
 
         textLength = max(0, nextTextLength)
+        self.baseForeground = baseForeground
         colorRuns = []
         fontRuns = []
         foregroundSuppressionRanges = []
         epoch += 1
 
-        return SyntaxEditorTextKit2StyleOperations(
+        return HighlightStyleOperations(
             colorOperations: colorOperations,
             fontOperations: fontOperations
         )
     }
 
-    package func baseOperations(
-        in range: NSRange,
-        textLength nextTextLength: Int,
-        baseForeground: SyntaxEditorColor,
-        baseFont: SyntaxEditorFont?
-    ) -> SyntaxEditorTextKit2StyleOperations {
-        let clampedRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: max(0, nextTextLength))
-        guard clampedRange.length > 0 else { return .empty }
-
-        let colorOperations = [SyntaxEditorTextKit2ColorOperation(range: clampedRange, color: baseForeground)]
-        let fontOperations = baseFont.map { [SyntaxEditorTextKit2FontOperation(range: clampedRange, font: $0)] } ?? []
-        return SyntaxEditorTextKit2StyleOperations(
-            colorOperations: colorOperations,
-            fontOperations: fontOperations
-        )
+    package func reset(textLength nextTextLength: Int) {
+        textLength = max(0, nextTextLength)
+        colorRuns = []
+        fontRuns = []
+        foregroundSuppressionRanges = []
+        epoch += 1
     }
 
     private static func normalizedColorRuns(
-        _ runs: [SyntaxEditorTextKit2ColorRun],
+        _ runs: [HighlightColorRun],
         textLength: Int
-    ) -> [SyntaxEditorTextKit2ColorRun] {
+    ) -> [HighlightColorRun] {
         runs
             .map { run in
-                SyntaxEditorTextKit2ColorRun(
+                HighlightColorRun(
                     range: SyntaxEditorRangeUtilities.clampedRange(run.range, utf16Length: textLength),
                     color: run.color
                 )
@@ -249,12 +297,12 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func normalizedFontRuns(
-        _ runs: [SyntaxEditorTextKit2FontRun],
+        _ runs: [HighlightFontRun],
         textLength: Int
-    ) -> [SyntaxEditorTextKit2FontRun] {
+    ) -> [HighlightFontRun] {
         runs
             .map { run in
-                SyntaxEditorTextKit2FontRun(
+                HighlightFontRun(
                     range: SyntaxEditorRangeUtilities.clampedRange(run.range, utf16Length: textLength),
                     font: run.font
                 )
@@ -300,47 +348,47 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func clippedColorRuns(
-        _ runs: [SyntaxEditorTextKit2ColorRun],
+        _ runs: [HighlightColorRun],
         to range: NSRange
-    ) -> [SyntaxEditorTextKit2ColorRun] {
+    ) -> [HighlightColorRun] {
         guard range.length > 0 else { return [] }
         let startIndex = firstColorRunIndex(intersecting: range, in: runs)
-        var clippedRuns: [SyntaxEditorTextKit2ColorRun] = []
+        var clippedRuns: [HighlightColorRun] = []
         clippedRuns.reserveCapacity(min(runs.count - startIndex, 128))
 
         for run in runs[startIndex...] {
             guard run.range.location < range.upperBound else { break }
             let intersection = SyntaxEditorRangeUtilities.intersection(of: run.range, and: range)
             guard intersection.length > 0 else { continue }
-            clippedRuns.append(SyntaxEditorTextKit2ColorRun(range: intersection, color: run.color))
+            clippedRuns.append(HighlightColorRun(range: intersection, color: run.color))
         }
 
         return coalescedColorRuns(clippedRuns)
     }
 
     private static func clippedFontRuns(
-        _ runs: [SyntaxEditorTextKit2FontRun],
+        _ runs: [HighlightFontRun],
         to range: NSRange
-    ) -> [SyntaxEditorTextKit2FontRun] {
+    ) -> [HighlightFontRun] {
         guard range.length > 0 else { return [] }
         let startIndex = firstFontRunIndex(intersecting: range, in: runs)
-        var clippedRuns: [SyntaxEditorTextKit2FontRun] = []
+        var clippedRuns: [HighlightFontRun] = []
         clippedRuns.reserveCapacity(min(runs.count - startIndex, 128))
 
         for run in runs[startIndex...] {
             guard run.range.location < range.upperBound else { break }
             let intersection = SyntaxEditorRangeUtilities.intersection(of: run.range, and: range)
             guard intersection.length > 0 else { continue }
-            clippedRuns.append(SyntaxEditorTextKit2FontRun(range: intersection, font: run.font))
+            clippedRuns.append(HighlightFontRun(range: intersection, font: run.font))
         }
 
         return coalescedFontRuns(clippedRuns)
     }
 
     private static func replaceColorRuns(
-        _ runs: inout [SyntaxEditorTextKit2ColorRun],
+        _ runs: inout [HighlightColorRun],
         in range: NSRange,
-        with replacementRuns: [SyntaxEditorTextKit2ColorRun]
+        with replacementRuns: [HighlightColorRun]
     ) {
         guard range.length > 0 else { return }
         let startIndex = firstColorRunIndex(intersecting: range, in: runs)
@@ -349,13 +397,13 @@ package final class SyntaxEditorTextKit2StyleStore {
             endIndex += 1
         }
 
-        var insertedRuns: [SyntaxEditorTextKit2ColorRun] = []
+        var insertedRuns: [HighlightColorRun] = []
         insertedRuns.reserveCapacity(replacementRuns.count + 2)
         if startIndex < endIndex {
             let firstRun = runs[startIndex]
             if firstRun.range.location < range.location {
                 insertedRuns.append(
-                    SyntaxEditorTextKit2ColorRun(
+                    HighlightColorRun(
                         range: NSRange(
                             location: firstRun.range.location,
                             length: range.location - firstRun.range.location
@@ -367,7 +415,7 @@ package final class SyntaxEditorTextKit2StyleStore {
             let lastRun = runs[endIndex - 1]
             if lastRun.range.upperBound > range.upperBound {
                 insertedRuns.append(
-                    SyntaxEditorTextKit2ColorRun(
+                    HighlightColorRun(
                         range: NSRange(
                             location: range.upperBound,
                             length: lastRun.range.upperBound - range.upperBound
@@ -385,9 +433,9 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func replaceFontRuns(
-        _ runs: inout [SyntaxEditorTextKit2FontRun],
+        _ runs: inout [HighlightFontRun],
         in range: NSRange,
-        with replacementRuns: [SyntaxEditorTextKit2FontRun]
+        with replacementRuns: [HighlightFontRun]
     ) {
         guard range.length > 0 else { return }
         let startIndex = firstFontRunIndex(intersecting: range, in: runs)
@@ -396,13 +444,13 @@ package final class SyntaxEditorTextKit2StyleStore {
             endIndex += 1
         }
 
-        var insertedRuns: [SyntaxEditorTextKit2FontRun] = []
+        var insertedRuns: [HighlightFontRun] = []
         insertedRuns.reserveCapacity(replacementRuns.count + 2)
         if startIndex < endIndex {
             let firstRun = runs[startIndex]
             if firstRun.range.location < range.location {
                 insertedRuns.append(
-                    SyntaxEditorTextKit2FontRun(
+                    HighlightFontRun(
                         range: NSRange(
                             location: firstRun.range.location,
                             length: range.location - firstRun.range.location
@@ -414,7 +462,7 @@ package final class SyntaxEditorTextKit2StyleStore {
             let lastRun = runs[endIndex - 1]
             if lastRun.range.upperBound > range.upperBound {
                 insertedRuns.append(
-                    SyntaxEditorTextKit2FontRun(
+                    HighlightFontRun(
                         range: NSRange(
                             location: range.upperBound,
                             length: lastRun.range.upperBound - range.upperBound
@@ -432,7 +480,7 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func coalesceColorRunsAround(
-        _ runs: inout [SyntaxEditorTextKit2ColorRun],
+        _ runs: inout [HighlightColorRun],
         startIndex: Int,
         replacementCount: Int
     ) {
@@ -459,7 +507,7 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func coalesceFontRunsAround(
-        _ runs: inout [SyntaxEditorTextKit2FontRun],
+        _ runs: inout [HighlightFontRun],
         startIndex: Int,
         replacementCount: Int
     ) {
@@ -487,7 +535,7 @@ package final class SyntaxEditorTextKit2StyleStore {
 
     private static func firstColorRunIndex(
         intersecting range: NSRange,
-        in runs: [SyntaxEditorTextKit2ColorRun]
+        in runs: [HighlightColorRun]
     ) -> Int {
         var lowerBound = 0
         var upperBound = runs.count
@@ -504,7 +552,7 @@ package final class SyntaxEditorTextKit2StyleStore {
 
     private static func firstFontRunIndex(
         intersecting range: NSRange,
-        in runs: [SyntaxEditorTextKit2FontRun]
+        in runs: [HighlightFontRun]
     ) -> Int {
         var lowerBound = 0
         var upperBound = runs.count
@@ -520,20 +568,20 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func colorOperations(
-        from previousRuns: [SyntaxEditorTextKit2ColorRun],
-        to nextRuns: [SyntaxEditorTextKit2ColorRun],
+        from previousRuns: [HighlightColorRun],
+        to nextRuns: [HighlightColorRun],
         baseForeground: SyntaxEditorColor
-    ) -> [SyntaxEditorTextKit2ColorOperation] {
+    ) -> [HighlightColorOperation] {
         let nextKeys = Set(nextRuns.map(ColorRunKey.init))
         let previousKeys = Set(previousRuns.map(ColorRunKey.init))
-        var operations: [SyntaxEditorTextKit2ColorOperation] = []
+        var operations: [HighlightColorOperation] = []
         operations.reserveCapacity(previousRuns.count + nextRuns.count)
 
         for run in previousRuns where !nextKeys.contains(ColorRunKey(run)) {
-            operations.append(SyntaxEditorTextKit2ColorOperation(range: run.range, color: baseForeground))
+            operations.append(HighlightColorOperation(range: run.range, color: baseForeground))
         }
         for run in nextRuns where !previousKeys.contains(ColorRunKey(run)) {
-            operations.append(SyntaxEditorTextKit2ColorOperation(range: run.range, color: run.color))
+            operations.append(HighlightColorOperation(range: run.range, color: run.color))
         }
 
         return operations.sorted { lhs, rhs in
@@ -546,22 +594,22 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func fontOperations(
-        from previousRuns: [SyntaxEditorTextKit2FontRun],
-        to nextRuns: [SyntaxEditorTextKit2FontRun],
+        from previousRuns: [HighlightFontRun],
+        to nextRuns: [HighlightFontRun],
         baseFont: SyntaxEditorFont?
-    ) -> [SyntaxEditorTextKit2FontOperation] {
+    ) -> [HighlightFontOperation] {
         let nextKeys = Set(nextRuns.map(FontRunKey.init))
         let previousKeys = Set(previousRuns.map(FontRunKey.init))
-        var operations: [SyntaxEditorTextKit2FontOperation] = []
+        var operations: [HighlightFontOperation] = []
         operations.reserveCapacity(previousRuns.count + nextRuns.count)
 
         if let baseFont {
             for run in previousRuns where !nextKeys.contains(FontRunKey(run)) {
-                operations.append(SyntaxEditorTextKit2FontOperation(range: run.range, font: baseFont))
+                operations.append(HighlightFontOperation(range: run.range, font: baseFont))
             }
         }
         for run in nextRuns where !previousKeys.contains(FontRunKey(run)) {
-            operations.append(SyntaxEditorTextKit2FontOperation(range: run.range, font: run.font))
+            operations.append(HighlightFontOperation(range: run.range, font: run.font))
         }
 
         return operations.sorted { lhs, rhs in
@@ -574,9 +622,9 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func coalescedColorRuns(
-        _ runs: [SyntaxEditorTextKit2ColorRun]
-    ) -> [SyntaxEditorTextKit2ColorRun] {
-        var coalescedRuns: [SyntaxEditorTextKit2ColorRun] = []
+        _ runs: [HighlightColorRun]
+    ) -> [HighlightColorRun] {
+        var coalescedRuns: [HighlightColorRun] = []
         coalescedRuns.reserveCapacity(runs.count)
 
         for run in runs.sorted(by: sortColorRun) {
@@ -597,9 +645,9 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func coalescedFontRuns(
-        _ runs: [SyntaxEditorTextKit2FontRun]
-    ) -> [SyntaxEditorTextKit2FontRun] {
-        var coalescedRuns: [SyntaxEditorTextKit2FontRun] = []
+        _ runs: [HighlightFontRun]
+    ) -> [HighlightFontRun] {
+        var coalescedRuns: [HighlightFontRun] = []
         coalescedRuns.reserveCapacity(runs.count)
 
         for run in runs.sorted(by: sortFontRun) {
@@ -620,8 +668,8 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func sortColorRun(
-        lhs: SyntaxEditorTextKit2ColorRun,
-        rhs: SyntaxEditorTextKit2ColorRun
+        lhs: HighlightColorRun,
+        rhs: HighlightColorRun
     ) -> Bool {
         if lhs.range.location == rhs.range.location {
             lhs.range.length < rhs.range.length
@@ -631,8 +679,8 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func sortFontRun(
-        lhs: SyntaxEditorTextKit2FontRun,
-        rhs: SyntaxEditorTextKit2FontRun
+        lhs: HighlightFontRun,
+        rhs: HighlightFontRun
     ) -> Bool {
         if lhs.range.location == rhs.range.location {
             lhs.range.length < rhs.range.length
@@ -642,24 +690,24 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 
     private static func shiftedColorRuns(
-        _ runs: [SyntaxEditorTextKit2ColorRun],
+        _ runs: [HighlightColorRun],
         by mutation: SyntaxHighlightMutation,
         sourceLength: Int
-    ) -> [SyntaxEditorTextKit2ColorRun] {
+    ) -> [HighlightColorRun] {
         coalescedColorRuns(runs.flatMap { run in
             shiftedRangesAfterMutation(run.range, by: mutation, sourceLength: sourceLength)
-                .map { SyntaxEditorTextKit2ColorRun(range: $0, color: run.color) }
+                .map { HighlightColorRun(range: $0, color: run.color) }
         })
     }
 
     private static func shiftedFontRuns(
-        _ runs: [SyntaxEditorTextKit2FontRun],
+        _ runs: [HighlightFontRun],
         by mutation: SyntaxHighlightMutation,
         sourceLength: Int
-    ) -> [SyntaxEditorTextKit2FontRun] {
+    ) -> [HighlightFontRun] {
         coalescedFontRuns(runs.flatMap { run in
             shiftedRangesAfterMutation(run.range, by: mutation, sourceLength: sourceLength)
-                .map { SyntaxEditorTextKit2FontRun(range: $0, font: run.font) }
+                .map { HighlightFontRun(range: $0, font: run.font) }
         })
     }
 
@@ -730,7 +778,7 @@ package final class SyntaxEditorTextKit2StyleStore {
         let length: Int
         let colorComponents: ColorComponents
 
-        init(_ run: SyntaxEditorTextKit2ColorRun) {
+        init(_ run: HighlightColorRun) {
             location = run.range.location
             length = run.range.length
             colorComponents = ColorComponents(run.color)
@@ -743,7 +791,7 @@ package final class SyntaxEditorTextKit2StyleStore {
         let fontName: String
         let pointSize: CGFloat
 
-        init(_ run: SyntaxEditorTextKit2FontRun) {
+        init(_ run: HighlightFontRun) {
             location = run.range.location
             length = run.range.length
             fontName = run.font.fontName
@@ -787,112 +835,4 @@ package final class SyntaxEditorTextKit2StyleStore {
     }
 }
 
-package enum SyntaxEditorTextKit2StyleApplier {
-    @MainActor
-    package static func performContentEditing(
-        on textContentStorage: NSTextContentStorage,
-        _ body: (NSTextStorage) -> Void
-    ) {
-        textContentStorage.performEditingTransaction {
-            guard let textStorage = textContentStorage.textStorage else { return }
-            body(textStorage)
-        }
-    }
-
-    @MainActor
-    package static func apply(
-        _ operations: SyntaxEditorTextKit2StyleOperations,
-        to textContentStorage: NSTextContentStorage
-    ) {
-        guard !operations.isEmpty else { return }
-
-        performContentEditing(on: textContentStorage) { textStorage in
-            let textLength = textStorage.length
-            for operation in operations.colorOperations {
-                let range = SyntaxEditorRangeUtilities.clampedRange(operation.range, utf16Length: textLength)
-                guard range.length > 0 else { continue }
-                textStorage.addAttribute(.foregroundColor, value: operation.color, range: range)
-            }
-            for operation in operations.fontOperations {
-                let range = SyntaxEditorRangeUtilities.clampedRange(operation.range, utf16Length: textLength)
-                guard range.length > 0 else { continue }
-                textStorage.addAttribute(.font, value: operation.font, range: range)
-            }
-        }
-    }
-}
-
-@MainActor
-package final class SyntaxEditorTextKit2System {
-    package let textContentStorage: NSTextContentStorage
-    package let layoutManager: NSTextLayoutManager
-    package let container: NSTextContainer
-    package let styleStore: SyntaxEditorTextKit2StyleStore
-
-    package init(
-        textContentStorage: NSTextContentStorage = NSTextContentStorage(),
-        layoutManager: NSTextLayoutManager = NSTextLayoutManager(),
-        container: NSTextContainer = NSTextContainer(),
-        styleStore: SyntaxEditorTextKit2StyleStore = SyntaxEditorTextKit2StyleStore()
-    ) {
-        self.textContentStorage = textContentStorage
-        self.layoutManager = layoutManager
-        self.container = container
-        self.styleStore = styleStore
-
-        layoutManager.textContainer = container
-        textContentStorage.addTextLayoutManager(layoutManager)
-        textContentStorage.primaryTextLayoutManager = layoutManager
-    }
-
-    package var textStorage: NSTextStorage {
-        guard let textStorage = textContentStorage.textStorage else {
-            fatalError("SyntaxEditorTextKit2System requires NSTextContentStorage-backed NSTextStorage")
-        }
-        return textStorage
-    }
-
-    package func textLocation(forUTF16Offset offset: Int) -> NSTextLocation? {
-        let clampedOffset = min(max(0, offset), textStorage.length)
-        return textContentStorage.location(
-            textContentStorage.documentRange.location,
-            offsetBy: clampedOffset
-        )
-    }
-
-    package func utf16Offset(for textLocation: NSTextLocation) -> Int {
-        textContentStorage.offset(
-            from: textContentStorage.documentRange.location,
-            to: textLocation
-        )
-    }
-
-    package func textRange(forUTF16Range range: NSRange) -> NSTextRange? {
-        let clampedRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textStorage.length)
-        guard let startLocation = textLocation(forUTF16Offset: clampedRange.location),
-              let endLocation = textLocation(forUTF16Offset: clampedRange.location + clampedRange.length)
-        else {
-            return nil
-        }
-        return NSTextRange(location: startLocation, end: endLocation)
-    }
-
-    package func utf16Range(for textRange: NSTextRange) -> NSRange {
-        NSRange(
-            location: textContentStorage.offset(
-                from: textContentStorage.documentRange.location,
-                to: textRange.location
-            ),
-            length: textContentStorage.offset(
-                from: textRange.location,
-                to: textRange.endLocation
-            )
-        )
-    }
-
-    package func invalidateRenderingAttributes(for range: NSRange) {
-        guard let textRange = textRange(forUTF16Range: range) else { return }
-        layoutManager.invalidateRenderingAttributes(for: textRange)
-    }
-}
 #endif
