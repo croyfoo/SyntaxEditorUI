@@ -74,6 +74,13 @@ package final class LineMetricsIndex {
         let maxColumns = currentMaxColumns()
         return ceil(CGFloat(maxColumns) * columnWidth + lineFragmentPadding * 2 + textContainerInset)
     }
+
+    package func estimatedWrappedLineCount(maxColumnsPerLine: Int) -> Int {
+        let maxColumnsPerLine = max(1, maxColumnsPerLine)
+        return lineColumns.reduce(0) { total, columns in
+            total + max(1, Int(ceil(Double(columns) / Double(maxColumnsPerLine))))
+        }
+    }
 }
 
 private extension LineMetricsIndex {

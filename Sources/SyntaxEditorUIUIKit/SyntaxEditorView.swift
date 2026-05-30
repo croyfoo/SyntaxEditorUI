@@ -2338,7 +2338,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         let measuredSize = layoutManager.usageBoundsForTextContainer.size
-        let estimatedHeight = CGFloat(lineMetricsIndex.lineCount) * resolvedBaseFont().lineHeight
+        let font = resolvedBaseFont()
+        let estimatedColumnWidth = Self.estimatedMonospacedColumnWidth(for: font)
+        let availableLineWidth = max(1, container.size.width - container.lineFragmentPadding * 2)
+        let estimatedHeight = CGFloat(lineMetricsIndex.estimatedWrappedLineCount(
+            maxColumnsPerLine: Int(floor(availableLineWidth / estimatedColumnWidth))
+        )) * font.lineHeight
         return CGSize(
             width: max(measuredSize.width, bounds.width),
             height: max(measuredSize.height, estimatedHeight)

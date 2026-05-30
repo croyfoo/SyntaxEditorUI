@@ -759,6 +759,14 @@ struct SyntaxEditorCoreTests {
         #expect(index.horizontalDocumentWidth(columnWidth: 2, textContainerInset: 10, lineFragmentPadding: 5) == 260)
     }
 
+    @Test("LineMetricsIndex estimates wrapped visual line counts")
+    func lineMetricsIndexEstimatesWrappedLineCount() {
+        let index = LineMetricsIndex(source: "1234567890\nabc\n", tabWidth: 4)
+
+        #expect(index.estimatedWrappedLineCount(maxColumnsPerLine: 4) == 5)
+        #expect(index.estimatedWrappedLineCount(maxColumnsPerLine: 20) == 3)
+    }
+
     @Test("LineMetricsIndex updates edited line ranges without full rebuild")
     func lineMetricsIndexIncrementalEdits() {
         var source = "abc\nabcdef"

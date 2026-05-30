@@ -3943,21 +3943,26 @@ extension SyntaxEditorUITests {
     @Test("SyntaxEditorView clears stale horizontal content size after iOS wrapping toggles")
     @MainActor
     func syntaxEditorViewIOSWrappingToggleClearsStaleHorizontalContentSize() async {
+        let source = String(repeating: "let wrappingHeightMustTrackVisualLines = true; ", count: 48)
         let model = SyntaxEditorTestContext(
-            text: longSyntaxEditorLine,
+            text: source,
             language: SyntaxLanguage.swift,
             lineWrappingEnabled: true
         )
         let editorView = SyntaxEditorView(testContext: model)
 
-        layoutIOSEditorView(editorView)
+        layoutIOSEditorView(editorView, width: 240, height: 140)
+        let wrappedHeight = editorView.contentSize.height
         #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
+        #expect(wrappedHeight > editorView.bounds.height + 400)
 
         model.configuration.lineWrappingEnabled = false
 
         editorView.synchronizeDocumentForTesting()
         #expect(!editorView.textContainer.widthTracksTextView)
-        layoutIOSEditorView(editorView)
+        layoutIOSEditorView(editorView, width: 240, height: 140)
+        let unwrappedHeight = editorView.contentSize.height
+        #expect(unwrappedHeight < wrappedHeight - 400)
         let restoredHorizontalOverflow = iOSEditorHasHorizontalOverflow(editorView)
         if !restoredHorizontalOverflow {
             Issue.record(Comment(rawValue: iOSEditorHorizontalOverflowDiagnostics(editorView)))
@@ -3971,8 +3976,9 @@ extension SyntaxEditorUITests {
 
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textContainer.widthTracksTextView)
-        layoutIOSEditorView(editorView)
+        layoutIOSEditorView(editorView, width: 240, height: 140)
         #expect(editorView.contentSize.width <= editorView.bounds.width + 1)
+        #expect(editorView.contentSize.height > unwrappedHeight + 400)
     }
 
     @Test("SyntaxEditorMenu builds UIKit Editor menu commands")

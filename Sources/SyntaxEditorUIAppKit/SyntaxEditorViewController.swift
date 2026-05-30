@@ -1758,7 +1758,10 @@ public final class SyntaxEditorView: NSScrollView {
         }
 
         let contentSize = effectiveScrollContentSize
-        let estimatedDocumentSize = estimatedTextViewDocumentSize(minimumContentSize: contentSize)
+        let estimatedDocumentSize = estimatedTextViewDocumentSize(
+            minimumContentSize: contentSize,
+            lineWrappingEnabled: lineWrappingEnabled
+        )
 
         if textView.minSize.height != contentSize.height {
             textView.minSize = NSSize(width: 0, height: contentSize.height)
@@ -1861,28 +1864,28 @@ public final class SyntaxEditorView: NSScrollView {
         )
     }
 
-    private func estimatedTextViewDocumentSize(minimumContentSize: NSSize) -> NSSize {
+    private func estimatedTextViewDocumentSize(
+        minimumContentSize: NSSize,
+        lineWrappingEnabled: Bool
+    ) -> NSSize {
         let source = textView.string
         let baseFont = textView.font ?? resolvedBaseFont()
         let lineHeight = max(1, ceil(baseFont.ascender - baseFont.descender + baseFont.leading))
-        var lineCount = 1
-        var currentLineLength = 0
-        var maximumLineLength = 0
-
-        for codeUnit in source.utf16 {
-            if codeUnit == 10 || codeUnit == 13 {
-                maximumLineLength = max(maximumLineLength, currentLineLength)
-                currentLineLength = 0
-                lineCount += 1
-            } else {
-                currentLineLength += 1
-            }
-        }
-        maximumLineLength = max(maximumLineLength, currentLineLength)
-
         let estimatedColumnWidth = max(1, baseFont.pointSize * 0.65)
         let horizontalPadding = textContainer.lineFragmentPadding * 2
-        let estimatedWidth = ceil(CGFloat(maximumLineLength) * estimatedColumnWidth + horizontalPadding)
+        let metrics = LineMetricsIndex(source: source, tabWidth: 4)
+        let estimatedWidth = metrics.horizontalDocumentWidth(
+            columnWidth: estimatedColumnWidth,
+            textContainerInset: 0,
+            lineFragmentPadding: textContainer.lineFragmentPadding
+        )
+        let lineCount = if lineWrappingEnabled {
+            metrics.estimatedWrappedLineCount(
+                maxColumnsPerLine: Int(floor(max(1, minimumContentSize.width - horizontalPadding) / estimatedColumnWidth))
+            )
+        } else {
+            metrics.lineCount
+        }
         let estimatedHeight = ceil(CGFloat(lineCount) * lineHeight)
 
         return NSSize(

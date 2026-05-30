@@ -1692,6 +1692,36 @@ extension SyntaxEditorUITests {
         }())
     }
 
+    @Test("SyntaxEditorView recalculates macOS document height after wrapping toggles")
+    @MainActor
+    func syntaxEditorViewMacWrappingToggleRecalculatesDocumentHeight() async {
+        let source = String(repeating: "let wrappingHeightMustTrackVisualLines = true; ", count: 48)
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        layoutMacEditorView(editorView, width: 240, height: 120)
+        let unwrappedHeight = editorView.textView.frame.height
+
+        model.configuration.lineWrappingEnabled = true
+
+        editorView.synchronizeDocumentForTesting()
+        layoutMacEditorView(editorView, width: 240, height: 120)
+        let wrappedHeight = editorView.textView.frame.height
+
+        #expect(wrappedHeight > unwrappedHeight + 400)
+
+        model.configuration.lineWrappingEnabled = false
+
+        editorView.synchronizeDocumentForTesting()
+        layoutMacEditorView(editorView, width: 240, height: 120)
+
+        #expect(editorView.textView.frame.height < wrappedHeight - 400)
+        #expect(approximatelyEqual(editorView.textView.frame.height, unwrappedHeight))
+    }
+
     @Test("SyntaxEditorView does not repaint all macOS text fragments while scrolling")
     @MainActor
     func syntaxEditorViewMacScrollDoesNotInvalidateVisibleFragments() async {
