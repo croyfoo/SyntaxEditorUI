@@ -59,7 +59,7 @@ struct SyntaxEditorUICommonTests {
         }
 
         let font = SyntaxEditorFont.monospacedSystemFont(ofSize: 18, weight: .bold)
-        await TextEditingTransaction.applyIncrementally(
+        let completed = await TextEditingTransaction.applyIncrementally(
             HighlightStyleOperations(
                 colorOperations: [HighlightColorOperation(range: NSRange(location: 0, length: 6), color: redColor)],
                 fontOperations: [HighlightFontOperation(range: NSRange(location: 1, length: 3), font: font)]
@@ -68,8 +68,40 @@ struct SyntaxEditorUICommonTests {
             maximumOperationsPerTransaction: 1
         )
 
+        #expect(completed)
         #expect(system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) == nil)
         #expect((system.textStorage.attribute(.font, at: 1, effectiveRange: nil) as? SyntaxEditorFont) == font)
+    }
+
+    @Test("Text editing transaction stops incremental font operations after cancellation validation fails")
+    func stopsIncrementalFontOperationsAfterCancellationValidationFails() async {
+        let system = EditorTextSystem()
+        TextEditingTransaction.perform(on: system.textContentStorage) { storage in
+            storage.setAttributedString(NSAttributedString(string: "abcdef"))
+        }
+
+        let firstFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 18, weight: .bold)
+        let secondFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 20, weight: .bold)
+        var validationCount = 0
+        let completed = await TextEditingTransaction.applyIncrementally(
+            HighlightStyleOperations(
+                colorOperations: [],
+                fontOperations: [
+                    HighlightFontOperation(range: NSRange(location: 0, length: 1), font: firstFont),
+                    HighlightFontOperation(range: NSRange(location: 1, length: 1), font: secondFont),
+                ]
+            ),
+            to: system.textContentStorage,
+            maximumOperationsPerTransaction: 1,
+            shouldContinue: {
+                validationCount += 1
+                return validationCount < 2
+            }
+        )
+
+        #expect(!completed)
+        #expect((system.textStorage.attribute(.font, at: 0, effectiveRange: nil) as? SyntaxEditorFont) == firstFont)
+        #expect(system.textStorage.attribute(.font, at: 1, effectiveRange: nil) == nil)
     }
 
     @Test("Highlight style store emits content attribute operations")

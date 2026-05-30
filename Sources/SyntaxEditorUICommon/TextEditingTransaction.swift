@@ -39,14 +39,17 @@ package enum TextEditingTransaction {
     package static func applyIncrementally(
         _ operations: HighlightStyleOperations,
         to textContentStorage: NSTextContentStorage,
-        maximumOperationsPerTransaction: Int = 64
-    ) async {
-        guard !operations.isEmpty else { return }
+        maximumOperationsPerTransaction: Int = 64,
+        shouldContinue: @MainActor () -> Bool = { true }
+    ) async -> Bool {
+        guard !operations.isEmpty else { return true }
 
         let maximumOperationsPerTransaction = max(1, maximumOperationsPerTransaction)
         var fontIndex = operations.fontOperations.startIndex
 
         while fontIndex < operations.fontOperations.endIndex {
+            guard !Task.isCancelled, shouldContinue() else { return false }
+
             let fontCount = min(
                 maximumOperationsPerTransaction,
                 operations.fontOperations.distance(from: fontIndex, to: operations.fontOperations.endIndex)
@@ -64,10 +67,14 @@ package enum TextEditingTransaction {
 
             fontIndex = fontEndIndex
 
+            guard !Task.isCancelled, shouldContinue() else { return false }
+
             if fontIndex < operations.fontOperations.endIndex {
                 await Task.yield()
             }
         }
+
+        return !Task.isCancelled && shouldContinue()
     }
 }
 #endif

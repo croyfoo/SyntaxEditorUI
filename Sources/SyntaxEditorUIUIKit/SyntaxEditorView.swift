@@ -2105,7 +2105,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         ) else {
             return false
         }
-        await TextEditingTransaction.applyIncrementally(operations, to: textContentStorage)
+        let didApply = await TextEditingTransaction.applyIncrementally(
+            operations,
+            to: textContentStorage,
+            shouldContinue: { document.revision == expectedRevision }
+        )
+        guard didApply else { return false }
         textSystem.invalidateRenderingAttributes(for: targetRange)
         await Task.yield()
         return !Task.isCancelled && document.revision == expectedRevision

@@ -1423,13 +1423,14 @@ public final class SyntaxEditorView: NSScrollView {
         guard !Task.isCancelled else { return false }
         isApplyingHighlight = true
         defer { isApplyingHighlight = false }
-        await installSyntaxHighlightRenderingIncrementally(
+        guard await installSyntaxHighlightRenderingIncrementally(
             for: tokens,
             targetRange: targetRange,
             textLength: textLength,
             baseAttributes: base,
-            mutation: mutation
-        )
+            mutation: mutation,
+            expectedRevision: expectedRevision
+        ) else { return false }
         guard !Task.isCancelled, document.revision == expectedRevision else { return false }
 
         textView.typingAttributes = base
@@ -1481,8 +1482,9 @@ public final class SyntaxEditorView: NSScrollView {
         targetRange: NSRange,
         textLength: Int,
         baseAttributes: [NSAttributedString.Key: Any],
-        mutation: SyntaxHighlightMutation?
-    ) async {
+        mutation: SyntaxHighlightMutation?,
+        expectedRevision: Int
+    ) async -> Bool {
         guard let operations = syntaxHighlightOperations(
             for: tokens,
             targetRange: targetRange,
@@ -1490,10 +1492,16 @@ public final class SyntaxEditorView: NSScrollView {
             baseAttributes: baseAttributes,
             mutation: mutation
         ) else {
-            return
+            return false
         }
-        await TextEditingTransaction.applyIncrementally(operations, to: textSystem.textContentStorage)
+        let didApply = await TextEditingTransaction.applyIncrementally(
+            operations,
+            to: textSystem.textContentStorage,
+            shouldContinue: { document.revision == expectedRevision }
+        )
+        guard didApply else { return false }
         textSystem.invalidateRenderingAttributes(for: targetRange)
+        return true
     }
 
     private func syntaxHighlightOperations(
