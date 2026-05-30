@@ -8987,6 +8987,104 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.refreshRange.length < updatedSource.utf16.count)
     }
 
+    @Test("SyntaxHighlighterEngine keeps Objective-C property-heavy reference edits equal to full reset")
+    func highlighterKeepsObjectiveCPropertyHeavyReferenceEditsEqualToFullReset() async throws {
+        let properties = (0..<120)
+            .map { "@property(nonatomic, copy) NSString *name\($0);" }
+            .joined(separator: "\n")
+        let source = """
+        @interface Heavy : NSObject
+        \(properties)
+        @end
+
+        @implementation Heavy
+        - (NSUInteger)length
+        {
+            NSUInteger value = self.name42.length + 1;
+            return value;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(of: "self.name42.length + 1", with: "self.name42.length + 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "name42",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name42.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name42.length"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine replaces Objective-C semantic overlays inside partial target range")
+    func highlighterReplacesObjectiveCSemanticOverlaysInsidePartialTargetRange() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @property(nonatomic, copy) NSString *title;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length + self.title.length;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "self.name.length",
+            with: "self.title.length",
+            options: [],
+            range: source.range(of: "self.name.length")
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "title",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return self.title.length"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine incrementally updates Objective-C reference sample like a full reset")
     func highlighterIncrementallyUpdatesObjectiveCReferenceSampleLikeFullReset() async throws {
         let source = try referenceSampleText(named: "Reference.m")
@@ -9043,6 +9141,42 @@ struct SyntaxHighlighterEngineTests {
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
             mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        let systemType = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSString *value"
+        )
+        #expect(systemType.styleKeys.first == "editor.syntax.identifier.type.system")
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after type declaration rename")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterTypeDeclarationRename() async throws {
+        let source = """
+        @interface NSString : NSObject
+        @end
+
+        void run(void) {
+            NSString *value = nil;
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "@interface NSString", with: "@interface NSStringShadow")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 

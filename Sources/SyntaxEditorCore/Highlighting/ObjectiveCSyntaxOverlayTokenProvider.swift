@@ -52,6 +52,114 @@ private struct ObjectiveCSyntaxIDMask: OptionSet {
     }
 }
 
+struct ObjectiveCSemanticOverlayState {
+    fileprivate var index: ObjectiveCFileSymbolIndex?
+}
+
+struct ObjectiveCSemanticOverlayResult {
+    let tokens: [SyntaxHighlightToken]
+    let refreshRangeOverride: NSRange?
+    let isCancelled: Bool
+}
+
+private struct ObjectiveCOverlayPreparation {
+    let baseTokensForIndex: [SyntaxHighlightToken]
+    let outputBaseTokens: [SyntaxHighlightToken]
+    let nonCodeRanges: [NSRange]
+    let tokenIndex: ObjectiveCTokenIndex
+}
+
+private struct ObjectiveCIndexedToken {
+    let range: NSRange
+    let syntaxID: EditorSourceSyntaxID
+}
+
+private struct ObjectiveCTokenIndex {
+    let identifierTokens: [ObjectiveCIndexedToken]
+    private let declarationOtherIdentifierRanges: [NSRange]
+    private let propertyKeywordRangeKeys: Set<ObjectiveCRangeKey>
+    private let identifierRangeKeys: Set<ObjectiveCRangeKey>
+
+    init(tokens: [SyntaxHighlightToken], source: NSString) {
+        var identifierTokens: [ObjectiveCIndexedToken] = []
+        var declarationOtherIdentifierRanges: [NSRange] = []
+        var propertyKeywordRangeKeys = Set<ObjectiveCRangeKey>()
+        var identifierRangeKeys = Set<ObjectiveCRangeKey>()
+        identifierTokens.reserveCapacity(tokens.count)
+        declarationOtherIdentifierRanges.reserveCapacity(tokens.count / 12)
+
+        for token in tokens where token.language == .objectiveC || token.language == nil {
+            guard token.range.location >= 0,
+                  token.range.length > 0,
+                  token.range.upperBound <= source.length else {
+                continue
+            }
+            if token.range.length == "@property".utf16.count,
+               source.substring(with: token.range) == "@property" {
+                propertyKeywordRangeKeys.insert(ObjectiveCRangeKey(token.range))
+            }
+            guard ObjectiveCFileSymbolIndex.isIdentifierRange(token.range, in: source) else {
+                continue
+            }
+            identifierRangeKeys.insert(ObjectiveCRangeKey(token.range))
+            let indexedToken = ObjectiveCIndexedToken(range: token.range, syntaxID: token.syntaxID)
+            identifierTokens.append(indexedToken)
+            if token.syntaxID == .declarationOther {
+                declarationOtherIdentifierRanges.append(token.range)
+            }
+        }
+
+        self.identifierTokens = identifierTokens
+        self.declarationOtherIdentifierRanges = declarationOtherIdentifierRanges.sorted {
+            if $0.location != $1.location {
+                return $0.location < $1.location
+            }
+            return $0.length < $1.length
+        }
+        self.propertyKeywordRangeKeys = propertyKeywordRangeKeys
+        self.identifierRangeKeys = identifierRangeKeys
+    }
+
+    func declarationOtherIdentifierRanges(in range: NSRange) -> [NSRange] {
+        var index = lowerBoundForDeclarationOtherIdentifier(location: range.location)
+        var ranges: [NSRange] = []
+        while index < declarationOtherIdentifierRanges.count {
+            let candidate = declarationOtherIdentifierRanges[index]
+            guard candidate.location < range.upperBound else {
+                break
+            }
+            if candidate.location >= range.location,
+               candidate.upperBound <= range.upperBound {
+                ranges.append(candidate)
+            }
+            index += 1
+        }
+        return ranges
+    }
+
+    func containsPropertyKeywordRange(_ range: NSRange) -> Bool {
+        propertyKeywordRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    func containsIdentifierRange(_ range: NSRange) -> Bool {
+        identifierRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    private func lowerBoundForDeclarationOtherIdentifier(location: Int) -> Int {
+        var lower = 0
+        var upper = declarationOtherIdentifierRanges.count
+        while lower < upper {
+            let midpoint = (lower + upper) / 2
+            if declarationOtherIdentifierRanges[midpoint].location < location {
+                lower = midpoint + 1
+            } else {
+                upper = midpoint
+            }
+        }
+        return lower
+    }
+}
+
 enum ObjectiveCSyntaxOverlayTokenProvider {
     static func mergingOverlayTokens(
         tokens: [SyntaxHighlightToken],
@@ -59,31 +167,84 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         rootNode: Node? = nil,
         refreshRange: NSRange? = nil
     ) -> [SyntaxHighlightToken] {
+        var state: ObjectiveCSemanticOverlayState?
+        return mergingOverlayResult(
+            tokens: tokens,
+            source: source,
+            rootNode: rootNode,
+            refreshRange: refreshRange,
+            state: &state
+        ).tokens
+    }
+
+    static func mergingOverlayResult(
+        tokens: [SyntaxHighlightToken],
+        source: String,
+        rootNode: Node? = nil,
+        refreshRange: NSRange? = nil,
+        state: inout ObjectiveCSemanticOverlayState?
+    ) -> ObjectiveCSemanticOverlayResult {
         let nsSource = source as NSString
         guard nsSource.length > 0 else {
-            return objectiveCBaseTokens(from: tokens, source: nsSource)
+            state = nil
+            return ObjectiveCSemanticOverlayResult(
+                tokens: preparedOverlayInput(from: tokens, source: nsSource, targetRange: nil).baseTokensForIndex,
+                refreshRangeOverride: nil,
+                isCancelled: false
+            )
         }
 
         let targetRange = objectiveCSemanticTargetRange(refreshRange, in: nsSource)
-        let baseTokensForIndex = objectiveCBaseTokens(from: tokens, source: nsSource)
-        let outputBaseTokens = targetRange.map {
-            objectiveCBaseTokens(from: tokens, source: nsSource, strippingSemanticOverlaysIn: $0)
-        } ?? baseTokensForIndex
-        let nonCodeRanges = nonCodeRanges(from: baseTokensForIndex, sourceLength: nsSource.length)
-        let index = ObjectiveCFileSymbolIndex(source: nsSource, tokens: baseTokensForIndex, rootNode: rootNode)
+        let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
+        let shouldRebuildIndex = targetRange == nil || state?.index == nil
+        let index: ObjectiveCFileSymbolIndex
+        var rebuiltState: ObjectiveCSemanticOverlayState?
+        if shouldRebuildIndex {
+            guard let rebuiltIndex = ObjectiveCFileSymbolIndex(
+                source: nsSource,
+                tokenIndex: preparation.tokenIndex,
+                rootNode: rootNode,
+                allowsCancellation: true
+            ) else {
+                return ObjectiveCSemanticOverlayResult(
+                    tokens: tokens,
+                    refreshRangeOverride: nil,
+                    isCancelled: true
+                )
+            }
+            index = rebuiltIndex
+            rebuiltState = ObjectiveCSemanticOverlayState(index: rebuiltIndex)
+        } else {
+            index = state!.index!
+        }
+
+        guard !Task.isCancelled else {
+            return ObjectiveCSemanticOverlayResult(
+                tokens: tokens,
+                refreshRangeOverride: nil,
+                isCancelled: true
+            )
+        }
+
         let overlayTokens = semanticTokens(
-            from: baseTokensForIndex,
+            from: preparation.baseTokensForIndex,
             source: nsSource,
             index: index,
             targetRange: targetRange
         )
-            + appleMacroTokens(in: nsSource, nonCodeRanges: nonCodeRanges, targetRange: targetRange)
-            + appleEnumTypedefTokens(in: nsSource, nonCodeRanges: nonCodeRanges, targetRange: targetRange)
-        guard overlayTokens.isEmpty == false else {
-            return outputBaseTokens
+            + appleMacroTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
+            + appleEnumTypedefTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
+        let mergedTokens = overlayTokens.isEmpty
+            ? preparation.outputBaseTokens
+            : deduplicated(mergedTokens(baseTokens: preparation.outputBaseTokens, overlayTokens: overlayTokens))
+        if let rebuiltState {
+            state = rebuiltState
         }
-
-        return deduplicated(mergedTokens(baseTokens: outputBaseTokens, overlayTokens: overlayTokens))
+        return ObjectiveCSemanticOverlayResult(
+            tokens: mergedTokens,
+            refreshRangeOverride: targetRange,
+            isCancelled: false
+        )
     }
 
     private static func semanticTokens(
@@ -960,25 +1121,53 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         )
     }
 
-    private static func objectiveCBaseTokens(
+    private static func preparedOverlayInput(
         from tokens: [SyntaxHighlightToken],
         source: NSString,
-        strippingSemanticOverlaysIn stripRange: NSRange? = nil
-    ) -> [SyntaxHighlightToken] {
+        targetRange: NSRange?
+    ) -> ObjectiveCOverlayPreparation {
         var syntaxIDsByRange: [ObjectiveCRangeKey: ObjectiveCSyntaxIDMask] = [:]
         for token in tokens where token.language == .objectiveC || token.language == nil {
             syntaxIDsByRange[ObjectiveCRangeKey(token.range), default: []]
                 .formUnion(ObjectiveCSyntaxIDMask(syntaxID: token.syntaxID))
         }
 
-        return tokens.filter { token in
-            !isObjectiveCSemanticOverlayToken(
+        var baseTokensForIndex: [SyntaxHighlightToken] = []
+        var outputBaseTokens: [SyntaxHighlightToken] = []
+        baseTokensForIndex.reserveCapacity(tokens.count)
+        outputBaseTokens.reserveCapacity(tokens.count)
+
+        for token in tokens {
+            let syntaxIDs = syntaxIDsByRange[ObjectiveCRangeKey(token.range)] ?? []
+            let stripsFromIndex = isObjectiveCSemanticOverlayToken(
                 token,
-                syntaxIDsAtSameRange: syntaxIDsByRange[ObjectiveCRangeKey(token.range)] ?? [],
+                syntaxIDsAtSameRange: syntaxIDs,
                 source: source,
-                strippingSemanticOverlaysIn: stripRange
+                strippingSemanticOverlaysIn: nil
             )
+            if !stripsFromIndex {
+                baseTokensForIndex.append(token)
+            }
+
+            let stripsFromOutput = targetRange.map {
+                isObjectiveCSemanticOverlayToken(
+                    token,
+                    syntaxIDsAtSameRange: syntaxIDs,
+                    source: source,
+                    strippingSemanticOverlaysIn: $0
+                )
+            } ?? stripsFromIndex
+            if !stripsFromOutput {
+                outputBaseTokens.append(token)
+            }
         }
+
+        return ObjectiveCOverlayPreparation(
+            baseTokensForIndex: baseTokensForIndex,
+            outputBaseTokens: outputBaseTokens,
+            nonCodeRanges: nonCodeRanges(from: baseTokensForIndex, sourceLength: source.length),
+            tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source)
+        )
     }
 
     private static func mergedTokens(
@@ -1160,10 +1349,29 @@ private struct ObjectiveCFileSymbolIndex {
     private let selfMemberNameRangeKeys: Set<ObjectiveCRangeKey>
     private let selfChainMemberNameRangeKeys: Set<ObjectiveCRangeKey>
 
-    init(source: NSString, tokens: [SyntaxHighlightToken], rootNode: Node? = nil) {
-        let treeFacts = rootNode.map {
-            Self.collectTreeSymbolFacts(from: $0, source: source, tokens: tokens)
-        } ?? ObjectiveCTreeSymbolFacts()
+    init?(
+        source: NSString,
+        tokenIndex: ObjectiveCTokenIndex,
+        rootNode: Node? = nil,
+        allowsCancellation: Bool = false
+    ) {
+        if allowsCancellation, Task.isCancelled {
+            return nil
+        }
+        let treeFacts: ObjectiveCTreeSymbolFacts
+        if let rootNode {
+            guard let facts = Self.collectTreeSymbolFacts(
+                from: rootNode,
+                source: source,
+                tokenIndex: tokenIndex,
+                allowsCancellation: allowsCancellation
+            ) else {
+                return nil
+            }
+            treeFacts = facts
+        } else {
+            treeFacts = ObjectiveCTreeSymbolFacts()
+        }
 
         var localTypes = treeFacts.localTypes
         var localFunctions = treeFacts.localFunctions
@@ -1174,20 +1382,14 @@ private struct ObjectiveCFileSymbolIndex {
 
         if rootNode == nil {
             localTypes.formUnion(Self.scanLocalTypes(source: source))
-            propertyDeclarations.append(contentsOf: Self.scanLocalPropertyDeclarations(source: source, tokens: tokens))
+            propertyDeclarations.append(contentsOf: Self.scanLocalPropertyDeclarations(source: source, tokenIndex: tokenIndex))
             localProperties.formUnion(propertyDeclarations.map(\.name))
         }
 
-        for token in tokens {
-            guard token.language == .objectiveC || token.language == nil,
-                  token.range.location >= 0,
-                  token.range.length > 0,
-                  token.range.upperBound <= source.length,
-                  Self.isIdentifierRange(token.range, in: source)
-            else {
-                continue
+        for token in tokenIndex.identifierTokens {
+            if allowsCancellation, Task.isCancelled {
+                return nil
             }
-
             let text = source.substring(with: token.range)
 
             switch token.syntaxID {
@@ -1234,19 +1436,33 @@ private struct ObjectiveCFileSymbolIndex {
     private static func collectTreeSymbolFacts(
         from rootNode: Node,
         source: NSString,
-        tokens: [SyntaxHighlightToken]
-    ) -> ObjectiveCTreeSymbolFacts {
+        tokenIndex: ObjectiveCTokenIndex,
+        allowsCancellation: Bool
+    ) -> ObjectiveCTreeSymbolFacts? {
         var facts = ObjectiveCTreeSymbolFacts()
-        collectTreeSymbolFacts(from: rootNode, source: source, tokens: tokens, into: &facts)
+        guard collectTreeSymbolFacts(
+            from: rootNode,
+            source: source,
+            tokenIndex: tokenIndex,
+            allowsCancellation: allowsCancellation,
+            into: &facts
+        ) else {
+            return nil
+        }
         return facts
     }
 
+    @discardableResult
     private static func collectTreeSymbolFacts(
         from node: Node,
         source: NSString,
-        tokens: [SyntaxHighlightToken],
+        tokenIndex: ObjectiveCTokenIndex,
+        allowsCancellation: Bool,
         into facts: inout ObjectiveCTreeSymbolFacts
-    ) {
+    ) -> Bool {
+        if allowsCancellation, Task.isCancelled {
+            return false
+        }
         switch node.nodeType {
         case "class_interface", "class_implementation", "protocol_declaration":
             if let nameNode = primaryTypeIdentifier(in: node, source: source) {
@@ -1263,7 +1479,7 @@ private struct ObjectiveCFileSymbolIndex {
                 facts.localTypes.insert(source.substring(with: nameNode.range))
             }
         case "property_declaration":
-            collectPropertyFacts(from: node, source: source, tokens: tokens, into: &facts)
+            collectPropertyFacts(from: node, source: source, tokenIndex: tokenIndex, into: &facts)
         case "method_declaration", "method_definition":
             collectMethodFacts(from: node, source: source, into: &facts)
         case "function_declarator":
@@ -1276,8 +1492,17 @@ private struct ObjectiveCFileSymbolIndex {
 
         for index in 0..<node.childCount {
             guard let child = node.child(at: index) else { continue }
-            collectTreeSymbolFacts(from: child, source: source, tokens: tokens, into: &facts)
+            guard collectTreeSymbolFacts(
+                from: child,
+                source: source,
+                tokenIndex: tokenIndex,
+                allowsCancellation: allowsCancellation,
+                into: &facts
+            ) else {
+                return false
+            }
         }
+        return true
     }
 
     private static func collectTypeDefinitionFacts(
@@ -1295,7 +1520,7 @@ private struct ObjectiveCFileSymbolIndex {
     private static func collectPropertyFacts(
         from node: Node,
         source: NSString,
-        tokens: [SyntaxHighlightToken],
+        tokenIndex: ObjectiveCTokenIndex,
         into facts: inout ObjectiveCTreeSymbolFacts
     ) {
         guard let declarationRange = propertyStatementRange(startingAt: node.range.location, in: source) else {
@@ -1308,17 +1533,10 @@ private struct ObjectiveCFileSymbolIndex {
         }
 
         var didCollectFromToken = false
-        for token in tokens where token.language == .objectiveC || token.language == nil {
-            guard token.syntaxID == .declarationOther,
-                  range(declarationRange, contains: token.range),
-                  token.range.upperBound <= source.length,
-                  isIdentifierRange(token.range, in: source)
-            else {
-                continue
-            }
-            let name = source.substring(with: token.range)
+        for range in tokenIndex.declarationOtherIdentifierRanges(in: declarationRange) {
+            let name = source.substring(with: range)
             facts.localProperties.insert(name)
-            facts.propertyDeclarations.append((name: name, range: token.range))
+            facts.propertyDeclarations.append((name: name, range: range))
             didCollectFromToken = true
         }
 
@@ -1623,7 +1841,7 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static func scanLocalPropertyDeclarations(
         source: NSString,
-        tokens: [SyntaxHighlightToken]
+        tokenIndex: ObjectiveCTokenIndex
     ) -> [(name: String, range: NSRange)] {
         let string = source as String
         let fullRange = NSRange(location: 0, length: source.length)
@@ -1631,7 +1849,7 @@ private struct ObjectiveCFileSymbolIndex {
 
         for match in propertyDeclarationRegex.matches(in: string, range: fullRange) {
             let propertyKeywordRange = NSRange(location: match.range.location, length: "@property".count)
-            guard isCodeTokenRange(propertyKeywordRange, tokens: tokens, source: source) else {
+            guard tokenIndex.containsPropertyKeywordRange(propertyKeywordRange) else {
                 continue
             }
 
@@ -1649,40 +1867,12 @@ private struct ObjectiveCFileSymbolIndex {
             let name = source.substring(with: range)
             if isIdentifier(name),
                !typedefIgnoredIdentifiers.contains(name),
-               isCodeIdentifierRange(range, tokens: tokens, source: source) {
+               tokenIndex.containsIdentifierRange(range) {
                 declarations.append((name: name, range: range))
             }
         }
 
         return declarations
-    }
-
-    private static func isCodeTokenRange(
-        _ range: NSRange,
-        tokens: [SyntaxHighlightToken],
-        source: NSString
-    ) -> Bool {
-        tokens.contains { token in
-            guard NSEqualRanges(token.range, range),
-                  (token.language == .objectiveC || token.language == nil) else {
-                return false
-            }
-            return source.substring(with: token.range) == "@property"
-        }
-    }
-
-    private static func isCodeIdentifierRange(
-        _ range: NSRange,
-        tokens: [SyntaxHighlightToken],
-        source: NSString
-    ) -> Bool {
-        tokens.contains { token in
-            guard NSEqualRanges(token.range, range),
-                  (token.language == .objectiveC || token.language == nil) else {
-                return false
-            }
-            return isIdentifier(source.substring(with: token.range))
-        }
     }
 
     private static func propertyDeclaredNameRange(in declaration: NSString) -> NSRange? {
@@ -2082,7 +2272,7 @@ private struct ObjectiveCFileSymbolIndex {
         return isIdentifierRange(NSRange(location: 0, length: nsText.length), in: nsText)
     }
 
-    private static func isIdentifierRange(_ range: NSRange, in source: NSString) -> Bool {
+    static func isIdentifierRange(_ range: NSRange, in source: NSString) -> Bool {
         guard range.location >= 0,
               range.length > 0,
               range.upperBound <= source.length,
