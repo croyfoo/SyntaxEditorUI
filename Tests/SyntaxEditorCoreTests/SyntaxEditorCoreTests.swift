@@ -8987,6 +8987,77 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.refreshRange.length < updatedSource.utf16.count)
     }
 
+    @Test("SyntaxHighlighterEngine incrementally updates Objective-C reference sample like a full reset")
+    func highlighterIncrementallyUpdatesObjectiveCReferenceSampleLikeFullReset() async throws {
+        let source = try referenceSampleText(named: "Reference.m")
+        let updatedSource = source.replacingOccurrences(
+            of: "ReferenceTokenBase + 1",
+            with: "ReferenceTokenBase + 2",
+            options: [],
+            range: source.range(of: "ReferenceTokenBase + 1")
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C type shadows after declaration removal")
+    func highlighterStripsStaleObjectiveCTypeShadowsAfterDeclarationRemoval() async throws {
+        let source = """
+        @interface NSString : NSObject
+        @end
+
+        void run(void) {
+            NSString *value = nil;
+        }
+        """
+        let removedDeclaration = """
+        @interface NSString : NSObject
+        @end
+
+        """
+        let updatedSource = source.replacingOccurrences(of: removedDeclaration, with: "")
+        let mutation = SyntaxHighlightMutation(
+            location: 0,
+            length: (removedDeclaration as NSString).length,
+            replacement: ""
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        let systemType = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSString *value"
+        )
+        #expect(systemType.styleKeys.first == "editor.syntax.identifier.type.system")
+    }
+
     @Test("SyntaxHighlighterEngine highlights HTML root and embedded languages")
     func highlighterSupportsHTMLInjections() async {
         let engine = sharedSyntaxHighlighterEngine

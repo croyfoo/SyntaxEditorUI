@@ -263,7 +263,7 @@ private final class SyntaxHighlightSession {
             let classifiedTokens = semanticClassifiedTokensIfNeeded(
                 highlightTokens,
                 source: layeredSource,
-                swiftRootNode: swiftRootNodeSnapshot()
+                rootNode: semanticRootNodeSnapshot()
             )
 
             tokens = classifiedTokens
@@ -371,7 +371,7 @@ private final class SyntaxHighlightSession {
         let classifiedTokens = semanticClassifiedTokensIfNeeded(
             mergedHighlight.tokens,
             source: nextLayeredSource,
-            swiftRootNode: swiftRootNodeSnapshot(),
+            rootNode: semanticRootNodeSnapshot(),
             refreshRange: refreshRange
         )
         let resultRefreshRange = semanticRefreshRange(
@@ -585,7 +585,7 @@ private extension SyntaxHighlightSession {
     func semanticClassifiedTokensIfNeeded(
         _ tokens: [SyntaxHighlightToken],
         source: String,
-        swiftRootNode: Node? = nil,
+        rootNode: Node? = nil,
         refreshRange: NSRange? = nil
     ) -> [SyntaxHighlightToken] {
         switch language {
@@ -593,13 +593,15 @@ private extension SyntaxHighlightSession {
             return SwiftSyntaxOverlayTokenProvider.mergingOverlayTokens(
                 tokens: tokens,
                 source: source,
-                rootNode: swiftRootNode,
+                rootNode: rootNode,
                 refreshRange: refreshRange
             )
         case .objectiveC:
             return ObjectiveCSyntaxOverlayTokenProvider.mergingOverlayTokens(
                 tokens: tokens,
-                source: source
+                source: source,
+                rootNode: rootNode,
+                refreshRange: refreshRange
             )
         case .css:
             return CSSSyntaxOverlayTokenProvider.mergingOverlayTokens(
@@ -617,8 +619,8 @@ private extension SyntaxHighlightSession {
         }
     }
 
-    func swiftRootNodeSnapshot() -> Node? {
-        guard language == .swift else {
+    func semanticRootNodeSnapshot() -> Node? {
+        guard language == .swift || language == .objectiveC else {
             return nil
         }
         return layer?.snapshot()?.rootSnapshot.tree.rootNode

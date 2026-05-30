@@ -11,7 +11,7 @@ struct HighlightBenchmark {
 
         _ = await SyntaxHighlighterEngine().reset(
             source: benchmarkSource,
-            language: .swift,
+            language: arguments.language,
             revision: 0
         )
 
@@ -20,17 +20,20 @@ struct HighlightBenchmark {
 
         let fullSamples = await measureFullReset(
             source: benchmarkSource,
+            language: arguments.language,
             iterations: arguments.iterations
         )
         let incrementalSamples = await measureIncrementalUpdate(
             source: benchmarkSource,
             updatedSource: updatedSource,
             mutation: mutation,
+            language: arguments.language,
             iterations: arguments.iterations
         )
 
-        print("Swift highlight benchmark")
+        print("\(arguments.language.displayName) highlight benchmark")
         print("file: \(arguments.filePath)")
+        print("language: \(arguments.language.identifier)")
         print("utf16Length: \((benchmarkSource as NSString).length)")
         print("repeatSource: \(arguments.repeatSource)")
         print("iterations: \(arguments.iterations)")
@@ -44,10 +47,11 @@ struct HighlightBenchmark {
     @MainActor
     private static func measureFullReset(
         source: String,
+        language: SyntaxLanguage,
         iterations: Int
     ) async -> BenchmarkSamples {
         await measure(iterations: iterations) {
-            await SyntaxHighlighterEngine().reset(source: source, language: .swift, revision: 0)
+            await SyntaxHighlighterEngine().reset(source: source, language: language, revision: 0)
         }
     }
 
@@ -56,6 +60,7 @@ struct HighlightBenchmark {
         source: String,
         updatedSource: String,
         mutation: SyntaxHighlightMutation?,
+        language: SyntaxLanguage,
         iterations: Int
     ) async -> BenchmarkSamples {
         var durations: [Double] = []
@@ -64,19 +69,19 @@ struct HighlightBenchmark {
 
         for _ in 0..<iterations {
             let engine = SyntaxHighlighterEngine()
-            _ = await engine.reset(source: source, language: .swift, revision: 0)
+            _ = await engine.reset(source: source, language: language, revision: 0)
 
             let start = DispatchTime.now().uptimeNanoseconds
             let result: SyntaxHighlightResult
             if let mutation {
                 result = await engine.update(
                     source: updatedSource,
-                    language: .swift,
+                    language: language,
                     mutation: mutation,
                     revision: 1
                 )
             } else {
-                result = await engine.reset(source: updatedSource, language: .swift, revision: 1)
+                result = await engine.reset(source: updatedSource, language: language, revision: 1)
             }
             let end = DispatchTime.now().uptimeNanoseconds
             durations.append(Double(end - start) / 1_000_000)
@@ -123,6 +128,22 @@ struct HighlightBenchmark {
                 range: source.range(of: "Reference highlighting surface")
             )
         }
+        if let range = source.range(of: "ReferenceTokenBase + 1") {
+            return source.replacingOccurrences(
+                of: "ReferenceTokenBase + 1",
+                with: "ReferenceTokenBase + 2",
+                options: [],
+                range: range
+            )
+        }
+        if let range = source.range(of: "ReferenceItem") {
+            return source.replacingOccurrences(
+                of: "ReferenceItem",
+                with: "ReferenceItemBenchmark",
+                options: [],
+                range: range
+            )
+        }
         return source + "\n// benchmark edit\n"
     }
 
@@ -142,11 +163,13 @@ struct HighlightBenchmark {
 
 private struct BenchmarkArguments {
     let filePath: String
+    let language: SyntaxLanguage
     let iterations: Int
     let repeatSource: Int
 
     init(_ arguments: ArraySlice<String>) {
         var filePath = "Tools/Mini/Mini/ReferenceSamples/Reference.swift"
+        var explicitLanguage: SyntaxLanguage?
         var iterations = 20
         var repeatSource = 1
         var index = arguments.startIndex
@@ -158,6 +181,9 @@ private struct BenchmarkArguments {
             switch argument {
             case "--file" where nextIndex < arguments.endIndex:
                 filePath = arguments[nextIndex]
+                index = arguments.index(after: nextIndex)
+            case "--language" where nextIndex < arguments.endIndex:
+                explicitLanguage = Self.language(named: arguments[nextIndex])
                 index = arguments.index(after: nextIndex)
             case "--iterations" where nextIndex < arguments.endIndex:
                 iterations = max(1, Int(arguments[nextIndex]) ?? iterations)
@@ -171,8 +197,53 @@ private struct BenchmarkArguments {
         }
 
         self.filePath = filePath
+        self.language = explicitLanguage ?? Self.language(forFilePath: filePath)
         self.iterations = iterations
         self.repeatSource = repeatSource
+    }
+
+    private static func language(named name: String) -> SyntaxLanguage? {
+        switch name.lowercased() {
+        case "css":
+            .css
+        case "html":
+            .html
+        case "javascript", "js":
+            .javascript
+        case "json":
+            .json
+        case "objective-c", "objectivec", "objc", "m", "h":
+            .objectiveC
+        case "swift":
+            .swift
+        case "toml":
+            .toml
+        case "xml":
+            .xml
+        default:
+            SyntaxLanguage.named(name)
+        }
+    }
+
+    private static func language(forFilePath filePath: String) -> SyntaxLanguage {
+        switch URL(fileURLWithPath: filePath).pathExtension.lowercased() {
+        case "css":
+            .css
+        case "html", "htm":
+            .html
+        case "js", "mjs", "cjs":
+            .javascript
+        case "json":
+            .json
+        case "m", "h":
+            .objectiveC
+        case "toml":
+            .toml
+        case "xml":
+            .xml
+        default:
+            .swift
+        }
     }
 }
 
