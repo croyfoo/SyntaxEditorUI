@@ -1487,6 +1487,32 @@ extension SyntaxEditorUITests {
         #expect(recorder.count == 1)
     }
 
+    @Test("SyntaxEditorView replaces macOS marked text when IME commits through insertText")
+    @MainActor
+    func syntaxEditorViewMacReplacesMarkedTextWhenIMECommitsThroughInsertText() async {
+        let source = "let value = "
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let insertionRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.textView.setSelectedRange(insertionRange)
+
+        editorView.textView.setMarkedText(
+            "かな",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        editorView.textView.insertText("仮名", replacementRange: NSRange(location: NSNotFound, length: 0))
+        await editorView.waitForPendingHighlightForTesting()
+
+        let expectedSource = source + "仮名"
+        #expect(!editorView.textView.hasMarkedText())
+        #expect(editorView.textView.markedRange().location == NSNotFound)
+        #expect(editorView.textView.string == expectedSource)
+        #expect(model.document.textSnapshot() == expectedSource)
+        #expect(editorView.textView.selectedRange() == NSRange(location: expectedSource.utf16.count, length: 0))
+    }
+
     @Test("SyntaxEditorView preserves macOS highlights for observed document edits")
     @MainActor
     func syntaxEditorViewMacObservedDocumentEditsPreserveExistingHighlights() async {

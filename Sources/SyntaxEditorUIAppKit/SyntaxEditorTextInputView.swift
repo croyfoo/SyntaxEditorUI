@@ -618,8 +618,19 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     func insertText(_ string: Any, replacementRange: NSRange) {
         guard isEditable else { return }
         let replacement = (string as? NSAttributedString)?.string ?? "\(string)"
-        let range = effectiveReplacementRange(replacementRange)
-        replaceText(in: range, with: replacement, selectedRange: NSRange(location: range.location + replacement.utf16.count, length: 0))
+        let markedRange = markedTextRangeStorage
+        let range = markedRange ?? effectiveReplacementRange(replacementRange)
+        if markedRange != nil {
+            markedTextRangeStorage = nil
+        }
+        let didReplace = replaceText(
+            in: range,
+            with: replacement,
+            selectedRange: NSRange(location: range.location + replacement.utf16.count, length: 0)
+        )
+        if !didReplace {
+            markedTextRangeStorage = markedRange
+        }
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
@@ -980,8 +991,9 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         updateInsertionIndicator()
     }
 
-    private func replaceText(in range: NSRange, with replacement: String, selectedRange: NSRange) {
-        guard shouldChangeText(inRanges: [range], replacementStrings: [replacement]) else { return }
+    @discardableResult
+    private func replaceText(in range: NSRange, with replacement: String, selectedRange: NSRange) -> Bool {
+        guard shouldChangeText(inRanges: [range], replacementStrings: [replacement]) else { return false }
         textFinder.noteClientStringWillChange()
         textContentStorage.performEditingTransaction {
             storage.replaceCharacters(in: range, with: NSAttributedString(string: replacement, attributes: typingAttributes))
@@ -989,6 +1001,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         setSelectedRange(selectedRange)
         invalidateTextLayout()
         didChangeTextNotification()
+        return true
     }
 
     private func configureTextFinder() {
