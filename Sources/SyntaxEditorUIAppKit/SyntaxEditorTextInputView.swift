@@ -753,11 +753,82 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     }
 
     func invalidateTextLayout() {
+        updateDocumentFrameForCurrentText()
         textLayoutManager.invalidateLayout(for: textContentStorage.documentRange)
         textLayoutManager.textSelectionNavigation.flushLayoutCache()
         layoutVisibleViewport()
         updateDecorationRenderingForVisibleFragments()
         setNeedsDisplayForVisibleTextFragments()
+    }
+
+    func updateDocumentFrameForCurrentText() {
+        updateDocumentFrameForCurrentText(
+            minimumContentSize: effectiveScrollContentSize,
+            lineWrappingEnabled: lineWrappingStateProvider?() ?? !isHorizontallyResizable
+        )
+    }
+
+    func updateDocumentFrameForCurrentText(
+        minimumContentSize: NSSize,
+        lineWrappingEnabled: Bool
+    ) {
+        let estimatedDocumentSize = estimatedDocumentSize(minimumContentSize: minimumContentSize)
+        let nextSize = if lineWrappingEnabled {
+            NSSize(width: max(0, minimumContentSize.width), height: estimatedDocumentSize.height)
+        } else {
+            estimatedDocumentSize
+        }
+
+        guard !frame.size.isNearlyEqual(to: nextSize) else { return }
+
+        setFrameSize(nextSize)
+        textContentView.frame = bounds
+        needsLayout = true
+    }
+
+    private var effectiveScrollContentSize: NSSize {
+        guard let scrollView = enclosingScrollView else {
+            return bounds.size
+        }
+
+        let contentSize = scrollView.contentSize
+        let contentInsets = scrollView.contentView.contentInsets
+        let width = contentSize.width > 0 ? contentSize.width : bounds.width
+        let height = contentSize.height > 0 ? contentSize.height : bounds.height
+        return NSSize(
+            width: max(0, width - max(0, contentInsets.left) - max(0, contentInsets.right)),
+            height: max(0, height - max(0, contentInsets.bottom))
+        )
+    }
+
+    private func estimatedDocumentSize(minimumContentSize: NSSize) -> NSSize {
+        let source = string
+        let baseFont = font ?? (typingAttributes[.font] as? NSFont) ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let lineHeight = max(1, ceil(baseFont.ascender - baseFont.descender + baseFont.leading))
+        var lineCount = 1
+        var currentLineLength = 0
+        var maximumLineLength = 0
+
+        for codeUnit in source.utf16 {
+            if codeUnit == 10 || codeUnit == 13 {
+                maximumLineLength = max(maximumLineLength, currentLineLength)
+                currentLineLength = 0
+                lineCount += 1
+            } else {
+                currentLineLength += 1
+            }
+        }
+        maximumLineLength = max(maximumLineLength, currentLineLength)
+
+        let estimatedColumnWidth = max(1, baseFont.pointSize * 0.65)
+        let horizontalPadding = (textContainer?.lineFragmentPadding ?? 0) * 2
+        let estimatedWidth = ceil(CGFloat(maximumLineLength) * estimatedColumnWidth + horizontalPadding)
+        let estimatedHeight = ceil(CGFloat(lineCount) * lineHeight)
+
+        return NSSize(
+            width: max(minimumContentSize.width, estimatedWidth),
+            height: max(minimumContentSize.height, estimatedHeight)
+        )
     }
 
     func layoutVisibleViewport() {
@@ -1720,6 +1791,19 @@ final class SyntaxEditorTextLayoutFragmentView: NSView {
         default:
             return false
         }
+    }
+}
+
+private extension CGFloat {
+    func isNearlyEqual(to other: CGFloat, tolerance: CGFloat = 0.5) -> Bool {
+        abs(self - other) <= tolerance
+    }
+}
+
+private extension NSSize {
+    func isNearlyEqual(to other: NSSize, tolerance: CGFloat = 0.5) -> Bool {
+        width.isNearlyEqual(to: other.width, tolerance: tolerance)
+            && height.isNearlyEqual(to: other.height, tolerance: tolerance)
     }
 }
 #endif

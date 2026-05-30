@@ -1588,6 +1588,54 @@ extension SyntaxEditorUITests {
         )
     }
 
+    @Test("SyntaxEditorView renders macOS pasted text before async highlight completes")
+    @MainActor
+    func syntaxEditorViewMacRendersPastedTextBeforeAsyncHighlightCompletes() async {
+        let source = "let start = 0\n"
+        let pastedText = String(repeating: "let value = 1\n", count: 500)
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let updateGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorUITestHighlighter(updateGate: updateGate)
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        layoutMacEditorView(editorView)
+        await editorView.waitForPendingHighlightForTesting()
+        let initialDocumentHeight = editorView.textView.frame.height
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        editorView.textView.insertText(pastedText, replacementRange: NSRange(location: 0, length: 0))
+        await updateGate.waitUntilSuspended()
+        layoutMacEditorView(editorView)
+        let pastedDocumentHeight = editorView.textView.frame.height
+
+        #expect(editorView.textView.string == pastedText + source)
+        #expect(model.document.textSnapshot() == pastedText + source)
+        #expect(pastedDocumentHeight > initialDocumentHeight + 1_000)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        let previousSuspensionCount = await updateGate.currentSuspensionCount()
+        editorView.textView.replaceCharacters(
+            in: NSRange(location: 0, length: pastedText.utf16.count),
+            with: ""
+        )
+        await updateGate.waitUntilSuspended(after: previousSuspensionCount)
+        layoutMacEditorView(editorView)
+
+        #expect(editorView.textView.string == source)
+        #expect(model.document.textSnapshot() == source)
+        #expect(editorView.textView.frame.height < pastedDocumentHeight - 1_000)
+
+        await updateGate.resumeAll()
+        await editorView.waitForPendingHighlightForTesting()
+    }
+
     @Test("SyntaxEditorView reflects editable and wrapping changes on macOS")
     @MainActor
     func syntaxEditorViewMacEditorStateObservation() async {

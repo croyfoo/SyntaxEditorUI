@@ -1139,7 +1139,7 @@ public final class SyntaxEditorView: NSScrollView {
         pendingHighlightApplication = nil
 
         let highlighter = self.highlighter
-        highlightTask = Task { [weak self] in
+        highlightTask = Task(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation] in
             await Task.yield()
             guard !Task.isCancelled else {
                 return
@@ -1161,21 +1161,28 @@ public final class SyntaxEditorView: NSScrollView {
                 )
             }
             guard !Task.isCancelled else { return }
-            guard let self else { return }
-            guard self.document.revision == result.revision else { return }
-            let refreshRange = self.highlightApplicationRefreshRange(
-                for: result,
-                mutation: mutation
-            )
-            await self.applyHighlightFromScheduledTask(
-                result.tokens,
-                expectedRevision: result.revision,
-                source: result.source,
-                language: result.language,
-                refreshRange: refreshRange,
-                mutation: mutation
-            )
+            await self?.applyHighlightResultFromScheduledTask(result, mutation: mutation)
         }
+    }
+
+    private func applyHighlightResultFromScheduledTask(
+        _ result: SyntaxHighlightResult,
+        mutation: SyntaxHighlightMutation?
+    ) async {
+        guard !Task.isCancelled else { return }
+        guard document.revision == result.revision else { return }
+        let refreshRange = highlightApplicationRefreshRange(
+            for: result,
+            mutation: mutation
+        )
+        await applyHighlightFromScheduledTask(
+            result.tokens,
+            expectedRevision: result.revision,
+            source: result.source,
+            language: result.language,
+            refreshRange: refreshRange,
+            mutation: mutation
+        )
     }
 
     private func highlightApplicationRefreshRange(
@@ -1777,7 +1784,7 @@ public final class SyntaxEditorView: NSScrollView {
 
             let wrappingWidth = max(0, contentSize.width)
             var frame = textView.frame
-            let frameHeight = max(frame.height, estimatedDocumentSize.height)
+            let frameHeight = estimatedDocumentSize.height
             if !frame.width.isNearlyEqual(to: wrappingWidth) || !frame.height.isNearlyEqual(to: frameHeight) {
                 frame.size = NSSize(width: wrappingWidth, height: frameHeight)
                 textView.frame = frame

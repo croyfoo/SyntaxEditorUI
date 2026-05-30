@@ -1514,6 +1514,52 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorLineFragmentForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView renders iOS pasted text before async highlight completes")
+    @MainActor
+    func syntaxEditorViewIOSRendersPastedTextBeforeAsyncHighlightCompletes() async {
+        let source = "let start = 0\n"
+        let pastedText = String(repeating: "let value = 1\n", count: 500)
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let updateGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorUITestHighlighter(updateGate: updateGate)
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+        await editorView.waitForPendingHighlightForTesting()
+        let initialContentHeight = editorView.contentSize.height
+
+        editorView.selectedRange = NSRange(location: 0, length: 0)
+        editorView.insertPastedText(pastedText)
+        await updateGate.waitUntilSuspended()
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+        let pastedContentHeight = editorView.contentSize.height
+
+        #expect(editorView.text == pastedText + source)
+        #expect(model.document.textSnapshot() == pastedText + source)
+        #expect(pastedContentHeight > initialContentHeight + 1_000)
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorLineFragmentForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        let previousSuspensionCount = await updateGate.currentSuspensionCount()
+        editorView.selectedRange = NSRange(location: 0, length: pastedText.utf16.count)
+        editorView.delete(nil)
+        await updateGate.waitUntilSuspended(after: previousSuspensionCount)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        #expect(editorView.text == source)
+        #expect(model.document.textSnapshot() == source)
+        #expect(editorView.contentSize.height < pastedContentHeight - 1_000)
+
+        await updateGate.resumeAll()
+        await editorView.waitForPendingHighlightForTesting()
+    }
+
     @Test("SyntaxEditorView fully applies iOS highlight when skipped revisions precede an incremental result")
     @MainActor
     func syntaxEditorViewIOSFullyAppliesHighlightAfterSkippedIncrementalRevisions() async {

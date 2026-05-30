@@ -1311,6 +1311,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             }
         }
         lineMetricsIndex.apply(edits: edits, previousSource: previousText)
+        updateTextContainerForCurrentWrappingMode()
+        updateContentSizeIfNeeded()
         invalidateFindResultsAfterTextChange()
         if !preservesMarkedTextUndoAnchor {
             markedTextUndoAnchor = nil
@@ -1602,7 +1604,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         )
 
         let highlighter = self.highlighter
-        highlightTask = Task { [weak self] in
+        highlightTask = Task(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation] in
             await Task.yield()
             guard !Task.isCancelled else {
                 return
@@ -1623,31 +1625,34 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                     revision: revision
                 )
             }
-            guard let self else { return }
-            guard !Task.isCancelled else {
-                return
-            }
-            guard self.document.revision == result.revision else {
-                return
-            }
-            let refreshRange = self.highlightApplicationRefreshRange(
-                for: result,
-                mutation: mutation
-            )
-            let didApplyHighlight = await self.applyHighlightFromScheduledTask(
-                result.tokens,
-                expectedRevision: result.revision,
-                source: result.source,
-                language: result.language,
-                refreshRange: refreshRange,
-                mutation: mutation
-            )
-            guard didApplyHighlight else { return }
-            self.lastHighlightTokens = result.tokens
-            self.lastHighlightSource = result.source
-            self.lastHighlightRevision = result.revision
-            self.lastHighlightLanguage = result.language
+            guard !Task.isCancelled else { return }
+            await self?.applyHighlightResultFromScheduledTask(result, mutation: mutation)
         }
+    }
+
+    private func applyHighlightResultFromScheduledTask(
+        _ result: SyntaxHighlightResult,
+        mutation: SyntaxHighlightMutation?
+    ) async {
+        guard !Task.isCancelled else { return }
+        guard document.revision == result.revision else { return }
+        let refreshRange = highlightApplicationRefreshRange(
+            for: result,
+            mutation: mutation
+        )
+        let didApplyHighlight = await applyHighlightFromScheduledTask(
+            result.tokens,
+            expectedRevision: result.revision,
+            source: result.source,
+            language: result.language,
+            refreshRange: refreshRange,
+            mutation: mutation
+        )
+        guard didApplyHighlight else { return }
+        lastHighlightTokens = result.tokens
+        lastHighlightSource = result.source
+        lastHighlightRevision = result.revision
+        lastHighlightLanguage = result.language
     }
 
     func highlightApplicationRefreshRange(
