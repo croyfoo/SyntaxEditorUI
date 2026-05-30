@@ -303,8 +303,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
     private let fallbackUndoManager = UndoManager()
     private let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
-    private let textStorage: NSTextStorage
-    private let layoutManager: NSLayoutManager
+    let textStorage: NSTextStorage
+    let layoutManager: NSLayoutManager
     private let textContainer: NSTextContainer
 
     private let highlighter: any SyntaxHighlighting
@@ -320,7 +320,8 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
     private var pendingEditStartUTF16: Int?
     private var pendingHighlightMutation: SyntaxHighlightMutation?
     private var pendingHighlightApplication: PendingMacHighlightApplication?
-    private var matchedBracketRanges: [NSRange] = []
+    var matchedBracketRanges: [NSRange] = []
+    private var visibleTextDisplayInvalidationCount = 0
     private var isApplyingUndoRedo = false
     private var isApplyingCommandSelection = false
     private var isApplyingLineWrappingConfiguration = false
@@ -441,6 +442,10 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
     internal var bracketHighlightRangesForTesting: [NSRange] {
         matchedBracketRanges
+    }
+
+    internal var visibleTextDisplayInvalidationCountForTesting: Int {
+        visibleTextDisplayInvalidationCount
     }
 
     @available(*, unavailable)
@@ -1338,7 +1343,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         textStorage.endEditing()
         textView.typingAttributes = base
         applyMatchingBracketHighlight(force: true)
-        invalidateVisibleTextDisplay()
+        invalidateTextDisplay(forCharacterRanges: [targetRange])
         recordAppliedHighlight(
             tokens: tokens,
             source: expectedSource,
@@ -1411,7 +1416,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
 
         textView.typingAttributes = base
         applyMatchingBracketHighlight(force: true)
-        invalidateVisibleTextDisplay()
+        invalidateTextDisplay(forCharacterRanges: [targetRange])
         recordAppliedHighlight(
             tokens: tokens,
             source: expectedSource,
@@ -1628,63 +1633,6 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         )
     }
 
-    private func applyMatchingBracketHighlight(force: Bool = false) {
-        let source = textView.string
-        let textLength = textStorage.length
-        let selection = textView.selectedRange()
-
-        guard selection.length == 0 else {
-            clearMatchingBracketHighlight()
-            return
-        }
-
-        let newRanges = BracketMatcher.matchedRanges(
-            in: source,
-            caretUTF16Offset: selection.location
-        )
-
-        guard force || newRanges != matchedBracketRanges else {
-            return
-        }
-
-        textStorage.beginEditing()
-
-        for range in matchedBracketRanges {
-            let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
-            guard clamped.length > 0 else { continue }
-            textStorage.removeAttribute(.backgroundColor, range: clamped)
-        }
-
-        for range in newRanges {
-            let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
-            guard clamped.length > 0 else { continue }
-            textStorage.addAttribute(
-                .backgroundColor,
-                value: NSColor.syntaxEditorAlpha(resolvedColorTheme().bracketBackground, alpha: 0.24),
-                range: clamped
-            )
-        }
-
-        textStorage.endEditing()
-        matchedBracketRanges = newRanges
-        invalidateVisibleTextDisplay()
-    }
-
-    private func clearMatchingBracketHighlight() {
-        guard !matchedBracketRanges.isEmpty else { return }
-
-        let textLength = textStorage.length
-        textStorage.beginEditing()
-        for range in matchedBracketRanges {
-            let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
-            guard clamped.length > 0 else { continue }
-            textStorage.removeAttribute(.backgroundColor, range: clamped)
-        }
-        textStorage.endEditing()
-        matchedBracketRanges = []
-        invalidateVisibleTextDisplay()
-    }
-
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
         let theme = resolvedColorTheme()
         return [
@@ -1709,7 +1657,7 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         effectiveAppearance.syntaxEditorThemeAppearance
     }
 
-    private func resolvedColorTheme() -> SyntaxEditorResolvedColorTheme {
+    func resolvedColorTheme() -> SyntaxEditorResolvedColorTheme {
         (lastAppliedColorTheme ?? configuration.colorTheme).resolved(
             for: configuration.language,
             appearance: currentThemeAppearance
@@ -1858,8 +1806,17 @@ public final class SyntaxEditorView: NSScrollView, NSTextViewDelegate {
         scrollView.contentView.needsDisplay = true
     }
 
+    private func invalidateTextDisplay(forCharacterRanges ranges: [NSRange]) {
+        MacHighlightRenderer(
+            layoutManager: layoutManager,
+            textStorage: textStorage
+        )
+        .invalidateDisplay(forCharacterRanges: ranges)
+    }
+
     private func invalidateVisibleTextDisplay() {
         guard textStorage.length > 0 else { return }
+        visibleTextDisplayInvalidationCount += 1
 
         let visibleRect = textView.visibleRect
         guard !visibleRect.isEmpty else { return }
@@ -1959,7 +1916,7 @@ public final class SyntaxEditorViewController: NSViewController, NSTextViewDeleg
     }
 }
 
-private extension NSColor {
+extension NSColor {
     static func syntaxEditorAlpha(_ color: NSColor, alpha: CGFloat) -> NSColor {
         NSColor(name: nil) { appearance in
             var resolvedColor = color.withAlphaComponent(alpha)

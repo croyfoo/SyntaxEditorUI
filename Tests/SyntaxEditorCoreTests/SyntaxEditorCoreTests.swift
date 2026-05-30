@@ -5772,6 +5772,42 @@ struct SyntaxHighlighterEngineTests {
         #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
     }
 
+    @Test("SyntaxHighlighterEngine keeps Swift safe reference edits local")
+    func highlighterKeepsSwiftSafeReferenceEditsLocal() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item + 1
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "item + 1", with: "item + 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "item",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return item + 2"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine reapplies Swift semantic overlays after distant declaration edits")
     func highlighterReappliesSwiftSemanticOverlaysAfterDistantDeclarationEdits() async throws {
         let source = """

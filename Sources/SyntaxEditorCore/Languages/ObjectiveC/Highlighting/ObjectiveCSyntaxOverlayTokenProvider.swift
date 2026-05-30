@@ -1,70 +1,20 @@
 import Foundation
 import SwiftTreeSitter
 
-private struct ObjectiveCRangeKey: Hashable {
-    let location: Int
-    let length: Int
+private typealias ObjectiveCRangeKey = SyntaxOverlayRangeKey
+private typealias ObjectiveCTokenKey = SyntaxOverlayTokenKey
+private typealias ObjectiveCSyntaxIDMask = SyntaxOverlaySyntaxIDMask
 
-    init(_ range: NSRange) {
-        location = range.location
-        length = range.length
-    }
-}
-
-private struct ObjectiveCTokenKey: Hashable {
-    let range: ObjectiveCRangeKey
-    let rawCaptureName: String
-
-    init(_ token: SyntaxHighlightToken) {
-        range = ObjectiveCRangeKey(token.range)
-        rawCaptureName = token.rawCaptureName
-    }
-}
-
-private struct ObjectiveCSyntaxIDMask: OptionSet {
-    let rawValue: UInt16
-
-    static let identifier = Self(rawValue: 1 << 0)
-    static let identifierType = Self(rawValue: 1 << 1)
-    static let identifierTypeSystem = Self(rawValue: 1 << 2)
-    static let identifierFunction = Self(rawValue: 1 << 3)
-    static let identifierFunctionSystem = Self(rawValue: 1 << 4)
-
-    init(rawValue: UInt16) {
-        self.rawValue = rawValue
-    }
-
-    init(syntaxID: EditorSourceSyntaxID) {
-        switch syntaxID {
-        case .identifier:
-            self = .identifier
-        case .identifierType:
-            self = .identifierType
-        case .identifierTypeSystem:
-            self = .identifierTypeSystem
-        case .identifierFunction:
-            self = .identifierFunction
-        case .identifierFunctionSystem:
-            self = .identifierFunctionSystem
-        default:
-            self = []
-        }
-    }
-}
-
-struct ObjectiveCSemanticOverlayState {
+struct ObjectiveCSemanticOverlayState: SyntaxOverlayState {
     fileprivate var index: ObjectiveCFileSymbolIndex?
 }
 
-struct ObjectiveCSemanticOverlayResult {
-    let tokens: [SyntaxHighlightToken]
-    let refreshRangeOverride: NSRange?
-    let isCancelled: Bool
-}
+typealias ObjectiveCSemanticOverlayResult = SyntaxOverlayResult
 
 private struct ObjectiveCOverlayPreparation {
     let baseTokensForIndex: [SyntaxHighlightToken]
     let outputBaseTokens: [SyntaxHighlightToken]
+    let preservedOverlayTokens: [SyntaxHighlightToken]
     let nonCodeRanges: [NSRange]
     let tokenIndex: ObjectiveCTokenIndex
 }
@@ -160,7 +110,7 @@ private struct ObjectiveCTokenIndex {
     }
 }
 
-enum ObjectiveCSyntaxOverlayTokenProvider {
+enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     static func mergingOverlayTokens(
         tokens: [SyntaxHighlightToken],
         source: String,
@@ -194,7 +144,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             )
         }
 
-        let targetRange = objectiveCSemanticTargetRange(refreshRange, in: nsSource)
+        let targetRange = refreshRange.flatMap {
+            semanticTargetRange($0, in: nsSource)
+        }
         let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
         let shouldRebuildIndex = targetRange == nil || state?.index == nil
         let index: ObjectiveCFileSymbolIndex
@@ -234,9 +186,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         )
             + appleMacroTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
             + appleEnumTypedefTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
-        let mergedTokens = overlayTokens.isEmpty
-            ? preparation.outputBaseTokens
-            : deduplicated(mergedTokens(baseTokens: preparation.outputBaseTokens, overlayTokens: overlayTokens))
+        let mergedTokens = deduplicated(
+            mergedTokens(
+                baseTokens: preparation.outputBaseTokens,
+                overlayTokens: preparation.preservedOverlayTokens + overlayTokens
+            )
+        )
         if let rebuiltState {
             state = rebuiltState
         }
@@ -408,10 +363,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         SyntaxEditorRangeUtilities.intersection(of: lhs, and: rhs).length > 0
     }
 
-    private static func objectiveCSemanticTargetRange(_ refreshRange: NSRange?, in source: NSString) -> NSRange? {
-        guard let refreshRange else {
-            return nil
-        }
+    static func semanticTargetRange(_ refreshRange: NSRange, in source: NSString) -> NSRange? {
         let clamped = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: source.length)
         guard clamped.length > 0 else {
             return nil
@@ -1134,8 +1086,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
         var baseTokensForIndex: [SyntaxHighlightToken] = []
         var outputBaseTokens: [SyntaxHighlightToken] = []
+        var preservedOverlayTokens: [SyntaxHighlightToken] = []
         baseTokensForIndex.reserveCapacity(tokens.count)
         outputBaseTokens.reserveCapacity(tokens.count)
+        preservedOverlayTokens.reserveCapacity(tokens.count / 4)
 
         for token in tokens {
             let syntaxIDs = syntaxIDsByRange[ObjectiveCRangeKey(token.range)] ?? []
@@ -1158,13 +1112,18 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
                 )
             } ?? stripsFromIndex
             if !stripsFromOutput {
-                outputBaseTokens.append(token)
+                if stripsFromIndex {
+                    preservedOverlayTokens.append(token)
+                } else {
+                    outputBaseTokens.append(token)
+                }
             }
         }
 
         return ObjectiveCOverlayPreparation(
             baseTokensForIndex: baseTokensForIndex,
             outputBaseTokens: outputBaseTokens,
+            preservedOverlayTokens: preservedOverlayTokens,
             nonCodeRanges: nonCodeRanges(from: baseTokensForIndex, sourceLength: source.length),
             tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source)
         )

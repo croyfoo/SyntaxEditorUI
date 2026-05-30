@@ -2015,39 +2015,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         ]
     }
 
-    func applyMatchingBracketHighlight(force: Bool = false) {
-        let source = text
-        let selection = selectedRange
-
-        guard selection.length == 0 else {
-            clearMatchingBracketHighlight()
-            return
-        }
-
-        let newRanges = BracketMatcher.matchedRanges(
-            in: source,
-            caretUTF16Offset: selection.location
-        )
-
-        guard force || newRanges != matchedBracketRanges else {
-            return
-        }
-
-        let rangesToInvalidate = matchedBracketRanges + newRanges
-        matchedBracketRanges = newRanges
-        updateBracketHighlightFragmentViews()
-        setNeedsDisplayForBracketHighlightRanges(rangesToInvalidate)
-    }
-
-    func clearMatchingBracketHighlight() {
-        guard !matchedBracketRanges.isEmpty else { return }
-
-        let rangesToInvalidate = matchedBracketRanges
-        matchedBracketRanges = []
-        updateBracketHighlightFragmentViews()
-        setNeedsDisplayForBracketHighlightRanges(rangesToInvalidate)
-    }
-
     func baseAttributes() -> [NSAttributedString.Key: Any] {
         let theme = resolvedColorTheme()
         return [
@@ -2239,12 +2206,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return estimatedSize
     }
 
-    func updateBracketHighlightFragmentViews() {
-        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
-            configureBracketHighlights(for: fragmentView, layoutFragmentFrame: fragmentView.layoutFragment.layoutFragmentFrame)
-        }
-    }
-
     func updateFindHighlightFragmentViews() {
         findHighlightUpdatePassCount += 1
         for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
@@ -2295,36 +2256,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         fragmentView.currentFindHighlightRects = highlightedRects
         fragmentView.currentFindHighlightColor = highlightedColor
         if foundChanged || highlightedChanged {
-            fragmentView.setNeedsDisplay()
-        }
-    }
-
-    func configureBracketHighlights(
-        for fragmentView: SyntaxEditorTextLayoutFragmentView,
-        layoutFragmentFrame: CGRect
-    ) {
-        let rects: [CGRect]
-        if matchedBracketRanges.isEmpty {
-            rects = []
-        } else {
-            let fragmentRange = textRange(for: fragmentView.layoutFragment)
-            rects = textHighlightRects(
-                in: layoutFragmentFrame,
-                ranges: Self.ranges(matchedBracketRanges, intersecting: fragmentRange)
-            )
-        }
-        let color = rects.isEmpty
-            ? nil
-            : UIColor
-                .syntaxEditorAlpha(resolvedColorTheme().bracketBackground, alpha: 0.24)
-                .resolvedColor(with: traitCollection)
-                .cgColor
-        let colorChanged = !Self.optionalColorsEqual(fragmentView.bracketHighlightColor, color)
-        let rectsChanged = fragmentView.bracketHighlightRects != rects
-
-        fragmentView.bracketHighlightRects = rects
-        fragmentView.bracketHighlightColor = color
-        if rectsChanged || colorChanged {
             fragmentView.setNeedsDisplay()
         }
     }
@@ -2509,10 +2440,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
             fragmentView.setNeedsDisplay()
         }
-    }
-
-    func setNeedsDisplayForBracketHighlightRanges(_ ranges: [NSRange]) {
-        setNeedsDisplayForTextRanges(ranges)
     }
 
     func setNeedsDisplayForTextRanges(_ ranges: [NSRange]) {

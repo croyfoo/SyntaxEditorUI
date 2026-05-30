@@ -244,6 +244,7 @@ private final class SyntaxHighlightSession {
     private var layer: LanguageLayer?
     private let lineIndex = SyntaxHighlightLineIndex()
     private var tokens: [SyntaxHighlightToken] = []
+    private var swiftSemanticState: SwiftSemanticOverlayState?
     private var objectiveCSemanticState: ObjectiveCSemanticOverlayState?
 
     init(language: SyntaxLanguage, setup: HighlightingSetup) {
@@ -255,6 +256,7 @@ private final class SyntaxHighlightSession {
         self.source = source
         layeredSource = layeredSource(for: source)
         lineIndex.reset(source: layeredSource)
+        swiftSemanticState = nil
         objectiveCSemanticState = nil
 
         guard !layeredSource.isEmpty else {
@@ -371,17 +373,31 @@ private final class SyntaxHighlightSession {
             mutation: layeredMutation,
             sourceUTF16Length: nextSourceLength
         )
+        let semanticRefreshSeedRange = Self.semanticRefreshSeedRange(
+            mutation: layeredMutation,
+            sourceUTF16Length: nextSourceLength
+        )
+        let semanticPartialRefreshRange = semanticPartialRefreshRange(
+            source: nextLayeredSource,
+            refreshRange: semanticRefreshSeedRange
+        )
         let replacementHighlight = highlightTokensCoveringQueryRange(
-            queryRange,
+            semanticPartialRefreshRange ?? queryRange,
             source: nextLayeredSource
         )
         guard !Task.isCancelled else {
             return cancelledUpdateResult(revision: revision)
         }
+        let replacementMergeRange = semanticPartialRefreshRange ?? replacementHighlight.range
+        let replacementTokens = semanticPartialRefreshRange.map { targetRange in
+            replacementHighlight.tokens.filter { token in
+                SyntaxEditorRangeUtilities.intersection(of: token.range, and: targetRange).length > 0
+            }
+        } ?? replacementHighlight.tokens
         let mergedHighlight = Self.mergedHighlightTokens(
             existingTokens: tokens,
-            replacementTokens: replacementHighlight.tokens,
-            refreshedRange: replacementHighlight.range,
+            replacementTokens: replacementTokens,
+            refreshedRange: replacementMergeRange,
             mutation: layeredMutation,
             previousSourceUTF16Length: previousLayeredSource.utf16.count,
             nextSourceUTF16Length: nextSourceLength
@@ -391,17 +407,14 @@ private final class SyntaxHighlightSession {
             mergedHighlight.tokens,
             source: nextLayeredSource,
             rootNode: semanticRootNodeSnapshot(),
-            refreshRange: refreshRange
+            refreshRange: semanticPartialRefreshRange
         )
         guard !semanticResult.isCancelled, !Task.isCancelled else {
             return cancelledUpdateResult(revision: revision)
         }
         let classifiedTokens = semanticResult.tokens
         let resultRefreshRange = semanticResult.refreshRangeOverride.map {
-            Self.union(
-                SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: nextSourceLength),
-                SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
-            )
+            SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
         } ?? semanticRefreshRange(
             previousTokens: mergedHighlight.tokens,
             classifiedTokens: classifiedTokens,
@@ -628,15 +641,17 @@ private extension SyntaxHighlightSession {
     ) -> SemanticClassificationResult {
         switch language {
         case .swift:
+            let result = SwiftSyntaxOverlayTokenProvider.mergingOverlayResult(
+                tokens: tokens,
+                source: source,
+                rootNode: rootNode,
+                refreshRange: refreshRange,
+                state: &swiftSemanticState
+            )
             return SemanticClassificationResult(
-                tokens: SwiftSyntaxOverlayTokenProvider.mergingOverlayTokens(
-                    tokens: tokens,
-                    source: source,
-                    rootNode: rootNode,
-                    refreshRange: refreshRange
-                ),
-                refreshRangeOverride: nil,
-                isCancelled: false
+                tokens: result.tokens,
+                refreshRangeOverride: result.refreshRangeOverride,
+                isCancelled: result.isCancelled
             )
         case .objectiveC:
             let result = ObjectiveCSyntaxOverlayTokenProvider.mergingOverlayResult(
@@ -677,6 +692,31 @@ private extension SyntaxHighlightSession {
                 isCancelled: false
             )
         }
+    }
+
+    func semanticPartialRefreshRange(
+        source: String,
+        refreshRange: NSRange
+    ) -> NSRange? {
+        let nsSource = source as NSString
+        switch language {
+        case .swift:
+            return SwiftSyntaxOverlayTokenProvider.semanticTargetRange(refreshRange, in: nsSource)
+        case .objectiveC:
+            return ObjectiveCSyntaxOverlayTokenProvider.semanticTargetRange(refreshRange, in: nsSource)
+        default:
+            return nil
+        }
+    }
+
+    static func semanticRefreshSeedRange(
+        mutation: SyntaxHighlightMutation,
+        sourceUTF16Length: Int
+    ) -> NSRange {
+        let replacementLength = mutation.replacement.utf16.count
+        let location = min(max(0, mutation.location), sourceUTF16Length)
+        let upperBound = min(max(location, mutation.location + replacementLength), sourceUTF16Length)
+        return NSRange(location: location, length: upperBound - location)
     }
 
     func semanticRootNodeSnapshot() -> Node? {

@@ -911,12 +911,34 @@ private func macEditorBackgroundColor(_ editorView: SyntaxEditorView, at locatio
         return nil
     }
 
+    if let color = editorView.textView.layoutManager?.temporaryAttribute(
+        .backgroundColor,
+        atCharacterIndex: location,
+        effectiveRange: nil
+    ) as? NSColor {
+        return color
+    }
+
     return textStorage.attribute(.backgroundColor, at: location, effectiveRange: nil) as? NSColor
 }
 
 @MainActor
 private func macEditorHasBackgroundAttribute(_ editorView: SyntaxEditorView, at location: Int) -> Bool {
     macEditorBackgroundColor(editorView, at: location) != nil
+}
+
+@MainActor
+private func macEditorTextStorageBackgroundColor(_ editorView: SyntaxEditorView, at location: Int) -> NSColor? {
+    guard let textStorage = editorView.textView.textStorage else {
+        return nil
+    }
+    guard location >= 0,
+          location < textStorage.length
+    else {
+        return nil
+    }
+
+    return textStorage.attribute(.backgroundColor, at: location, effectiveRange: nil) as? NSColor
 }
 
 private func makeMacCommandKeyEvent(
@@ -6360,6 +6382,7 @@ struct SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
         await editorView.waitForPendingHighlightForTesting()
 
+        let visibleInvalidationCount = editorView.visibleTextDisplayInvalidationCountForTesting
         editorView.textView.setSelectedRange(NSRange(location: 1, length: 0))
         editorView.textViewDidChangeSelection(
             Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
@@ -6371,6 +6394,9 @@ struct SyntaxEditorUITests {
         ])
         #expect(macEditorHasBackgroundAttribute(editorView, at: 0))
         #expect(macEditorHasBackgroundAttribute(editorView, at: 1))
+        #expect(macEditorTextStorageBackgroundColor(editorView, at: 0) == nil)
+        #expect(macEditorTextStorageBackgroundColor(editorView, at: 1) == nil)
+        #expect(editorView.visibleTextDisplayInvalidationCountForTesting == visibleInvalidationCount)
 
         editorView.textView.setSelectedRange(NSRange(location: 0, length: source.utf16.count))
         editorView.textViewDidChangeSelection(
@@ -6380,6 +6406,7 @@ struct SyntaxEditorUITests {
         #expect(editorView.bracketHighlightRangesForTesting.isEmpty)
         #expect(!macEditorHasBackgroundAttribute(editorView, at: 0))
         #expect(!macEditorHasBackgroundAttribute(editorView, at: 1))
+        #expect(editorView.visibleTextDisplayInvalidationCountForTesting == visibleInvalidationCount)
     }
 
     @Test("SyntaxEditorView keeps macOS text painting owned by the scroll view")
