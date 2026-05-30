@@ -6515,6 +6515,46 @@ struct SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView keeps same-line macOS syntax colors while typing awaits highlight")
+    @MainActor
+    func syntaxEditorViewMacKeepsSameLineSyntaxColorsDuringPendingTypingHighlight() async {
+        let source = "extension "
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x102030),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let updateGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 9),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            updateGate: updateGate
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        let previousSuspensionCount = await updateGate.currentSuspensionCount()
+        editorView.textView.insertText("S", replacementRange: NSRange(location: source.utf16.count, length: 0))
+        await updateGate.waitUntilSuspended(after: previousSuspensionCount)
+
+        #expect(editorView.textView.string == "extension S")
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        await updateGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
     @Test("SyntaxEditorView materializes shifted stale macOS syntax colors while typing awaits highlight")
     @MainActor
     func syntaxEditorViewMacMaterializesShiftedStaleSyntaxColorsDuringPendingTypingHighlight() async {

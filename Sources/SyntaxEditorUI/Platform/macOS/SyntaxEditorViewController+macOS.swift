@@ -2001,17 +2001,13 @@ public final class SyntaxEditorView: NSScrollView {
     private func prepareSyntaxHighlightRenderingForPendingTextChange(
         mutation: SyntaxHighlightMutation?,
         source: String,
-        refreshStartUTF16: Int
+        refreshStartUTF16 _: Int
     ) {
         guard let mutation else {
             suspendSyntaxHighlightMaterialization()
             return
         }
-        let invalidatedRange = pendingTextChangeInvalidatedRange(
-            in: source,
-            mutation: mutation,
-            refreshStartUTF16: refreshStartUTF16
-        )
+        let invalidatedRange = pendingTextMutationReplacementRange(in: source, mutation: mutation)
         textKit2System.renderStore.prepareForegroundForPendingTextMutation(
             mutation,
             sourceLength: source.utf16.count,
@@ -2020,24 +2016,21 @@ public final class SyntaxEditorView: NSScrollView {
         textKit2System.invalidateRenderingAttributes(for: invalidatedRange)
     }
 
-    private func pendingTextChangeInvalidatedRange(
+    private func pendingTextMutationReplacementRange(
         in source: String,
-        mutation: SyntaxHighlightMutation,
-        refreshStartUTF16: Int
+        mutation: SyntaxHighlightMutation
     ) -> NSRange {
-        let source = source as NSString
-        guard source.length > 0 else {
+        let textLength = source.utf16.count
+        let location = min(max(0, mutation.location), textLength)
+        let replacementLength = min(max(0, mutation.replacement.utf16.count), textLength - location)
+        if replacementLength > 0 {
+            return NSRange(location: location, length: replacementLength)
+        }
+        guard textLength > 0 else {
             return NSRange(location: 0, length: 0)
         }
-
-        let lineStart = max(0, min(refreshStartUTF16, source.length - 1))
-        let replacementEnd = max(
-            lineStart,
-            min(source.length, mutation.location + mutation.replacement.utf16.count)
-        )
-        return source.lineRange(
-            for: NSRange(location: lineStart, length: max(0, replacementEnd - lineStart))
-        )
+        let fallbackLocation = min(location, textLength - 1)
+        return NSRange(location: fallbackLocation, length: 1)
     }
 
     private func suspendSyntaxHighlightMaterialization() {
