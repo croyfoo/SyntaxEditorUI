@@ -262,7 +262,8 @@ private final class SyntaxHighlightSession {
             let highlightTokens = highlightTokens(in: fullRange(for: layeredSource), source: layeredSource)
             let classifiedTokens = semanticClassifiedTokensIfNeeded(
                 highlightTokens,
-                source: layeredSource
+                source: layeredSource,
+                swiftRootNode: swiftRootNodeSnapshot()
             )
 
             tokens = classifiedTokens
@@ -370,6 +371,7 @@ private final class SyntaxHighlightSession {
         let classifiedTokens = semanticClassifiedTokensIfNeeded(
             mergedHighlight.tokens,
             source: nextLayeredSource,
+            swiftRootNode: swiftRootNodeSnapshot(),
             refreshRange: refreshRange
         )
         let resultRefreshRange = semanticRefreshRange(
@@ -583,6 +585,7 @@ private extension SyntaxHighlightSession {
     func semanticClassifiedTokensIfNeeded(
         _ tokens: [SyntaxHighlightToken],
         source: String,
+        swiftRootNode: Node? = nil,
         refreshRange: NSRange? = nil
     ) -> [SyntaxHighlightToken] {
         switch language {
@@ -590,6 +593,7 @@ private extension SyntaxHighlightSession {
             return SwiftSyntaxOverlayTokenProvider.mergingOverlayTokens(
                 tokens: tokens,
                 source: source,
+                rootNode: swiftRootNode,
                 refreshRange: refreshRange
             )
         case .objectiveC:
@@ -611,6 +615,13 @@ private extension SyntaxHighlightSession {
         default:
             return tokens
         }
+    }
+
+    func swiftRootNodeSnapshot() -> Node? {
+        guard language == .swift else {
+            return nil
+        }
+        return layer?.snapshot()?.rootSnapshot.tree.rootNode
     }
 
     func semanticRefreshRange(

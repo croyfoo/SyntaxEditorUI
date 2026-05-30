@@ -79,6 +79,18 @@ let package = Package(
                 ], .when(platforms: [.macOS])),
             ]
         ),
+        .executableTarget(
+            name: "HighlightBenchmark",
+            dependencies: [
+                "SyntaxEditorCore",
+            ],
+            path: "Tools/HighlightBenchmark",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+            ]
+        ),
         .target(
             name: "SyntaxEditorCore",
             dependencies: [
