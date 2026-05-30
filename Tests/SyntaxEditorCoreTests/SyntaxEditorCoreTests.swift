@@ -7626,6 +7626,92 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(result.tokens, full.tokens))
     }
 
+    @Test("SyntaxHighlighterEngine keeps switch-heavy Swift paste updates finite")
+    func highlighterKeepsSwitchHeavySwiftPasteUpdatesFinite() async {
+        let engine = SyntaxHighlighterEngine()
+        var source = """
+        struct PasteTarget {
+            func render(_ input: Int) {
+                switch input {
+                default:
+                    break
+                }
+            }
+        }
+
+        """
+        var result = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 1)
+
+        for pasteIndex in 0..<4 {
+            let insertion = (0..<60).map { caseIndex in
+                let valueIndex = pasteIndex * 60 + caseIndex
+                return """
+                    case \(valueIndex):
+                        let value\(valueIndex) = input + \(valueIndex)
+                        _ = value\(valueIndex)
+
+                """
+            }.joined()
+            let insertionLocation = (source as NSString).range(of: "        default:").location
+            let mutation = SyntaxHighlightMutation(
+                location: insertionLocation,
+                length: 0,
+                replacement: insertion
+            )
+            source = (source as NSString).replacingCharacters(
+                in: NSRange(location: insertionLocation, length: 0),
+                with: insertion
+            )
+            result = await engine.update(
+                source: source,
+                language: SyntaxLanguage.swift,
+                mutation: mutation,
+                revision: pasteIndex + 2
+            )
+
+            #expect(result.source == source)
+            #expect(result.tokens.allSatisfy { $0.range.upperBound <= source.utf16.count })
+        }
+
+        let full = await SyntaxHighlighterEngine()
+            .reset(source: source, language: SyntaxLanguage.swift, revision: 20)
+        #expect(highlightTokensMatch(result.tokens, full.tokens))
+    }
+
+    @Test("Swift semantic overlay exits before indexing cancelled paste work")
+    func swiftSemanticOverlayExitsBeforeIndexingCancelledPasteWork() async {
+        let source = String(
+            repeating: """
+            struct CancelledPaste {
+                func render(_ input: Int) {
+                    switch input {
+                    case 0:
+                        let value = input + 1
+                        _ = value
+                    default:
+                        break
+                    }
+                }
+            }
+
+            """,
+            count: 400
+        )
+        let task = Task {
+            var state: SwiftSemanticOverlayState?
+            return SwiftSyntaxOverlayTokenProvider.mergingOverlayResult(
+                tokens: [],
+                source: source,
+                state: &state
+            )
+        }
+        task.cancel()
+
+        let result = await task.value
+        #expect(result.isCancelled)
+        #expect(result.tokens.isEmpty)
+    }
+
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")
     func highlighterKeepsUnsupportedInjectionsDirect() async {
         let engine = SyntaxHighlighterEngine()

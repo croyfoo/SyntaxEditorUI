@@ -133,6 +133,13 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         var rebuiltState: SwiftSemanticOverlayState?
         if shouldRebuildIndex {
             index = SwiftFileSymbolIndex(source: nsSource, tokens: preparation.baseTokensForIndex, rootNode: rootNode)
+            guard !index.isCancelled else {
+                return SwiftSemanticOverlayResult(
+                    tokens: tokens,
+                    refreshRangeOverride: nil,
+                    isCancelled: true
+                )
+            }
             rebuiltState = SwiftSemanticOverlayState(index: index, indexedSourceUTF16Length: nsSource.length)
         } else {
             index = state!.index!
