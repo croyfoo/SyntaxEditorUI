@@ -1,4 +1,5 @@
 import Foundation
+import SwiftTreeSitter
 
 // Provides Swift substring tokens that cannot be expressed by Tree-sitter
 // captures alone, such as MARK comments and URLs inside comments.
@@ -6,10 +7,12 @@ enum SwiftSyntaxOverlayTokenProvider {
     static func mergingOverlayTokens(
         tokens: [SyntaxHighlightToken],
         source: String,
+        rootNode: Node? = nil,
         refreshRange: NSRange? = nil
     ) -> [SyntaxHighlightToken] {
         let nsSource = source as NSString
         let baseTokens = tokens.filter { !isSwiftSemanticOverlayToken($0, existingTokens: tokens, source: nsSource) }
+        let excludedPreprocessorRanges = mergedExcludedPreprocessorRanges(existingTokens: baseTokens)
         let targetRange = refreshRange.map {
             lineEnvelopeRange(containing: $0, in: nsSource)
         }
@@ -21,12 +24,13 @@ enum SwiftSyntaxOverlayTokenProvider {
             ) +
             tokensInPreprocessorLines(
                 source: nsSource,
-                existingTokens: baseTokens,
+                excludedRanges: excludedPreprocessorRanges,
                 targetRange: targetRange
             ) +
             tokensInSemanticSymbolRanges(
                 source: nsSource,
-                existingTokens: baseTokens
+                existingTokens: baseTokens,
+                rootNode: rootNode
             )
         guard overlayTokens.isEmpty == false else {
             return baseTokens
@@ -95,7 +99,7 @@ enum SwiftSyntaxOverlayTokenProvider {
 
     private static func tokensInPreprocessorLines(
         source: NSString,
-        existingTokens: [SyntaxHighlightToken],
+        excludedRanges: [NSRange],
         targetRange: NSRange?
     ) -> [SyntaxHighlightToken] {
         let fullRange = NSRange(location: 0, length: source.length)
@@ -129,7 +133,7 @@ enum SwiftSyntaxOverlayTokenProvider {
 
             for match in preprocessorRegex.matches(in: sourceString, range: clampedLineRange) {
                 let range = match.range
-                guard !isExcludedPreprocessorRange(range, existingTokens: existingTokens) else {
+                guard !rangeIntersectsMergedRanges(range, excludedRanges) else {
                     continue
                 }
                 appendPreprocessorTokens(for: range, in: source, to: &tokens)
@@ -142,13 +146,14 @@ enum SwiftSyntaxOverlayTokenProvider {
 
     private static func tokensInSemanticSymbolRanges(
         source: NSString,
-        existingTokens: [SyntaxHighlightToken]
+        existingTokens: [SyntaxHighlightToken],
+        rootNode: Node?
     ) -> [SyntaxHighlightToken] {
         guard source.length > 0 else {
             return []
         }
 
-        let index = SwiftFileSymbolIndex(source: source, tokens: existingTokens)
+        let index = SwiftFileSymbolIndex(source: source, tokens: existingTokens, rootNode: rootNode)
         var tokens: [SyntaxHighlightToken] = []
 
         for token in existingTokens {
@@ -199,8 +204,7 @@ enum SwiftSyntaxOverlayTokenProvider {
             if index.entry(
                 named: text,
                 at: range,
-                allowedKinds: [.macro, .type],
-                rolePredicate: { _ in true }
+                allowedKinds: [.macro, .type]
             ) != nil {
                 return []
             }
@@ -228,8 +232,7 @@ enum SwiftSyntaxOverlayTokenProvider {
             if let localMacro = index.entry(
                 named: text,
                 at: range,
-                allowedKinds: [.macro],
-                rolePredicate: { _ in true }
+                allowedKinds: [.macro]
             ) {
                 return syntaxIDForLocalEntry(localMacro).map {
                     [
@@ -265,7 +268,7 @@ enum SwiftSyntaxOverlayTokenProvider {
                 named: text,
                 at: range,
                 allowedKinds: [.function, .type, .variable],
-                rolePredicate: { $0 == .member }
+                allowedRoles: .member
             ) {
                 if localMember.kind == .type {
                     return syntaxIDForLocalEntry(localMember).map {
@@ -306,7 +309,7 @@ enum SwiftSyntaxOverlayTokenProvider {
             named: text,
             at: range,
             allowedKinds: [.variable],
-            rolePredicate: { $0 == .local }
+            allowedRoles: .local
         )
         let isTypeContext = context.isTypeContext
 
@@ -319,7 +322,7 @@ enum SwiftSyntaxOverlayTokenProvider {
             named: text,
             at: range,
             allowedKinds: [.variable],
-            rolePredicate: { $0 == .file || $0 == .member }
+            allowedRoles: [.file, .member]
            ) {
             return syntaxIDForLocalEntry(projectVariable).map {
                 [SemanticOverlay(range: range, syntaxID: $0)]
@@ -331,7 +334,7 @@ enum SwiftSyntaxOverlayTokenProvider {
             named: text,
             at: range,
             allowedKinds: [.variable],
-            rolePredicate: { $0 == .file || $0 == .member }
+            allowedRoles: [.file, .member]
            ) {
             return syntaxIDForLocalEntry(projectVariable).map {
                 [SemanticOverlay(range: range, syntaxID: $0)]
@@ -351,8 +354,7 @@ enum SwiftSyntaxOverlayTokenProvider {
             if let localType = index.entry(
                 named: text,
                 at: range,
-                allowedKinds: [.type],
-                rolePredicate: { _ in true }
+                allowedKinds: [.type]
             ) {
                 return syntaxIDForLocalEntry(localType).map {
                     [SemanticOverlay(range: range, syntaxID: $0)]
@@ -363,8 +365,7 @@ enum SwiftSyntaxOverlayTokenProvider {
                let localFunction = index.entry(
                 named: text,
                 at: range,
-                allowedKinds: [.function],
-                rolePredicate: { _ in true }
+                allowedKinds: [.function]
                ) {
                 return syntaxIDForLocalEntry(localFunction).map {
                     [SemanticOverlay(range: range, syntaxID: $0)]
@@ -388,7 +389,7 @@ enum SwiftSyntaxOverlayTokenProvider {
             named: text,
             at: range,
             allowedKinds: [.variable],
-            rolePredicate: { $0 == .file || $0 == .member }
+            allowedRoles: [.file, .member]
         ) {
             return syntaxIDForLocalEntry(local).map {
                 [SemanticOverlay(range: range, syntaxID: $0)]
@@ -403,8 +404,7 @@ enum SwiftSyntaxOverlayTokenProvider {
             guard let localFunction = index.entry(
                 named: text,
                 at: range,
-                allowedKinds: [.function],
-                rolePredicate: { _ in true }
+                allowedKinds: [.function]
             ) else {
                 return [SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem)]
             }
@@ -569,20 +569,46 @@ enum SwiftSyntaxOverlayTokenProvider {
         }
     }
 
-    private static func isExcludedPreprocessorRange(
-        _ range: NSRange,
-        existingTokens: [SyntaxHighlightToken]
-    ) -> Bool {
-        existingTokens.contains {
-            guard $0.language == .swift || $0.language == nil else {
-                return false
+    private static func mergedExcludedPreprocessorRanges(existingTokens: [SyntaxHighlightToken]) -> [NSRange] {
+        let ranges: [NSRange] = existingTokens.compactMap { token -> NSRange? in
+            guard token.language == .swift || token.language == nil else {
+                return nil
             }
-            let value = $0.syntaxID.rawValue
+            let value = token.syntaxID.rawValue
             guard value == "string" || value == "character" || value.hasPrefix("comment") else {
-                return false
+                return nil
             }
-            return SyntaxEditorRangeUtilities.intersection(of: $0.range, and: range).length > 0
+            return token.range
         }
+        .sorted {
+            if $0.location != $1.location {
+                return $0.location < $1.location
+            }
+            return $0.length < $1.length
+        }
+        return mergedRanges(ranges)
+    }
+
+    private static func rangeIntersectsMergedRanges(_ range: NSRange, _ mergedRanges: [NSRange]) -> Bool {
+        guard !mergedRanges.isEmpty else {
+            return false
+        }
+
+        var lower = 0
+        var upper = mergedRanges.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if mergedRanges[middle].upperBound <= range.location {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+
+        guard lower < mergedRanges.count else {
+            return false
+        }
+        return mergedRanges[lower].location < range.upperBound
     }
 
     private static func appendPreprocessorTokens(
@@ -613,10 +639,19 @@ enum SwiftSyntaxOverlayTokenProvider {
     }
 
     private static func isSwiftIdentifier(_ text: String) -> Bool {
-        swiftIdentifierRegex.firstMatch(
-            in: text,
-            range: NSRange(location: 0, length: (text as NSString).length)
-        )?.range == NSRange(location: 0, length: (text as NSString).length)
+        var iterator = text.utf8.makeIterator()
+        guard let first = iterator.next(),
+              isSwiftIdentifierStartByte(first)
+        else {
+            return false
+        }
+
+        while let byte = iterator.next() {
+            guard isSwiftIdentifierContinueByte(byte) else {
+                return false
+            }
+        }
+        return true
     }
 
     private static func isSwiftSemanticOverlayToken(
@@ -674,9 +709,15 @@ enum SwiftSyntaxOverlayTokenProvider {
         }
     }
 
-    private static let swiftIdentifierRegex = try! NSRegularExpression(
-        pattern: #"^[A-Za-z_][A-Za-z0-9_]*$"#
-    )
+    private static func isSwiftIdentifierStartByte(_ byte: UInt8) -> Bool {
+        byte == 95
+            || (byte >= 65 && byte <= 90)
+            || (byte >= 97 && byte <= 122)
+    }
+
+    private static func isSwiftIdentifierContinueByte(_ byte: UInt8) -> Bool {
+        isSwiftIdentifierStartByte(byte) || (byte >= 48 && byte <= 57)
+    }
 
     private static let knownExternalTypeNames: Set<String> = [
         "AdditionPrecedence", "Bool", "ClosedRange", "Double", "Float", "Int", "StaticString", "String", "UInt", "UUID"

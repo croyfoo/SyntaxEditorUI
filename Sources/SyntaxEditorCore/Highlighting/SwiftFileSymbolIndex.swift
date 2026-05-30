@@ -1,4 +1,5 @@
 import Foundation
+import SwiftTreeSitter
 
 struct SwiftFileSymbolIndex {
     enum SymbolKind: Hashable {
@@ -9,11 +10,31 @@ struct SwiftFileSymbolIndex {
         case macro
     }
 
+    struct SymbolKindSet: OptionSet {
+        let rawValue: UInt8
+
+        static let type = Self(rawValue: 1 << 0)
+        static let function = Self(rawValue: 1 << 1)
+        static let variable = Self(rawValue: 1 << 2)
+        static let constant = Self(rawValue: 1 << 3)
+        static let macro = Self(rawValue: 1 << 4)
+    }
+
     enum SymbolRole {
         case file
         case member
         case local
         case genericParameter
+    }
+
+    struct SymbolRoleSet: OptionSet {
+        let rawValue: UInt8
+
+        static let file = Self(rawValue: 1 << 0)
+        static let member = Self(rawValue: 1 << 1)
+        static let local = Self(rawValue: 1 << 2)
+        static let genericParameter = Self(rawValue: 1 << 3)
+        static let any: Self = [.file, .member, .local, .genericParameter]
     }
 
     struct Entry {
@@ -85,10 +106,16 @@ struct SwiftFileSymbolIndex {
     private var typeScopes: [TypeScope] = []
     private var functionScopes: [FunctionScope] = []
     private var typedValues: [TypedValue] = []
+    private var entriesByName: [String: [Entry]] = [:]
+    private var typedValuesByName: [String: [TypedValue]] = [:]
+    private var enumCasesByName: [String: [Entry]] = [:]
+    private var genericParametersByName: [String: [Entry]] = [:]
+    private var braceRanges: [NSRange] = []
 
-    init(source: NSString, tokens: [SyntaxHighlightToken]) {
+    init(source: NSString, tokens: [SyntaxHighlightToken], rootNode: Node? = nil) {
         self.source = source
         self.maskedSource = Self.maskedSource(from: source, tokens: tokens)
+        self.braceRanges = Self.braceRanges(from: rootNode, in: maskedSource)
 
         collectTypeDeclarationCandidates()
         collectFunctionLikeDeclarations()
@@ -102,112 +129,130 @@ struct SwiftFileSymbolIndex {
         collectValueDeclarations()
         collectEnumCases()
         collectGenericParameters()
+        rebuildLookupTables()
     }
 
     func entry(
         named name: String,
         at range: NSRange,
-        allowedKinds: Set<SymbolKind>,
-        rolePredicate: ((SymbolRole) -> Bool)? = nil
+        allowedKinds: SymbolKindSet,
+        allowedRoles: SymbolRoleSet = .any
     ) -> Entry? {
-        entries
-            .filter {
-                $0.name == name
-                    && allowedKinds.contains($0.kind)
-                    && Self.range($0.scopeRange, contains: range)
-                    && !(Self.range($0.declarationRange, contains: range))
-                    && memberOwnerMatches($0, at: range)
-                    && (rolePredicate?($0.role) ?? true)
+        guard let candidates = entriesByName[name] else {
+            return nil
+        }
+
+        let ownerQualifiedName = candidates.contains(where: { $0.role == .member && $0.ownerQualifiedName != nil })
+            ? innermostTypeScope(containing: range)?.qualifiedName
+            : nil
+        var best: Entry?
+        for candidate in candidates {
+            guard allowedKinds.contains(candidate.kind.kindSet),
+                  allowedRoles.contains(candidate.role.roleSet),
+                  Self.range(candidate.scopeRange, contains: range),
+                  !Self.range(candidate.declarationRange, contains: range),
+                  memberOwnerMatches(candidate, currentOwnerQualifiedName: ownerQualifiedName)
+            else {
+                continue
             }
-            .sorted { lhs, rhs in
-                if lhs.scopeRange.length != rhs.scopeRange.length {
-                    return lhs.scopeRange.length < rhs.scopeRange.length
-                }
-                if lhs.declarationRange.location != rhs.declarationRange.location {
-                    return lhs.declarationRange.location > rhs.declarationRange.location
-                }
-                return lhs.name < rhs.name
+
+            if best.map({ Self.entry(candidate, isBetterThan: $0) }) ?? true {
+                best = candidate
             }
-            .first
+        }
+
+        return best
     }
 
     func hasLocalType(named name: String, at range: NSRange) -> Bool {
-        entries.contains {
-            $0.name == name
-                && $0.kind == .type
+        entriesByName[name]?.contains {
+            $0.kind == .type
                 && Self.range($0.scopeRange, contains: range)
-                && !(Self.range($0.declarationRange, contains: range))
-        }
+                && !Self.range($0.declarationRange, contains: range)
+        } ?? false
     }
 
     func isGenericParameter(named name: String, at range: NSRange) -> Bool {
-        entries.contains {
-            $0.name == name
-                && $0.kind == .type
-                && $0.role == .genericParameter
-                && Self.range($0.scopeRange, contains: range)
-                && !(Self.range($0.declarationRange, contains: range))
-        }
+        genericParametersByName[name]?.contains {
+            Self.range($0.scopeRange, contains: range)
+                && !Self.range($0.declarationRange, contains: range)
+        } ?? false
     }
 
     func enumCaseEntry(named name: String, at range: NSRange, receiverTypeName: String?) -> Entry? {
-        let candidates = entries.filter {
-            $0.name == name
-                && $0.kind == .constant
-                && Self.range($0.scopeRange, contains: range)
-                && !(Self.range($0.declarationRange, contains: range))
-        }
-
-        if let receiverTypeName {
-            return candidates
-                .filter {
-                    guard let ownerName = $0.ownerQualifiedName?.split(separator: ".").last.map(String.init) else {
-                        return false
-                    }
-                    return ownerName == receiverTypeName
-                }
-                .sorted { lhs, rhs in
-                    if lhs.scopeRange.length != rhs.scopeRange.length {
-                        return lhs.scopeRange.length < rhs.scopeRange.length
-                    }
-                    return lhs.declarationRange.location > rhs.declarationRange.location
-                }
-                .first
-        }
-
-        let uniqueByOwner = Dictionary(grouping: candidates) { $0.ownerQualifiedName ?? "" }
-        guard uniqueByOwner.count == 1 else {
+        guard let candidates = enumCasesByName[name] else {
             return nil
         }
-        return candidates
-            .sorted { lhs, rhs in
-                if lhs.scopeRange.length != rhs.scopeRange.length {
-                    return lhs.scopeRange.length < rhs.scopeRange.length
+
+        var best: Entry?
+        if let receiverTypeName {
+            for candidate in candidates {
+                guard Self.range(candidate.scopeRange, contains: range),
+                      !Self.range(candidate.declarationRange, contains: range),
+                      candidate.ownerQualifiedName.map(Self.lastQualifiedComponent) == receiverTypeName
+                else {
+                    continue
                 }
-                return lhs.declarationRange.location > rhs.declarationRange.location
+                if best.map({ Self.entry(candidate, isBetterThan: $0) }) ?? true {
+                    best = candidate
+                }
             }
-            .first
+            return best
+        }
+
+        var ownerQualifiedName: String?
+        var sawOwner = false
+        for candidate in candidates {
+            guard Self.range(candidate.scopeRange, contains: range),
+                  !Self.range(candidate.declarationRange, contains: range)
+            else {
+                continue
+            }
+
+            let owner = candidate.ownerQualifiedName ?? ""
+            if !sawOwner {
+                ownerQualifiedName = owner
+                sawOwner = true
+            } else if ownerQualifiedName != owner {
+                return nil
+            }
+
+            if best.map({ Self.entry(candidate, isBetterThan: $0) }) ?? true {
+                best = candidate
+            }
+        }
+        return best
     }
 
     func declaredTypeName(forValueNamed name: String, at range: NSRange) -> String? {
-        typedValues
-            .filter {
-                $0.name == name
-                    && Self.range($0.scopeRange, contains: range)
-                    && !(Self.range($0.declarationRange, contains: range))
+        guard let candidates = typedValuesByName[name] else {
+            return nil
+        }
+
+        var best: TypedValue?
+        for candidate in candidates {
+            guard Self.range(candidate.scopeRange, contains: range),
+                  !Self.range(candidate.declarationRange, contains: range)
+            else {
+                continue
             }
-            .sorted { lhs, rhs in
-                if lhs.scopeRange.length != rhs.scopeRange.length {
-                    return lhs.scopeRange.length < rhs.scopeRange.length
-                }
-                return lhs.declarationRange.location > rhs.declarationRange.location
+
+            if best.map({ Self.typedValue(candidate, isBetterThan: $0) }) ?? true {
+                best = candidate
             }
-            .first?
-            .typeName
+        }
+        return best?.typeName
     }
 }
 
 private extension SwiftFileSymbolIndex {
+    mutating func rebuildLookupTables() {
+        entriesByName = Dictionary(grouping: entries, by: \.name)
+        typedValuesByName = Dictionary(grouping: typedValues, by: \.name)
+        enumCasesByName = Dictionary(grouping: entries.lazy.filter { $0.kind == .constant }, by: \.name)
+        genericParametersByName = Dictionary(grouping: entries.lazy.filter { $0.role == .genericParameter }, by: \.name)
+    }
+
     mutating func collectTypeDeclarationCandidates() {
         let sourceString = maskedSource as String
         for match in Self.typeDeclarationRegex.matches(in: sourceString, range: fullRange) {
@@ -1269,20 +1314,80 @@ private extension SwiftFileSymbolIndex {
         return masked
     }
 
-    private func innermostTypeScope(containing range: NSRange) -> TypeScope? {
-        typeScopes
-            .filter { Self.range($0.bodyRange, contains: range) }
-            .sorted { $0.bodyRange.length < $1.bodyRange.length }
-            .first
+    static func braceRanges(from rootNode: Node?, in source: NSString) -> [NSRange] {
+        guard let rootNode else {
+            return braceRanges(in: source)
+        }
+
+        var ranges: [NSRange] = []
+        var stack: [Int] = []
+        ranges.reserveCapacity(128)
+        stack.reserveCapacity(64)
+        collectBraceRanges(from: rootNode, source: source, stack: &stack, ranges: &ranges)
+        return ranges.isEmpty ? braceRanges(in: source) : ranges
     }
 
-    private func memberOwnerMatches(_ entry: Entry, at range: NSRange) -> Bool {
+    static func collectBraceRanges(
+        from node: Node,
+        source: NSString,
+        stack: inout [Int],
+        ranges: inout [NSRange]
+    ) {
+        let range = node.range
+        if range.length == 1, range.upperBound <= source.length {
+            let character = source.character(at: range.location)
+            if character == openBraceCodeUnit {
+                stack.append(range.location)
+            } else if character == closeBraceCodeUnit, let openBrace = stack.popLast() {
+                ranges.append(NSRange(location: openBrace, length: range.location - openBrace + 1))
+            }
+        }
+
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index) else { continue }
+            collectBraceRanges(from: child, source: source, stack: &stack, ranges: &ranges)
+        }
+    }
+
+    static func braceRanges(in source: NSString) -> [NSRange] {
+        var stack: [Int] = []
+        var ranges: [NSRange] = []
+        stack.reserveCapacity(64)
+
+        var location = 0
+        while location < source.length {
+            let character = source.character(at: location)
+            if character == openBraceCodeUnit {
+                stack.append(location)
+            } else if character == closeBraceCodeUnit, let openBrace = stack.popLast() {
+                ranges.append(NSRange(location: openBrace, length: location - openBrace + 1))
+            }
+            location += 1
+        }
+
+        return ranges
+    }
+
+    private func innermostTypeScope(containing range: NSRange) -> TypeScope? {
+        var best: TypeScope?
+        for scope in typeScopes {
+            guard Self.range(scope.bodyRange, contains: range) else {
+                continue
+            }
+            if best.map({ scope.bodyRange.length < $0.bodyRange.length }) ?? true {
+                best = scope
+            }
+        }
+        return best
+    }
+
+    private func memberOwnerMatches(_ entry: Entry, currentOwnerQualifiedName: String?) -> Bool {
         guard entry.role == .member,
               let ownerQualifiedName = entry.ownerQualifiedName
         else {
             return true
         }
-        return innermostTypeScope(containing: range)?.qualifiedName == ownerQualifiedName
+        return currentOwnerQualifiedName == ownerQualifiedName
     }
 
     private func nestedExecutableBraceRange(containing range: NSRange, within typeScope: TypeScope) -> NSRange? {
@@ -1305,7 +1410,13 @@ private extension SwiftFileSymbolIndex {
             candidates.append(braceRange)
         }
 
-        return candidates.sorted { $0.length < $1.length }.first
+        var best: NSRange?
+        for candidate in candidates {
+            if best.map({ candidate.length < $0.length }) ?? true {
+                best = candidate
+            }
+        }
+        return best
     }
 
     private func localExecutableBraceRange(
@@ -1386,31 +1497,31 @@ private extension SwiftFileSymbolIndex {
     }
 
     private func innermostFunctionScope(containing range: NSRange) -> FunctionScope? {
-        functionScopes
-            .filter { Self.range($0.bodyRange, contains: range) }
-            .sorted { $0.bodyRange.length < $1.bodyRange.length }
-            .first
+        var best: FunctionScope?
+        for scope in functionScopes {
+            guard Self.range(scope.bodyRange, contains: range) else {
+                continue
+            }
+            if best.map({ scope.bodyRange.length < $0.bodyRange.length }) ?? true {
+                best = scope
+            }
+        }
+        return best
     }
 
     private func innermostBraceRange(containing range: NSRange, within outerRange: NSRange) -> NSRange? {
-        var stack: [Int] = []
-        var matches: [NSRange] = []
-        var location = outerRange.location
-
-        while location < outerRange.upperBound {
-            let character = maskedSource.substring(with: NSRange(location: location, length: 1))
-            if character == "{" {
-                stack.append(location)
-            } else if character == "}", let openBrace = stack.popLast() {
-                let braceRange = NSRange(location: openBrace, length: location - openBrace + 1)
-                if Self.range(braceRange, contains: range) {
-                    matches.append(braceRange)
-                }
+        var best: NSRange?
+        for braceRange in braceRanges {
+            guard Self.range(outerRange, contains: braceRange),
+                  Self.range(braceRange, contains: range)
+            else {
+                continue
             }
-            location += 1
+            if best.map({ braceRange.length < $0.length }) ?? true {
+                best = braceRange
+            }
         }
-
-        return matches.sorted { $0.length < $1.length }.first
+        return best
     }
 
     private func conditionalBindingScopes(for range: NSRange, within outerRange: NSRange) -> [LocalBindingScope] {
@@ -2212,8 +2323,7 @@ private extension SwiftFileSymbolIndex {
         guard location >= 0 && location < maskedSource.length else {
             return false
         }
-        let character = maskedSource.substring(with: NSRange(location: location, length: 1))
-        return character.range(of: #"^[A-Za-z0-9_]$"#, options: .regularExpression) != nil
+        return Self.isSwiftIdentifierContinueCodeUnit(maskedSource.character(at: location))
     }
 
     func enumCaseNameRanges(in range: NSRange) -> [NSRange] {
@@ -2269,6 +2379,30 @@ private extension SwiftFileSymbolIndex {
 }
 
 private extension SwiftFileSymbolIndex {
+    static func entry(_ lhs: Entry, isBetterThan rhs: Entry) -> Bool {
+        if lhs.scopeRange.length != rhs.scopeRange.length {
+            return lhs.scopeRange.length < rhs.scopeRange.length
+        }
+        if lhs.declarationRange.location != rhs.declarationRange.location {
+            return lhs.declarationRange.location > rhs.declarationRange.location
+        }
+        return lhs.name < rhs.name
+    }
+
+    private static func typedValue(_ lhs: TypedValue, isBetterThan rhs: TypedValue) -> Bool {
+        if lhs.scopeRange.length != rhs.scopeRange.length {
+            return lhs.scopeRange.length < rhs.scopeRange.length
+        }
+        return lhs.declarationRange.location > rhs.declarationRange.location
+    }
+
+    static func lastQualifiedComponent(_ name: String) -> String {
+        guard let dotIndex = name.lastIndex(of: ".") else {
+            return name
+        }
+        return String(name[name.index(after: dotIndex)...])
+    }
+
     static let identifierPattern = #"[A-Za-z_][A-Za-z0-9_]*"#
     static let qualifiedIdentifierPattern = #"\#(identifierPattern)(?:\.\#(identifierPattern))*"#
 
@@ -2374,4 +2508,46 @@ private extension SwiftFileSymbolIndex {
     ]
 
     static let nonBindingPatternKeywords: Set<String> = ["await", "case", "let", "try", "var"]
+
+    static let openBraceCodeUnit: unichar = 123
+    static let closeBraceCodeUnit: unichar = 125
+
+    static func isSwiftIdentifierContinueCodeUnit(_ codeUnit: unichar) -> Bool {
+        codeUnit == 95
+            || (codeUnit >= 48 && codeUnit <= 57)
+            || (codeUnit >= 65 && codeUnit <= 90)
+            || (codeUnit >= 97 && codeUnit <= 122)
+    }
+}
+
+private extension SwiftFileSymbolIndex.SymbolKind {
+    var kindSet: SwiftFileSymbolIndex.SymbolKindSet {
+        switch self {
+        case .type:
+            return .type
+        case .function:
+            return .function
+        case .variable:
+            return .variable
+        case .constant:
+            return .constant
+        case .macro:
+            return .macro
+        }
+    }
+}
+
+private extension SwiftFileSymbolIndex.SymbolRole {
+    var roleSet: SwiftFileSymbolIndex.SymbolRoleSet {
+        switch self {
+        case .file:
+            return .file
+        case .member:
+            return .member
+        case .local:
+            return .local
+        case .genericParameter:
+            return .genericParameter
+        }
+    }
 }
