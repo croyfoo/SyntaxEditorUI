@@ -8,7 +8,7 @@ struct SyntaxEditorUISwiftUITests {
     @Test("SyntaxEditorUISwiftUI exposes the SwiftUI wrapper")
     func exposesSwiftUIWrapper() {
         let context = SyntaxEditorUITestContext(text: "let value = 1")
-        let editor = SyntaxEditor(document: context.document, configuration: context.configuration)
+        let editor = SyntaxEditor(context.model)
         #expect(String(describing: type(of: editor)) == "SyntaxEditor")
     }
 }

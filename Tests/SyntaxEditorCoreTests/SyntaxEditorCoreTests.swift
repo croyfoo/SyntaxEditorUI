@@ -11,7 +11,7 @@ private func applying(_ result: EditorCommandResult?, to source: String) -> Stri
 }
 
 private func applying(_ result: EditorCommandResult, to source: String) -> String {
-    SyntaxEditorDocument.applying(result.edits, to: source)
+    SyntaxEditorModel.applying(result.edits, to: source)
 }
 
 private func applying(_ edit: SyntaxLanguageEdit?, to source: String) -> String? {
@@ -20,7 +20,7 @@ private func applying(_ edit: SyntaxLanguageEdit?, to source: String) -> String?
 }
 
 private func applying(_ edit: SyntaxLanguageEdit, to source: String) -> String {
-    SyntaxEditorDocument.applying(edit.edits, to: source)
+    SyntaxEditorModel.applying(edit.edits, to: source)
 }
 
 private func applyingIfValid(_ edits: [SyntaxEditorTextEdit], to source: String) -> String? {
@@ -32,7 +32,7 @@ private func applyingIfValid(_ edits: [SyntaxEditorTextEdit], to source: String)
     }) else {
         return nil
     }
-    return SyntaxEditorDocument.applying(edits, to: source)
+    return SyntaxEditorModel.applying(edits, to: source)
 }
 
 private func highlightTokensMatch(_ lhs: [SyntaxHighlightToken], _ rhs: [SyntaxHighlightToken]) -> Bool {
@@ -393,103 +393,102 @@ struct SyntaxEditorCoreTests {
         #expect(SyntaxLanguage.named("yaml") == nil)
     }
 
-    @Test("SyntaxEditorDocument and SyntaxEditorConfiguration store and mutate state on MainActor")
+    @Test("SyntaxEditorModel stores and mutates editor state on MainActor")
     @MainActor
-    func syntaxEditorDocumentConfigurationState() {
-        let document = SyntaxEditorDocument(text: "{}")
-        let configuration = SyntaxEditorConfiguration(language: SyntaxLanguage.json)
+    func syntaxEditorModelState() {
+        let model = SyntaxEditorModel(text: "{}", language: SyntaxLanguage.json)
 
-        #expect(document.textSnapshot() == "{}")
-        #expect(configuration.language.identifier == SyntaxLanguage.json.identifier)
-        #expect(configuration.isEditable == true)
-        #expect(configuration.lineWrappingEnabled == false)
-        #expect(configuration.colorTheme == .default)
-        #expect(configuration.drawsBackground == true)
-        #expect(configuration.fontSizeDelta == 0)
+        #expect(model.text == "{}")
+        #expect(model.language.identifier == SyntaxLanguage.json.identifier)
+        #expect(model.isEditable == true)
+        #expect(model.lineWrappingEnabled == false)
+        #expect(model.colorTheme == .default)
+        #expect(model.drawsBackground == true)
+        #expect(model.fontSizeDelta == 0)
 
-        document.replaceText("body { color: red; }")
-        configuration.language = SyntaxLanguage.css
-        configuration.isEditable = false
-        configuration.lineWrappingEnabled = true
-        configuration.drawsBackground = false
-        configuration.increaseFontSize()
-        configuration.increaseFontSize()
-        configuration.decreaseFontSize()
+        model.replaceText("body { color: red; }")
+        model.language = SyntaxLanguage.css
+        model.isEditable = false
+        model.lineWrappingEnabled = true
+        model.drawsBackground = false
+        model.increaseFontSize()
+        model.increaseFontSize()
+        model.decreaseFontSize()
 
-        #expect(document.textSnapshot() == "body { color: red; }")
-        #expect(document.revision == 1)
-        #expect(configuration.language.identifier == SyntaxLanguage.css.identifier)
-        #expect(configuration.isEditable == false)
-        #expect(configuration.lineWrappingEnabled == true)
-        #expect(configuration.colorTheme == .default)
-        #expect(configuration.drawsBackground == false)
-        #expect(configuration.fontSizeDelta == 1)
+        #expect(model.text == "body { color: red; }")
+        #expect(model.revision == 1)
+        #expect(model.language.identifier == SyntaxLanguage.css.identifier)
+        #expect(model.isEditable == false)
+        #expect(model.lineWrappingEnabled == true)
+        #expect(model.colorTheme == .default)
+        #expect(model.drawsBackground == false)
+        #expect(model.fontSizeDelta == 1)
 
-        configuration.resetFontSize()
-        #expect(configuration.fontSizeDelta == 0)
+        model.resetFontSize()
+        #expect(model.fontSizeDelta == 0)
     }
 
-    @Test("SyntaxEditorConfiguration font size commands clamp at rendered bounds")
+    @Test("SyntaxEditorModel font size commands clamp at rendered bounds")
     @MainActor
-    func syntaxEditorConfigurationFontSizeCommandsClampAtRenderedBounds() {
-        let configuration = SyntaxEditorConfiguration(colorTheme: .presentationLarge)
-        let basePointSize = configuration.colorTheme.resolved(for: configuration.language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
+    func syntaxEditorModelFontSizeCommandsClampAtRenderedBounds() {
+        let model = SyntaxEditorModel(colorTheme: .presentationLarge)
+        let basePointSize = model.colorTheme.resolved(for: model.language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
         let minimumDelta = Int(ceil(SyntaxEditorFontSize.minimum - basePointSize))
         let maximumDelta = Int(floor(SyntaxEditorFontSize.maximum - basePointSize))
 
         for _ in 0..<100 {
-            configuration.increaseFontSize()
+            model.increaseFontSize()
         }
-        #expect(configuration.fontSizeDelta == maximumDelta)
+        #expect(model.fontSizeDelta == maximumDelta)
 
-        configuration.increaseFontSize()
-        #expect(configuration.fontSizeDelta == maximumDelta)
+        model.increaseFontSize()
+        #expect(model.fontSizeDelta == maximumDelta)
 
-        configuration.decreaseFontSize()
-        #expect(configuration.fontSizeDelta == maximumDelta - 1)
+        model.decreaseFontSize()
+        #expect(model.fontSizeDelta == maximumDelta - 1)
 
         for _ in 0..<100 {
-            configuration.decreaseFontSize()
+            model.decreaseFontSize()
         }
-        #expect(configuration.fontSizeDelta == minimumDelta)
+        #expect(model.fontSizeDelta == minimumDelta)
 
-        configuration.decreaseFontSize()
-        #expect(configuration.fontSizeDelta == minimumDelta)
+        model.decreaseFontSize()
+        #expect(model.fontSizeDelta == minimumDelta)
 
-        configuration.increaseFontSize()
-        #expect(configuration.fontSizeDelta == minimumDelta + 1)
+        model.increaseFontSize()
+        #expect(model.fontSizeDelta == minimumDelta + 1)
     }
 
-    @Test("SyntaxEditorConfiguration font size commands recover from explicit overshoot")
+    @Test("SyntaxEditorModel font size commands recover from explicit overshoot")
     @MainActor
-    func syntaxEditorConfigurationFontSizeCommandsRecoverFromExplicitOvershoot() {
-        let configuration = SyntaxEditorConfiguration(colorTheme: .presentationLarge, fontSizeDelta: 100)
-        let basePointSize = configuration.colorTheme.resolved(for: configuration.language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
+    func syntaxEditorModelFontSizeCommandsRecoverFromExplicitOvershoot() {
+        let model = SyntaxEditorModel(colorTheme: .presentationLarge, fontSizeDelta: 100)
+        let basePointSize = model.colorTheme.resolved(for: model.language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
         let minimumDelta = Int(ceil(SyntaxEditorFontSize.minimum - basePointSize))
         let maximumDelta = Int(floor(SyntaxEditorFontSize.maximum - basePointSize))
 
-        configuration.decreaseFontSize()
-        #expect(configuration.fontSizeDelta == maximumDelta - 1)
+        model.decreaseFontSize()
+        #expect(model.fontSizeDelta == maximumDelta - 1)
 
-        configuration.fontSizeDelta = -100
-        configuration.increaseFontSize()
-        #expect(configuration.fontSizeDelta == minimumDelta + 1)
+        model.fontSizeDelta = -100
+        model.increaseFontSize()
+        #expect(model.fontSizeDelta == minimumDelta + 1)
     }
 
-    @Test("SyntaxEditorDocument text snapshots participate in observation")
+    @Test("SyntaxEditorModel text participates in observation")
     @MainActor
-    func syntaxEditorDocumentTextSnapshotObservation() {
-        let document = SyntaxEditorDocument(text: "let value = 1")
+    func syntaxEditorModelTextObservation() {
+        let model = SyntaxEditorModel(text: "let value = 1")
         var observedText = ""
         let didChange = DispatchSemaphore(value: 0)
 
         withObservationTracking {
-            observedText = document.textSnapshot()
+            observedText = model.text
         } onChange: {
             didChange.signal()
         }
 
-        document.replaceText("let value = 2")
+        model.replaceText("let value = 2")
 
         #expect(observedText == "let value = 1")
         #expect(didChange.wait(timeout: .now()) == .success)
@@ -783,7 +782,7 @@ struct SyntaxEditorCoreTests {
 
         func apply(_ edit: SyntaxEditorTextEdit) {
             index.apply(edits: [edit], previousSource: source)
-            source = SyntaxEditorDocument.applying([edit], to: source)
+            source = SyntaxEditorModel.applying([edit], to: source)
         }
 
         #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 6)
@@ -817,7 +816,7 @@ struct SyntaxEditorCoreTests {
                 replacement: replacement
             )
             index.apply(edits: [edit], previousSource: source)
-            source = SyntaxEditorDocument.applying([edit], to: source)
+            source = SyntaxEditorModel.applying([edit], to: source)
             #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 1)
         }
 
@@ -837,7 +836,7 @@ struct SyntaxEditorCoreTests {
                 replacement: String(repeating: "y", count: width)
             )
             index.apply(edits: [edit], previousSource: source)
-            source = SyntaxEditorDocument.applying([edit], to: source)
+            source = SyntaxEditorModel.applying([edit], to: source)
 
             #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 200)
         }
@@ -855,7 +854,7 @@ struct SyntaxEditorCoreTests {
         )
 
         index.apply(edits: [edit], previousSource: source)
-        source = SyntaxEditorDocument.applying([edit], to: source)
+        source = SyntaxEditorModel.applying([edit], to: source)
 
         #expect(source == "abc")
         #expect(index.lineCountForTesting == 1)

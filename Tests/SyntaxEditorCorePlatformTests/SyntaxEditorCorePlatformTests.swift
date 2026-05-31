@@ -108,19 +108,19 @@ private func syntaxEditorComponents(
 
 @Suite("SyntaxEditorCorePlatform")
 struct SyntaxEditorCorePlatformTests {
-    @Test("SyntaxEditorConfiguration stores custom color themes")
+    @Test("SyntaxEditorModel stores custom color themes")
     @MainActor
-    func syntaxEditorConfigurationCustomColorTheme() {
+    func syntaxEditorModelCustomColorTheme() {
         let theme = customColorTheme()
-        let configuration = SyntaxEditorConfiguration(
+        let model = SyntaxEditorModel(
             language: SyntaxLanguage.swift,
             colorTheme: theme
         )
 
-        #expect(configuration.colorTheme == theme)
+        #expect(model.colorTheme == theme)
 
-        configuration.colorTheme = .default
-        #expect(configuration.colorTheme == .default)
+        model.colorTheme = .default
+        #expect(model.colorTheme == .default)
     }
 
     @Test("SyntaxEditorHighlightTheme resolves built-in colors on the current platform")

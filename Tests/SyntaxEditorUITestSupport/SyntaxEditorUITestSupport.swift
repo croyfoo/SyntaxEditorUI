@@ -4,8 +4,7 @@ import SyntaxEditorUI
 
 @MainActor
 public struct SyntaxEditorUITestContext {
-    public let document: SyntaxEditorDocument
-    public let configuration: SyntaxEditorConfiguration
+    public let model: SyntaxEditorModel
 
     public init(
         text: String = "",
@@ -16,8 +15,8 @@ public struct SyntaxEditorUITestContext {
         drawsBackground: Bool = true,
         fontSizeDelta: Int = 0
     ) {
-        self.document = SyntaxEditorDocument(text: text)
-        self.configuration = SyntaxEditorConfiguration(
+        self.model = SyntaxEditorModel(
+            text: text,
             language: language,
             isEditable: isEditable,
             lineWrappingEnabled: lineWrappingEnabled,

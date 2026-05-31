@@ -35,7 +35,7 @@ extension SyntaxEditorUITests {
         syntaxEditorSettleUIKitHost(controller)
         let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
 
-        firstEditor.document.replaceText(editedText)
+        firstEditor.model.replaceText(editedText)
         firstEditor.synchronizeDocumentForTesting()
         syntaxEditorSettleUIKitHost(controller)
         probe.tick += 1
@@ -43,15 +43,15 @@ extension SyntaxEditorUITests {
 
         let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
-        #expect(secondEditor.document === firstEditor.document)
-        #expect(secondEditor.document.textSnapshot() == editedText)
+        #expect(secondEditor.model === firstEditor.model)
+        #expect(secondEditor.model.text == editedText)
         #expect(secondEditor.text == editedText)
 #elseif canImport(AppKit)
         let controller = NSHostingController(rootView: SyntaxEditorDefaultWrapperHost(probe: probe))
         syntaxEditorSettleAppKitHost(controller)
         let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
 
-        firstEditor.document.replaceText(editedText)
+        firstEditor.model.replaceText(editedText)
         firstEditor.synchronizeDocumentForTesting()
         syntaxEditorSettleAppKitHost(controller)
         probe.tick += 1
@@ -59,24 +59,24 @@ extension SyntaxEditorUITests {
 
         let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
-        #expect(secondEditor.document === firstEditor.document)
-        #expect(secondEditor.document.textSnapshot() == editedText)
+        #expect(secondEditor.model === firstEditor.model)
+        #expect(secondEditor.model.text == editedText)
         #expect(secondEditor.textView.string == editedText)
 #endif
     }
 
-    @Test("SyntaxEditor rebinds replaced SwiftUI configuration without recreating native view")
+    @Test("SyntaxEditor rebinds replaced SwiftUI model without recreating native view")
     @MainActor
-    func syntaxEditorRebindsReplacedSwiftUIConfigurationWithoutRecreatingNativeView() throws {
+    func syntaxEditorRebindsReplacedSwiftUIModelWithoutRecreatingNativeView() throws {
         let probe = SyntaxEditorSwiftUIProbe()
-        let replacementConfiguration = SyntaxEditorConfiguration(
+        let replacementModel = SyntaxEditorModel(
             language: SyntaxLanguage.json,
             isEditable: false,
             lineWrappingEnabled: true
         )
 
 #if canImport(UIKit)
-        let controller = UIHostingController(rootView: SyntaxEditorConfigurationReplacementHost(probe: probe))
+        let controller = UIHostingController(rootView: SyntaxEditorModelReplacementHost(probe: probe))
         let window = syntaxEditorAttachUIKitHost(controller)
         defer {
             window.isHidden = true
@@ -85,29 +85,29 @@ extension SyntaxEditorUITests {
         syntaxEditorSettleUIKitHost(controller)
         let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
 
-        probe.configuration = replacementConfiguration
+        probe.model = replacementModel
         probe.tick += 1
         syntaxEditorSettleUIKitHost(controller)
 
         let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
-        #expect(secondEditor.configuration === replacementConfiguration)
-        #expect(secondEditor.configuration.language == SyntaxLanguage.json)
-        #expect(secondEditor.configuration.isEditable == false)
+        #expect(secondEditor.model === replacementModel)
+        #expect(secondEditor.model.language == SyntaxLanguage.json)
+        #expect(secondEditor.model.isEditable == false)
 #elseif canImport(AppKit)
-        let controller = NSHostingController(rootView: SyntaxEditorConfigurationReplacementHost(probe: probe))
+        let controller = NSHostingController(rootView: SyntaxEditorModelReplacementHost(probe: probe))
         syntaxEditorSettleAppKitHost(controller)
         let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
 
-        probe.configuration = replacementConfiguration
+        probe.model = replacementModel
         probe.tick += 1
         syntaxEditorSettleAppKitHost(controller)
 
         let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
-        #expect(secondEditor.configuration === replacementConfiguration)
-        #expect(secondEditor.configuration.language == SyntaxLanguage.json)
-        #expect(secondEditor.configuration.isEditable == false)
+        #expect(secondEditor.model === replacementModel)
+        #expect(secondEditor.model.language == SyntaxLanguage.json)
+        #expect(secondEditor.model.isEditable == false)
         #expect(secondEditor.textView.isEditable == false)
 #endif
     }
@@ -117,7 +117,7 @@ extension SyntaxEditorUITests {
     func syntaxEditorViewClearsUndoStateWhenRebindingDocument() throws {
         let source = "let value = 1"
         let editedSource = "\(source)!"
-        let replacementDocument = SyntaxEditorDocument(text: "let other = 2")
+        let replacementDocument = SyntaxEditorModel(text: "let other = 2")
         let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
 
 #if canImport(UIKit)
@@ -127,13 +127,13 @@ extension SyntaxEditorUITests {
         editorView.insertText("!")
         let undoManager = try #require(editorView.undoManager)
 
-        #expect(model.document.textSnapshot() == editedSource)
+        #expect(model.model.text == editedSource)
         #expect(undoManager.canUndo)
 
-        editorView.update(document: replacementDocument, configuration: model.configuration)
+        editorView.update(model: replacementDocument)
 
-        #expect(editorView.document === replacementDocument)
-        #expect(editorView.text == replacementDocument.textSnapshot())
+        #expect(editorView.model === replacementDocument)
+        #expect(editorView.text == replacementDocument.text)
         #expect(!undoManager.canUndo)
 #elseif canImport(AppKit)
         let editorView = SyntaxEditorView(testContext: model)
@@ -143,13 +143,13 @@ extension SyntaxEditorUITests {
         editorView.textView.insertText("!", replacementRange: editRange)
         editorView.textView.breakUndoCoalescing()
 
-        #expect(model.document.textSnapshot() == editedSource)
+        #expect(model.model.text == editedSource)
         #expect(undoManager.canUndo)
 
-        editorView.update(document: replacementDocument, configuration: model.configuration)
+        editorView.update(model: replacementDocument)
 
-        #expect(editorView.document === replacementDocument)
-        #expect(editorView.textView.string == replacementDocument.textSnapshot())
+        #expect(editorView.model === replacementDocument)
+        #expect(editorView.textView.string == replacementDocument.text)
         #expect(!undoManager.canUndo)
 #endif
     }
@@ -169,10 +169,10 @@ extension SyntaxEditorUITests {
         editorView.insertText("!")
         let undoManager = try #require(editorView.undoManager)
 
-        #expect(model.document.textSnapshot() == editedSource)
+        #expect(model.model.text == editedSource)
         #expect(undoManager.canUndo)
 
-        model.document.replaceText(replacementText)
+        model.model.replaceText(replacementText)
         editorView.synchronizeDocumentForTesting()
 
         #expect(editorView.text == replacementText)
@@ -185,10 +185,10 @@ extension SyntaxEditorUITests {
         editorView.textView.insertText("!", replacementRange: editRange)
         editorView.textView.breakUndoCoalescing()
 
-        #expect(model.document.textSnapshot() == editedSource)
+        #expect(model.model.text == editedSource)
         #expect(undoManager.canUndo)
 
-        model.document.replaceText(replacementText)
+        model.model.replaceText(replacementText)
         editorView.synchronizeDocumentForTesting()
 
         #expect(editorView.textView.string == replacementText)
@@ -222,7 +222,7 @@ extension SyntaxEditorUITests {
             language: SyntaxLanguage.swift,
             colorTheme: initialTheme
         )
-        let replacementDocument = SyntaxEditorDocument(text: "abc new = 1")
+        let replacementDocument = SyntaxEditorModel(text: "abc new = 1")
 
 #if canImport(UIKit)
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
@@ -232,8 +232,8 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
 
         let previousSuspensionCount = await resetGate.currentSuspensionCount()
-        editorView.update(document: replacementDocument, configuration: model.configuration)
-        model.configuration.colorTheme = updatedTheme
+        editorView.update(model: replacementDocument)
+        replacementDocument.colorTheme = updatedTheme
         editorView.synchronizeDocumentForTesting()
 
         await resetGate.waitUntilSuspended(after: previousSuspensionCount)
@@ -249,8 +249,8 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
 
         let previousSuspensionCount = await resetGate.currentSuspensionCount()
-        editorView.update(document: replacementDocument, configuration: model.configuration)
-        model.configuration.colorTheme = updatedTheme
+        editorView.update(model: replacementDocument)
+        replacementDocument.colorTheme = updatedTheme
         editorView.synchronizeDocumentForTesting()
 
         await resetGate.waitUntilSuspended(after: previousSuspensionCount)

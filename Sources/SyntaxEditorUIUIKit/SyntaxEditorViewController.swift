@@ -4,17 +4,12 @@ import UIKit
 
 @MainActor
 public final class SyntaxEditorViewController: UIViewController {
-    public private(set) var document: SyntaxEditorDocument
-    public private(set) var configuration: SyntaxEditorConfiguration
+    public private(set) var model: SyntaxEditorModel
     public let editorView: SyntaxEditorView
 
-    public init(
-        document: SyntaxEditorDocument = SyntaxEditorDocument(),
-        configuration: SyntaxEditorConfiguration = SyntaxEditorConfiguration()
-    ) {
-        self.document = document
-        self.configuration = configuration
-        self.editorView = SyntaxEditorView(document: document, configuration: configuration)
+    public init(model: SyntaxEditorModel) {
+        self.model = model
+        self.editorView = SyntaxEditorView(model: model)
 
         super.init(nibName: nil, bundle: nil)
     }
@@ -28,17 +23,11 @@ public final class SyntaxEditorViewController: UIViewController {
         view = editorView
     }
 
-    public func update(
-        document nextDocument: SyntaxEditorDocument,
-        configuration nextConfiguration: SyntaxEditorConfiguration
-    ) {
-        let documentChanged = document !== nextDocument
-        let configurationChanged = configuration !== nextConfiguration
-        guard documentChanged || configurationChanged else { return }
+    public func update(model nextModel: SyntaxEditorModel) {
+        guard model !== nextModel else { return }
 
-        document = nextDocument
-        configuration = nextConfiguration
-        editorView.update(document: nextDocument, configuration: nextConfiguration)
+        model = nextModel
+        editorView.update(model: nextModel)
     }
 }
 #endif

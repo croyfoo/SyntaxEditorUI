@@ -1780,7 +1780,7 @@ private final class SyntaxHighlightLineIndex {
 
     func apply(mutation: SyntaxHighlightMutation, previousSource: String) {
         guard let affectedRange = affectedRange(for: mutation, in: previousSource) else {
-            reset(source: SyntaxEditorDocument.applying([
+            reset(source: SyntaxEditorModel.applying([
                 SyntaxEditorTextEdit(
                     range: NSRange(location: mutation.location, length: mutation.length),
                     replacement: mutation.replacement
@@ -1791,7 +1791,7 @@ private final class SyntaxHighlightLineIndex {
 
         let nsSource = previousSource as NSString
         let oldSegment = nsSource.substring(with: affectedRange)
-        let newSegment = SyntaxEditorDocument.applying([
+        let newSegment = SyntaxEditorModel.applying([
             SyntaxEditorTextEdit(
                 range: NSRange(
                     location: mutation.location - affectedRange.location,

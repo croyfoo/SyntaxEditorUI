@@ -29,7 +29,7 @@ package final class LineMetricsIndex {
     package func apply(edits: [SyntaxEditorTextEdit], previousSource: String) {
         guard !edits.isEmpty else { return }
         guard let affected = affectedRange(for: edits, in: previousSource) else {
-            reset(source: SyntaxEditorDocument.applying(edits, to: previousSource))
+            reset(source: SyntaxEditorModel.applying(edits, to: previousSource))
             return
         }
 
@@ -41,7 +41,7 @@ package final class LineMetricsIndex {
                 replacement: $0.replacement
             )
         }
-        let newSegment = SyntaxEditorDocument.applying(localEdits, to: oldSegment)
+        let newSegment = SyntaxEditorModel.applying(localEdits, to: oldSegment)
         var metrics = Self.metrics(in: newSegment, baseOffset: affected.range.location, tabWidth: tabWidth)
         if affected.range.upperBound < nsSource.length,
            Self.endsWithLineBreak(newSegment),

@@ -61,7 +61,7 @@ extension SyntaxEditorUITests {
     func syntaxEditorViewMacTextObservation() async {
         let model = SyntaxEditorTestContext(text: "const answer = 42;", language: SyntaxLanguage.javascript)
         let editorView = SyntaxEditorView(testContext: model)
-        guard let delivery = editorView.documentDeliveryForTesting else {
+        guard let delivery = editorView.modelDeliveryForTesting else {
             Issue.record("Expected SyntaxEditorView to expose its production document delivery")
             return
         }
@@ -71,7 +71,7 @@ extension SyntaxEditorUITests {
 
         #expect(await renderedText.waitUntilValue("const answer = 42;"))
 
-        model.document.replaceText("{\"enabled\":true}")
+        model.model.replaceText("{\"enabled\":true}")
 
         #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
     }
@@ -83,10 +83,37 @@ extension SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
         editorView.textView.setSelectedRange(NSRange(location: 6, length: 0))
 
-        model.document.replaceText("a")
+        model.model.replaceText("a")
         editorView.synchronizeDocumentForTesting()
 
         #expect(editorView.textView.selectedRange() == NSRange(location: 1, length: 0))
+    }
+
+    @Test("SyntaxEditorView keeps macOS selection when setting unchanged text")
+    @MainActor
+    func syntaxEditorViewMacKeepsSelectionWhenSettingUnchangedText() {
+        let source = "abcdef"
+        let replacement = "abcdefghi"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
+
+        model.model.replaceText(
+            replacement,
+            selectedRange: NSRange(location: replacement.utf16.count, length: 0)
+        )
+        editorView.synchronizeDocumentForTesting()
+        #expect(editorView.textView.selectedRange() == NSRange(location: replacement.utf16.count, length: 0))
+
+        editorView.selectedRange = NSRange(location: 2, length: 0)
+        let revision = model.model.revision
+        let latestChange = model.model.latestChange
+
+        editorView.text = replacement
+
+        #expect(model.model.revision == revision)
+        #expect(model.model.latestChange == latestChange)
+        #expect(model.model.selectedRange == NSRange(location: 2, length: 0))
+        #expect(editorView.textView.selectedRange() == NSRange(location: 2, length: 0))
     }
 
     @Test("SyntaxEditorView enables macOS find bar by default")
@@ -164,7 +191,7 @@ extension SyntaxEditorUITests {
 
         editorView.textView.replaceCharacters(in: NSRange(location: 0, length: 5), with: "omega")
 
-        #expect(model.document.textSnapshot() == "omega beta")
+        #expect(model.model.text == "omega beta")
         #expect(editorView.selectedRange == NSRange(location: 5, length: 0))
     }
 
@@ -179,13 +206,13 @@ extension SyntaxEditorUITests {
         #expect(editorView.textView.isIncrementalSearchingEnabled)
         #expect(editorView.textView.isEditable == false)
 
-        model.configuration.isEditable = true
+        model.model.isEditable = true
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textView.usesFindBar)
         #expect(editorView.textView.isIncrementalSearchingEnabled)
         #expect(editorView.textView.isEditable)
 
-        model.configuration.isEditable = false
+        model.model.isEditable = false
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textView.usesFindBar)
         #expect(editorView.textView.isIncrementalSearchingEnabled)
@@ -213,7 +240,7 @@ extension SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground))
 
-        model.configuration.colorTheme = updatedTheme
+        model.model.colorTheme = updatedTheme
 
         editorView.synchronizeDocumentForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
@@ -254,7 +281,7 @@ extension SyntaxEditorUITests {
             colorTheme: theme
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
-        guard let delivery = editorView.configurationDeliveryForTesting else {
+        guard let delivery = editorView.modelConfigurationDeliveryForTesting else {
             Issue.record("Expected SyntaxEditorView to expose its production configuration delivery")
             return
         }
@@ -270,7 +297,7 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(editorView.backgroundColor, background))
         #expect(syntaxEditorUITestColorsEqual(editorView.textView.backgroundColor, background))
 
-        model.configuration.drawsBackground = false
+        model.model.drawsBackground = false
 
         #expect(await stopsDrawingBackground.waitUntilValue(true))
     }
@@ -415,7 +442,7 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), initialTheme.baseForeground))
 
-        model.configuration.colorTheme = updatedTheme
+        model.model.colorTheme = updatedTheme
 
         editorView.synchronizeDocumentForTesting()
         #expect(
@@ -450,13 +477,13 @@ extension SyntaxEditorUITests {
         )
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
-        model.configuration.lineWrappingEnabled = true
+        model.model.lineWrappingEnabled = true
 
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.hasHorizontalScroller == false)
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
-        model.configuration.isEditable = false
+        model.model.isEditable = false
 
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textView.isEditable == false)
@@ -490,7 +517,7 @@ extension SyntaxEditorUITests {
         let initialCallCount = await highlighter.callCount()
         let initialFont = try #require(macEditorFont(editorView, at: 0))
 
-        model.configuration.fontSizeDelta = 4
+        model.model.fontSizeDelta = 4
         editorView.synchronizeDocumentForTesting()
 
         #expect(await highlighter.callCount() == initialCallCount)
@@ -531,7 +558,7 @@ extension SyntaxEditorUITests {
         let initialPlainFont = try #require(macEditorFont(editorView, at: 3))
 
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 3))
-        model.configuration.fontSizeDelta = 4
+        model.model.fontSizeDelta = 4
         editorView.synchronizeDocumentForTesting()
 
         #expect(editorView.textView.selectedRange() == NSRange(location: 0, length: 3))
@@ -629,7 +656,7 @@ extension SyntaxEditorUITests {
             string: syntaxEditorUITestColor(hex: 0x556677),
             keyword: syntaxEditorUITestColor(hex: 0x334455)
         )
-        model.configuration.colorTheme = updatedTheme
+        model.model.colorTheme = updatedTheme
         editorView.synchronizeDocumentForTesting()
         await editorView.waitForPendingHighlightForTesting()
 
@@ -670,7 +697,7 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         let suspensionCount = await resetGate.currentSuspensionCount()
-        model.document.replaceText(replacement)
+        model.model.replaceText(replacement)
         editorView.synchronizeDocumentForTesting()
 
         await resetGate.waitUntilSuspended(after: suspensionCount)
@@ -763,7 +790,7 @@ extension SyntaxEditorUITests {
         #expect(abs(maximumHighlightedFont.pointSize - 64) < 0.01)
         #expect(abs(maximumPlainFont.pointSize - 64) < 0.01)
 
-        model.configuration.fontSizeDelta = -100
+        model.model.fontSizeDelta = -100
         editorView.synchronizeDocumentForTesting()
 
         let minimumHighlightedFont = try #require(macEditorFont(editorView, at: 0))
@@ -797,19 +824,19 @@ extension SyntaxEditorUITests {
         #expect(abs(maximumPlainFont.pointSize - 64) < 0.01)
 
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 3))
-        model.configuration.decreaseFontSize()
+        model.model.decreaseFontSize()
         editorView.synchronizeDocumentForTesting()
 
-        #expect(model.configuration.fontSizeDelta == 35)
+        #expect(model.model.fontSizeDelta == 35)
         let decreasedHighlightedFont = try #require(macEditorFont(editorView, at: 0))
         let decreasedPlainFont = try #require(macEditorFont(editorView, at: 4))
         #expect(abs(decreasedHighlightedFont.pointSize - 63) < 0.01)
         #expect(abs(decreasedPlainFont.pointSize - 63) < 0.01)
 
-        model.configuration.resetFontSize()
+        model.model.resetFontSize()
         editorView.synchronizeDocumentForTesting()
 
-        #expect(model.configuration.fontSizeDelta == 0)
+        #expect(model.model.fontSizeDelta == 0)
         let resetHighlightedFont = try #require(macEditorFont(editorView, at: 0))
         let resetPlainFont = try #require(macEditorFont(editorView, at: 4))
         #expect(abs(resetHighlightedFont.pointSize - 28) < 0.01)
@@ -1068,7 +1095,7 @@ extension SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
 
-        model.configuration.colorTheme = updatedTheme
+        model.model.colorTheme = updatedTheme
         editorView.synchronizeDocumentForTesting()
 
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
@@ -1237,7 +1264,7 @@ extension SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
         let invalidationCount = editorView.fullTextDisplayInvalidationCountForTesting
 
-        model.configuration.language = SyntaxLanguage.json
+        model.model.language = SyntaxLanguage.json
         editorView.synchronizeDocumentForTesting()
         await editorView.waitForPendingHighlightForTesting()
 
@@ -1280,7 +1307,7 @@ extension SyntaxEditorUITests {
         #expect(!initialFragments.isEmpty)
         let fragmentInvalidationCount = editorView.fragmentDisplayInvalidationCountForTesting
 
-        model.configuration.language = SyntaxLanguage.json
+        model.model.language = SyntaxLanguage.json
         editorView.synchronizeDocumentForTesting()
         await editorView.waitForPendingHighlightForTesting()
 
@@ -1461,7 +1488,7 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
 
         let previousSuspensionCount = await resetGate.currentSuspensionCount()
-        model.configuration.language = SyntaxLanguage.json
+        model.model.language = SyntaxLanguage.json
         editorView.synchronizeDocumentForTesting()
         await resetGate.waitUntilSuspended(after: previousSuspensionCount)
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -1605,7 +1632,7 @@ extension SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(editorView.textView.string == expectedSource)
-        #expect(model.document.textSnapshot() == expectedSource)
+        #expect(model.model.text == expectedSource)
     }
 
     @Test("SyntaxEditorView keeps macOS marked range unchanged when marked text is handled as command input")
@@ -1628,7 +1655,7 @@ extension SyntaxEditorUITests {
         #expect(!editorView.textView.hasMarkedText())
         #expect(editorView.textView.markedRange().location == NSNotFound)
         #expect(editorView.textView.string == expectedSource)
-        #expect(model.document.textSnapshot() == expectedSource)
+        #expect(model.model.text == expectedSource)
     }
 
     @Test("SyntaxEditorView replaces macOS marked text when IME commits through insertText")
@@ -1653,7 +1680,7 @@ extension SyntaxEditorUITests {
         #expect(!editorView.textView.hasMarkedText())
         #expect(editorView.textView.markedRange().location == NSNotFound)
         #expect(editorView.textView.string == expectedSource)
-        #expect(model.document.textSnapshot() == expectedSource)
+        #expect(model.model.text == expectedSource)
         #expect(editorView.textView.selectedRange() == NSRange(location: expectedSource.utf16.count, length: 0))
     }
 
@@ -1728,7 +1755,7 @@ extension SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
-        _ = model.document.commitEdits(
+        _ = model.model.commitEdits(
             [
                 SyntaxEditorTextEdit(
                     range: NSRange(location: source.utf16.count, length: 0),
@@ -1832,7 +1859,7 @@ extension SyntaxEditorUITests {
         let pastedDocumentHeight = editorView.textView.frame.height
 
         #expect(editorView.textView.string == pastedText + source)
-        #expect(model.document.textSnapshot() == pastedText + source)
+        #expect(model.model.text == pastedText + source)
         #expect(pastedDocumentHeight > initialDocumentHeight + 1_000)
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
 
@@ -1845,7 +1872,7 @@ extension SyntaxEditorUITests {
         layoutMacEditorView(editorView)
 
         #expect(editorView.textView.string == source)
-        #expect(model.document.textSnapshot() == source)
+        #expect(model.model.text == source)
         #expect(editorView.textView.frame.height < pastedDocumentHeight - 1_000)
 
         await updateGate.resumeAll()
@@ -1884,7 +1911,7 @@ extension SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
 
         #expect(editorView.textView.string == pastedText + source)
-        #expect(model.document.textSnapshot() == pastedText + source)
+        #expect(model.model.text == pastedText + source)
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
@@ -1894,8 +1921,8 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: "body {}", language: SyntaxLanguage.css)
         let editorView = SyntaxEditorView(testContext: model)
 
-        model.configuration.isEditable = false
-        model.configuration.lineWrappingEnabled = true
+        model.model.isEditable = false
+        model.model.lineWrappingEnabled = true
 
         editorView.synchronizeDocumentForTesting()
         #expect(
@@ -1903,7 +1930,7 @@ extension SyntaxEditorUITests {
                 && editorView.hasHorizontalScroller == false
         )
 
-        model.configuration.lineWrappingEnabled = false
+        model.model.lineWrappingEnabled = false
 
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.hasHorizontalScroller == true)
@@ -1925,7 +1952,7 @@ extension SyntaxEditorUITests {
         editorView.reflectScrolledClipView(editorView.contentView)
         #expect(editorView.contentView.bounds.origin.x > 0)
 
-        model.configuration.lineWrappingEnabled = true
+        model.model.lineWrappingEnabled = true
 
         editorView.synchronizeDocumentForTesting()
         #expect({
@@ -1957,7 +1984,7 @@ extension SyntaxEditorUITests {
         layoutMacEditorView(editorView, width: 240, height: 120)
         let unwrappedHeight = editorView.textView.frame.height
 
-        model.configuration.lineWrappingEnabled = true
+        model.model.lineWrappingEnabled = true
 
         editorView.synchronizeDocumentForTesting()
         layoutMacEditorView(editorView, width: 240, height: 120)
@@ -1965,7 +1992,7 @@ extension SyntaxEditorUITests {
 
         #expect(wrappedHeight > unwrappedHeight + 400)
 
-        model.configuration.lineWrappingEnabled = false
+        model.model.lineWrappingEnabled = false
 
         editorView.synchronizeDocumentForTesting()
         layoutMacEditorView(editorView, width: 240, height: 120)
@@ -2168,13 +2195,13 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: "let answer = 42", language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(testContext: model)
 
-        model.configuration.language = SyntaxLanguage.json
-        model.configuration.isEditable = false
+        model.model.language = SyntaxLanguage.json
+        model.model.isEditable = false
 
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textView.isEditable == false)
 
-        model.document.replaceText("{\"answer\":42}")
+        model.model.replaceText("{\"answer\":42}")
 
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textView.string == "{\"answer\":42}")
@@ -2252,12 +2279,12 @@ extension SyntaxEditorUITests {
         #expect(!editorView.textView.validateUserInterfaceItem(shiftRight))
         #expect(editorView.textView.validateUserInterfaceItem(wrapLines))
         #expect(wrapLines.state == .off)
-        model.configuration.lineWrappingEnabled = true
+        model.model.lineWrappingEnabled = true
         #expect(editorView.textView.validateUserInterfaceItem(wrapLines))
         #expect(wrapLines.state == .on)
 
-        model.configuration.lineWrappingEnabled = false
-        model.configuration.isEditable = true
+        model.model.lineWrappingEnabled = false
+        model.model.isEditable = true
         editorView.synchronizeDocumentForTesting()
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
 
@@ -2277,7 +2304,7 @@ extension SyntaxEditorUITests {
             to: editorView.textView,
             from: shiftRight
         ))
-        #expect(model.document.textSnapshot() == "    \(source)")
+        #expect(model.model.text == "    \(source)")
         #expect(editorView.textView.string == "    \(source)")
 
         #expect(NSApplication.shared.sendAction(
@@ -2285,7 +2312,7 @@ extension SyntaxEditorUITests {
             to: editorView.textView,
             from: wrapLines
         ))
-        #expect(model.configuration.lineWrappingEnabled)
+        #expect(model.model.lineWrappingEnabled)
     }
 
     @Test("SyntaxEditorView handles AppKit standard edit key equivalents")
@@ -2332,7 +2359,7 @@ extension SyntaxEditorUITests {
         pasteboard.setString("value", forType: .string)
         #expect(editorView.textView.validateUserInterfaceItem(pasteItem))
         #expect(editorView.textView.performKeyEquivalent(with: pasteEvent))
-        #expect(model.document.textSnapshot() == "let value = 42")
+        #expect(model.model.text == "let value = 42")
         #expect(editorView.textView.string == "let value = 42")
         #expect(editorView.textView.selectedRange() == NSRange(location: 9, length: 0))
 
@@ -2340,14 +2367,14 @@ extension SyntaxEditorUITests {
         #expect(editorView.textView.validateUserInterfaceItem(cutItem))
         #expect(editorView.textView.performKeyEquivalent(with: cutEvent))
         #expect(pasteboard.string(forType: .string) == "value")
-        #expect(model.document.textSnapshot() == "let  = 42")
+        #expect(model.model.text == "let  = 42")
         #expect(editorView.textView.string == "let  = 42")
         #expect(editorView.textView.selectedRange() == NSRange(location: 4, length: 0))
 
         #expect(editorView.textView.performKeyEquivalent(with: selectAllEvent))
         #expect(editorView.textView.selectedRange() == NSRange(location: 0, length: editorView.textView.string.utf16.count))
 
-        model.configuration.isEditable = false
+        model.model.isEditable = false
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textView.validateUserInterfaceItem(copyItem))
         #expect(!editorView.textView.validateUserInterfaceItem(cutItem))
@@ -2390,7 +2417,7 @@ extension SyntaxEditorUITests {
         let pasteEvent = try #require(makeMacCommandKeyEvent("v"))
         #expect(window.firstResponder !== editorView.textView)
         #expect(!editorView.textView.performKeyEquivalent(with: pasteEvent))
-        #expect(model.document.textSnapshot() == source)
+        #expect(model.model.text == source)
         #expect(editorView.textView.string == source)
     }
 
@@ -2421,7 +2448,7 @@ extension SyntaxEditorUITests {
 
         for commandSelector in commandSelectors {
             #expect(!editorView.textView(editorView.textView, doCommandBy: commandSelector))
-            #expect(model.document.textSnapshot() == source)
+            #expect(model.model.text == source)
             #expect(editorView.textView.string == source)
         }
     }
@@ -2439,7 +2466,7 @@ extension SyntaxEditorUITests {
             doCommandBy: #selector(NSResponder.insertTab(_:))
         ))
 
-        #expect(model.document.textSnapshot() == "ab  cde")
+        #expect(model.model.text == "ab  cde")
         #expect(editorView.textView.string == "ab  cde")
         #expect(editorView.textView.selectedRange() == NSRange(location: 4, length: 0))
     }
@@ -2471,7 +2498,7 @@ extension SyntaxEditorUITests {
 
         editorView.textView.keyDown(with: event)
 
-        #expect(model.document.textSnapshot() == "letx")
+        #expect(model.model.text == "letx")
         #expect(editorView.textView.string == "letx")
         #expect(editorView.textView.selectedRange() == NSRange(location: 4, length: 0))
     }
@@ -2751,7 +2778,7 @@ extension SyntaxEditorUITests {
         }
 
         #expect(editorView.textView.performKeyEquivalent(with: lineWrappingEvent))
-        #expect(model.configuration.lineWrappingEnabled)
+        #expect(model.model.lineWrappingEnabled)
         #expect(editorView.textView.string == source)
 
         for (character, modifiers) in [
@@ -2765,7 +2792,7 @@ extension SyntaxEditorUITests {
             }
 
             #expect(editorView.textView.performKeyEquivalent(with: event))
-            #expect(model.document.textSnapshot() == source)
+            #expect(model.model.text == source)
             #expect(editorView.textView.string == source)
         }
 
@@ -2776,7 +2803,7 @@ extension SyntaxEditorUITests {
             }
 
             _ = editorView.textView.performKeyEquivalent(with: event)
-            #expect(model.document.textSnapshot() == source)
+            #expect(model.model.text == source)
             #expect(editorView.textView.string == source)
         }
     }
@@ -2800,12 +2827,12 @@ extension SyntaxEditorUITests {
         }
 
         #expect(editorView.textView.performKeyEquivalent(with: event))
-        #expect(model.configuration.lineWrappingEnabled)
+        #expect(model.model.lineWrappingEnabled)
         editorView.synchronizeDocumentForTesting()
         #expect(!editorView.hasHorizontalScroller)
 
         #expect(editorView.textView.performKeyEquivalent(with: event))
-        #expect(!model.configuration.lineWrappingEnabled)
+        #expect(!model.model.lineWrappingEnabled)
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.hasHorizontalScroller)
     }
@@ -2825,14 +2852,14 @@ extension SyntaxEditorUITests {
         }
 
         #expect(editorView.textView.performKeyEquivalent(with: increaseEvent))
-        #expect(model.configuration.fontSizeDelta == 1)
+        #expect(model.model.fontSizeDelta == 1)
 
         #expect(editorView.textView.performKeyEquivalent(with: decreaseEvent))
-        #expect(model.configuration.fontSizeDelta == 0)
+        #expect(model.model.fontSizeDelta == 0)
 
-        model.configuration.fontSizeDelta = 5
+        model.model.fontSizeDelta = 5
         #expect(editorView.textView.performKeyEquivalent(with: resetEvent))
-        #expect(model.configuration.fontSizeDelta == 0)
+        #expect(model.model.fontSizeDelta == 0)
     }
 
     @Test("SyntaxEditorView uses native macOS undo stack for text input")
@@ -2863,7 +2890,7 @@ extension SyntaxEditorUITests {
         editorView.textView.insertText("!", replacementRange: editRange)
         editorView.textView.breakUndoCoalescing()
 
-        #expect(model.document.textSnapshot() == editedSource)
+        #expect(model.model.text == editedSource)
         #expect(editorView.textView.string == editedSource)
 
         let undoSelector = NSSelectorFromString("undo:")
@@ -2874,30 +2901,30 @@ extension SyntaxEditorUITests {
         #expect(undoManager.canUndo)
         #expect(editorView.textView.validateUserInterfaceItem(undoItem))
 
-        model.configuration.isEditable = false
+        model.model.isEditable = false
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textView.isEditable == false)
         #expect(!undoManager.canUndo)
         #expect(!editorView.textView.validateUserInterfaceItem(undoItem))
 
         #expect(NSApplication.shared.sendAction(undoSelector, to: editorView.textView, from: undoItem))
-        #expect(model.document.textSnapshot() == editedSource)
+        #expect(model.model.text == editedSource)
         #expect(editorView.textView.string == editedSource)
 
-        model.configuration.isEditable = true
+        model.model.isEditable = true
         editorView.synchronizeDocumentForTesting()
         #expect(editorView.textView.isEditable == true)
 
         #expect(undoManager.canUndo)
         #expect(NSApplication.shared.sendAction(undoSelector, to: editorView.textView, from: undoItem))
 
-        #expect(model.document.textSnapshot() == source)
+        #expect(model.model.text == source)
         #expect(editorView.textView.string == source)
         #expect(undoManager.canRedo)
         #expect(editorView.textView.validateUserInterfaceItem(redoItem))
         #expect(NSApplication.shared.sendAction(redoSelector, to: editorView.textView, from: redoItem))
 
-        #expect(model.document.textSnapshot() == editedSource)
+        #expect(model.model.text == editedSource)
         #expect(editorView.textView.string == editedSource)
     }
 
@@ -2947,47 +2974,47 @@ extension SyntaxEditorUITests {
                 doCommandBy: #selector(NSResponder.insertTab(_:))
             )
         }
-        #expect(model.document.textSnapshot() == twiceIndentedSource)
+        #expect(model.model.text == twiceIndentedSource)
 
-        model.configuration.isEditable = false
+        model.model.isEditable = false
         undoManager.undo()
         undoManager.undo()
 
         #expect(!undoManager.canUndo)
         #expect(!undoManager.canRedo)
-        #expect(model.document.textSnapshot() == twiceIndentedSource)
+        #expect(model.model.text == twiceIndentedSource)
         #expect(editorView.textView.string == twiceIndentedSource)
 
-        model.configuration.isEditable = true
+        model.model.isEditable = true
 
         #expect(undoManager.canUndo)
         undoManager.undo()
 
-        #expect(model.document.textSnapshot() == onceIndentedSource)
+        #expect(model.model.text == onceIndentedSource)
         #expect(editorView.textView.string == onceIndentedSource)
         #expect(undoManager.canUndo)
         undoManager.undo()
 
-        #expect(model.document.textSnapshot() == source)
+        #expect(model.model.text == source)
         #expect(editorView.textView.string == source)
         #expect(undoManager.canRedo)
 
-        model.configuration.isEditable = false
+        model.model.isEditable = false
         undoManager.redo()
         undoManager.redo()
 
-        #expect(model.document.textSnapshot() == source)
+        #expect(model.model.text == source)
         #expect(editorView.textView.string == source)
         #expect(!undoManager.canUndo)
         #expect(!undoManager.canRedo)
 
-        model.configuration.isEditable = true
+        model.model.isEditable = true
 
         #expect(undoManager.canRedo)
         undoManager.redo()
         undoManager.redo()
 
-        #expect(model.document.textSnapshot() == twiceIndentedSource)
+        #expect(model.model.text == twiceIndentedSource)
         #expect(editorView.textView.string == twiceIndentedSource)
     }
 
@@ -3009,8 +3036,8 @@ extension SyntaxEditorUITests {
         let controller = SyntaxEditorViewController(testContext: model)
         controller.loadViewIfNeeded()
 
-        #expect(controller.document === model.document)
-        #expect(controller.configuration === model.configuration)
+        #expect(controller.model === model.model)
+        #expect(controller.model === model.model)
         #expect(
             controller.textView(
                 controller.textView,
@@ -3019,7 +3046,7 @@ extension SyntaxEditorUITests {
             )
         )
 
-        guard let delivery = controller.editorView.documentDeliveryForTesting else {
+        guard let delivery = controller.editorView.modelDeliveryForTesting else {
             Issue.record("Expected SyntaxEditorViewController to expose its production document delivery")
             return
         }
@@ -3029,7 +3056,7 @@ extension SyntaxEditorUITests {
 
         #expect(await renderedText.waitUntilValue("{}"))
 
-        model.document.replaceText("{\"enabled\":true}")
+        model.model.replaceText("{\"enabled\":true}")
 
         #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
     }
@@ -3040,7 +3067,7 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: "const answer = 42;", language: SyntaxLanguage.javascript)
         let controller = SyntaxEditorViewController(testContext: model)
         controller.loadViewIfNeeded()
-        guard let delivery = controller.editorView.documentDeliveryForTesting else {
+        guard let delivery = controller.editorView.modelDeliveryForTesting else {
             Issue.record("Expected SyntaxEditorViewController to expose its production document delivery")
             return
         }
@@ -3050,7 +3077,7 @@ extension SyntaxEditorUITests {
 
         #expect(await renderedText.waitUntilValue("const answer = 42;"))
 
-        model.document.replaceText("{\"enabled\":true}")
+        model.model.replaceText("{\"enabled\":true}")
 
         #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
     }
@@ -3061,8 +3088,8 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: "const answer = 42;", language: SyntaxLanguage.javascript)
         let controller = SyntaxEditorViewController(testContext: model)
         controller.loadViewIfNeeded()
-        guard let configurationDelivery = controller.editorView.configurationDeliveryForTesting,
-              let documentDelivery = controller.editorView.documentDeliveryForTesting
+        guard let configurationDelivery = controller.editorView.modelConfigurationDeliveryForTesting,
+              let documentDelivery = controller.editorView.modelDeliveryForTesting
         else {
             Issue.record("Expected SyntaxEditorViewController to expose its production deliveries")
             return
@@ -3077,11 +3104,11 @@ extension SyntaxEditorUITests {
 
         #expect(await configurationPasses.waitUntilValue(1))
 
-        model.configuration.language = SyntaxLanguage.json
+        model.model.language = SyntaxLanguage.json
 
         #expect(await configurationPasses.waitUntilValue(2))
 
-        model.document.replaceText("{\"enabled\":true}")
+        model.model.replaceText("{\"enabled\":true}")
 
         #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
         await syntaxEditorDrainMainActorObservationDelivery(recording: configurationPasses)
@@ -3094,7 +3121,7 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: "body {}", language: SyntaxLanguage.css)
         let controller = SyntaxEditorViewController(testContext: model)
         controller.loadViewIfNeeded()
-        guard let delivery = controller.editorView.configurationDeliveryForTesting else {
+        guard let delivery = controller.editorView.modelConfigurationDeliveryForTesting else {
             Issue.record("Expected SyntaxEditorViewController to expose its production configuration delivery")
             return
         }
@@ -3105,8 +3132,8 @@ extension SyntaxEditorUITests {
             )
         }
 
-        model.configuration.isEditable = false
-        model.configuration.lineWrappingEnabled = true
+        model.model.isEditable = false
+        model.model.lineWrappingEnabled = true
 
         #expect(
             await renderedState.waitUntilValue(
@@ -3114,7 +3141,7 @@ extension SyntaxEditorUITests {
             )
         )
 
-        model.configuration.lineWrappingEnabled = false
+        model.model.lineWrappingEnabled = false
 
         #expect(
             await renderedState.waitUntilValue(
@@ -3130,13 +3157,13 @@ extension SyntaxEditorUITests {
         let controller = SyntaxEditorViewController(testContext: model)
         controller.loadViewIfNeeded()
 
-        model.configuration.language = SyntaxLanguage.json
-        model.configuration.isEditable = false
+        model.model.language = SyntaxLanguage.json
+        model.model.isEditable = false
 
         controller.synchronizeDocumentForTesting()
         #expect(controller.textView.isEditable == false)
 
-        model.document.replaceText("{\"answer\":42}")
+        model.model.replaceText("{\"answer\":42}")
 
         controller.synchronizeDocumentForTesting()
         #expect(controller.textView.string == "{\"answer\":42}")
