@@ -10,6 +10,15 @@ import AppKit
 
 @MainActor
 package enum TextEditingTransaction {
+    private struct AttributeRollbackRun {
+        let range: NSRange
+        let attributedString: NSAttributedString
+    }
+
+    private struct AttributeRollbackSnapshot {
+        let runs: [AttributeRollbackRun]
+    }
+
     package static func perform(
         on textContentStorage: NSTextContentStorage,
         _ body: (NSTextStorage) -> Void
@@ -27,16 +36,92 @@ package enum TextEditingTransaction {
         guard !operations.isEmpty else { return }
 
         perform(on: textContentStorage) { textStorage in
-            let textLength = textStorage.length
-            for operation in operations.colorOperations {
-                let range = SyntaxEditorRangeUtilities.clampedRange(operation.range, utf16Length: textLength)
-                guard range.length > 0 else { continue }
-                textStorage.addAttribute(.foregroundColor, value: operation.color, range: range)
+            apply(operations, to: textStorage)
+        }
+    }
+
+    private static func apply(
+        _ operations: HighlightStyleOperations,
+        to textStorage: NSTextStorage
+    ) {
+        let textLength = textStorage.length
+        for operation in operations.colorOperations {
+            let range = SyntaxEditorRangeUtilities.clampedRange(operation.range, utf16Length: textLength)
+            guard range.length > 0 else { continue }
+            textStorage.addAttribute(.foregroundColor, value: operation.color, range: range)
+        }
+        for operation in operations.fontOperations {
+            let range = SyntaxEditorRangeUtilities.clampedRange(operation.range, utf16Length: textLength)
+            guard range.length > 0 else { continue }
+            textStorage.addAttribute(.font, value: operation.font, range: range)
+        }
+    }
+
+    private static func rollbackRanges(
+        for operations: HighlightStyleOperations,
+        textLength: Int
+    ) -> [NSRange] {
+        let ranges = (operations.colorOperations.map(\.range) + operations.fontOperations.map(\.range))
+            .map { SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: textLength) }
+            .filter { $0.length > 0 }
+            .sorted {
+                if $0.location == $1.location {
+                    return $0.length < $1.length
+                }
+                return $0.location < $1.location
             }
-            for operation in operations.fontOperations {
-                let range = SyntaxEditorRangeUtilities.clampedRange(operation.range, utf16Length: textLength)
-                guard range.length > 0 else { continue }
-                textStorage.addAttribute(.font, value: operation.font, range: range)
+
+        guard var current = ranges.first else { return [] }
+        var merged: [NSRange] = []
+        for range in ranges.dropFirst() {
+            let currentEnd = current.location + current.length
+            let rangeEnd = range.location + range.length
+            if range.location <= currentEnd {
+                current.length = max(currentEnd, rangeEnd) - current.location
+            } else {
+                merged.append(current)
+                current = range
+            }
+        }
+        merged.append(current)
+        return merged
+    }
+
+    private static func makeRollbackSnapshot(
+        for operations: HighlightStyleOperations,
+        in textStorage: NSTextStorage
+    ) -> AttributeRollbackSnapshot {
+        let runs = rollbackRanges(for: operations, textLength: textStorage.length).map { range in
+            AttributeRollbackRun(range: range, attributedString: textStorage.attributedSubstring(from: range))
+        }
+        return AttributeRollbackSnapshot(runs: runs)
+    }
+
+    private static func apply(
+        _ operations: HighlightStyleOperations,
+        to textContentStorage: NSTextContentStorage,
+        rollbackSnapshots: inout [AttributeRollbackSnapshot]
+    ) {
+        perform(on: textContentStorage) { textStorage in
+            rollbackSnapshots.append(makeRollbackSnapshot(for: operations, in: textStorage))
+            apply(operations, to: textStorage)
+        }
+    }
+
+    private static func restore(
+        _ snapshot: AttributeRollbackSnapshot,
+        to textContentStorage: NSTextContentStorage
+    ) {
+        guard !snapshot.runs.isEmpty else { return }
+
+        perform(on: textContentStorage) { textStorage in
+            let textLength = textStorage.length
+            for run in snapshot.runs {
+                let range = SyntaxEditorRangeUtilities.clampedRange(run.range, utf16Length: textLength)
+                guard range.length == run.attributedString.length else { continue }
+                let currentString = (textStorage.string as NSString).substring(with: range)
+                guard currentString == run.attributedString.string else { continue }
+                textStorage.replaceCharacters(in: range, with: run.attributedString)
             }
         }
     }
@@ -52,9 +137,17 @@ package enum TextEditingTransaction {
         let maximumOperationsPerTransaction = max(1, maximumOperationsPerTransaction)
         var colorIndex = operations.colorOperations.startIndex
         var fontIndex = operations.fontOperations.startIndex
+        var rollbackSnapshots: [AttributeRollbackSnapshot] = []
+
+        func cancelAfterPartialApply() -> Bool {
+            for rollbackSnapshot in rollbackSnapshots.reversed() {
+                restore(rollbackSnapshot, to: textContentStorage)
+            }
+            return false
+        }
 
         while colorIndex < operations.colorOperations.endIndex {
-            guard !Task.isCancelled, shouldContinue() else { return false }
+            guard !Task.isCancelled, shouldContinue() else { return cancelAfterPartialApply() }
 
             let colorCount = min(
                 maximumOperationsPerTransaction,
@@ -68,12 +161,12 @@ package enum TextEditingTransaction {
             )
 
             autoreleasepool {
-                apply(chunk, to: textContentStorage)
+                apply(chunk, to: textContentStorage, rollbackSnapshots: &rollbackSnapshots)
             }
 
             colorIndex = colorEndIndex
 
-            guard !Task.isCancelled, shouldContinue() else { return false }
+            guard !Task.isCancelled, shouldContinue() else { return cancelAfterPartialApply() }
 
             if colorIndex < operations.colorOperations.endIndex || !operations.fontOperations.isEmpty {
                 await Task.yield()
@@ -81,7 +174,7 @@ package enum TextEditingTransaction {
         }
 
         while fontIndex < operations.fontOperations.endIndex {
-            guard !Task.isCancelled, shouldContinue() else { return false }
+            guard !Task.isCancelled, shouldContinue() else { return cancelAfterPartialApply() }
 
             let fontCount = min(
                 maximumOperationsPerTransaction,
@@ -95,19 +188,20 @@ package enum TextEditingTransaction {
             )
 
             autoreleasepool {
-                apply(chunk, to: textContentStorage)
+                apply(chunk, to: textContentStorage, rollbackSnapshots: &rollbackSnapshots)
             }
 
             fontIndex = fontEndIndex
 
-            guard !Task.isCancelled, shouldContinue() else { return false }
+            guard !Task.isCancelled, shouldContinue() else { return cancelAfterPartialApply() }
 
             if fontIndex < operations.fontOperations.endIndex {
                 await Task.yield()
             }
         }
 
-        return !Task.isCancelled && shouldContinue()
+        guard !Task.isCancelled, shouldContinue() else { return cancelAfterPartialApply() }
+        return true
     }
 }
 #endif

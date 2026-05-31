@@ -100,8 +100,8 @@ struct SyntaxEditorUICommonTests {
         #expect((system.textStorage.attribute(.font, at: 1, effectiveRange: nil) as? SyntaxEditorFont) == font)
     }
 
-    @Test("Text editing transaction stops incremental font operations after cancellation validation fails")
-    func stopsIncrementalFontOperationsAfterCancellationValidationFails() async {
+    @Test("Text editing transaction rolls back incremental font operations after cancellation validation fails")
+    func rollsBackIncrementalFontOperationsAfterCancellationValidationFails() async {
         let system = EditorTextSystem()
         TextEditingTransaction.perform(on: system.textContentStorage) { storage in
             storage.setAttributedString(NSAttributedString(string: "abcdef"))
@@ -127,16 +127,18 @@ struct SyntaxEditorUICommonTests {
         )
 
         #expect(!completed)
-        #expect((system.textStorage.attribute(.font, at: 0, effectiveRange: nil) as? SyntaxEditorFont) == firstFont)
+        #expect(system.textStorage.attribute(.font, at: 0, effectiveRange: nil) == nil)
         #expect(system.textStorage.attribute(.font, at: 1, effectiveRange: nil) == nil)
     }
 
-    @Test("Highlight style store does not advance prepared operations after incremental cancellation")
-    func doesNotAdvancePreparedOperationsAfterIncrementalCancellation() async {
+    @Test("Highlight style store leaves storage unchanged after incremental cancellation")
+    func leavesStorageUnchangedAfterIncrementalCancellation() async {
         let system = EditorTextSystem()
         let store = HighlightStyleStore()
         TextEditingTransaction.perform(on: system.textContentStorage) { storage in
-            storage.setAttributedString(NSAttributedString(string: "ab"))
+            let attributedString = NSMutableAttributedString(string: "ab")
+            attributedString.addAttribute(.foregroundColor, value: baseForeground, range: NSRange(location: 0, length: 2))
+            storage.setAttributedString(attributedString)
         }
 
         let transaction = store.prepareApply(
@@ -168,7 +170,7 @@ struct SyntaxEditorUICommonTests {
         #expect(!completed)
         #expect(store.appliedColorRunsForTesting.isEmpty)
         #expect(store.epoch == 0)
-        #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorColor)?.isEqual(redColor) == true)
+        #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorColor)?.isEqual(baseForeground) == true)
     }
 
     @Test("Highlight style store emits content attribute operations")
