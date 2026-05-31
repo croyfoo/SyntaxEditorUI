@@ -38,6 +38,29 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 
 ## Usage
 
+### SwiftUI
+
+```swift
+import SwiftUI
+import SyntaxEditorUI
+
+struct EditorView: View {
+    @State private var model = SyntaxEditorModel(
+        text: "const answer = 42;",
+        language: .javascript
+    )
+
+    var body: some View {
+        SyntaxEditor(model)
+            .onChange(of: model.text) { _, text in
+                print("Edited text:", text)
+            }
+    }
+}
+```
+
+### UIKit / AppKit
+
 ```swift
 import SyntaxEditorUI
 
@@ -46,8 +69,8 @@ let model = SyntaxEditorModel(
     language: .javascript
 )
 
-let editor = SyntaxEditor(model)
 let editorView = SyntaxEditorView(model: model)
+let editorViewController = SyntaxEditorViewController(model: model)
 ```
 
 Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
