@@ -574,16 +574,28 @@ package final class HighlightStyleStore {
     ) -> [HighlightColorOperation] {
         let nextKeys = Set(nextRuns.map(ColorRunKey.init))
         let previousKeys = Set(previousRuns.map(ColorRunKey.init))
-        var operations: [HighlightColorOperation] = []
-        operations.reserveCapacity(previousRuns.count + nextRuns.count)
+        var resetOperations: [HighlightColorOperation] = []
+        var styledOperations: [HighlightColorOperation] = []
+        resetOperations.reserveCapacity(previousRuns.count)
+        styledOperations.reserveCapacity(nextRuns.count)
 
         for run in previousRuns where !nextKeys.contains(ColorRunKey(run)) {
-            operations.append(HighlightColorOperation(range: run.range, color: baseForeground))
+            resetOperations.append(HighlightColorOperation(range: run.range, color: baseForeground))
         }
         for run in nextRuns where !previousKeys.contains(ColorRunKey(run)) {
-            operations.append(HighlightColorOperation(range: run.range, color: run.color))
+            styledOperations.append(HighlightColorOperation(range: run.range, color: run.color))
         }
 
+        let resetCount = resetOperations.count
+        var operations = sortedColorOperations(resetOperations)
+        operations.reserveCapacity(resetCount + styledOperations.count)
+        operations.append(contentsOf: sortedColorOperations(styledOperations))
+        return operations
+    }
+
+    private static func sortedColorOperations(
+        _ operations: [HighlightColorOperation]
+    ) -> [HighlightColorOperation] {
         return operations.sorted { lhs, rhs in
             if lhs.range.location == rhs.range.location {
                 lhs.range.length < rhs.range.length
@@ -825,7 +837,7 @@ package final class HighlightStyleStore {
             var alpha: CGFloat = 0
             let resolvedFallbackHash: Int
 #if canImport(UIKit)
-            if color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+            if unsafe color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
                 resolvedFallbackHash = 0
             } else {
                 resolvedFallbackHash = color.hash

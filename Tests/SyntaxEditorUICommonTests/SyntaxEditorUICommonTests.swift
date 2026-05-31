@@ -227,6 +227,41 @@ struct SyntaxEditorUICommonTests {
         ])
     }
 
+    @Test("Highlight style store resets expanding foreground runs before applying replacement style")
+    func resetsExpandingForegroundRunsBeforeApplyingReplacementStyle() {
+        let store = HighlightStyleStore()
+        _ = store.apply(
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 5, length: 5), color: blueColor)],
+                fontRuns: []
+            ),
+            refreshedRange: NSRange(location: 0, length: 10),
+            mutation: nil,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        let operations = store.apply(
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            refreshedRange: NSRange(location: 0, length: 10),
+            mutation: nil,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        #expect(operations.colorOperations.map(\.range) == [
+            NSRange(location: 5, length: 5),
+            NSRange(location: 0, length: 10),
+        ])
+        #expect(operations.colorOperations.first?.color.isEqual(baseForeground) == true)
+        #expect(operations.colorOperations.last?.color.isEqual(redColor) == true)
+    }
+
     @Test("Highlight style store records text mutation without repainting unaffected split runs")
     func recordsTextMutationWithoutRepaintingUnaffectedSplitRuns() {
         let store = HighlightStyleStore()
