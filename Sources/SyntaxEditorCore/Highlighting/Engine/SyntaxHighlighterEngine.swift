@@ -80,25 +80,33 @@ private struct SemanticClassificationResult {
     let isCancelled: Bool
 }
 
+package enum SyntaxHighlightPhase: Equatable, Sendable {
+    case syntacticFastPass
+    case complete
+}
+
 package struct SyntaxHighlightResult: Sendable {
     package let tokens: [SyntaxHighlightToken]
     package let source: String
     package let language: SyntaxLanguage
     package let revision: Int
     package let refreshRange: NSRange
+    package let phase: SyntaxHighlightPhase
 
     package init(
         tokens: [SyntaxHighlightToken],
         source: String,
         language: SyntaxLanguage,
         revision: Int,
-        refreshRange: NSRange
+        refreshRange: NSRange,
+        phase: SyntaxHighlightPhase = .complete
     ) {
         self.tokens = tokens
         self.source = source
         self.language = language
         self.revision = revision
         self.refreshRange = refreshRange
+        self.phase = phase
     }
 }
 
@@ -134,12 +142,73 @@ package enum SyntaxHighlightInvalidation {
 
 package protocol SyntaxHighlighting: Sendable {
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult
+    func resetPhases(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult>
     func update(
         source: String,
         language: SyntaxLanguage,
         mutation: SyntaxHighlightMutation,
         revision: Int
     ) async -> SyntaxHighlightResult
+    func updatePhases(
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult>
+}
+
+package extension SyntaxHighlighting {
+    func resetPhases(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult> {
+        AsyncStream { continuation in
+            let task = Task {
+                let result = await reset(source: source, language: language, revision: revision)
+                guard !Task.isCancelled else {
+                    continuation.finish()
+                    return
+                }
+                continuation.yield(result)
+                continuation.finish()
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
+
+    func updatePhases(
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult> {
+        AsyncStream { continuation in
+            let task = Task {
+                let result = await update(
+                    source: source,
+                    language: language,
+                    mutation: mutation,
+                    revision: revision
+                )
+                guard !Task.isCancelled else {
+                    continuation.finish()
+                    return
+                }
+                continuation.yield(result)
+                continuation.finish()
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
 }
 
 package actor SyntaxHighlighterEngine: SyntaxHighlighting {
@@ -151,13 +220,48 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
     }
 
     package func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+        await reset(source: source, language: language, revision: revision, emitFastPass: nil)
+    }
+
+    package func resetPhases(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult> {
+        AsyncStream { continuation in
+            let task = Task {
+                let result = await self.reset(
+                    source: source,
+                    language: language,
+                    revision: revision,
+                    emitFastPass: { continuation.yield($0) }
+                )
+                guard !Task.isCancelled else {
+                    continuation.finish()
+                    return
+                }
+                continuation.yield(result)
+                continuation.finish()
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private func reset(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int,
+        emitFastPass: ((SyntaxHighlightResult) -> Void)?
+    ) async -> SyntaxHighlightResult {
         guard let setup = await registry.highlightingSetup(for: language) else {
             session = nil
             return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
         }
 
         let nextSession = SyntaxHighlightSession(language: language, setup: setup)
-        let result = nextSession.reset(source: source, revision: revision)
+        let result = nextSession.reset(source: source, revision: revision, emitFastPass: emitFastPass)
         session = nextSession
         return result
     }
@@ -168,17 +272,62 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         mutation: SyntaxHighlightMutation,
         revision: Int
     ) async -> SyntaxHighlightResult {
+        await update(
+            source: source,
+            language: language,
+            mutation: mutation,
+            revision: revision,
+            emitFastPass: nil
+        )
+    }
+
+    package func updatePhases(
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult> {
+        AsyncStream { continuation in
+            let task = Task {
+                let result = await self.update(
+                    source: source,
+                    language: language,
+                    mutation: mutation,
+                    revision: revision,
+                    emitFastPass: { continuation.yield($0) }
+                )
+                guard !Task.isCancelled else {
+                    continuation.finish()
+                    return
+                }
+                continuation.yield(result)
+                continuation.finish()
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private func update(
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation,
+        revision: Int,
+        emitFastPass: ((SyntaxHighlightResult) -> Void)?
+    ) async -> SyntaxHighlightResult {
         if let session,
            let result = session.update(
                source: source,
                language: language,
                mutation: mutation,
-               revision: revision
+               revision: revision,
+               emitFastPass: emitFastPass
            ) {
             return result
         }
 
-        return await reset(source: source, language: language, revision: revision)
+        return await reset(source: source, language: language, revision: revision, emitFastPass: emitFastPass)
     }
 
     package func render(source: String, language: SyntaxLanguage) async -> [SyntaxHighlightToken] {
@@ -252,7 +401,11 @@ private final class SyntaxHighlightSession {
         self.setup = setup
     }
 
-    func reset(source: String, revision: Int) -> SyntaxHighlightResult {
+    func reset(
+        source: String,
+        revision: Int,
+        emitFastPass: ((SyntaxHighlightResult) -> Void)? = nil
+    ) -> SyntaxHighlightResult {
         self.source = source
         layeredSource = layeredSource(for: source)
         lineIndex.reset(source: layeredSource)
@@ -279,6 +432,13 @@ private final class SyntaxHighlightSession {
             )
             self.layer = layer
             let highlightTokens = highlightTokens(in: fullRange(for: layeredSource), source: layeredSource)
+            emitSyntacticFastPassIfNeeded(
+                tokens: highlightTokens,
+                source: source,
+                revision: revision,
+                refreshRange: fullRange(for: source),
+                emitFastPass: emitFastPass
+            )
             let semanticResult = semanticClassifiedTokensIfNeeded(
                 highlightTokens,
                 source: layeredSource,
@@ -318,7 +478,8 @@ private final class SyntaxHighlightSession {
         source nextSource: String,
         language nextLanguage: SyntaxLanguage,
         mutation originalMutation: SyntaxHighlightMutation,
-        revision: Int
+        revision: Int,
+        emitFastPass: ((SyntaxHighlightResult) -> Void)? = nil
     ) -> SyntaxHighlightResult? {
         guard nextLanguage == language else {
             return nil
@@ -440,6 +601,13 @@ private final class SyntaxHighlightSession {
             nextSourceUTF16Length: nextSourceLength
         )
         let refreshRange = mergedHighlight.refreshRange
+        emitSyntacticFastPassIfNeeded(
+            tokens: mergedHighlight.tokens,
+            source: nextSource,
+            revision: revision,
+            refreshRange: refreshRange,
+            emitFastPass: emitFastPass
+        )
         let semanticResult = semanticClassifiedTokensIfNeeded(
             mergedHighlight.tokens,
             source: nextLayeredSource,
@@ -475,6 +643,30 @@ private final class SyntaxHighlightSession {
 }
 
 private extension SyntaxHighlightSession {
+    var usesDeferredSemanticHighlighting: Bool {
+        language == .swift || language == .objectiveC
+    }
+
+    func emitSyntacticFastPassIfNeeded(
+        tokens: [SyntaxHighlightToken],
+        source: String,
+        revision: Int,
+        refreshRange: NSRange,
+        emitFastPass: ((SyntaxHighlightResult) -> Void)?
+    ) {
+        guard usesDeferredSemanticHighlighting, let emitFastPass else { return }
+        emitFastPass(
+            SyntaxHighlightResult(
+                tokens: tokens,
+                source: source,
+                language: language,
+                revision: revision,
+                refreshRange: refreshRange,
+                phase: .syntacticFastPass
+            )
+        )
+    }
+
     func makeLayer() throws -> LanguageLayer {
         let layerConfiguration = LanguageLayer.Configuration(
             maximumLanguageDepth: setup.supportsLayeredHighlighting ? 4 : 0,

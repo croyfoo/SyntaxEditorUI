@@ -273,6 +273,22 @@ func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: SyntaxEdito
         && abs(lhsAlpha - rhsAlpha) < 0.002
 }
 
+@MainActor
+func syntaxEditorWaitForColor(
+    _ currentColor: @MainActor () -> SyntaxEditorColor?,
+    equals expectedColor: SyntaxEditorColor,
+    attempts: Int = 20
+) async -> Bool {
+    for _ in 0..<attempts {
+        if syntaxEditorUITestColorsEqual(currentColor(), expectedColor) {
+            return true
+        }
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 2_000_000)
+    }
+    return syntaxEditorUITestColorsEqual(currentColor(), expectedColor)
+}
+
 actor ManualSyntaxHighlightGate {
     struct SuspensionWaiter {
         let minimumCount: Int
@@ -408,6 +424,154 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
             language: language,
             revision: revision,
             refreshRange: refreshRange ?? NSRange(location: 0, length: source.utf16.count)
+        )
+    }
+}
+
+actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
+    let fastTokens: [SyntaxHighlightToken]
+    let completeTokens: [SyntaxHighlightToken]
+    let completeGate: ManualSyntaxHighlightGate?
+    var resetCount = 0
+    var updateCount = 0
+
+    init(
+        fastTokens: [SyntaxHighlightToken],
+        completeTokens: [SyntaxHighlightToken],
+        completeGate: ManualSyntaxHighlightGate? = nil
+    ) {
+        self.fastTokens = fastTokens
+        self.completeTokens = completeTokens
+        self.completeGate = completeGate
+    }
+
+    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+        resetCount += 1
+        if let completeGate {
+            await completeGate.suspend()
+        }
+        return Self.result(
+            tokens: completeTokens,
+            source: source,
+            language: language,
+            revision: revision,
+            phase: .complete
+        )
+    }
+
+    func resetPhases(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult> {
+        resetCount += 1
+        return Self.phases(
+            fastTokens: fastTokens,
+            completeTokens: completeTokens,
+            completeGate: completeGate,
+            source: source,
+            language: language,
+            revision: revision
+        )
+    }
+
+    func update(
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation,
+        revision: Int
+    ) async -> SyntaxHighlightResult {
+        updateCount += 1
+        if let completeGate {
+            await completeGate.suspend()
+        }
+        return Self.result(
+            tokens: completeTokens,
+            source: source,
+            language: language,
+            revision: revision,
+            phase: .complete
+        )
+    }
+
+    func updatePhases(
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult> {
+        updateCount += 1
+        return Self.phases(
+            fastTokens: fastTokens,
+            completeTokens: completeTokens,
+            completeGate: completeGate,
+            source: source,
+            language: language,
+            revision: revision
+        )
+    }
+
+    func callCount() -> Int {
+        resetCount + updateCount
+    }
+
+    private static func phases(
+        fastTokens: [SyntaxHighlightToken],
+        completeTokens: [SyntaxHighlightToken],
+        completeGate: ManualSyntaxHighlightGate?,
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) -> AsyncStream<SyntaxHighlightResult> {
+        AsyncStream { continuation in
+            let task = Task {
+                continuation.yield(
+                    result(
+                        tokens: fastTokens,
+                        source: source,
+                        language: language,
+                        revision: revision,
+                        phase: .syntacticFastPass
+                    )
+                )
+                if let completeGate {
+                    await completeGate.suspend()
+                }
+                guard !Task.isCancelled else {
+                    continuation.finish()
+                    return
+                }
+                continuation.yield(
+                    result(
+                        tokens: completeTokens,
+                        source: source,
+                        language: language,
+                        revision: revision,
+                        phase: .complete
+                    )
+                )
+                continuation.finish()
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private static func result(
+        tokens: [SyntaxHighlightToken],
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int,
+        phase: SyntaxHighlightPhase
+    ) -> SyntaxHighlightResult {
+        SyntaxHighlightResult(
+            tokens: tokens,
+            source: source,
+            language: language,
+            revision: revision,
+            refreshRange: NSRange(location: 0, length: source.utf16.count),
+            phase: phase
         )
     }
 }

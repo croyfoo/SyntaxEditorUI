@@ -1384,6 +1384,63 @@ extension SyntaxEditorUITests {
         #expect(iOSEditorLineBreakMode(editorView) == .byCharWrapping)
     }
 
+    @Test("SyntaxEditorView applies iOS fast pass highlight before final phase")
+    @MainActor
+    func syntaxEditorViewIOSAppliesFastPassHighlightBeforeFinalPhase() async {
+        let source = "let value = 1"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0xABCDEF),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let completeGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorPhasedTestHighlighter(
+            fastTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            completeTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.string"
+                ),
+            ],
+            completeGate: completeGate
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await completeGate.waitUntilSuspended()
+        #expect(await syntaxEditorWaitForColor(
+            { iOSEditorForegroundColor(editorView, at: 0) },
+            equals: theme.keyword
+        ))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 4), theme.baseForeground))
+        #expect(await highlighter.callCount() == 1)
+
+        await completeGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.string))
+
+        let updatedTheme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x112233),
+            string: syntaxEditorUITestColor(hex: 0x556677),
+            keyword: syntaxEditorUITestColor(hex: 0x334455)
+        )
+        model.configuration.colorTheme = updatedTheme
+        editorView.synchronizeDocumentForTesting()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(await highlighter.callCount() == 1)
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.string))
+    }
+
     @Test("SyntaxEditorView applies iOS base attributes to inserted text before delayed update highlight")
     @MainActor
     func syntaxEditorViewIOSAppliesBaseAttributesToInsertedTextBeforeDelayedUpdateHighlight() async {
