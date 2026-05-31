@@ -253,6 +253,8 @@ package final class HighlightStyleStore {
         let colorOperations = Self.colorOperations(
             from: previousColorRuns,
             to: normalizedNextColorRuns,
+            refreshedRange: clampedRefreshRange,
+            previousBaseForeground: self.baseForeground,
             baseForeground: baseForeground
         )
         let fontOperations = Self.fontOperations(
@@ -610,20 +612,30 @@ package final class HighlightStyleStore {
     private static func colorOperations(
         from previousRuns: [HighlightColorRun],
         to nextRuns: [HighlightColorRun],
+        refreshedRange: NSRange,
+        previousBaseForeground: SyntaxEditorColor?,
         baseForeground: SyntaxEditorColor
     ) -> [HighlightColorOperation] {
+        let baseForegroundChanged = previousBaseForeground.map { !$0.isEqual(baseForeground) } ?? false
         let nextKeys = Set(nextRuns.map(ColorRunKey.init))
         let previousKeys = Set(previousRuns.map(ColorRunKey.init))
         var resetOperations: [HighlightColorOperation] = []
         var styledOperations: [HighlightColorOperation] = []
-        resetOperations.reserveCapacity(previousRuns.count)
+        resetOperations.reserveCapacity(previousRuns.count + (baseForegroundChanged ? 1 : 0))
         styledOperations.reserveCapacity(nextRuns.count)
 
-        for run in previousRuns where !nextKeys.contains(ColorRunKey(run)) {
-            resetOperations.append(HighlightColorOperation(range: run.range, color: baseForeground))
-        }
-        for run in nextRuns where !previousKeys.contains(ColorRunKey(run)) {
-            styledOperations.append(HighlightColorOperation(range: run.range, color: run.color))
+        if baseForegroundChanged, refreshedRange.length > 0 {
+            resetOperations.append(HighlightColorOperation(range: refreshedRange, color: baseForeground))
+            styledOperations.append(contentsOf: nextRuns.map {
+                HighlightColorOperation(range: $0.range, color: $0.color)
+            })
+        } else {
+            for run in previousRuns where !nextKeys.contains(ColorRunKey(run)) {
+                resetOperations.append(HighlightColorOperation(range: run.range, color: baseForeground))
+            }
+            for run in nextRuns where !previousKeys.contains(ColorRunKey(run)) {
+                styledOperations.append(HighlightColorOperation(range: run.range, color: run.color))
+            }
         }
 
         let resetCount = resetOperations.count

@@ -269,6 +269,41 @@ struct SyntaxEditorUICommonTests {
         ])
     }
 
+    @Test("Highlight style store refreshes plain foreground when base foreground changes")
+    func refreshesPlainForegroundWhenBaseForegroundChanges() {
+        let store = HighlightStyleStore()
+        _ = store.apply(
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 4, length: 2), color: redColor)],
+                fontRuns: []
+            ),
+            refreshedRange: NSRange(location: 0, length: 12),
+            mutation: nil,
+            textLength: 12,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        let operations = store.apply(
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 4, length: 2), color: redColor)],
+                fontRuns: []
+            ),
+            refreshedRange: NSRange(location: 0, length: 12),
+            mutation: nil,
+            textLength: 12,
+            baseForeground: blueColor,
+            baseFont: nil
+        )
+
+        #expect(operations.colorOperations.map(\.range) == [
+            NSRange(location: 0, length: 12),
+            NSRange(location: 4, length: 2),
+        ])
+        #expect(operations.colorOperations.first?.color.isEqual(blueColor) == true)
+        #expect(operations.colorOperations.last?.color.isEqual(redColor) == true)
+    }
+
     @Test("Highlight style store resets expanding foreground runs before applying replacement style")
     func resetsExpandingForegroundRunsBeforeApplyingReplacementStyle() {
         let store = HighlightStyleStore()
