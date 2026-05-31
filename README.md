@@ -52,8 +52,8 @@ struct EditorView: View {
 
     var body: some View {
         SyntaxEditor(model)
-            .onChange(of: model.text) { _, text in
-                print("Edited text:", text)
+            .onChange(of: model.text) {
+                print("Edited text:", model.text)
             }
     }
 }
