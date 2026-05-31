@@ -697,6 +697,9 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         if structuralSwiftEditRegex.firstMatch(in: text, range: fullRange) != nil {
             return true
         }
+        if standaloneSwiftBraceRegex.firstMatch(in: text, range: fullRange) != nil {
+            return true
+        }
         return swiftEditTouchesValueDeclarationHead(text, editedRange: editedRange, lineRange: lineRange)
             || swiftEditTouchesPreInBindingHead(text, editedRange: editedRange, lineRange: lineRange)
     }
@@ -808,6 +811,11 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static let structuralSwiftEditRegex = try! NSRegularExpression(
         pattern: #"(^|\s)(@\w+|#if|#elseif|#else|#endif|#sourceLocation|class|struct|enum|actor|protocol|extension|func|init|deinit|subscript|typealias|associatedtype|case|macro|operator|precedencegroup|import)\b"#,
+        options: [.anchorsMatchLines]
+    )
+
+    private static let standaloneSwiftBraceRegex = try! NSRegularExpression(
+        pattern: #"^\s*[{}]\s*$"#,
         options: [.anchorsMatchLines]
     )
 

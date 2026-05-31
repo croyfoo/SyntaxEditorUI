@@ -5816,6 +5816,22 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine treats standalone Swift brace edits as structural")
+    func highlighterTreatsStandaloneSwiftBraceEditsAsStructural() {
+        let source = """
+        func render() -> Int
+        {
+            return 1
+        }
+        """
+        let nsSource = source as NSString
+        let openBraceRange = nsSource.range(of: "{")
+        let closeBraceRange = nsSource.range(of: "}", options: .backwards)
+
+        #expect(SwiftSyntaxOverlayTokenProvider.semanticTargetRange(openBraceRange, in: nsSource) == nil)
+        #expect(SwiftSyntaxOverlayTokenProvider.semanticTargetRange(closeBraceRange, in: nsSource) == nil)
+    }
+
     @Test("SyntaxHighlighterEngine keeps Swift initializer edits local")
     func highlighterKeepsSwiftInitializerEditsLocal() async throws {
         let source = """
