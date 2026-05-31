@@ -449,6 +449,19 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 } ?? []
             }
 
+            if context.isOptionalMemberAccess {
+                return []
+            }
+            if let receiverName = context.memberReceiverName,
+               index.entry(
+                named: receiverName,
+                at: range,
+                allowedKinds: [.variable],
+                allowedRoles: .local
+               ) != nil {
+                return []
+            }
+
             if context.startsLikeTypeName {
                 return [SemanticOverlay(range: range, syntaxID: .identifierTypeSystem)]
             }
@@ -534,6 +547,16 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 : []
         }
 
+        if context.isInsideStringInterpolation,
+           index.entry(
+            named: text,
+            at: range,
+            allowedKinds: [.variable],
+            allowedRoles: .member
+           ) != nil {
+            return [SemanticOverlay(range: range, syntaxID: .identifierVariableSystem)]
+        }
+
         if context.isInsideStringInterpolation {
             return []
         }
@@ -559,6 +582,9 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 at: range,
                 allowedKinds: [.function]
             ) else {
+                return [SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem)]
+            }
+            if localFunction.role == .member {
                 return [SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem)]
             }
             return syntaxIDForLocalEntry(localFunction).map {
@@ -1166,6 +1192,10 @@ private struct SwiftSemanticTokenContext {
     var isMemberAccess: Bool {
         let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
         return trimmedBefore.hasSuffix(".") && !trimmedBefore.hasSuffix("..")
+    }
+
+    var isOptionalMemberAccess: Bool {
+        before.trimmingCharacters(in: .whitespaces).hasSuffix("?.")
     }
 
     var memberReceiverTypeName: String? {

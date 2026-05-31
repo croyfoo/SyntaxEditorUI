@@ -4011,7 +4011,7 @@ struct SyntaxHighlighterEngineTests {
             ("ReferenceStore", "declaration.type", "editor.syntax.declaration.type", "final class ReferenceStore"),
             ("OpenReferenceBase", "identifier.type", "editor.syntax.identifier.type", "OpenReferenceBase, @unchecked"),
             ("UUID", "identifier.type.system", "editor.syntax.identifier.type.system", "typealias ReferenceID = UUID"),
-            ("load", "identifier.function", "editor.syntax.identifier.function", "try await load().map"),
+            ("load", "identifier.function.system", "editor.syntax.identifier.function.system", "try await load().map"),
             ("Value", "plain", "editor.syntax.plain", "var wrappedValue: Value"),
             ("wrappedValue", "declaration.other", "editor.syntax.declaration.other", "init(wrappedValue: Value"),
             ("create", "declaration.other", "editor.syntax.declaration.other", "for key: Key, create: @Sendable"),
@@ -4088,6 +4088,10 @@ struct SyntaxHighlighterEngineTests {
             ("Sendable", "identifier.class.system", "editor.syntax.identifier.class.system", "@unchecked Sendable"),
             ("Hashable", "identifier.class.system", "editor.syntax.identifier.class.system", "ID: Hashable"),
             ("Identifiable", "identifier.class.system", "editor.syntax.identifier.class.system", "Identifiable {"),
+            ("load", "identifier.function.system", "editor.syntax.identifier.function.system", "try await load().map"),
+            ("firstMatch", "plain", "editor.syntax.plain", "pattern.firstMatch"),
+            ("output", "plain", "editor.syntax.plain", "?.output.number"),
+            ("state", "identifier.variable.system", "editor.syntax.identifier.variable.system", "state.rawValue"),
         ]
 
         for expectation in effectiveExpectations {
