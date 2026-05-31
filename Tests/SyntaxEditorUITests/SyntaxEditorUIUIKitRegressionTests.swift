@@ -4198,9 +4198,9 @@ extension SyntaxEditorUITests {
         #expect(model.document.textSnapshot() == "let 4242")
     }
 
-    @Test("SyntaxEditorView does not force immediate iOS end layout for large paste payloads")
+    @Test("SyntaxEditorView defers iOS large paste selection scroll until layout")
     @MainActor
-    func syntaxEditorViewIOSDefersImmediateEndLayoutForLargePastePayloads() {
+    func syntaxEditorViewIOSDefersLargePasteSelectionScrollUntilLayout() {
         let model = SyntaxEditorTestContext(text: "let start = 0\n", lineWrappingEnabled: false)
         let editorView = SyntaxEditorView(testContext: model)
         layoutIOSEditorView(editorView)
@@ -4209,10 +4209,12 @@ extension SyntaxEditorUITests {
         let pastedText = String(repeating: "let value = 1\n", count: 500)
 
         editorView.insertPastedText(pastedText)
+        #expect(abs(editorView.contentOffset.y - stableOffset.y) <= 1)
+
         layoutIOSEditorView(editorView)
 
         #expect(model.document.textSnapshot() == "let start = 0\n" + pastedText)
-        #expect(abs(editorView.contentOffset.y - stableOffset.y) <= 1)
+        #expect(editorView.contentOffset.y > stableOffset.y + 1)
     }
 
     @Test("SyntaxEditorView toggles iOS line wrapping key command")

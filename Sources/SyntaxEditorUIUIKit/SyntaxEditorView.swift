@@ -1268,8 +1268,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         updateTypingAttributes()
         updateTextContainerForCurrentWrappingMode()
         if shouldDeferSelectionGeometry {
-            postLayoutAction = nil
-            setNeedsLayout()
+            scheduleScrollSelectionToVisibleIfNeeded()
         } else {
             layoutAndScrollSelectionForTextInputGeometry()
         }
