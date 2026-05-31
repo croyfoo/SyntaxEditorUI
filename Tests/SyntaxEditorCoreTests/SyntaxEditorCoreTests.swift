@@ -5816,6 +5816,30 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine re-queries Swift identifiers that become keywords")
+    func highlighterRequeriesSwiftIdentifiersThatBecomeKeywords() async throws {
+        let source = "let value = tru\n"
+        let updatedSource = "let value = true\n"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+        let keywordRange = (updatedSource as NSString).range(of: "true")
+
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: keywordRange, syntaxID: .keyword, language: .swift)
+        })
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Swift semantic index after source-length edits")
     func highlighterRebuildsSwiftSemanticIndexAfterSourceLengthEdits() async throws {
         let source = """

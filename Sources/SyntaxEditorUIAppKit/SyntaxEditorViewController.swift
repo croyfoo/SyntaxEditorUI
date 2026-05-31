@@ -1487,7 +1487,7 @@ public final class SyntaxEditorView: NSScrollView {
         baseAttributes: [NSAttributedString.Key: Any],
         mutation: SyntaxHighlightMutation?
     ) {
-        guard let operations = syntaxHighlightOperations(
+        guard let transaction = syntaxHighlightTransaction(
             for: tokens,
             targetRange: targetRange,
             textLength: textLength,
@@ -1496,7 +1496,8 @@ public final class SyntaxEditorView: NSScrollView {
         ) else {
             return
         }
-        TextEditingTransaction.apply(operations, to: textSystem.textContentStorage)
+        TextEditingTransaction.apply(transaction.operations, to: textSystem.textContentStorage)
+        textSystem.styleStore.commit(transaction)
     }
 
     private func installSyntaxHighlightRenderingIncrementally(
@@ -1507,7 +1508,7 @@ public final class SyntaxEditorView: NSScrollView {
         mutation: SyntaxHighlightMutation?,
         expectedRevision: Int
     ) async -> Bool {
-        guard let operations = syntaxHighlightOperations(
+        guard let transaction = syntaxHighlightTransaction(
             for: tokens,
             targetRange: targetRange,
             textLength: textLength,
@@ -1517,21 +1518,22 @@ public final class SyntaxEditorView: NSScrollView {
             return false
         }
         let didApply = await TextEditingTransaction.applyIncrementally(
-            operations,
+            transaction.operations,
             to: textSystem.textContentStorage,
             shouldContinue: { document.revision == expectedRevision }
         )
         guard didApply else { return false }
+        textSystem.styleStore.commit(transaction)
         return true
     }
 
-    private func syntaxHighlightOperations(
+    private func syntaxHighlightTransaction(
         for tokens: [SyntaxHighlightToken],
         targetRange: NSRange,
         textLength: Int,
         baseAttributes: [NSAttributedString.Key: Any],
         mutation _: SyntaxHighlightMutation?
-    ) -> HighlightStyleOperations? {
+    ) -> HighlightStyleTransaction? {
         var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes)
         let runSet = syntaxHighlightRunSet(
             for: tokens,
@@ -1543,7 +1545,7 @@ public final class SyntaxEditorView: NSScrollView {
         guard let baseForeground = baseAttributes[.foregroundColor] as? NSColor else {
             return nil
         }
-        return textSystem.styleStore.apply(
+        return textSystem.styleStore.prepareApply(
             runSet,
             refreshedRange: targetRange,
             mutation: nil,

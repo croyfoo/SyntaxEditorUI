@@ -79,6 +79,15 @@ package struct HighlightStyleOperations {
     }
 }
 
+package struct HighlightStyleTransaction {
+    package let operations: HighlightStyleOperations
+    fileprivate let textLength: Int
+    fileprivate let baseForeground: SyntaxEditorColor
+    fileprivate let colorRuns: [HighlightColorRun]
+    fileprivate let fontRuns: [HighlightFontRun]
+    fileprivate let foregroundSuppressionRanges: [NSRange]
+}
+
 @MainActor
 package final class HighlightStyleStore {
     package private(set) var epoch = 0
@@ -177,17 +186,48 @@ package final class HighlightStyleStore {
         baseFont: SyntaxEditorFont?,
         foregroundSuppressionRanges nextForegroundSuppressionRanges: [NSRange]? = nil
     ) -> HighlightStyleOperations {
+        let transaction = prepareApply(
+            runSet,
+            refreshedRange: refreshedRange,
+            mutation: mutation,
+            textLength: nextTextLength,
+            baseForeground: baseForeground,
+            baseFont: baseFont,
+            foregroundSuppressionRanges: nextForegroundSuppressionRanges
+        )
+        commit(transaction)
+        return transaction.operations
+    }
+
+    package func prepareApply(
+        _ runSet: HighlightRunSet,
+        refreshedRange: NSRange,
+        mutation: SyntaxHighlightMutation?,
+        textLength nextTextLength: Int,
+        baseForeground: SyntaxEditorColor,
+        baseFont: SyntaxEditorFont?,
+        foregroundSuppressionRanges nextForegroundSuppressionRanges: [NSRange]? = nil
+    ) -> HighlightStyleTransaction {
         let nextTextLength = max(0, nextTextLength)
-        self.baseForeground = baseForeground
+        var nextColorRuns = colorRuns
+        var nextFontRuns = fontRuns
+        var nextSuppressionRanges = foregroundSuppressionRanges
         if let mutation {
-            recordTextMutation(mutation, textLength: nextTextLength)
+            nextColorRuns = Self.shiftedColorRuns(nextColorRuns, by: mutation, sourceLength: nextTextLength)
+            nextFontRuns = Self.shiftedFontRuns(nextFontRuns, by: mutation, sourceLength: nextTextLength)
+            nextSuppressionRanges = Self.normalizedRanges(
+                nextSuppressionRanges.flatMap { range in
+                    Self.shiftedRangesAfterMutation(range, by: mutation, sourceLength: nextTextLength)
+                },
+                textLength: nextTextLength
+            )
         }
 
         let clampedRefreshRange = SyntaxEditorRangeUtilities.clampedRange(
             refreshedRange,
             utf16Length: nextTextLength
         )
-        let effectiveSuppressionRanges = nextForegroundSuppressionRanges ?? foregroundSuppressionRanges
+        let effectiveSuppressionRanges = nextForegroundSuppressionRanges ?? nextSuppressionRanges
         let normalizedSuppressionRanges = Self.normalizedRanges(
             effectiveSuppressionRanges,
             textLength: nextTextLength
@@ -208,8 +248,8 @@ package final class HighlightStyleStore {
             ),
             to: clampedRefreshRange
         )
-        let previousColorRuns = Self.clippedColorRuns(colorRuns, to: clampedRefreshRange)
-        let previousFontRuns = Self.clippedFontRuns(fontRuns, to: clampedRefreshRange)
+        let previousColorRuns = Self.clippedColorRuns(nextColorRuns, to: clampedRefreshRange)
+        let previousFontRuns = Self.clippedFontRuns(nextFontRuns, to: clampedRefreshRange)
         let colorOperations = Self.colorOperations(
             from: previousColorRuns,
             to: normalizedNextColorRuns,
@@ -221,29 +261,29 @@ package final class HighlightStyleStore {
             baseFont: baseFont
         )
 
-        Self.replaceColorRuns(&colorRuns, in: clampedRefreshRange, with: normalizedNextColorRuns)
-        Self.replaceFontRuns(&fontRuns, in: clampedRefreshRange, with: normalizedNextFontRuns)
-        textLength = nextTextLength
-        foregroundSuppressionRanges = normalizedSuppressionRanges
-        epoch += 1
+        Self.replaceColorRuns(&nextColorRuns, in: clampedRefreshRange, with: normalizedNextColorRuns)
+        Self.replaceFontRuns(&nextFontRuns, in: clampedRefreshRange, with: normalizedNextFontRuns)
 
-        return HighlightStyleOperations(
-            colorOperations: colorOperations,
-            fontOperations: fontOperations
+        return HighlightStyleTransaction(
+            operations: HighlightStyleOperations(
+                colorOperations: colorOperations,
+                fontOperations: fontOperations
+            ),
+            textLength: nextTextLength,
+            baseForeground: baseForeground,
+            colorRuns: nextColorRuns,
+            fontRuns: nextFontRuns,
+            foregroundSuppressionRanges: normalizedSuppressionRanges
         )
     }
 
-    private func recordTextMutation(_ mutation: SyntaxHighlightMutation, textLength nextTextLength: Int) {
-        let nextTextLength = max(0, nextTextLength)
-        colorRuns = Self.shiftedColorRuns(colorRuns, by: mutation, sourceLength: nextTextLength)
-        fontRuns = Self.shiftedFontRuns(fontRuns, by: mutation, sourceLength: nextTextLength)
-        foregroundSuppressionRanges = Self.normalizedRanges(
-            foregroundSuppressionRanges.flatMap { range in
-                Self.shiftedRangesAfterMutation(range, by: mutation, sourceLength: nextTextLength)
-            },
-            textLength: nextTextLength
-        )
-        textLength = nextTextLength
+    package func commit(_ transaction: HighlightStyleTransaction) {
+        textLength = transaction.textLength
+        baseForeground = transaction.baseForeground
+        colorRuns = transaction.colorRuns
+        fontRuns = transaction.fontRuns
+        foregroundSuppressionRanges = transaction.foregroundSuppressionRanges
+        epoch += 1
     }
 
     package func clear(

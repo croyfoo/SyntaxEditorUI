@@ -1991,7 +1991,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         textLength: Int,
         mutation: SyntaxHighlightMutation?
     ) {
-        guard let operations = syntaxHighlightOperations(
+        guard let transaction = syntaxHighlightTransaction(
             for: runSet,
             targetRange: targetRange,
             baseAttributes: baseAttributes,
@@ -2000,18 +2000,19 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         ) else {
             return
         }
-        TextEditingTransaction.apply(operations, to: textContentStorage)
+        TextEditingTransaction.apply(transaction.operations, to: textContentStorage)
+        highlightStyleStore.commit(transaction)
     }
 
-    private func syntaxHighlightOperations(
+    private func syntaxHighlightTransaction(
         for runSet: HighlightRunSet,
         targetRange: NSRange,
         baseAttributes: [NSAttributedString.Key: Any],
         textLength: Int,
         mutation _: SyntaxHighlightMutation?
-    ) -> HighlightStyleOperations? {
+    ) -> HighlightStyleTransaction? {
         guard let baseForeground = baseAttributes[.foregroundColor] as? UIColor else { return nil }
-        return highlightStyleStore.apply(
+        return highlightStyleStore.prepareApply(
             runSet,
             refreshedRange: targetRange,
             mutation: nil,
@@ -2103,7 +2104,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
         isApplyingHighlight = true
         defer { isApplyingHighlight = false }
-        guard let operations = syntaxHighlightOperations(
+        guard let transaction = syntaxHighlightTransaction(
             for: runSet,
             targetRange: targetRange,
             baseAttributes: baseAttributes,
@@ -2113,11 +2114,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return false
         }
         let didApply = await TextEditingTransaction.applyIncrementally(
-            operations,
+            transaction.operations,
             to: textContentStorage,
             shouldContinue: { document.revision == expectedRevision }
         )
         guard didApply else { return false }
+        highlightStyleStore.commit(transaction)
         await Task.yield()
         return !Task.isCancelled && document.revision == expectedRevision
     }

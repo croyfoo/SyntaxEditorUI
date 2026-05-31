@@ -131,6 +131,46 @@ struct SyntaxEditorUICommonTests {
         #expect(system.textStorage.attribute(.font, at: 1, effectiveRange: nil) == nil)
     }
 
+    @Test("Highlight style store does not advance prepared operations after incremental cancellation")
+    func doesNotAdvancePreparedOperationsAfterIncrementalCancellation() async {
+        let system = EditorTextSystem()
+        let store = HighlightStyleStore()
+        TextEditingTransaction.perform(on: system.textContentStorage) { storage in
+            storage.setAttributedString(NSAttributedString(string: "ab"))
+        }
+
+        let transaction = store.prepareApply(
+            HighlightRunSet(
+                colorRuns: [
+                    HighlightColorRun(range: NSRange(location: 0, length: 1), color: redColor),
+                    HighlightColorRun(range: NSRange(location: 1, length: 1), color: blueColor),
+                ],
+                fontRuns: []
+            ),
+            refreshedRange: NSRange(location: 0, length: 2),
+            mutation: nil,
+            textLength: 2,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+        var validationCount = 0
+
+        let completed = await TextEditingTransaction.applyIncrementally(
+            transaction.operations,
+            to: system.textContentStorage,
+            maximumOperationsPerTransaction: 1,
+            shouldContinue: {
+                validationCount += 1
+                return validationCount < 2
+            }
+        )
+
+        #expect(!completed)
+        #expect(store.appliedColorRunsForTesting.isEmpty)
+        #expect(store.epoch == 0)
+        #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorColor)?.isEqual(redColor) == true)
+    }
+
     @Test("Highlight style store emits content attribute operations")
     func emitsContentAttributeOperations() {
         let store = HighlightStyleStore()
