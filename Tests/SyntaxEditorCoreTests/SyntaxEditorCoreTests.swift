@@ -5816,6 +5816,33 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine keeps Swift initializer edits local")
+    func highlighterKeepsSwiftInitializerEditsLocal() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item + 1
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "let item = 1", with: "let item = 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Swift semantic index after same-length closure parameter edits")
     func highlighterRebuildsSwiftSemanticIndexAfterSameLengthClosureParameterEdits() async throws {
         let source = """

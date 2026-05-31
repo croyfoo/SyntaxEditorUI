@@ -747,8 +747,8 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         while location < source.length {
             let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
             let line = source.substring(with: lineRange)
-            if swiftLineCanAffectSemanticIndex(line) {
-                hasher.combine(line)
+            if let component = swiftSemanticIndexFingerprintComponent(in: line) {
+                hasher.combine(component)
             }
             let nextLocation = lineRange.upperBound
             guard nextLocation > location else { break }
@@ -758,20 +758,26 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return hasher.finalize()
     }
 
-    private static func swiftLineCanAffectSemanticIndex(_ line: String) -> Bool {
+    private static func swiftSemanticIndexFingerprintComponent(in line: String) -> String? {
         let nsLine = line as NSString
         let fullRange = NSRange(location: 0, length: nsLine.length)
-        if structuralSwiftEditRegex.firstMatch(in: line, range: fullRange) != nil {
-            return true
-        }
         if valueDeclarationHeadRegex.firstMatch(in: line, range: fullRange) != nil {
-            return true
+            let assignmentRange = nsLine.range(of: "=")
+            guard assignmentRange.location != NSNotFound else {
+                return line
+            }
+            return nsLine.substring(to: assignmentRange.location)
         }
-        guard let inMatch = swiftPreInBindingKeywordRegex.firstMatch(in: line, range: fullRange) else {
-            return false
+        if let inMatch = swiftPreInBindingKeywordRegex.firstMatch(in: line, range: fullRange) {
+            let headRange = NSRange(location: 0, length: inMatch.range.location)
+            if swiftPreInBindingHeadRegex.firstMatch(in: line, range: headRange) != nil {
+                return nsLine.substring(to: inMatch.range.location)
+            }
         }
-        let headRange = NSRange(location: 0, length: inMatch.range.location)
-        return swiftPreInBindingHeadRegex.firstMatch(in: line, range: headRange) != nil
+        if structuralSwiftEditRegex.firstMatch(in: line, range: fullRange) != nil {
+            return line
+        }
+        return nil
     }
 
     private static func markTokenRange(from markerRange: NSRange, in source: NSString) -> NSRange {
