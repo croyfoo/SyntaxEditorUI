@@ -1260,6 +1260,7 @@ public final class SyntaxEditorView: NSScrollView {
         TextEditingTransaction.perform(on: textSystem.textContentStorage) { textStorage in
             textStorage.setAttributedString(NSAttributedString(string: nextText, attributes: storageBaseAttributes()))
         }
+        textView.setSelectedRange(textView.selectedRange())
         textView.invalidateTextLayout()
     }
 

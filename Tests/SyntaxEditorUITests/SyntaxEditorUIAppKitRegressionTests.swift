@@ -76,6 +76,19 @@ extension SyntaxEditorUITests {
         #expect(await renderedText.waitUntilValue("{\"enabled\":true}"))
     }
 
+    @Test("SyntaxEditorView clamps macOS selection after whole-document replacement")
+    @MainActor
+    func syntaxEditorViewMacClampsSelectionAfterWholeDocumentReplacement() {
+        let model = SyntaxEditorTestContext(text: "abcdef", language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
+        editorView.textView.setSelectedRange(NSRange(location: 6, length: 0))
+
+        model.document.replaceText("a")
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(editorView.textView.selectedRange() == NSRange(location: 1, length: 0))
+    }
+
     @Test("SyntaxEditorView enables macOS find bar by default")
     @MainActor
     func syntaxEditorViewMacEnablesFindBarByDefault() {
