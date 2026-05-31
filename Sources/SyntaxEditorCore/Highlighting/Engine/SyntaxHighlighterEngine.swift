@@ -284,6 +284,19 @@ private final class SyntaxHighlightSession {
                 source: layeredSource,
                 rootNode: semanticRootNodeSnapshot()
             )
+            guard !semanticResult.isCancelled, !Task.isCancelled else {
+                self.layer = nil
+                swiftSemanticState = nil
+                objectiveCSemanticState = nil
+                tokens = []
+                return SyntaxHighlightResult(
+                    tokens: [],
+                    source: source,
+                    language: language,
+                    revision: revision,
+                    refreshRange: fullRange(for: source)
+                )
+            }
             let classifiedTokens = semanticResult.tokens
 
             tokens = classifiedTokens

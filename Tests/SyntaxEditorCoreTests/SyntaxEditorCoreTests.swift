@@ -7762,6 +7762,43 @@ struct SyntaxHighlighterEngineTests {
         #expect(result.tokens.isEmpty)
     }
 
+    @Test("SyntaxHighlighterEngine does not cache cancelled Swift reset tokens")
+    func highlighterDoesNotCacheCancelledSwiftResetTokens() async throws {
+        let source = String(
+            repeating: """
+            struct CancelledReset {
+                func render(_ input: Int) -> Int {
+                    let value = input + 1
+                    return value
+                }
+            }
+
+            """,
+            count: 500
+        )
+        let engine = SyntaxHighlighterEngine()
+        let resetTask = Task {
+            await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 1)
+        }
+        resetTask.cancel()
+        let cancelled = await resetTask.value
+
+        #expect(cancelled.tokens.isEmpty)
+
+        let updatedSource = source.replacingOccurrences(of: "input + 1", with: "input + 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incremental = await engine.update(
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation),
+            revision: 2
+        )
+        let full = await SyntaxHighlighterEngine()
+            .reset(source: updatedSource, language: SyntaxLanguage.swift, revision: 3)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")
     func highlighterKeepsUnsupportedInjectionsDirect() async {
         let engine = SyntaxHighlighterEngine()
