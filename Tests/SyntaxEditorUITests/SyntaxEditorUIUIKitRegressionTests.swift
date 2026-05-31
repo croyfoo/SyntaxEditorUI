@@ -930,6 +930,28 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
 
+    @Test("SyntaxEditorView refreshes iOS permanent base foreground after appearance changes")
+    @MainActor
+    func syntaxEditorViewIOSRefreshesPermanentBaseForegroundAfterAppearanceChanges() throws {
+        let model = SyntaxEditorTestContext(
+            text: "plain text",
+            language: SyntaxLanguage.swift,
+            colorTheme: .default
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
+
+        editorView.overrideUserInterfaceStyle = .light
+        editorView.refreshForColorAppearanceChange()
+        let lightForeground = try #require(iOSEditorPermanentForegroundColor(editorView, at: 0))
+
+        editorView.overrideUserInterfaceStyle = .dark
+        editorView.refreshForColorAppearanceChange()
+        let darkBaseForeground = try #require(editorView.baseForegroundColorForTesting())
+
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorPermanentForegroundColor(editorView, at: 0), darkBaseForeground))
+        #expect(!syntaxEditorUITestColorsEqual(lightForeground, darkBaseForeground))
+    }
+
     @Test("SyntaxEditorView reflects iOS background drawing configuration")
     @MainActor
     func syntaxEditorViewIOSDrawsBackgroundObservation() async {

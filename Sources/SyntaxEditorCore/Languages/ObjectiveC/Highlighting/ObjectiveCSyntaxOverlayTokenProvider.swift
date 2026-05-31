@@ -8,6 +8,7 @@ private typealias ObjectiveCSyntaxIDMask = SyntaxOverlaySyntaxIDMask
 struct ObjectiveCSemanticOverlayState: SyntaxOverlayState {
     fileprivate var index: ObjectiveCFileSymbolIndex?
     fileprivate var indexedSourceUTF16Length: Int
+    fileprivate var indexedDeclarationFingerprint: Int
 }
 
 typealias ObjectiveCSemanticOverlayResult = SyntaxOverlayResult
@@ -149,9 +150,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
         let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
+        let declarationFingerprint = semanticIndexFingerprint(in: nsSource)
         let shouldRebuildIndex = targetRange == nil
             || state?.index == nil
             || state?.indexedSourceUTF16Length != nsSource.length
+            || state?.indexedDeclarationFingerprint != declarationFingerprint
         let index: ObjectiveCFileSymbolIndex
         var rebuiltState: ObjectiveCSemanticOverlayState?
         if shouldRebuildIndex {
@@ -168,7 +171,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 )
             }
             index = rebuiltIndex
-            rebuiltState = ObjectiveCSemanticOverlayState(index: rebuiltIndex, indexedSourceUTF16Length: nsSource.length)
+            rebuiltState = ObjectiveCSemanticOverlayState(
+                index: rebuiltIndex,
+                indexedSourceUTF16Length: nsSource.length,
+                indexedDeclarationFingerprint: declarationFingerprint
+            )
         } else {
             index = state!.index!
         }
@@ -399,6 +406,32 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let nsText = text as NSString
         let fullRange = NSRange(location: 0, length: nsText.length)
         return structuralObjectiveCEditRegex.firstMatch(in: text, range: fullRange) != nil
+    }
+
+    private static func semanticIndexFingerprint(in source: NSString) -> Int {
+        var hasher = Hasher()
+        hasher.combine(source.length)
+
+        var location = 0
+        while location < source.length {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            let line = source.substring(with: lineRange)
+            if objectiveCLineCanAffectSemanticIndex(line) {
+                hasher.combine(lineRange.location)
+                hasher.combine(line)
+            }
+            let nextLocation = lineRange.upperBound
+            guard nextLocation > location else { break }
+            location = nextLocation
+        }
+
+        return hasher.finalize()
+    }
+
+    private static func objectiveCLineCanAffectSemanticIndex(_ line: String) -> Bool {
+        let nsLine = line as NSString
+        let fullRange = NSRange(location: 0, length: nsLine.length)
+        return structuralObjectiveCEditRegex.firstMatch(in: line, range: fullRange) != nil
     }
 
     private static func shouldTreatUnknownTypeAsProject(_ name: String) -> Bool {

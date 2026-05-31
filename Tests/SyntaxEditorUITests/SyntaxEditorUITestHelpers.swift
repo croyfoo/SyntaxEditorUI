@@ -743,6 +743,18 @@ func iOSEditorForegroundColor(_ editorView: SyntaxEditorView, at location: Int) 
 }
 
 @MainActor
+func iOSEditorPermanentForegroundColor(_ editorView: SyntaxEditorView, at location: Int) -> UIColor? {
+    guard let attributedText = editorView.attributedText,
+          location >= 0,
+          location < attributedText.length
+    else {
+        return nil
+    }
+
+    return attributedText.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor
+}
+
+@MainActor
 func iOSEditorFont(_ editorView: SyntaxEditorView, at location: Int) -> UIFont? {
     guard let attributedText = editorView.attributedText,
           location >= 0,

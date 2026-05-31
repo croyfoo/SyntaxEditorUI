@@ -404,6 +404,7 @@ public final class SyntaxEditorView: NSScrollView {
     public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateEditorBackgroundColor()
+        applyBaseForegroundColorChange(from: lastAppliedColorTheme, to: lastAppliedColorTheme ?? configuration.colorTheme)
         updateTextViewFontAndTypingAttributes()
         reapplyCachedHighlight()
         applyMatchingBracketHighlight(force: true)

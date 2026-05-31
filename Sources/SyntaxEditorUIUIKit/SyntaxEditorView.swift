@@ -759,6 +759,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func refreshForColorAppearanceChange() {
         updateEditorBackgroundColor()
         invalidateHorizontalMeasurement()
+        applyBaseForegroundColorChange(from: lastAppliedColorTheme, to: lastAppliedColorTheme)
         updateTypingAttributes()
         reapplyCachedHighlight()
         updateFindHighlightFragmentViews()

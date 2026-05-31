@@ -6,6 +6,7 @@ import SwiftTreeSitter
 struct SwiftSemanticOverlayState: SyntaxOverlayState {
     fileprivate var index: SwiftFileSymbolIndex?
     fileprivate var indexedSourceUTF16Length: Int
+    fileprivate var indexedDeclarationFingerprint: Int
 }
 
 typealias SwiftSemanticOverlayResult = SyntaxOverlayResult
@@ -126,9 +127,11 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
         let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
+        let declarationFingerprint = semanticIndexFingerprint(in: nsSource)
         let shouldRebuildIndex = targetRange == nil
             || state?.index == nil
             || state?.indexedSourceUTF16Length != nsSource.length
+            || state?.indexedDeclarationFingerprint != declarationFingerprint
         let index: SwiftFileSymbolIndex
         var rebuiltState: SwiftSemanticOverlayState?
         if shouldRebuildIndex {
@@ -140,7 +143,11 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                     isCancelled: true
                 )
             }
-            rebuiltState = SwiftSemanticOverlayState(index: index, indexedSourceUTF16Length: nsSource.length)
+            rebuiltState = SwiftSemanticOverlayState(
+                index: index,
+                indexedSourceUTF16Length: nsSource.length,
+                indexedDeclarationFingerprint: declarationFingerprint
+            )
         } else {
             index = state!.index!
         }
@@ -682,6 +689,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             return true
         }
         return swiftEditTouchesValueDeclarationHead(text, editedRange: editedRange, lineRange: lineRange)
+            || swiftEditTouchesPreInBindingHead(text, editedRange: editedRange, lineRange: lineRange)
     }
 
     private static func swiftEditTouchesValueDeclarationHead(
@@ -703,6 +711,60 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             safeValueStart = lineRange.location + assignmentRange.upperBound
         }
         return editedRange.location < safeValueStart
+    }
+
+    private static func swiftEditTouchesPreInBindingHead(
+        _ line: String,
+        editedRange: NSRange,
+        lineRange: NSRange
+    ) -> Bool {
+        let nsLine = line as NSString
+        let fullRange = NSRange(location: 0, length: nsLine.length)
+        guard let inMatch = swiftPreInBindingKeywordRegex.firstMatch(in: line, range: fullRange) else {
+            return false
+        }
+        let headRange = NSRange(location: 0, length: inMatch.range.location)
+        guard swiftPreInBindingHeadRegex.firstMatch(in: line, range: headRange) != nil else {
+            return false
+        }
+        let editedStart = max(0, editedRange.location - lineRange.location)
+        return editedStart < inMatch.range.location
+    }
+
+    private static func semanticIndexFingerprint(in source: NSString) -> Int {
+        var hasher = Hasher()
+        hasher.combine(source.length)
+
+        var location = 0
+        while location < source.length {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            let line = source.substring(with: lineRange)
+            if swiftLineCanAffectSemanticIndex(line) {
+                hasher.combine(lineRange.location)
+                hasher.combine(line)
+            }
+            let nextLocation = lineRange.upperBound
+            guard nextLocation > location else { break }
+            location = nextLocation
+        }
+
+        return hasher.finalize()
+    }
+
+    private static func swiftLineCanAffectSemanticIndex(_ line: String) -> Bool {
+        let nsLine = line as NSString
+        let fullRange = NSRange(location: 0, length: nsLine.length)
+        if structuralSwiftEditRegex.firstMatch(in: line, range: fullRange) != nil {
+            return true
+        }
+        if valueDeclarationHeadRegex.firstMatch(in: line, range: fullRange) != nil {
+            return true
+        }
+        guard let inMatch = swiftPreInBindingKeywordRegex.firstMatch(in: line, range: fullRange) else {
+            return false
+        }
+        let headRange = NSRange(location: 0, length: inMatch.range.location)
+        return swiftPreInBindingHeadRegex.firstMatch(in: line, range: headRange) != nil
     }
 
     private static func markTokenRange(from markerRange: NSRange, in source: NSString) -> NSRange {
@@ -738,6 +800,14 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static let valueDeclarationHeadRegex = try! NSRegularExpression(
         pattern: #"^\s*(let|var)\s+[A-Za-z_][A-Za-z0-9_]*"#
+    )
+
+    private static let swiftPreInBindingKeywordRegex = try! NSRegularExpression(
+        pattern: #"\bin\b"#
+    )
+
+    private static let swiftPreInBindingHeadRegex = try! NSRegularExpression(
+        pattern: #"(?:(?:^|[{\[(,;=]\s*)|(?:^\s*for\s+))(?:case\s+)?(?:let\s+|var\s+)?[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*(?:let\s+|var\s+)?[A-Za-z_][A-Za-z0-9_]*)*\s*$"#
     )
 
     private static func urlTokens(in source: String, lineRange: NSRange) -> [SyntaxHighlightToken] {
