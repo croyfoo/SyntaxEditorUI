@@ -820,7 +820,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     )
 
     private static let valueDeclarationHeadRegex = try! NSRegularExpression(
-        pattern: #"^\s*(let|var)\s+[A-Za-z_][A-Za-z0-9_]*"#
+        pattern: #"^\s*(?:@\w+(?:\([^)]*\))?\s+|(?:open|public|package|internal|fileprivate|private|nonisolated)(?:\([^)]+\))?\s+|static\s+|class\s+|final\s+|lazy\s+|weak\s+|unowned\s+|isolated\s+)*(let|var)\s+[A-Za-z_][A-Za-z0-9_]*"#
     )
 
     private static let swiftPreInBindingKeywordRegex = try! NSRegularExpression(
