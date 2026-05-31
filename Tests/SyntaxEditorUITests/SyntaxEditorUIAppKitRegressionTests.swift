@@ -89,6 +89,33 @@ extension SyntaxEditorUITests {
         #expect(editorView.textView.selectedRange() == NSRange(location: 1, length: 0))
     }
 
+    @Test("SyntaxEditorView keeps macOS selection when setting unchanged text")
+    @MainActor
+    func syntaxEditorViewMacKeepsSelectionWhenSettingUnchangedText() {
+        let source = "abcdef"
+        let replacement = "abcdefghi"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
+
+        model.model.replaceText(
+            replacement,
+            selectedRange: NSRange(location: replacement.utf16.count, length: 0)
+        )
+        editorView.synchronizeDocumentForTesting()
+        #expect(editorView.textView.selectedRange() == NSRange(location: replacement.utf16.count, length: 0))
+
+        editorView.selectedRange = NSRange(location: 2, length: 0)
+        let revision = model.model.revision
+        let latestChange = model.model.latestChange
+
+        editorView.text = replacement
+
+        #expect(model.model.revision == revision)
+        #expect(model.model.latestChange == latestChange)
+        #expect(model.model.selectedRange == NSRange(location: 2, length: 0))
+        #expect(editorView.textView.selectedRange() == NSRange(location: 2, length: 0))
+    }
+
     @Test("SyntaxEditorView enables macOS find bar by default")
     @MainActor
     func syntaxEditorViewMacEnablesFindBarByDefault() {

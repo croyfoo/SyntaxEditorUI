@@ -209,8 +209,11 @@ public final class SyntaxEditorView: NSScrollView {
     public var text: String {
         get { textView.string }
         set {
-            model.replaceText(newValue, selectedRange: selectedRange)
-            applyObservedModelChange(forceTextUpdate: true)
+            guard let change = model.replaceText(newValue, selectedRange: selectedRange) else {
+                updateTypingAttributes()
+                return
+            }
+            applyObservedModelChange(forceTextUpdate: true, observedRevision: change.revision)
         }
     }
 
