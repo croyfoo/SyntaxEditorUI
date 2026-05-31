@@ -1786,8 +1786,8 @@ public final class SyntaxEditorView: NSScrollView {
             layoutGeometryChanged = true
         }
 
-        let contentSize = effectiveScrollContentSize
-        let estimatedDocumentSize = estimatedTextViewDocumentSize(
+        var contentSize = effectiveScrollContentSize
+        var estimatedDocumentSize = estimatedTextViewDocumentSize(
             minimumContentSize: contentSize,
             lineWrappingEnabled: lineWrappingEnabled
         )
@@ -1814,20 +1814,10 @@ public final class SyntaxEditorView: NSScrollView {
                 layoutGeometryChanged = true
             }
 
-            let wrappingWidth = max(0, contentSize.width)
-            var frame = textView.frame
-            let frameHeight = estimatedDocumentSize.height
-            if !frame.width.isNearlyEqual(to: wrappingWidth) || !frame.height.isNearlyEqual(to: frameHeight) {
-                frame.size = NSSize(width: wrappingWidth, height: frameHeight)
-                textView.frame = frame
-                layoutGeometryChanged = true
-            }
-
-            let containerSize = NSSize(width: wrappingWidth, height: CGFloat.greatestFiniteMagnitude)
-            if !textContainer.containerSize.isNearlyEqual(to: containerSize) {
-                textContainer.containerSize = containerSize
-                layoutGeometryChanged = true
-            }
+            layoutGeometryChanged = applyWrappedTextGeometry(
+                contentSize: contentSize,
+                estimatedDocumentSize: estimatedDocumentSize
+            ) || layoutGeometryChanged
             if !textContainer.widthTracksTextView {
                 textContainer.widthTracksTextView = true
                 layoutGeometryChanged = true
@@ -1839,6 +1829,20 @@ public final class SyntaxEditorView: NSScrollView {
 
             if resetHorizontalClipOriginForWrapping() {
                 layoutGeometryChanged = true
+            }
+
+            scrollView.tile()
+            let settledContentSize = effectiveScrollContentSize
+            if !settledContentSize.isNearlyEqual(to: contentSize) {
+                contentSize = settledContentSize
+                estimatedDocumentSize = estimatedTextViewDocumentSize(
+                    minimumContentSize: contentSize,
+                    lineWrappingEnabled: true
+                )
+                layoutGeometryChanged = applyWrappedTextGeometry(
+                    contentSize: contentSize,
+                    estimatedDocumentSize: estimatedDocumentSize
+                ) || layoutGeometryChanged
             }
         } else {
             if !textView.isHorizontallyResizable {
@@ -1880,6 +1884,28 @@ public final class SyntaxEditorView: NSScrollView {
         if layoutGeometryChanged {
             invalidateTextLayoutAfterGeometryChange()
         }
+    }
+
+    private func applyWrappedTextGeometry(
+        contentSize: NSSize,
+        estimatedDocumentSize: NSSize
+    ) -> Bool {
+        var didChange = false
+        let wrappingWidth = max(0, contentSize.width)
+        var frame = textView.frame
+        let frameHeight = estimatedDocumentSize.height
+        if !frame.width.isNearlyEqual(to: wrappingWidth) || !frame.height.isNearlyEqual(to: frameHeight) {
+            frame.size = NSSize(width: wrappingWidth, height: frameHeight)
+            textView.frame = frame
+            didChange = true
+        }
+
+        let containerSize = NSSize(width: wrappingWidth, height: CGFloat.greatestFiniteMagnitude)
+        if !textContainer.containerSize.isNearlyEqual(to: containerSize) {
+            textContainer.containerSize = containerSize
+            didChange = true
+        }
+        return didChange
     }
 
     private var effectiveScrollContentSize: NSSize {
