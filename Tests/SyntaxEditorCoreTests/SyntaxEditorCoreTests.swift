@@ -5908,6 +5908,38 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine removes Swift semantic overlays after declaration syntax removal")
+    func highlighterRemovesSwiftSemanticOverlaysAfterDeclarationSyntaxRemoval() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item + 1
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "let item = 1", with: "item = 1")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+        let nsSource = updatedSource as NSString
+        let returnRange = nsSource.range(of: "return item + 1")
+        let itemRange = nsSource.range(of: "item", options: [], range: returnRange)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: itemRange, syntaxID: .identifierVariable, language: .swift)
+        } == false)
+    }
+
     @Test("SyntaxHighlighterEngine uses Swift parser invalidation beyond semantic line ranges")
     func highlighterUsesSwiftParserInvalidationBeyondSemanticLineRanges() async throws {
         let source = """
@@ -9491,6 +9523,46 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "self.name.length"
         )
+    }
+
+    @Test("SyntaxHighlighterEngine removes Objective-C semantic overlays after property declaration removal")
+    func highlighterRemovesObjectiveCSemanticOverlaysAfterPropertyDeclarationRemoval() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length + 1;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "@property(nonatomic, copy) NSString *name;\n",
+            with: ""
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+        let nsSource = updatedSource as NSString
+        let returnRange = nsSource.range(of: "self.name.length")
+        let nameRange = nsSource.range(of: "name", options: [], range: returnRange)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: nameRange, syntaxID: .identifierVariable, language: .objectiveC)
+        } == false)
     }
 
     @Test("SyntaxHighlighterEngine uses Objective-C parser invalidation beyond semantic line ranges")

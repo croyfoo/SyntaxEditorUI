@@ -123,15 +123,24 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             )
         }
 
-        let targetRange = refreshRange.map {
+        let proposedTargetRange = refreshRange.map {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
-        let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
+        let previousState = state
         let declarationFingerprint = semanticIndexFingerprint(in: nsSource)
-        let shouldRebuildIndex = targetRange == nil
-            || state?.index == nil
-            || state?.indexedSourceUTF16Length != nsSource.length
-            || state?.indexedDeclarationFingerprint != declarationFingerprint
+        let declarationFingerprintChanged = previousState.map {
+            $0.indexedDeclarationFingerprint != declarationFingerprint
+        } ?? true
+        let targetRange = proposedTargetRange == nil
+            || previousState?.index == nil
+            || declarationFingerprintChanged
+            ? nil
+            : proposedTargetRange
+        let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
+        let shouldRebuildIndex = proposedTargetRange == nil
+            || previousState?.index == nil
+            || previousState?.indexedSourceUTF16Length != nsSource.length
+            || declarationFingerprintChanged
         let index: SwiftFileSymbolIndex
         var rebuiltState: SwiftSemanticOverlayState?
         if shouldRebuildIndex {
@@ -149,7 +158,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 indexedDeclarationFingerprint: declarationFingerprint
             )
         } else {
-            index = state!.index!
+            index = previousState!.index!
         }
 
         guard !Task.isCancelled else {
@@ -733,14 +742,12 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static func semanticIndexFingerprint(in source: NSString) -> Int {
         var hasher = Hasher()
-        hasher.combine(source.length)
 
         var location = 0
         while location < source.length {
             let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
             let line = source.substring(with: lineRange)
             if swiftLineCanAffectSemanticIndex(line) {
-                hasher.combine(lineRange.location)
                 hasher.combine(line)
             }
             let nextLocation = lineRange.upperBound
