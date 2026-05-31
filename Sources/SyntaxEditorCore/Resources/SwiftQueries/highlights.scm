@@ -604,7 +604,6 @@
   "." @editor.syntax.swift.number)
 
 [
-  (availability_condition)
   (playground_literal)
   (key_path_string_expression)
   (selector_expression)

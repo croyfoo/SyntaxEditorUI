@@ -4009,9 +4009,9 @@ struct SyntaxHighlighterEngineTests {
             ("propertyWrapper", "keyword", "editor.syntax.keyword", "@propertyWrapper"),
             ("Comparable", "identifier.class.system", "editor.syntax.identifier.class.system", "Value: Comparable"),
             ("ReferenceStore", "declaration.type", "editor.syntax.declaration.type", "final class ReferenceStore"),
-            ("OpenReferenceBase", "plain", "editor.syntax.plain", "OpenReferenceBase, @unchecked"),
+            ("OpenReferenceBase", "identifier.type", "editor.syntax.identifier.type", "OpenReferenceBase, @unchecked"),
             ("UUID", "identifier.type.system", "editor.syntax.identifier.type.system", "typealias ReferenceID = UUID"),
-            ("load", "identifier.function", "editor.syntax.identifier.function", "try await load().map"),
+            ("load", "identifier.function.system", "editor.syntax.identifier.function.system", "try await load().map"),
             ("Value", "plain", "editor.syntax.plain", "var wrappedValue: Value"),
             ("wrappedValue", "declaration.other", "editor.syntax.declaration.other", "init(wrappedValue: Value"),
             ("create", "declaration.other", "editor.syntax.declaration.other", "for key: Key, create: @Sendable"),
@@ -4025,9 +4025,9 @@ struct SyntaxHighlighterEngineTests {
             ("Clamped", "plain", "editor.syntax.plain", "@Clamped(0...globalLimit)"),
             ("RowBuilder", "plain", "editor.syntax.plain", "@RowBuilder content:"),
             ("AdditionPrecedence", "identifier.type.system", "editor.syntax.identifier.type.system", "higherThan: AdditionPrecedence"),
-            ("ReferencePrecedence", "plain", "editor.syntax.plain", "operator <+>: ReferencePrecedence"),
+            ("ReferencePrecedence", "identifier.type", "editor.syntax.identifier.type", "operator <+>: ReferencePrecedence"),
             ("Sendable", "identifier.class.system", "editor.syntax.identifier.class.system", "@unchecked Sendable"),
-            ("ReferenceRenderable", "plain", "editor.syntax.plain", "@unchecked Sendable, ReferenceRenderable"),
+            ("ReferenceRenderable", "identifier.type", "editor.syntax.identifier.type", "@unchecked Sendable, ReferenceRenderable"),
             ("CaseIterable", "identifier.class.system", "editor.syntax.identifier.class.system", "String, CaseIterable"),
             ("Hashable", "identifier.class.system", "editor.syntax.identifier.class.system", "ID: Hashable"),
             ("Identifiable", "identifier.class.system", "editor.syntax.identifier.class.system", "Identifiable {"),
@@ -4081,6 +4081,17 @@ struct SyntaxHighlighterEngineTests {
             ("#if", "preprocessor", "editor.syntax.preprocessor", "#if canImport(UIKit"),
             ("#", "keyword", "editor.syntax.keyword", "if #available(macOS"),
             ("#available", "keyword", "editor.syntax.keyword", "if #available(macOS"),
+            ("Comparable", "identifier.class.system", "editor.syntax.identifier.class.system", "Value: Comparable"),
+            ("Observable", "identifier.function.system", "editor.syntax.identifier.function.system", "@Observable"),
+            ("MainActor", "identifier.class.system", "editor.syntax.identifier.class.system", "@MainActor"),
+            ("AdditionPrecedence", "identifier.type.system", "editor.syntax.identifier.type.system", "higherThan: AdditionPrecedence"),
+            ("Sendable", "identifier.class.system", "editor.syntax.identifier.class.system", "@unchecked Sendable"),
+            ("Hashable", "identifier.class.system", "editor.syntax.identifier.class.system", "ID: Hashable"),
+            ("Identifiable", "identifier.class.system", "editor.syntax.identifier.class.system", "Identifiable {"),
+            ("load", "identifier.function.system", "editor.syntax.identifier.function.system", "try await load().map"),
+            ("firstMatch", "plain", "editor.syntax.plain", "pattern.firstMatch"),
+            ("output", "plain", "editor.syntax.plain", "?.output.number"),
+            ("state", "identifier.variable.system", "editor.syntax.identifier.variable.system", "state.rawValue"),
         ]
 
         for expectation in effectiveExpectations {
@@ -4122,6 +4133,8 @@ struct SyntaxHighlighterEngineTests {
         macro LocalAttribute() = #externalMacro(module: "FixtureMacros", type: "LocalAttribute")
         @propertyWrapper struct LocalWrapper { var wrappedValue: Int }
         @LocalAttribute
+        @Observable
+        @MainActor
         @UnknownFixture
         struct SwiftAttributesFixture {
             @LocalWrapper var localValue: Int
@@ -4137,8 +4150,12 @@ struct SyntaxHighlighterEngineTests {
             ("LocalAttribute", "plain", "editor.syntax.plain", "@LocalAttribute"),
             ("@", "plain", "editor.syntax.plain", "@LocalWrapper"),
             ("LocalWrapper", "plain", "editor.syntax.plain", "@LocalWrapper"),
-            ("@", "identifier.class.system", "editor.syntax.identifier.class.system", "@UnknownFixture"),
-            ("UnknownFixture", "identifier.class.system", "editor.syntax.identifier.class.system", "@UnknownFixture"),
+            ("@", "identifier.function.system", "editor.syntax.identifier.function.system", "@Observable"),
+            ("Observable", "identifier.function.system", "editor.syntax.identifier.function.system", "@Observable"),
+            ("@", "identifier.class.system", "editor.syntax.identifier.class.system", "@MainActor"),
+            ("MainActor", "identifier.class.system", "editor.syntax.identifier.class.system", "@MainActor"),
+            ("@", "plain", "editor.syntax.plain", "@UnknownFixture"),
+            ("UnknownFixture", "plain", "editor.syntax.plain", "@UnknownFixture"),
         ]
 
         for expectation in expectations {
@@ -4189,8 +4206,8 @@ struct SyntaxHighlighterEngineTests {
         }
     }
 
-    @Test("SyntaxHighlighterEngine classifies Swift file-local variables and external types")
-    func highlighterClassifiesSwiftFileLocalVariablesAndExternalTypes() async throws {
+    @Test("SyntaxHighlighterEngine classifies Swift file-local variables and scoped symbols")
+    func highlighterClassifiesSwiftFileLocalVariablesAndScopedSymbols() async throws {
         let source = """
         struct LocalModel {
             let value: Int
@@ -4249,7 +4266,7 @@ struct SyntaxHighlighterEngineTests {
             ("ready", "identifier.constant", "editor.syntax.identifier.constant", "LocalState.ready"),
             ("LocalModel", "identifier.type", "editor.syntax.identifier.type", "LocalModel(value: 1)"),
             ("LocalMacro", "identifier.macro", "editor.syntax.identifier.macro", "#LocalMacro()"),
-            ("ExternalMacro", "identifier.macro.system", "editor.syntax.identifier.macro.system", "#ExternalMacro()"),
+            ("ExternalMacro", "plain", "editor.syntax.plain", "#ExternalMacro()"),
         ]
 
         for expectation in expectations {
@@ -4751,6 +4768,9 @@ struct SyntaxHighlighterEngineTests {
         #elseif swift(>=5.9) && compiler(>=6.0)
         let mode = "modern"
         #endif
+        if #available(macOS 15.0, *) {
+            let mode = "available"
+        }
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
 
@@ -4769,6 +4789,7 @@ struct SyntaxHighlighterEngineTests {
             ("&&", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
             ("6.0", "number", "editor.syntax.number", "&& compiler(>=6.0)"),
             ("#endif", "preprocessor", "editor.syntax.preprocessor", "#endif"),
+            ("#available", "keyword", "editor.syntax.keyword", "if #available(macOS"),
         ]
 
         for expectation in expectations {
@@ -4795,6 +4816,12 @@ struct SyntaxHighlighterEngineTests {
             text: "_",
             inOccurrenceOf: "_version: 17.0"
         ).contains(.character) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "#available",
+            inOccurrenceOf: "if #available(macOS"
+        ).contains(.identifierMacroSystem) == false)
     }
 
     @Test("SyntaxHighlighterEngine keeps preprocessor fallback scoped to directive errors")

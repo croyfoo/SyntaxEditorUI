@@ -378,30 +378,26 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                     SemanticOverlay(range: range, syntaxID: .identifierClassSystem),
                 ]
             }
-            let syntaxID: EditorSourceSyntaxID = context.startsLikeTypeName ? .identifierClassSystem : .identifierFunctionSystem
-            return [
-                SemanticOverlay(range: sigilRange, syntaxID: syntaxID),
-                SemanticOverlay(range: range, syntaxID: syntaxID),
-            ]
+
+            return []
         }
 
-        if let sigilRange = context.macroInvocationSigilRange {
-            if let localMacro = index.entry(
-                named: text,
-                at: range,
-                allowedKinds: [.macro]
-            ) {
-                return syntaxIDForLocalEntry(localMacro).map {
-                    [
-                        SemanticOverlay(range: sigilRange, syntaxID: $0),
-                        SemanticOverlay(range: range, syntaxID: $0),
-                    ]
-                } ?? []
-            }
-            return [
-                SemanticOverlay(range: sigilRange, syntaxID: .identifierMacroSystem),
-                SemanticOverlay(range: range, syntaxID: .identifierMacroSystem),
-            ]
+        if let sigilRange = context.macroInvocationSigilRange,
+           let localMacro = index.entry(
+            named: text,
+            at: range,
+            allowedKinds: [.macro]
+           ) {
+            return syntaxIDForLocalEntry(localMacro).map {
+                [
+                    SemanticOverlay(range: sigilRange, syntaxID: $0),
+                    SemanticOverlay(range: range, syntaxID: $0),
+                ]
+            } ?? []
+        }
+
+        if context.macroInvocationSigilRange != nil {
+            return []
         }
 
         guard !context.isImportLine,
@@ -451,6 +447,19 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 return syntaxIDForLocalEntry(enumCase).map {
                     [SemanticOverlay(range: range, syntaxID: $0)]
                 } ?? []
+            }
+
+            if context.isOptionalMemberAccess {
+                return []
+            }
+            if let receiverName = context.memberReceiverName,
+               index.entry(
+                named: receiverName,
+                at: range,
+                allowedKinds: [.variable],
+                allowedRoles: .local
+               ) != nil {
+                return []
             }
 
             if context.startsLikeTypeName {
@@ -538,6 +547,16 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 : []
         }
 
+        if context.isInsideStringInterpolation,
+           index.entry(
+            named: text,
+            at: range,
+            allowedKinds: [.variable],
+            allowedRoles: .member
+           ) != nil {
+            return [SemanticOverlay(range: range, syntaxID: .identifierVariableSystem)]
+        }
+
         if context.isInsideStringInterpolation {
             return []
         }
@@ -563,6 +582,9 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 at: range,
                 allowedKinds: [.function]
             ) else {
+                return [SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem)]
+            }
+            if localFunction.role == .member {
                 return [SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem)]
             }
             return syntaxIDForLocalEntry(localFunction).map {
@@ -1170,6 +1192,10 @@ private struct SwiftSemanticTokenContext {
     var isMemberAccess: Bool {
         let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
         return trimmedBefore.hasSuffix(".") && !trimmedBefore.hasSuffix("..")
+    }
+
+    var isOptionalMemberAccess: Bool {
+        before.trimmingCharacters(in: .whitespaces).hasSuffix("?.")
     }
 
     var memberReceiverTypeName: String? {
