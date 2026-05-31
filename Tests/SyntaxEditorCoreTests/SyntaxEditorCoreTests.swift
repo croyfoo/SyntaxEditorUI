@@ -4768,6 +4768,9 @@ struct SyntaxHighlighterEngineTests {
         #elseif swift(>=5.9) && compiler(>=6.0)
         let mode = "modern"
         #endif
+        if #available(macOS 15.0, *) {
+            let mode = "available"
+        }
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
 
@@ -4786,6 +4789,7 @@ struct SyntaxHighlighterEngineTests {
             ("&&", "preprocessor", "editor.syntax.preprocessor", "&& compiler(>=6.0)"),
             ("6.0", "number", "editor.syntax.number", "&& compiler(>=6.0)"),
             ("#endif", "preprocessor", "editor.syntax.preprocessor", "#endif"),
+            ("#available", "keyword", "editor.syntax.keyword", "if #available(macOS"),
         ]
 
         for expectation in expectations {
@@ -4812,6 +4816,12 @@ struct SyntaxHighlighterEngineTests {
             text: "_",
             inOccurrenceOf: "_version: 17.0"
         ).contains(.character) == false)
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "#available",
+            inOccurrenceOf: "if #available(macOS"
+        ).contains(.identifierMacroSystem) == false)
     }
 
     @Test("SyntaxHighlighterEngine keeps preprocessor fallback scoped to directive errors")
