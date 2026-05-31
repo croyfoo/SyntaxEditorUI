@@ -1619,23 +1619,25 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 return
             }
 
-            let result: SyntaxHighlightResult
+            let phases: AsyncStream<SyntaxHighlightResult>
             if let mutation {
-                result = await highlighter.update(
+                phases = await highlighter.updatePhases(
                     source: expectedSource,
                     language: language,
                     mutation: mutation,
                     revision: revision
                 )
             } else {
-                result = await highlighter.reset(
+                phases = await highlighter.resetPhases(
                     source: expectedSource,
                     language: language,
                     revision: revision
                 )
             }
-            guard !Task.isCancelled else { return }
-            await self?.applyHighlightResultFromScheduledTask(result, mutation: mutation)
+            for await result in phases {
+                guard !Task.isCancelled else { return }
+                await self?.applyHighlightResultFromScheduledTask(result, mutation: mutation)
+            }
         }
     }
 
@@ -1658,6 +1660,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             mutation: mutation
         )
         guard didApplyHighlight else { return }
+        guard result.phase == .complete else { return }
         lastHighlightTokens = result.tokens
         lastHighlightSource = result.source
         lastHighlightRevision = result.revision

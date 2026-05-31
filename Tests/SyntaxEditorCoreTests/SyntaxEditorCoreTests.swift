@@ -39,6 +39,14 @@ private func highlightTokensMatch(_ lhs: [SyntaxHighlightToken], _ rhs: [SyntaxH
     sortHighlightTokens(lhs) == sortHighlightTokens(rhs)
 }
 
+private func collectHighlightPhases(_ stream: AsyncStream<SyntaxHighlightResult>) async -> [SyntaxHighlightResult] {
+    var results: [SyntaxHighlightResult] = []
+    for await result in stream {
+        results.append(result)
+    }
+    return results
+}
+
 private func sortHighlightTokens(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHighlightToken] {
     tokens.sorted {
         if $0.range.location != $1.range.location {
@@ -3852,6 +3860,86 @@ struct SyntaxHighlighterEngineTests {
             #expect(tokens.isEmpty == false)
             #expect(tokens.allSatisfy { $0.range.length > 0 })
         }
+    }
+
+    @Test("SyntaxHighlighterEngine emits Swift syntactic fast pass before semantic completion")
+    func highlighterEmitsSwiftSyntacticFastPassBeforeSemanticCompletion() async throws {
+        let source = "let value: Int = 1\n"
+        let intRange = (source as NSString).range(of: "Int")
+        let phases = await collectHighlightPhases(
+            await SyntaxHighlighterEngine().resetPhases(source: source, language: .swift, revision: 0)
+        )
+        let fastPass = try #require(phases.first)
+        let complete = try #require(phases.last)
+
+        #expect(phases.map(\.phase) == [.syntacticFastPass, .complete])
+        #expect(phases.allSatisfy { $0.source == source && $0.language == .swift && $0.revision == 0 })
+        #expect(fastPass.tokens.isEmpty == false)
+        #expect(fastPass.tokens.contains {
+            tokenIntersects($0, range: intRange, syntaxID: .identifierTypeSystem, language: .swift)
+        } == false)
+        #expect(complete.tokens.contains {
+            tokenIntersects($0, range: intRange, syntaxID: .identifierTypeSystem, language: .swift)
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine emits Objective-C syntactic fast pass before semantic completion")
+    func highlighterEmitsObjectiveCSyntacticFastPassBeforeSemanticCompletion() async throws {
+        let source = """
+        @interface ReferenceObject
+        @property(nonatomic) NSInteger count;
+        @end
+
+        @implementation ReferenceObject
+        - (NSInteger)run {
+            self.count = 1;
+            return self.count;
+        }
+        @end
+        """
+        let phases = await collectHighlightPhases(
+            await SyntaxHighlighterEngine().resetPhases(source: source, language: .objectiveC, revision: 0)
+        )
+        let fastPass = try #require(phases.first)
+        let complete = try #require(phases.last)
+
+        #expect(phases.map(\.phase) == [.syntacticFastPass, .complete])
+        #expect(phases.allSatisfy { $0.source == source && $0.language == .objectiveC && $0.revision == 0 })
+        #expect(fastPass.tokens.isEmpty == false)
+        #expect(complete.tokens.isEmpty == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps non-deferred languages single phase")
+    func highlighterKeepsNonDeferredLanguagesSinglePhase() async {
+        let source = "const answer = 42;"
+        let phases = await collectHighlightPhases(
+            await SyntaxHighlighterEngine().resetPhases(source: source, language: .javascript, revision: 0)
+        )
+
+        #expect(phases.map(\.phase) == [.complete])
+        #expect(phases.first?.source == source)
+        #expect(phases.first?.tokens.isEmpty == false)
+    }
+
+    @Test("SyntaxHighlighterEngine final APIs keep returning complete results")
+    func highlighterFinalAPIsKeepReturningCompleteResults() async throws {
+        let source = "let value: Int = 1\n"
+        let updatedSource = "let value: String = \"text\"\n"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let engine = SyntaxHighlighterEngine()
+
+        let reset = await engine.reset(source: source, language: .swift, revision: 0)
+        let update = await engine.update(
+            source: updatedSource,
+            language: .swift,
+            mutation: SyntaxHighlightMutation(mutation),
+            revision: 1
+        )
+        let render = await engine.render(source: source, language: .swift)
+
+        #expect(reset.phase == .complete)
+        #expect(update.phase == .complete)
+        #expect(highlightTokensMatch(reset.tokens, render))
     }
 
     @Test("SyntaxHighlighterEngine emits canonical reference sample captures")

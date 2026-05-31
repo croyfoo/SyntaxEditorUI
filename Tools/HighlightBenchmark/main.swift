@@ -30,6 +30,18 @@ struct HighlightBenchmark {
             language: arguments.language,
             iterations: arguments.iterations
         )
+        let phasedFullSamples = await measurePhasedFullReset(
+            source: benchmarkSource,
+            language: arguments.language,
+            iterations: arguments.iterations
+        )
+        let phasedIncrementalSamples = await measurePhasedIncrementalUpdate(
+            source: benchmarkSource,
+            updatedSource: updatedSource,
+            mutation: mutation,
+            language: arguments.language,
+            iterations: arguments.iterations
+        )
         let typingSamples = arguments.typingEdits > 0
             ? await measureTypingUpdates(
                 source: benchmarkSource,
@@ -46,6 +58,14 @@ struct HighlightBenchmark {
         print("iterations: \(arguments.iterations)")
         print("fullResetMedianMs: \(format(fullSamples.medianMilliseconds))")
         print("incrementalUpdateMedianMs: \(format(incrementalSamples.medianMilliseconds))")
+        if let syntacticFastPassMedianMilliseconds = phasedFullSamples.syntacticFastPassMedianMilliseconds {
+            print("syntacticFastPassMedianMs: \(format(syntacticFastPassMedianMilliseconds))")
+        }
+        print("completeMedianMs: \(format(phasedFullSamples.completeMedianMilliseconds))")
+        if let syntacticFastPassMedianMilliseconds = phasedIncrementalSamples.syntacticFastPassMedianMilliseconds {
+            print("incrementalSyntacticFastPassMedianMs: \(format(syntacticFastPassMedianMilliseconds))")
+        }
+        print("incrementalCompleteMedianMs: \(format(phasedIncrementalSamples.completeMedianMilliseconds))")
         print("fullTokenCount: \(fullSamples.lastTokenCount)")
         print("incrementalTokenCount: \(incrementalSamples.lastTokenCount)")
         print("incrementalRefreshRange: \(incrementalSamples.lastRefreshRange)")
@@ -57,6 +77,92 @@ struct HighlightBenchmark {
             print("typingTokenCount: \(typingSamples.lastTokenCount)")
             print("typingRefreshRange: \(typingSamples.lastRefreshRange)")
         }
+    }
+
+    @MainActor
+    private static func measurePhasedFullReset(
+        source: String,
+        language: SyntaxLanguage,
+        iterations: Int
+    ) async -> PhasedBenchmarkSamples {
+        var syntacticFastPassDurations: [Double] = []
+        var completeDurations: [Double] = []
+        syntacticFastPassDurations.reserveCapacity(iterations)
+        completeDurations.reserveCapacity(iterations)
+        var lastCompleteResult: SyntaxHighlightResult?
+
+        for _ in 0..<iterations {
+            let engine = SyntaxHighlighterEngine()
+            let start = DispatchTime.now().uptimeNanoseconds
+            let phases = await engine.resetPhases(source: source, language: language, revision: 0)
+            for await result in phases {
+                let duration = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+                switch result.phase {
+                case .syntacticFastPass:
+                    syntacticFastPassDurations.append(duration)
+                case .complete:
+                    completeDurations.append(duration)
+                    lastCompleteResult = result
+                }
+            }
+        }
+
+        return PhasedBenchmarkSamples(
+            syntacticFastPassMilliseconds: syntacticFastPassDurations,
+            completeMilliseconds: completeDurations,
+            lastTokenCount: lastCompleteResult?.tokens.count ?? 0,
+            lastRefreshRange: lastCompleteResult?.refreshRange ?? NSRange(location: 0, length: 0)
+        )
+    }
+
+    @MainActor
+    private static func measurePhasedIncrementalUpdate(
+        source: String,
+        updatedSource: String,
+        mutation: SyntaxHighlightMutation?,
+        language: SyntaxLanguage,
+        iterations: Int
+    ) async -> PhasedBenchmarkSamples {
+        var syntacticFastPassDurations: [Double] = []
+        var completeDurations: [Double] = []
+        syntacticFastPassDurations.reserveCapacity(iterations)
+        completeDurations.reserveCapacity(iterations)
+        var lastCompleteResult: SyntaxHighlightResult?
+
+        for _ in 0..<iterations {
+            let engine = SyntaxHighlighterEngine()
+            _ = await engine.reset(source: source, language: language, revision: 0)
+
+            let start = DispatchTime.now().uptimeNanoseconds
+            let phases: AsyncStream<SyntaxHighlightResult>
+            if let mutation {
+                phases = await engine.updatePhases(
+                    source: updatedSource,
+                    language: language,
+                    mutation: mutation,
+                    revision: 1
+                )
+            } else {
+                phases = await engine.resetPhases(source: updatedSource, language: language, revision: 1)
+            }
+            for await result in phases {
+                let duration = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+                switch result.phase {
+                case .syntacticFastPass:
+                    syntacticFastPassDurations.append(duration)
+                case .complete:
+                    completeDurations.append(duration)
+                    lastCompleteResult = result
+                }
+            }
+        }
+
+        return PhasedBenchmarkSamples(
+            syntacticFastPassMilliseconds: syntacticFastPassDurations,
+            completeMilliseconds: completeDurations,
+            lastTokenCount: lastCompleteResult?.tokens.count ?? 0,
+            lastRefreshRange: lastCompleteResult?.refreshRange ?? NSRange(location: 0, length: 0)
+        )
     }
 
     @MainActor
@@ -377,5 +483,31 @@ private struct BenchmarkSamples {
 
     var maxMilliseconds: Double {
         milliseconds.max() ?? 0
+    }
+}
+
+private struct PhasedBenchmarkSamples {
+    let syntacticFastPassMilliseconds: [Double]
+    let completeMilliseconds: [Double]
+    let lastTokenCount: Int
+    let lastRefreshRange: NSRange
+
+    var syntacticFastPassMedianMilliseconds: Double? {
+        guard !syntacticFastPassMilliseconds.isEmpty else { return nil }
+        return Self.median(syntacticFastPassMilliseconds)
+    }
+
+    var completeMedianMilliseconds: Double {
+        Self.median(completeMilliseconds)
+    }
+
+    private static func median(_ milliseconds: [Double]) -> Double {
+        guard !milliseconds.isEmpty else { return 0 }
+        let sorted = milliseconds.sorted()
+        let middle = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (sorted[middle - 1] + sorted[middle]) / 2
+        }
+        return sorted[middle]
     }
 }
