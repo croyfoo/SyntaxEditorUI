@@ -378,30 +378,26 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                     SemanticOverlay(range: range, syntaxID: .identifierClassSystem),
                 ]
             }
-            let syntaxID: EditorSourceSyntaxID = context.startsLikeTypeName ? .identifierClassSystem : .identifierFunctionSystem
-            return [
-                SemanticOverlay(range: sigilRange, syntaxID: syntaxID),
-                SemanticOverlay(range: range, syntaxID: syntaxID),
-            ]
+
+            return []
         }
 
-        if let sigilRange = context.macroInvocationSigilRange {
-            if let localMacro = index.entry(
-                named: text,
-                at: range,
-                allowedKinds: [.macro]
-            ) {
-                return syntaxIDForLocalEntry(localMacro).map {
-                    [
-                        SemanticOverlay(range: sigilRange, syntaxID: $0),
-                        SemanticOverlay(range: range, syntaxID: $0),
-                    ]
-                } ?? []
-            }
-            return [
-                SemanticOverlay(range: sigilRange, syntaxID: .identifierMacroSystem),
-                SemanticOverlay(range: range, syntaxID: .identifierMacroSystem),
-            ]
+        if let sigilRange = context.macroInvocationSigilRange,
+           let localMacro = index.entry(
+            named: text,
+            at: range,
+            allowedKinds: [.macro]
+           ) {
+            return syntaxIDForLocalEntry(localMacro).map {
+                [
+                    SemanticOverlay(range: sigilRange, syntaxID: $0),
+                    SemanticOverlay(range: range, syntaxID: $0),
+                ]
+            } ?? []
+        }
+
+        if context.macroInvocationSigilRange != nil {
+            return []
         }
 
         guard !context.isImportLine,
