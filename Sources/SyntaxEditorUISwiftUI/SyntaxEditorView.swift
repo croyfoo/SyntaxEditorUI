@@ -9,67 +9,39 @@ import SyntaxEditorUIAppKit
 
 #if canImport(UIKit)
 private struct SyntaxEditorContainer: UIViewRepresentable {
-    let document: SyntaxEditorDocument
-    let configuration: SyntaxEditorConfiguration
+    let model: SyntaxEditorModel
 
     func makeUIView(context: Context) -> SyntaxEditorView {
-        SyntaxEditorView(document: document, configuration: configuration)
+        SyntaxEditorView(model: model)
     }
 
     func updateUIView(_ uiView: SyntaxEditorView, context: Context) {
-        uiView.update(document: document, configuration: configuration)
+        uiView.update(model: model)
     }
 }
 #elseif canImport(AppKit)
 private struct SyntaxEditorContainer: NSViewRepresentable {
-    let document: SyntaxEditorDocument
-    let configuration: SyntaxEditorConfiguration
+    let model: SyntaxEditorModel
 
     func makeNSView(context: Context) -> SyntaxEditorView {
-        SyntaxEditorView(document: document, configuration: configuration)
+        SyntaxEditorView(model: model)
     }
 
     func updateNSView(_ nsView: SyntaxEditorView, context: Context) {
-        nsView.update(document: document, configuration: configuration)
+        nsView.update(model: model)
     }
 }
 #endif
 
 @MainActor
 public struct SyntaxEditor: View {
-    @State private var defaultDocument = SyntaxEditorDocument()
-    @State private var defaultConfiguration = SyntaxEditorConfiguration()
+    private let model: SyntaxEditorModel
 
-    private let providedDocument: SyntaxEditorDocument?
-    private let providedConfiguration: SyntaxEditorConfiguration?
-
-    public init() {
-        self.providedDocument = nil
-        self.providedConfiguration = nil
-    }
-
-    public init(document: SyntaxEditorDocument) {
-        self.providedDocument = document
-        self.providedConfiguration = nil
-    }
-
-    public init(configuration: SyntaxEditorConfiguration) {
-        self.providedDocument = nil
-        self.providedConfiguration = configuration
-    }
-
-    public init(
-        document: SyntaxEditorDocument,
-        configuration: SyntaxEditorConfiguration
-    ) {
-        self.providedDocument = document
-        self.providedConfiguration = configuration
+    public init(_ model: SyntaxEditorModel) {
+        self.model = model
     }
 
     public var body: some View {
-        let document = providedDocument ?? defaultDocument
-        let configuration = providedConfiguration ?? defaultConfiguration
-
-        SyntaxEditorContainer(document: document, configuration: configuration)
+        SyntaxEditorContainer(model: model)
     }
 }

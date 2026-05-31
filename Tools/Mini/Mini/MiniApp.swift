@@ -225,7 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     private let model: MiniEditorSession
     private let splitViewController: MiniSplitViewController
-    private let configurationObservations = ObservationScope()
+    private let modelObservations = ObservationScope()
     private let editorObservations = ObservationScope()
     private var lineWrappingItem: NSToolbarItemGroup?
     private var themePopUpButton: NSPopUpButton?
@@ -257,7 +257,7 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     }
 
     isolated deinit {
-        configurationObservations.cancelAll()
+        modelObservations.cancelAll()
         editorObservations.cancelAll()
     }
 
@@ -271,16 +271,16 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     }
 
     private func bindModel() {
-        configurationObservations.observe(model) { [weak self] _, _ in
+        modelObservations.observe(model) { [weak self] _, _ in
             self?.renderWindowState()
         }
         bindEditorModel()
     }
 
     private func bindEditorModel() {
-        editorObservations.observe(model.editorConfiguration) { [weak self] _, configuration in
-            self?.updateLineWrappingItem(lineWrappingEnabled: configuration.lineWrappingEnabled)
-            self?.updateThemeItem(selectedThemePreset: configuration.colorTheme.preset ?? .default)
+        editorObservations.observe(model.editorModel) { [weak self] _, editorModel in
+            self?.updateLineWrappingItem(lineWrappingEnabled: editorModel.lineWrappingEnabled)
+            self?.updateThemeItem(selectedThemePreset: editorModel.colorTheme.preset ?? .default)
         }
     }
 
@@ -292,7 +292,7 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
 
     private func updateLineWrappingItem(lineWrappingEnabled: Bool? = nil) {
         lineWrappingItem?.setSelected(
-            lineWrappingEnabled ?? model.editorConfiguration.lineWrappingEnabled,
+            lineWrappingEnabled ?? model.editorModel.lineWrappingEnabled,
             at: 0
         )
     }
@@ -306,7 +306,7 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     }
 
     @objc private func toggleLineWrapping() {
-        model.editorConfiguration.lineWrappingEnabled.toggle()
+        model.editorModel.lineWrappingEnabled.toggle()
     }
 
     @objc private func selectThemePreset(_ sender: NSPopUpButton) {

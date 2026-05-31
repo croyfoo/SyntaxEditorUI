@@ -160,8 +160,7 @@ private final class SyntaxEditorReadOnlyGuardedUndoManager: UndoManager {
 
 @MainActor
 public final class SyntaxEditorView: NSScrollView {
-    public private(set) var document: SyntaxEditorDocument
-    public private(set) var configuration: SyntaxEditorConfiguration
+    public private(set) var model: SyntaxEditorModel
     public var isFindInteractionEnabled = true {
         didSet {
             guard isFindInteractionEnabled != oldValue else { return }
@@ -201,50 +200,49 @@ public final class SyntaxEditorView: NSScrollView {
     private var lastAppliedColorTheme: SyntaxEditorColorTheme?
     private var lastAppliedFontSizeDelta: Int
     private var lastAppliedDocumentRevision = 0
-    private let documentObservations = ObservationScope()
-    private let configurationObservations = ObservationScope()
-    var documentDeliveryForTesting: ObservationDelivery?
-    var configurationDeliveryForTesting: ObservationDelivery?
+    private let modelObservations = ObservationScope()
+    var modelDeliveryForTesting: ObservationDelivery?
+    var modelConfigurationDeliveryForTesting: ObservationDelivery?
 
     private var scrollView: NSScrollView { self }
 
     public var text: String {
         get { textView.string }
         set {
-            document.replaceText(newValue, selectedRange: selectedRange)
-            applyObservedDocumentChange(forceTextUpdate: true)
+            model.replaceText(newValue, selectedRange: selectedRange)
+            applyObservedModelChange(forceTextUpdate: true)
         }
     }
 
     public var selectedRange: NSRange {
         get { textView.selectedRange() }
-        set { textView.setSelectedRange(newValue) }
+        set {
+            textView.setSelectedRange(newValue)
+            model.selectedRange = textView.selectedRange()
+        }
     }
 
     public var isEditable: Bool {
-        get { configuration.isEditable }
+        get { model.isEditable }
         set {
-            guard configuration.isEditable != newValue else { return }
-            configuration.isEditable = newValue
+            guard model.isEditable != newValue else { return }
+            model.isEditable = newValue
         }
     }
 
     public convenience init(
-        document: SyntaxEditorDocument = SyntaxEditorDocument(),
-        configuration: SyntaxEditorConfiguration = SyntaxEditorConfiguration()
+        model: SyntaxEditorModel
     ) {
-        self.init(document: document, configuration: configuration, highlighter: SyntaxHighlighterEngine())
+        self.init(model: model, highlighter: SyntaxHighlighterEngine())
     }
 
     package init(
-        document: SyntaxEditorDocument = SyntaxEditorDocument(),
-        configuration: SyntaxEditorConfiguration = SyntaxEditorConfiguration(),
+        model: SyntaxEditorModel,
         highlighter: any SyntaxHighlighting
     ) {
-        self.document = document
-        self.configuration = configuration
+        self.model = model
         self.highlighter = highlighter
-        self.lastAppliedDocumentRevision = document.revision
+        self.lastAppliedDocumentRevision = model.revision
 
         let textSystem = EditorTextSystem(
             container: NSTextContainer(
@@ -260,13 +258,13 @@ public final class SyntaxEditorView: NSScrollView {
         self.layoutManager = textSystem.layoutManager
         self.textContainer = textSystem.container
         self.textView = nativeTextView
-        self.lastAppliedFontSizeDelta = configuration.fontSizeDelta
+        self.lastAppliedFontSizeDelta = model.fontSizeDelta
 
         super.init(frame: .zero)
 
         nativeTextView.guardedUndoManager = guardedUndoManager
         guardedUndoManager.allowsMutation = { [weak self] in
-            self?.configuration.isEditable ?? true
+            self?.model.isEditable ?? true
         }
         nativeTextView.shortcutHandler = { [weak self] action in
             guard let self else { return false }
@@ -281,52 +279,36 @@ public final class SyntaxEditorView: NSScrollView {
             return self.textView(self.textView, doCommandBy: selector)
         }
         nativeTextView.lineWrappingStateProvider = { [weak self] in
-            self?.configuration.lineWrappingEnabled ?? false
+            self?.model.lineWrappingEnabled ?? false
         }
 
         configureScrollView()
         configureTextView()
-        startConfigurationObservation(schedulesInitialHighlight: false)
-        startDocumentObservation()
+        startModelObservation(schedulesInitialHighlight: false)
     }
 
-    public func update(
-        document nextDocument: SyntaxEditorDocument,
-        configuration nextConfiguration: SyntaxEditorConfiguration
-    ) {
-        let documentChanged = document !== nextDocument
-        let configurationChanged = configuration !== nextConfiguration
-        guard documentChanged || configurationChanged else { return }
+    public func update(model nextModel: SyntaxEditorModel) {
+        guard model !== nextModel else { return }
 
-        if documentChanged {
-            documentObservations.cancelAll()
-            activeUndoManager?.removeAllActions()
-            commandEngine.invalidateTransientState()
-            clearHighlightCache()
-            document = nextDocument
-        }
-
-        if configurationChanged {
-            configurationObservations.cancelAll()
-            configuration = nextConfiguration
-            startConfigurationObservation(schedulesInitialHighlight: !documentChanged)
-        }
-
-        if documentChanged {
-            startDocumentObservation()
-        }
+        modelObservations.cancelAll()
+        activeUndoManager?.removeAllActions()
+        commandEngine.invalidateTransientState()
+        clearHighlightCache()
+        model = nextModel
+        startModelObservation()
     }
 
     internal func synchronizeDocumentForTesting() {
         applyObservedConfiguration(
-            language: configuration.language,
-            isEditable: configuration.isEditable,
-            lineWrappingEnabled: configuration.lineWrappingEnabled,
-            colorTheme: configuration.colorTheme,
-            drawsBackground: configuration.drawsBackground,
-            fontSizeDelta: configuration.fontSizeDelta
+            language: model.language,
+            isEditable: model.isEditable,
+            lineWrappingEnabled: model.lineWrappingEnabled,
+            colorTheme: model.colorTheme,
+            drawsBackground: model.drawsBackground,
+            fontSizeDelta: model.fontSizeDelta
         )
-        applyObservedDocumentChange()
+        applyObservedModelChange()
+        applyObservedSelection(model.selectedRange)
     }
 
     internal func waitForPendingHighlightForTesting() async {
@@ -393,19 +375,18 @@ public final class SyntaxEditorView: NSScrollView {
 
     deinit {
         highlightTask?.cancel()
-        documentObservations.cancelAll()
-        configurationObservations.cancelAll()
+        modelObservations.cancelAll()
     }
 
     public override func layout() {
         super.layout()
-        applyLineWrappingConfiguration(lineWrappingEnabled: configuration.lineWrappingEnabled)
+        applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
     }
 
     public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateEditorBackgroundColor()
-        applyBaseForegroundColorChange(from: lastAppliedColorTheme, to: lastAppliedColorTheme ?? configuration.colorTheme)
+        applyBaseForegroundColorChange(from: lastAppliedColorTheme, to: lastAppliedColorTheme ?? model.colorTheme)
         updateTextViewFontAndTypingAttributes()
         reapplyCachedHighlight()
         applyMatchingBracketHighlight(force: true)
@@ -415,7 +396,7 @@ public final class SyntaxEditorView: NSScrollView {
         super.tile()
         guard isScrollViewConfigured, !isApplyingLineWrappingConfiguration else { return }
 
-        applyLineWrappingConfiguration(lineWrappingEnabled: configuration.lineWrappingEnabled)
+        applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
     }
 
     public override func reflectScrolledClipView(_ clipView: NSClipView) {
@@ -451,7 +432,7 @@ public final class SyntaxEditorView: NSScrollView {
             return
         }
 
-        let previousText = document.textSnapshot()
+        let previousText = model.text
         let nextText = textView.string
         if isApplyingHighlight, nextText == previousText {
             pendingEditStartUTF16 = nil
@@ -462,9 +443,9 @@ public final class SyntaxEditorView: NSScrollView {
 
         let mutation = pendingHighlightMutation ??
             TextMutation.diff(from: previousText, to: nextText).map(SyntaxHighlightMutation.init)
-        let change: SyntaxEditorDocumentChange
+        let change: SyntaxEditorTextChange?
         if let mutation {
-            change = document.commitEdits(
+            change = model.commitEdits(
                 [
                     SyntaxEditorTextEdit(
                         range: NSRange(location: mutation.location, length: mutation.length),
@@ -474,7 +455,11 @@ public final class SyntaxEditorView: NSScrollView {
                 selectedRange: textView.selectedRange()
             )
         } else {
-            change = document.replaceText(nextText, selectedRange: textView.selectedRange())
+            change = model.replaceText(nextText, selectedRange: textView.selectedRange())
+        }
+        guard let change else {
+            model.selectedRange = textView.selectedRange()
+            return
         }
         lastAppliedDocumentRevision = change.revision
 
@@ -504,7 +489,7 @@ public final class SyntaxEditorView: NSScrollView {
         )
         scheduleHighlight(
             source: nextText,
-            language: configuration.language,
+            language: model.language,
             revision: change.revision,
             mutation: mutation,
             refreshStartUTF16: refreshStartUTF16
@@ -516,6 +501,9 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func textSelectionDidChange() {
+        if !isApplyingModel {
+            model.selectedRange = textView.selectedRange()
+        }
         if !isApplyingCommandSelection {
             commandEngine.invalidateTransientState()
         }
@@ -531,7 +519,7 @@ public final class SyntaxEditorView: NSScrollView {
             return true
         }
 
-        guard configuration.isEditable else {
+        guard model.isEditable else {
             pendingEditStartUTF16 = nil
             pendingUndoSelection = nil
             pendingHighlightMutation = nil
@@ -556,7 +544,7 @@ public final class SyntaxEditorView: NSScrollView {
             source: source,
             range: affectedCharRange,
             replacementText: replacementString,
-            language: configuration.language
+            language: model.language
         ) {
             applyCommandResult(result)
             return false
@@ -577,7 +565,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     func textView(_ textView: SyntaxEditorTextInputView, doCommandBy commandSelector: Selector) -> Bool {
-        guard configuration.isEditable else {
+        guard model.isEditable else {
             return false
         }
 
@@ -593,7 +581,7 @@ public final class SyntaxEditorView: NSScrollView {
                 source: textView.string,
                 range: selectedRange,
                 replacementText: "\n",
-                language: configuration.language
+                language: model.language
             ) {
                 applyCommandResult(result)
                 return true
@@ -616,7 +604,7 @@ public final class SyntaxEditorView: NSScrollView {
                 source: textView.string,
                 range: deleteRange,
                 replacementText: "",
-                language: configuration.language,
+                language: model.language,
                 deletionIntent: deletionIntent
             ) {
                 applyCommandResult(result)
@@ -629,10 +617,10 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func configureScrollView() {
-        scrollView.drawsBackground = configuration.drawsBackground
+        scrollView.drawsBackground = model.drawsBackground
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = !configuration.lineWrappingEnabled
+        scrollView.hasHorizontalScroller = !model.lineWrappingEnabled
         scrollView.autohidesScrollers = true
         scrollView.documentView = textView
         isScrollViewConfigured = true
@@ -641,7 +629,7 @@ public final class SyntaxEditorView: NSScrollView {
     private func configureTextView() {
         textView.drawsBackground = false
         updateEditorBackgroundColor()
-        textView.isEditable = configuration.isEditable
+        textView.isEditable = model.isEditable
         textView.guardedUndoManager = guardedUndoManager
         textView.didChangeText = { [weak self] in
             self?.textDidChange()
@@ -655,7 +643,7 @@ public final class SyntaxEditorView: NSScrollView {
         applyFindInteractionConfiguration()
         configureBaseTextViewAppearance()
 
-        applyLineWrappingConfiguration(lineWrappingEnabled: configuration.lineWrappingEnabled)
+        applyLineWrappingConfiguration(lineWrappingEnabled: model.lineWrappingEnabled)
     }
 
     private func applyFindInteractionConfiguration() {
@@ -703,43 +691,44 @@ public final class SyntaxEditorView: NSScrollView {
         )
     }
 
-    private func startConfigurationObservation(schedulesInitialHighlight: Bool = true) {
-        configurationDeliveryForTesting = configurationObservations.observe(configuration, tracking: { configuration in
-            _ = configuration.language
-            _ = configuration.isEditable
-            _ = configuration.lineWrappingEnabled
-            _ = configuration.colorTheme
-            _ = configuration.drawsBackground
-            _ = configuration.fontSizeDelta
-        }) { [weak self] event, configuration in
+    private func startModelObservation(schedulesInitialHighlight: Bool = true) {
+        modelConfigurationDeliveryForTesting = modelObservations.observe(model, tracking: { model in
+            _ = model.language
+            _ = model.isEditable
+            _ = model.lineWrappingEnabled
+            _ = model.colorTheme
+            _ = model.drawsBackground
+            _ = model.fontSizeDelta
+        }) { [weak self] event, model in
             guard let self else { return }
             self.applyObservedConfiguration(
-                language: configuration.language,
-                isEditable: configuration.isEditable,
-                lineWrappingEnabled: configuration.lineWrappingEnabled,
-                colorTheme: configuration.colorTheme,
-                drawsBackground: configuration.drawsBackground,
-                fontSizeDelta: configuration.fontSizeDelta,
+                language: model.language,
+                isEditable: model.isEditable,
+                lineWrappingEnabled: model.lineWrappingEnabled,
+                colorTheme: model.colorTheme,
+                drawsBackground: model.drawsBackground,
+                fontSizeDelta: model.fontSizeDelta,
                 forceLanguageRefresh: event.kind == .initial,
                 schedulesHighlight: event.kind != .initial || schedulesInitialHighlight
             )
         }
-    }
 
-    private func startDocumentObservation() {
-        documentDeliveryForTesting = documentObservations.observe(document, tracking: { document in
-            _ = document.revision
-        }) { [weak self] event, document in
+        modelDeliveryForTesting = modelObservations.observe(model, tracking: { model in
+            _ = model.text
+            _ = model.revision
+            _ = model.selectedRange
+        }) { [weak self] event, model in
             guard let self else { return }
-            self.applyObservedDocumentChange(
+            self.applyObservedModelChange(
                 forceTextUpdate: event.kind == .initial,
-                observedRevision: document.revision
+                observedRevision: model.revision
             )
+            self.applyObservedSelection(model.selectedRange)
         }
     }
 
-    private func applyObservedDocumentChange(forceTextUpdate: Bool = false, observedRevision: Int? = nil) {
-        let revision = observedRevision ?? document.revision
+    private func applyObservedModelChange(forceTextUpdate: Bool = false, observedRevision: Int? = nil) {
+        let revision = observedRevision ?? model.revision
         guard forceTextUpdate || revision != lastAppliedDocumentRevision else { return }
 
         isApplyingModel = true
@@ -747,18 +736,18 @@ public final class SyntaxEditorView: NSScrollView {
             isApplyingModel = false
         }
 
-        let text = document.textSnapshot()
+        let text = model.text
         let textNeedsUpdate = forceTextUpdate || textView.string != text
         var highlightMutation: SyntaxHighlightMutation?
         if textNeedsUpdate {
             commandEngine.invalidateTransientState()
-            let change = document.latestChange
-            if change?.isWholeDocumentReplacement == true {
+            let change = model.latestChange
+            if change?.kind == .replacement {
                 activeUndoManager?.removeAllActions()
             }
             let canApplyIncrementally = change.map {
                 $0.revision == revision
-                    && !$0.isWholeDocumentReplacement
+                    && $0.kind == .incremental
                     && !forceTextUpdate
                     && lastAppliedDocumentRevision == revision - 1
             } ?? false
@@ -773,7 +762,7 @@ public final class SyntaxEditorView: NSScrollView {
                 replaceEntireStorageText(text)
             }
             if let change,
-               !(change.isWholeDocumentReplacement && change.selectedRange == NSRange(location: 0, length: 0)) {
+               !(change.kind == .replacement && change.selectedRange == NSRange(location: 0, length: 0)) {
                 textView.setSelectedRange(change.selectedRange)
             }
         }
@@ -787,13 +776,24 @@ public final class SyntaxEditorView: NSScrollView {
             )
             scheduleHighlight(
                 source: text,
-                language: configuration.language,
+                language: model.language,
                 revision: revision,
                 mutation: highlightMutation,
                 refreshStartUTF16: 0
             )
         }
         lastAppliedDocumentRevision = revision
+    }
+
+    private func applyObservedSelection(_ range: NSRange) {
+        let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textStorage.length)
+        guard textView.selectedRange() != clamped else { return }
+
+        isApplyingModel = true
+        defer {
+            isApplyingModel = false
+        }
+        textView.setSelectedRange(clamped)
     }
 
     private func applyObservedConfiguration(
@@ -833,7 +833,7 @@ public final class SyntaxEditorView: NSScrollView {
             scheduleHighlight(
                 source: textView.string,
                 language: language,
-                revision: document.revision,
+                revision: model.revision,
                 refreshStartUTF16: 0
             )
         } else if (colorThemeChanged || fontSizeDeltaChanged) && schedulesHighlight {
@@ -846,7 +846,7 @@ public final class SyntaxEditorView: NSScrollView {
         to colorTheme: SyntaxEditorColorTheme
     ) {
         let nextBaseForeground = colorTheme
-            .resolved(for: configuration.language, appearance: currentThemeAppearance)
+            .resolved(for: model.language, appearance: currentThemeAppearance)
             .baseForeground
         textSystem.styleStore.updateBaseForeground(nextBaseForeground, textLength: textStorage.length)
         let fullRange = NSRange(location: 0, length: textStorage.length)
@@ -859,7 +859,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func applyCommandResult(_ result: EditorCommandResult) {
-        guard configuration.isEditable else {
+        guard model.isEditable else {
             return
         }
 
@@ -867,14 +867,14 @@ public final class SyntaxEditorView: NSScrollView {
         let previousSelection = textView.selectedRange()
         let textChanged = !result.edits.isEmpty
         let nextText = textChanged
-            ? SyntaxEditorDocument.applying(result.edits, to: previousText)
+            ? SyntaxEditorModel.applying(result.edits, to: previousText)
             : previousText
 
         let undoState: (restore: EditorUndoState, counterpart: EditorUndoState)? =
             if textChanged, !isApplyingUndoRedo {
                 (
                     EditorUndoState(
-                        edits: SyntaxEditorDocument.inverseEdits(for: result.edits, in: previousText),
+                        edits: SyntaxEditorModel.inverseEdits(for: result.edits, in: previousText),
                         selectedRange: previousSelection,
                         refreshStartUTF16: 0
                     ),
@@ -898,6 +898,9 @@ public final class SyntaxEditorView: NSScrollView {
         isApplyingCommandSelection = false
         textView.typingAttributes = baseAttributes()
         isApplyingModel = false
+        if !textChanged {
+            model.selectedRange = textView.selectedRange()
+        }
 
         pendingEditStartUTF16 = nil
         pendingHighlightMutation = nil
@@ -906,9 +909,9 @@ public final class SyntaxEditorView: NSScrollView {
             registerUndoAction(restore: undoState.restore, counterpart: undoState.counterpart)
         }
 
-        var change: SyntaxEditorDocumentChange?
+        var change: SyntaxEditorTextChange?
         if textChanged {
-            change = document.commitEdits(result.edits, selectedRange: result.selectedRange)
+            change = model.commitEdits(result.edits, selectedRange: result.selectedRange)
             lastAppliedDocumentRevision = change?.revision ?? lastAppliedDocumentRevision
         }
 
@@ -921,8 +924,8 @@ public final class SyntaxEditorView: NSScrollView {
             )
             scheduleHighlight(
                 source: nextText,
-                language: configuration.language,
-                revision: change?.revision ?? document.revision,
+                language: model.language,
+                revision: change?.revision ?? model.revision,
                 mutation: mutation,
                 refreshStartUTF16: result.refreshStartUTF16
             )
@@ -955,7 +958,7 @@ public final class SyntaxEditorView: NSScrollView {
                     replacement: mutation.replacement
                 ),
             ]
-            restoreEdits = SyntaxEditorDocument.inverseEdits(for: edits, in: previousText)
+            restoreEdits = SyntaxEditorModel.inverseEdits(for: edits, in: previousText)
         } else {
             edits = [
                 SyntaxEditorTextEdit(
@@ -1002,7 +1005,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func applyUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
-        guard configuration.isEditable else {
+        guard model.isEditable else {
             return
         }
 
@@ -1050,7 +1053,7 @@ public final class SyntaxEditorView: NSScrollView {
     private func canHandleShortcut(_ action: EditorShortcutAction) -> Bool {
         switch action {
         case .indent, .outdent, .toggleComment:
-            configuration.isEditable
+            model.isEditable
         case .toggleLineWrapping, .increaseFontSize, .decreaseFontSize, .resetFontSize:
             true
         }
@@ -1067,19 +1070,19 @@ public final class SyntaxEditorView: NSScrollView {
         case .toggleLineWrapping:
             return runToggleLineWrappingCommand()
         case .increaseFontSize:
-            configuration.increaseFontSize()
+            model.increaseFontSize()
             return true
         case .decreaseFontSize:
-            configuration.decreaseFontSize()
+            model.decreaseFontSize()
             return true
         case .resetFontSize:
-            configuration.resetFontSize()
+            model.resetFontSize()
             return true
         }
     }
 
     private func runInsertTabCommand() -> Bool {
-        guard configuration.isEditable else {
+        guard model.isEditable else {
             return false
         }
 
@@ -1095,7 +1098,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func runIndentCommand() -> Bool {
-        guard configuration.isEditable else {
+        guard model.isEditable else {
             return false
         }
 
@@ -1111,7 +1114,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func runOutdentCommand() -> Bool {
-        guard configuration.isEditable else {
+        guard model.isEditable else {
             return false
         }
 
@@ -1127,7 +1130,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func runToggleCommentCommand() -> Bool {
-        guard configuration.isEditable else {
+        guard model.isEditable else {
             return false
         }
 
@@ -1135,7 +1138,7 @@ public final class SyntaxEditorView: NSScrollView {
         guard let result = commandEngine.toggleComment(
             source: source,
             selection: textView.selectedRange(),
-            language: configuration.language
+            language: model.language
         ) else {
             return false
         }
@@ -1144,7 +1147,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func runToggleLineWrappingCommand() -> Bool {
-        configuration.lineWrappingEnabled.toggle()
+        model.lineWrappingEnabled.toggle()
         return true
     }
 
@@ -1194,7 +1197,7 @@ public final class SyntaxEditorView: NSScrollView {
         mutation: SyntaxHighlightMutation?
     ) async {
         guard !Task.isCancelled else { return }
-        guard document.revision == result.revision else { return }
+        guard model.revision == result.revision else { return }
         let refreshRange = highlightApplicationRefreshRange(
             for: result,
             mutation: mutation
@@ -1229,19 +1232,19 @@ public final class SyntaxEditorView: NSScrollView {
 
     private func reapplyCachedHighlight() {
         let source = textView.string
-        guard lastHighlightRevision == document.revision,
-              lastHighlightLanguage == configuration.language,
+        guard lastHighlightRevision == model.revision,
+              lastHighlightLanguage == model.language,
               lastHighlightSource == source
         else {
-            scheduleHighlight(source: source, language: configuration.language, revision: document.revision)
+            scheduleHighlight(source: source, language: model.language, revision: model.revision)
             return
         }
 
         applyHighlight(
             lastHighlightTokens,
-            expectedRevision: document.revision,
+            expectedRevision: model.revision,
             source: source,
-            language: configuration.language,
+            language: model.language,
             refreshRange: NSRange(location: 0, length: source.utf16.count),
             mutation: nil,
             forceOperations: true
@@ -1295,8 +1298,8 @@ public final class SyntaxEditorView: NSScrollView {
 
         var updates: [(range: NSRange, font: NSFont)] = []
         let source = textView.string
-        if lastHighlightRevision == document.revision,
-           lastHighlightLanguage == configuration.language,
+        if lastHighlightRevision == model.revision,
+           lastHighlightLanguage == model.language,
            lastHighlightSource == source {
             var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes())
             let runSet = syntaxHighlightRunSet(
@@ -1328,7 +1331,7 @@ public final class SyntaxEditorView: NSScrollView {
         }
     }
 
-    private static func highlightMutation(_ change: SyntaxEditorDocumentChange) -> SyntaxHighlightMutation? {
+    private static func highlightMutation(_ change: SyntaxEditorTextChange) -> SyntaxHighlightMutation? {
         guard change.edits.count == 1, let edit = change.edits.first else { return nil }
         return SyntaxHighlightMutation(
             location: edit.range.location,
@@ -1348,8 +1351,8 @@ public final class SyntaxEditorView: NSScrollView {
         recordsCache: Bool = true,
         forceOperations: Bool = false
     ) -> Bool {
-        guard document.revision == expectedRevision else { return false }
-        guard configuration.language == expectedLanguage,
+        guard model.revision == expectedRevision else { return false }
+        guard model.language == expectedLanguage,
               textView.string == expectedSource
         else {
             pendingHighlightApplication = nil
@@ -1424,8 +1427,8 @@ public final class SyntaxEditorView: NSScrollView {
         mutation: SyntaxHighlightMutation?,
         recordsCache: Bool = true
     ) async -> Bool {
-        guard document.revision == expectedRevision else { return false }
-        guard configuration.language == expectedLanguage,
+        guard model.revision == expectedRevision else { return false }
+        guard model.language == expectedLanguage,
               textView.string == expectedSource
         else {
             pendingHighlightApplication = nil
@@ -1474,7 +1477,7 @@ public final class SyntaxEditorView: NSScrollView {
             mutation: mutation,
             expectedRevision: expectedRevision
         ) else { return false }
-        guard !Task.isCancelled, document.revision == expectedRevision else { return false }
+        guard !Task.isCancelled, model.revision == expectedRevision else { return false }
 
         textView.applyMarkedTextAttributes()
         textView.typingAttributes = base
@@ -1495,11 +1498,11 @@ public final class SyntaxEditorView: NSScrollView {
         baseAttributes: [NSAttributedString.Key: Any]
     ) -> SyntaxHighlightAttributeResolver {
         SyntaxHighlightAttributeResolver(
-            colorTheme: configuration.colorTheme,
-            defaultLanguage: configuration.language,
+            colorTheme: model.colorTheme,
+            defaultLanguage: model.language,
             appearance: currentThemeAppearance,
             baseFont: (baseAttributes[.font] as? NSFont) ?? resolvedBaseFont(),
-            fontSizeDelta: configuration.fontSizeDelta
+            fontSizeDelta: model.fontSizeDelta
         )
     }
 
@@ -1545,7 +1548,7 @@ public final class SyntaxEditorView: NSScrollView {
         let didApply = await TextEditingTransaction.applyIncrementally(
             transaction.operations,
             to: textSystem.textContentStorage,
-            shouldContinue: { document.revision == expectedRevision }
+            shouldContinue: { model.revision == expectedRevision }
         )
         guard didApply else { return false }
         textSystem.styleStore.commit(transaction)
@@ -1766,8 +1769,8 @@ public final class SyntaxEditorView: NSScrollView {
         let theme = theme ?? resolvedColorTheme()
         return theme.base.font?.platformFont(
             fallback: fallbackFont,
-            fontSizeDelta: configuration.fontSizeDelta
-        ) ?? fallbackFont.syntaxEditorFontSizeAdjusted(by: configuration.fontSizeDelta)
+            fontSizeDelta: model.fontSizeDelta
+        ) ?? fallbackFont.syntaxEditorFontSizeAdjusted(by: model.fontSizeDelta)
     }
 
     private var currentThemeAppearance: SyntaxEditorThemeAppearance {
@@ -1775,14 +1778,14 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     func resolvedColorTheme() -> SyntaxEditorResolvedColorTheme {
-        (lastAppliedColorTheme ?? configuration.colorTheme).resolved(
-            for: configuration.language,
+        (lastAppliedColorTheme ?? model.colorTheme).resolved(
+            for: model.language,
             appearance: currentThemeAppearance
         )
     }
 
     private func updateEditorBackgroundColor() {
-        updateEditorBackgroundColor(drawsBackground: configuration.drawsBackground)
+        updateEditorBackgroundColor(drawsBackground: model.drawsBackground)
     }
 
     private func updateEditorBackgroundColor(drawsBackground: Bool) {
@@ -2069,8 +2072,7 @@ public final class SyntaxEditorView: NSScrollView {
 
 @MainActor
 public final class SyntaxEditorViewController: NSViewController {
-    public private(set) var document: SyntaxEditorDocument
-    public private(set) var configuration: SyntaxEditorConfiguration
+    public private(set) var model: SyntaxEditorModel
     public let editorView: SyntaxEditorView
 
     var textView: SyntaxEditorTextInputView {
@@ -2081,13 +2083,9 @@ public final class SyntaxEditorViewController: NSViewController {
         editorView
     }
 
-    public init(
-        document: SyntaxEditorDocument = SyntaxEditorDocument(),
-        configuration: SyntaxEditorConfiguration = SyntaxEditorConfiguration()
-    ) {
-        self.document = document
-        self.configuration = configuration
-        self.editorView = SyntaxEditorView(document: document, configuration: configuration)
+    public init(model: SyntaxEditorModel) {
+        self.model = model
+        self.editorView = SyntaxEditorView(model: model)
 
         super.init(nibName: nil, bundle: nil)
     }
@@ -2101,17 +2099,11 @@ public final class SyntaxEditorViewController: NSViewController {
         view = editorView
     }
 
-    public func update(
-        document nextDocument: SyntaxEditorDocument,
-        configuration nextConfiguration: SyntaxEditorConfiguration
-    ) {
-        let documentChanged = document !== nextDocument
-        let configurationChanged = configuration !== nextConfiguration
-        guard documentChanged || configurationChanged else { return }
+    public func update(model nextModel: SyntaxEditorModel) {
+        guard model !== nextModel else { return }
 
-        document = nextDocument
-        configuration = nextConfiguration
-        editorView.update(document: nextDocument, configuration: nextConfiguration)
+        model = nextModel
+        editorView.update(model: nextModel)
     }
 
     internal func synchronizeDocumentForTesting() {

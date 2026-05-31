@@ -19,8 +19,7 @@ import AppKit
 @Observable
 final class SyntaxEditorSwiftUIProbe {
     var tick = 0
-    let document = SyntaxEditorDocument(text: "let value = 1")
-    var configuration = SyntaxEditorConfiguration(language: SyntaxLanguage.javascript)
+    var model = SyntaxEditorModel(text: "let value = 1", language: SyntaxLanguage.javascript)
 }
 
 struct SyntaxEditorDefaultWrapperHost: View {
@@ -28,18 +27,18 @@ struct SyntaxEditorDefaultWrapperHost: View {
 
     var body: some View {
         VStack {
-            SyntaxEditor()
+            SyntaxEditor(probe.model)
             Text("\(probe.tick)")
         }
     }
 }
 
-struct SyntaxEditorConfigurationReplacementHost: View {
+struct SyntaxEditorModelReplacementHost: View {
     var probe: SyntaxEditorSwiftUIProbe
 
     var body: some View {
         VStack {
-            SyntaxEditor(document: probe.document, configuration: probe.configuration)
+            SyntaxEditor(probe.model)
             Text("\(probe.tick)")
         }
     }
@@ -110,8 +109,7 @@ func syntaxEditorSettleAppKitHost<Content: View>(_ controller: NSHostingControll
 
 @MainActor
 struct SyntaxEditorTestContext {
-    let document: SyntaxEditorDocument
-    let configuration: SyntaxEditorConfiguration
+    let model: SyntaxEditorModel
 
     init(
         text: String = "",
@@ -122,8 +120,8 @@ struct SyntaxEditorTestContext {
         drawsBackground: Bool = true,
         fontSizeDelta: Int = 0
     ) {
-        self.document = SyntaxEditorDocument(text: text)
-        self.configuration = SyntaxEditorConfiguration(
+        self.model = SyntaxEditorModel(
+            text: text,
             language: language,
             isEditable: isEditable,
             lineWrappingEnabled: lineWrappingEnabled,
@@ -176,17 +174,17 @@ func syntaxEditorDrainMainActorObservationDelivery<Value>(
 
 extension SyntaxEditorView {
     convenience init(testContext: SyntaxEditorTestContext) {
-        self.init(document: testContext.document, configuration: testContext.configuration)
+        self.init(model: testContext.model)
     }
 
     convenience init(testContext: SyntaxEditorTestContext, highlighter: any SyntaxHighlighting) {
-        self.init(document: testContext.document, configuration: testContext.configuration, highlighter: highlighter)
+        self.init(model: testContext.model, highlighter: highlighter)
     }
 }
 
 extension SyntaxEditorViewController {
     convenience init(testContext: SyntaxEditorTestContext) {
-        self.init(document: testContext.document, configuration: testContext.configuration)
+        self.init(model: testContext.model)
     }
 }
 

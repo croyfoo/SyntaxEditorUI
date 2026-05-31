@@ -12,7 +12,7 @@ extension SyntaxEditorView {
     }
 
     public func insertText(_ text: String) {
-        guard configuration.isEditable else { return }
+        guard model.isEditable else { return }
 
         if markedRange != nil {
             replaceCommittedMarkedText(with: text)
@@ -28,7 +28,7 @@ extension SyntaxEditorView {
     }
 
     public func deleteBackward() {
-        guard configuration.isEditable else { return }
+        guard model.isEditable else { return }
 
         let deletionRange: NSRange
         let deletionIntent: EditorCommandEngine.DeletionIntent
@@ -84,7 +84,7 @@ extension SyntaxEditorView {
     }
 
     public func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
-        guard configuration.isEditable else { return }
+        guard model.isEditable else { return }
         guard let markedText else {
             unmarkText()
             return
@@ -163,7 +163,7 @@ extension SyntaxEditorView {
 
         let source = text
         let clampedRange = clampedTextRange(markedRange, in: source)
-        guard configuration.isEditable else { return }
+        guard model.isEditable else { return }
         beginMarkedTextCommitUndoSessionIfNeeded(source: source, markedRange: clampedRange)
 
         let nextSelection = NSRange(location: clampedRange.location + replacement.utf16.count, length: 0)
@@ -1085,7 +1085,7 @@ extension SyntaxEditorView {
 
         registerUndoAction(
             restore: EditorUndoState(
-                edits: SyntaxEditorDocument.inverseEdits(
+                edits: SyntaxEditorModel.inverseEdits(
                     for: [
                         SyntaxEditorTextEdit(
                             range: NSRange(location: 0, length: restore.source.utf16.count),

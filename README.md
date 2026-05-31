@@ -41,18 +41,18 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 ```swift
 import SyntaxEditorUI
 
-let document = SyntaxEditorDocument(text: "const answer = 42;")
-let configuration = SyntaxEditorConfiguration(
+let model = SyntaxEditorModel(
+    text: "const answer = 42;",
     language: .javascript
 )
 
-let editor = SyntaxEditor(document: document, configuration: configuration)
-let editorView = SyntaxEditorView(document: document, configuration: configuration)
+let editor = SyntaxEditor(model)
+let editorView = SyntaxEditorView(model: model)
 ```
 
 Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
 
-Set `configuration.drawsBackground = false` when the surrounding view should provide the editor background while syntax colors and editor decorations remain active. Use `configuration.fontSizeDelta`, `increaseFontSize()`, `decreaseFontSize()`, and `resetFontSize()` for Xcode-style point-size adjustments relative to the selected theme.
+Set `model.drawsBackground = false` when the surrounding view should provide the editor background while syntax colors and editor decorations remain active. Use `model.fontSizeDelta`, `increaseFontSize()`, `decreaseFontSize()`, and `resetFontSize()` for Xcode-style point-size adjustments relative to the selected theme.
 
 Use `SyntaxEditorMenu` when an app wants to expose editor shortcuts in an `Editor` menu. On iOS 26 and later, install it from the app delegate's main menu configuration:
 
@@ -95,15 +95,21 @@ GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `
 
 These notes apply when upgrading from `v0.10.x` or earlier to `v0.11.0`.
 
-- On macOS, `SyntaxEditorView` no longer exposes the underlying editor as `NSTextView`. The editor surface is implemented directly with TextKit 2, matching the iOS architecture. Use `SyntaxEditorView.text`, `SyntaxEditorView.selectedRange`, `SyntaxEditorView.isEditable`, `SyntaxEditorView.document`, and `SyntaxEditorView.configuration` instead of reaching through `textView`.
-- This is a breaking macOS API change: there is no replacement public `NSTextView` accessor. Code that previously customized `editorView.textView` should move those settings to `SyntaxEditorConfiguration` or drive the editor through the public `SyntaxEditorView` properties above.
-- `SyntaxEditorViewController.textView` is no longer public on macOS. Access the editor through `SyntaxEditorViewController.editorView`, `document`, and `configuration`.
+- `SyntaxEditorDocument` and `SyntaxEditorConfiguration` have been removed. Create and own a single `SyntaxEditorModel` for text, selection, language, editability, wrapping, theme, background drawing, and font-size state.
+- `textSnapshot()` has been removed. Read, write, and observe `model.text` directly. Use `model.replaceText(_:selectedRange:)` when replacement and selection should be updated together.
+- Replace `SyntaxEditor(document:configuration:)` with `SyntaxEditor(model)`.
+- Replace `SyntaxEditorView(document:configuration:)` and `SyntaxEditorViewController(document:configuration:)` with `SyntaxEditorView(model:)` and `SyntaxEditorViewController(model:)`.
+- `SyntaxEditorDocumentChange` has been renamed to `SyntaxEditorTextChange`. Use `change.kind == .incremental` or `change.kind == .replacement` instead of `isWholeDocumentReplacement`.
+- UIKit and AppKit `text`, `selectedRange`, and `isEditable` properties remain available and now proxy to the view's `model`.
+- On macOS, `SyntaxEditorView` no longer exposes the underlying editor as `NSTextView`. The editor surface is implemented directly with TextKit 2, matching the iOS architecture. Use `SyntaxEditorView.text`, `SyntaxEditorView.selectedRange`, `SyntaxEditorView.isEditable`, and `SyntaxEditorView.model` instead of reaching through `textView`.
+- This is a breaking macOS API change: there is no replacement public `NSTextView` accessor. Code that previously customized `editorView.textView` should move editor state to `SyntaxEditorModel` or drive the editor through the public `SyntaxEditorView` properties above.
+- `SyntaxEditorViewController.textView` is no longer public on macOS. Access the editor through `SyntaxEditorViewController.editorView` and `model`.
 
 ### v0.10.0
 
 These notes apply when upgrading from `v0.9.x` or earlier to `v0.10.0`.
 
-- `SyntaxEditorView.font` has been removed from the public iOS API. Use `SyntaxEditorConfiguration.fontSizeDelta` or the font-size command methods to adjust editor text size.
+- `SyntaxEditorView.font` has been removed from the public iOS API. Use `SyntaxEditorModel.fontSizeDelta` or the font-size command methods to adjust editor text size.
 
 ### v0.8.0
 

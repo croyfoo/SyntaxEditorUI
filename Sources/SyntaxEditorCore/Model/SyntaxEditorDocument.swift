@@ -3,28 +3,95 @@ import Foundation
 
 @MainActor
 @Observable
-public final class SyntaxEditorConfiguration {
+public final class SyntaxEditorModel {
+    private var textStorage: String
+    private var selectedRangeStorage: NSRange
+
+    public var text: String {
+        get {
+            textStorage
+        }
+        set {
+            replaceText(newValue)
+        }
+    }
+
     public var language: SyntaxLanguage
+    public var selectedRange: NSRange {
+        get {
+            selectedRangeStorage
+        }
+        set {
+            selectedRangeStorage = SyntaxEditorRangeUtilities.clampedRange(
+                newValue,
+                utf16Length: textStorage.utf16.count
+            )
+        }
+    }
+
     public var isEditable: Bool
     public var lineWrappingEnabled: Bool
     public var colorTheme: SyntaxEditorColorTheme
     public var drawsBackground: Bool
     public var fontSizeDelta: Int
+    public private(set) var revision: Int
+    public private(set) var latestChange: SyntaxEditorTextChange?
 
     public init(
+        text: String = "",
         language: SyntaxLanguage = .javascript,
+        selectedRange: NSRange = NSRange(location: 0, length: 0),
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
         colorTheme: SyntaxEditorColorTheme = .default,
         drawsBackground: Bool = true,
         fontSizeDelta: Int = 0
     ) {
+        self.textStorage = text
         self.language = language
+        self.selectedRangeStorage = SyntaxEditorRangeUtilities.clampedRange(
+            selectedRange,
+            utf16Length: text.utf16.count
+        )
         self.isEditable = isEditable
         self.lineWrappingEnabled = lineWrappingEnabled
         self.colorTheme = colorTheme
         self.drawsBackground = drawsBackground
         self.fontSizeDelta = fontSizeDelta
+        self.revision = 0
+        self.latestChange = nil
+    }
+
+    @discardableResult
+    public func replaceText(
+        _ text: String,
+        selectedRange: NSRange? = nil
+    ) -> SyntaxEditorTextChange? {
+        let nextSelectedRange = SyntaxEditorRangeUtilities.clampedRange(
+            selectedRange ?? selectedRangeStorage,
+            utf16Length: text.utf16.count
+        )
+
+        guard textStorage != text else {
+            selectedRangeStorage = nextSelectedRange
+            return nil
+        }
+
+        let edit = SyntaxEditorTextEdit(
+            range: NSRange(location: 0, length: textStorage.utf16.count),
+            replacement: text
+        )
+        textStorage = text
+        selectedRangeStorage = nextSelectedRange
+        revision += 1
+        let change = SyntaxEditorTextChange(
+            revision: revision,
+            edits: [edit],
+            selectedRange: nextSelectedRange,
+            kind: .replacement
+        )
+        latestChange = change
+        return change
     }
 
     public func increaseFontSize() {
@@ -48,100 +115,32 @@ public final class SyntaxEditorConfiguration {
     private var fontSizeCommandBasePointSize: CGFloat {
         colorTheme.resolved(for: language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
     }
-}
-
-public struct SyntaxEditorTextEdit: Equatable, Sendable {
-    public let range: NSRange
-    public let replacement: String
-
-    public init(range: NSRange, replacement: String) {
-        self.range = range
-        self.replacement = replacement
-    }
-}
-
-public struct SyntaxEditorDocumentChange: Equatable, Sendable {
-    public let revision: Int
-    public let edits: [SyntaxEditorTextEdit]
-    public let selectedRange: NSRange
-    public let isWholeDocumentReplacement: Bool
-
-    public init(
-        revision: Int,
-        edits: [SyntaxEditorTextEdit],
-        selectedRange: NSRange,
-        isWholeDocumentReplacement: Bool
-    ) {
-        self.revision = revision
-        self.edits = edits
-        self.selectedRange = selectedRange
-        self.isWholeDocumentReplacement = isWholeDocumentReplacement
-    }
-}
-
-@MainActor
-@Observable
-public final class SyntaxEditorDocument {
-    private var storage: String
-    public private(set) var revision: Int
-    public private(set) var latestChange: SyntaxEditorDocumentChange?
-
-    public init(text: String = "") {
-        self.storage = text
-        self.revision = 0
-        self.latestChange = nil
-    }
-
-    public func textSnapshot() -> String {
-        storage
-    }
-
-    @discardableResult
-    public func replaceText(
-        _ text: String,
-        selectedRange: NSRange = NSRange(location: 0, length: 0)
-    ) -> SyntaxEditorDocumentChange {
-        let edit = SyntaxEditorTextEdit(
-            range: NSRange(location: 0, length: storage.utf16.count),
-            replacement: text
-        )
-        return commitEdits(
-            [edit],
-            selectedRange: SyntaxEditorRangeUtilities.clampedRange(
-                selectedRange,
-                utf16Length: text.utf16.count
-            ),
-            isWholeDocumentReplacement: true
-        )
-    }
 
     @discardableResult
     package func commitEdits(
         _ edits: [SyntaxEditorTextEdit],
-        selectedRange: NSRange,
-        isWholeDocumentReplacement: Bool = false
-    ) -> SyntaxEditorDocumentChange {
+        selectedRange: NSRange
+    ) -> SyntaxEditorTextChange? {
         guard !edits.isEmpty else {
-            let change = SyntaxEditorDocumentChange(
-                revision: revision,
-                edits: [],
-                selectedRange: selectedRange,
-                isWholeDocumentReplacement: false
+            selectedRangeStorage = SyntaxEditorRangeUtilities.clampedRange(
+                selectedRange,
+                utf16Length: textStorage.utf16.count
             )
-            latestChange = change
-            return change
+            return nil
         }
 
-        storage = Self.applying(edits, to: storage)
+        textStorage = Self.applying(edits, to: textStorage)
+        let nextSelectedRange = SyntaxEditorRangeUtilities.clampedRange(
+            selectedRange,
+            utf16Length: textStorage.utf16.count
+        )
+        selectedRangeStorage = nextSelectedRange
         revision += 1
-        let change = SyntaxEditorDocumentChange(
+        let change = SyntaxEditorTextChange(
             revision: revision,
             edits: edits,
-            selectedRange: SyntaxEditorRangeUtilities.clampedRange(
-                selectedRange,
-                utf16Length: storage.utf16.count
-            ),
-            isWholeDocumentReplacement: isWholeDocumentReplacement
+            selectedRange: nextSelectedRange,
+            kind: .incremental
         )
         latestChange = change
         return change
@@ -175,5 +174,39 @@ public final class SyntaxEditorDocument {
                 delta += edit.replacement.utf16.count - edit.range.length
                 return inverse
             }
+    }
+}
+
+public struct SyntaxEditorTextEdit: Equatable, Sendable {
+    public let range: NSRange
+    public let replacement: String
+
+    public init(range: NSRange, replacement: String) {
+        self.range = range
+        self.replacement = replacement
+    }
+}
+
+public struct SyntaxEditorTextChange: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
+        case incremental
+        case replacement
+    }
+
+    public let revision: Int
+    public let edits: [SyntaxEditorTextEdit]
+    public let selectedRange: NSRange
+    public let kind: Kind
+
+    public init(
+        revision: Int,
+        edits: [SyntaxEditorTextEdit],
+        selectedRange: NSRange,
+        kind: Kind
+    ) {
+        self.revision = revision
+        self.edits = edits
+        self.selectedRange = selectedRange
+        self.kind = kind
     }
 }
