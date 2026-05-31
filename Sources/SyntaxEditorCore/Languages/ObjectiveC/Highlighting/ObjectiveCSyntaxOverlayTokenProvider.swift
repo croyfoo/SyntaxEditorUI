@@ -1,31 +1,231 @@
 import Foundation
+import SwiftTreeSitter
 
-enum ObjectiveCSyntaxOverlayTokenProvider {
+private typealias ObjectiveCRangeKey = SyntaxOverlayRangeKey
+private typealias ObjectiveCTokenKey = SyntaxOverlayTokenKey
+private typealias ObjectiveCSyntaxIDMask = SyntaxOverlaySyntaxIDMask
+
+struct ObjectiveCSemanticOverlayState: SyntaxOverlayState {
+    fileprivate var index: ObjectiveCFileSymbolIndex?
+    fileprivate var indexedSourceUTF16Length: Int
+    fileprivate var indexedDeclarationFingerprint: Int
+}
+
+typealias ObjectiveCSemanticOverlayResult = SyntaxOverlayResult
+
+private struct ObjectiveCOverlayPreparation {
+    let baseTokensForIndex: [SyntaxHighlightToken]
+    let outputBaseTokens: [SyntaxHighlightToken]
+    let preservedOverlayTokens: [SyntaxHighlightToken]
+    let nonCodeRanges: [NSRange]
+    let tokenIndex: ObjectiveCTokenIndex
+}
+
+private struct ObjectiveCIndexedToken {
+    let range: NSRange
+    let syntaxID: EditorSourceSyntaxID
+}
+
+private struct ObjectiveCTokenIndex {
+    let identifierTokens: [ObjectiveCIndexedToken]
+    private let declarationOtherIdentifierRanges: [NSRange]
+    private let propertyKeywordRangeKeys: Set<ObjectiveCRangeKey>
+    private let identifierRangeKeys: Set<ObjectiveCRangeKey>
+
+    init(tokens: [SyntaxHighlightToken], source: NSString) {
+        var identifierTokens: [ObjectiveCIndexedToken] = []
+        var declarationOtherIdentifierRanges: [NSRange] = []
+        var propertyKeywordRangeKeys = Set<ObjectiveCRangeKey>()
+        var identifierRangeKeys = Set<ObjectiveCRangeKey>()
+        identifierTokens.reserveCapacity(tokens.count)
+        declarationOtherIdentifierRanges.reserveCapacity(tokens.count / 12)
+
+        for token in tokens where token.language == .objectiveC || token.language == nil {
+            guard token.range.location >= 0,
+                  token.range.length > 0,
+                  token.range.upperBound <= source.length else {
+                continue
+            }
+            if token.range.length == "@property".utf16.count,
+               source.substring(with: token.range) == "@property" {
+                propertyKeywordRangeKeys.insert(ObjectiveCRangeKey(token.range))
+            }
+            guard ObjectiveCFileSymbolIndex.isIdentifierRange(token.range, in: source) else {
+                continue
+            }
+            identifierRangeKeys.insert(ObjectiveCRangeKey(token.range))
+            let indexedToken = ObjectiveCIndexedToken(range: token.range, syntaxID: token.syntaxID)
+            identifierTokens.append(indexedToken)
+            if token.syntaxID == .declarationOther {
+                declarationOtherIdentifierRanges.append(token.range)
+            }
+        }
+
+        self.identifierTokens = identifierTokens
+        self.declarationOtherIdentifierRanges = declarationOtherIdentifierRanges.sorted {
+            if $0.location != $1.location {
+                return $0.location < $1.location
+            }
+            return $0.length < $1.length
+        }
+        self.propertyKeywordRangeKeys = propertyKeywordRangeKeys
+        self.identifierRangeKeys = identifierRangeKeys
+    }
+
+    func declarationOtherIdentifierRanges(in range: NSRange) -> [NSRange] {
+        var index = lowerBoundForDeclarationOtherIdentifier(location: range.location)
+        var ranges: [NSRange] = []
+        while index < declarationOtherIdentifierRanges.count {
+            let candidate = declarationOtherIdentifierRanges[index]
+            guard candidate.location < range.upperBound else {
+                break
+            }
+            if candidate.location >= range.location,
+               candidate.upperBound <= range.upperBound {
+                ranges.append(candidate)
+            }
+            index += 1
+        }
+        return ranges
+    }
+
+    func containsPropertyKeywordRange(_ range: NSRange) -> Bool {
+        propertyKeywordRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    func containsIdentifierRange(_ range: NSRange) -> Bool {
+        identifierRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    private func lowerBoundForDeclarationOtherIdentifier(location: Int) -> Int {
+        var lower = 0
+        var upper = declarationOtherIdentifierRanges.count
+        while lower < upper {
+            let midpoint = (lower + upper) / 2
+            if declarationOtherIdentifierRanges[midpoint].location < location {
+                lower = midpoint + 1
+            } else {
+                upper = midpoint
+            }
+        }
+        return lower
+    }
+}
+
+enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     static func mergingOverlayTokens(
         tokens: [SyntaxHighlightToken],
-        source: String
+        source: String,
+        rootNode: Node? = nil,
+        refreshRange: NSRange? = nil
     ) -> [SyntaxHighlightToken] {
+        var state: ObjectiveCSemanticOverlayState?
+        return mergingOverlayResult(
+            tokens: tokens,
+            source: source,
+            rootNode: rootNode,
+            refreshRange: refreshRange,
+            state: &state
+        ).tokens
+    }
+
+    static func mergingOverlayResult(
+        tokens: [SyntaxHighlightToken],
+        source: String,
+        rootNode: Node? = nil,
+        refreshRange: NSRange? = nil,
+        state: inout ObjectiveCSemanticOverlayState?
+    ) -> ObjectiveCSemanticOverlayResult {
         let nsSource = source as NSString
         guard nsSource.length > 0 else {
-            return objectiveCBaseTokens(from: tokens, source: nsSource)
+            state = nil
+            return ObjectiveCSemanticOverlayResult(
+                tokens: preparedOverlayInput(from: tokens, source: nsSource, targetRange: nil).baseTokensForIndex,
+                refreshRangeOverride: nil,
+                isCancelled: false
+            )
         }
 
-        let baseTokens = objectiveCBaseTokens(from: tokens, source: nsSource)
-        let index = ObjectiveCFileSymbolIndex(source: nsSource, tokens: baseTokens)
-        let overlayTokens = semanticTokens(from: baseTokens, source: nsSource, index: index)
-            + appleMacroTokens(in: nsSource, baseTokens: baseTokens)
-            + appleEnumTypedefTokens(in: nsSource, baseTokens: baseTokens)
-        guard overlayTokens.isEmpty == false else {
-            return baseTokens
+        let proposedTargetRange = refreshRange.map {
+            SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
+        }
+        let previousState = state
+        let declarationFingerprint = semanticIndexFingerprint(in: nsSource)
+        let declarationFingerprintChanged = previousState.map {
+            $0.indexedDeclarationFingerprint != declarationFingerprint
+        } ?? true
+        let targetRange = proposedTargetRange == nil
+            || previousState?.index == nil
+            || declarationFingerprintChanged
+            ? nil
+            : proposedTargetRange
+        let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
+        let shouldRebuildIndex = proposedTargetRange == nil
+            || previousState?.index == nil
+            || previousState?.indexedSourceUTF16Length != nsSource.length
+            || declarationFingerprintChanged
+        let index: ObjectiveCFileSymbolIndex
+        var rebuiltState: ObjectiveCSemanticOverlayState?
+        if shouldRebuildIndex {
+            guard let rebuiltIndex = ObjectiveCFileSymbolIndex(
+                source: nsSource,
+                tokenIndex: preparation.tokenIndex,
+                rootNode: rootNode,
+                allowsCancellation: true
+            ) else {
+                return ObjectiveCSemanticOverlayResult(
+                    tokens: tokens,
+                    refreshRangeOverride: nil,
+                    isCancelled: true
+                )
+            }
+            index = rebuiltIndex
+            rebuiltState = ObjectiveCSemanticOverlayState(
+                index: rebuiltIndex,
+                indexedSourceUTF16Length: nsSource.length,
+                indexedDeclarationFingerprint: declarationFingerprint
+            )
+        } else {
+            index = previousState!.index!
         }
 
-        return deduplicated(mergedTokens(baseTokens: baseTokens, overlayTokens: overlayTokens))
+        guard !Task.isCancelled else {
+            return ObjectiveCSemanticOverlayResult(
+                tokens: tokens,
+                refreshRangeOverride: nil,
+                isCancelled: true
+            )
+        }
+
+        let overlayTokens = semanticTokens(
+            from: preparation.baseTokensForIndex,
+            source: nsSource,
+            index: index,
+            targetRange: targetRange
+        )
+            + appleMacroTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
+            + appleEnumTypedefTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
+        let mergedTokens = deduplicated(
+            mergedTokens(
+                baseTokens: preparation.outputBaseTokens,
+                overlayTokens: preparation.preservedOverlayTokens + overlayTokens
+            )
+        )
+        if let rebuiltState {
+            state = rebuiltState
+        }
+        return ObjectiveCSemanticOverlayResult(
+            tokens: mergedTokens,
+            refreshRangeOverride: targetRange,
+            isCancelled: false
+        )
     }
 
     private static func semanticTokens(
         from tokens: [SyntaxHighlightToken],
         source: NSString,
-        index: ObjectiveCFileSymbolIndex
+        index: ObjectiveCFileSymbolIndex,
+        targetRange: NSRange?
     ) -> [SyntaxHighlightToken] {
         var overlayTokens: [SyntaxHighlightToken] = []
         overlayTokens.reserveCapacity(tokens.count / 4)
@@ -34,15 +234,14 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             guard token.language == .objectiveC || token.language == nil,
                   token.range.location >= 0,
                   token.range.length > 0,
-                  token.range.upperBound <= source.length
+                  token.range.upperBound <= source.length,
+                  targetRange.map({ rangesIntersect(token.range, $0) }) ?? true,
+                  isObjectiveCIdentifierRange(token.range, in: source)
             else {
                 continue
             }
 
             let text = source.substring(with: token.range)
-            guard isObjectiveCIdentifier(text) else {
-                continue
-            }
 
             if appleMacroNames.contains(text) {
                 overlayTokens.append(canonicalToken(range: token.range, syntaxID: .preprocessor))
@@ -56,10 +255,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
             switch token.syntaxID {
             case .identifier:
-                if isSelfMemberName(token.range, in: source),
-                   index.localProperties.contains(text) {
+                if (index.containsSelfMemberNameRange(token.range) && index.localProperties.contains(text)) ||
+                    (isSelfMemberName(token.range, in: source) && index.localProperties.contains(text)) {
                     overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariable))
-                } else if isMemberNameInKnownSelfChain(token.range, in: source, localProperties: index.localProperties) {
+                } else if index.containsSelfChainMemberNameRange(token.range) ||
+                    isMemberNameInKnownSelfChain(token.range, in: source, localProperties: index.localProperties) {
                     overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariableSystem))
                 }
 
@@ -92,12 +292,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
     private static func appleMacroTokens(
         in source: NSString,
-        baseTokens: [SyntaxHighlightToken]
+        nonCodeRanges: [NSRange],
+        targetRange: NSRange?
     ) -> [SyntaxHighlightToken] {
         let string = source as String
-        let fullRange = NSRange(location: 0, length: source.length)
-        let nonCodeRanges = nonCodeRanges(from: baseTokens, sourceLength: source.length)
-        return appleMacroRegex.matches(in: string, range: fullRange).compactMap { match in
+        let searchRange = targetRange ?? NSRange(location: 0, length: source.length)
+        return appleMacroRegex.matches(in: string, range: searchRange).compactMap { match in
             let range = match.range
             guard range.location != NSNotFound,
                   range.length > 0,
@@ -111,13 +311,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
     private static func appleEnumTypedefTokens(
         in source: NSString,
-        baseTokens: [SyntaxHighlightToken]
+        nonCodeRanges: [NSRange],
+        targetRange: NSRange?
     ) -> [SyntaxHighlightToken] {
         let string = source as String
-        let fullRange = NSRange(location: 0, length: source.length)
-        let nonCodeRanges = nonCodeRanges(from: baseTokens, sourceLength: source.length)
+        let searchRange = targetRange ?? NSRange(location: 0, length: source.length)
         var tokens: [SyntaxHighlightToken] = []
-        for match in appleEnumTypedefRegex.matches(in: string, range: fullRange) {
+        for match in appleEnumTypedefRegex.matches(in: string, range: searchRange) {
             guard match.numberOfRanges == 5,
                   !rangeIntersectsSortedRanges(match.range, nonCodeRanges)
             else { continue }
@@ -176,6 +376,69 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
             return false
         }
         return SyntaxEditorRangeUtilities.intersection(of: range, and: sortedRanges[lower]).length > 0
+    }
+
+    private static func rangesIntersect(_ lhs: NSRange, _ rhs: NSRange) -> Bool {
+        SyntaxEditorRangeUtilities.intersection(of: lhs, and: rhs).length > 0
+    }
+
+    static func semanticTargetRange(_ refreshRange: NSRange, in source: NSString) -> NSRange? {
+        let clamped = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: source.length)
+        guard clamped.length > 0 else {
+            return nil
+        }
+
+        let targetRange = source.lineRange(for: clamped)
+        let contextRange = objectiveCUnsafeEditContextRange(around: targetRange, in: source)
+        let context = source.substring(with: contextRange)
+        return objectiveCRefreshLooksStructural(context) ? nil : targetRange
+    }
+
+    private static func objectiveCUnsafeEditContextRange(around range: NSRange, in source: NSString) -> NSRange {
+        var lower = range.location
+        var upper = range.upperBound
+
+        if lower > 0 {
+            let previousLocation = max(0, lower - 1)
+            let previousLine = source.lineRange(for: NSRange(location: previousLocation, length: 0))
+            lower = previousLine.location
+        }
+        if upper < source.length {
+            let nextLine = source.lineRange(for: NSRange(location: upper, length: 0))
+            upper = nextLine.upperBound
+        }
+
+        return NSRange(location: lower, length: max(0, min(upper, source.length) - lower))
+    }
+
+    private static func objectiveCRefreshLooksStructural(_ text: String) -> Bool {
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        return structuralObjectiveCEditRegex.firstMatch(in: text, range: fullRange) != nil
+    }
+
+    private static func semanticIndexFingerprint(in source: NSString) -> Int {
+        var hasher = Hasher()
+
+        var location = 0
+        while location < source.length {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            let line = source.substring(with: lineRange)
+            if objectiveCLineCanAffectSemanticIndex(line) {
+                hasher.combine(line)
+            }
+            let nextLocation = lineRange.upperBound
+            guard nextLocation > location else { break }
+            location = nextLocation
+        }
+
+        return hasher.finalize()
+    }
+
+    private static func objectiveCLineCanAffectSemanticIndex(_ line: String) -> Bool {
+        let nsLine = line as NSString
+        let fullRange = NSRange(location: 0, length: nsLine.length)
+        return structuralObjectiveCEditRegex.firstMatch(in: line, range: fullRange) != nil
     }
 
     private static func shouldTreatUnknownTypeAsProject(_ name: String) -> Bool {
@@ -853,22 +1116,60 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         )
     }
 
-    private static func objectiveCBaseTokens(
+    private static func preparedOverlayInput(
         from tokens: [SyntaxHighlightToken],
-        source: NSString
-    ) -> [SyntaxHighlightToken] {
-        var syntaxIDsByRange: [String: Set<EditorSourceSyntaxID>] = [:]
+        source: NSString,
+        targetRange: NSRange?
+    ) -> ObjectiveCOverlayPreparation {
+        var syntaxIDsByRange: [ObjectiveCRangeKey: ObjectiveCSyntaxIDMask] = [:]
         for token in tokens where token.language == .objectiveC || token.language == nil {
-            syntaxIDsByRange[rangeKey(token.range), default: []].insert(token.syntaxID)
+            syntaxIDsByRange[ObjectiveCRangeKey(token.range), default: []]
+                .formUnion(ObjectiveCSyntaxIDMask(syntaxID: token.syntaxID))
         }
 
-        return tokens.filter { token in
-            !isObjectiveCSemanticOverlayToken(
+        var baseTokensForIndex: [SyntaxHighlightToken] = []
+        var outputBaseTokens: [SyntaxHighlightToken] = []
+        var preservedOverlayTokens: [SyntaxHighlightToken] = []
+        baseTokensForIndex.reserveCapacity(tokens.count)
+        outputBaseTokens.reserveCapacity(tokens.count)
+        preservedOverlayTokens.reserveCapacity(tokens.count / 4)
+
+        for token in tokens {
+            let syntaxIDs = syntaxIDsByRange[ObjectiveCRangeKey(token.range)] ?? []
+            let stripsFromIndex = isObjectiveCSemanticOverlayToken(
                 token,
-                syntaxIDsAtSameRange: syntaxIDsByRange[rangeKey(token.range)] ?? [],
-                source: source
+                syntaxIDsAtSameRange: syntaxIDs,
+                source: source,
+                strippingSemanticOverlaysIn: nil
             )
+            if !stripsFromIndex {
+                baseTokensForIndex.append(token)
+            }
+
+            let stripsFromOutput = targetRange.map {
+                isObjectiveCSemanticOverlayToken(
+                    token,
+                    syntaxIDsAtSameRange: syntaxIDs,
+                    source: source,
+                    strippingSemanticOverlaysIn: $0
+                )
+            } ?? stripsFromIndex
+            if !stripsFromOutput {
+                if stripsFromIndex {
+                    preservedOverlayTokens.append(token)
+                } else {
+                    outputBaseTokens.append(token)
+                }
+            }
         }
+
+        return ObjectiveCOverlayPreparation(
+            baseTokensForIndex: baseTokensForIndex,
+            outputBaseTokens: outputBaseTokens,
+            preservedOverlayTokens: preservedOverlayTokens,
+            nonCodeRanges: nonCodeRanges(from: baseTokensForIndex, sourceLength: source.length),
+            tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source)
+        )
     }
 
     private static func mergedTokens(
@@ -894,10 +1195,15 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
 
     private static func isObjectiveCSemanticOverlayToken(
         _ token: SyntaxHighlightToken,
-        syntaxIDsAtSameRange: Set<EditorSourceSyntaxID>,
-        source: NSString
+        syntaxIDsAtSameRange: ObjectiveCSyntaxIDMask,
+        source: NSString,
+        strippingSemanticOverlaysIn stripRange: NSRange?
     ) -> Bool {
         guard token.language == .objectiveC || token.language == nil else {
+            return false
+        }
+        if let stripRange,
+           !rangesIntersect(token.range, stripRange) {
             return false
         }
         switch token.syntaxID {
@@ -933,33 +1239,50 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
         }
     }
 
-    private static func isObjectiveCIdentifier(_ text: String) -> Bool {
-        objectiveCIdentifierRegex.firstMatch(
-            in: text,
-            range: NSRange(location: 0, length: (text as NSString).length)
-        ) != nil
+    private static func isObjectiveCIdentifierRange(_ range: NSRange, in source: NSString) -> Bool {
+        guard range.location >= 0,
+              range.length > 0,
+              range.upperBound <= source.length,
+              isObjectiveCIdentifierStart(source.character(at: range.location))
+        else {
+            return false
+        }
+
+        var cursor = range.location + 1
+        while cursor < range.upperBound {
+            guard isObjectiveCIdentifierContinue(source.character(at: cursor)) else {
+                return false
+            }
+            cursor += 1
+        }
+        return true
+    }
+
+    private static func isObjectiveCIdentifierStart(_ unit: unichar) -> Bool {
+        unit == underscoreCodeUnit
+            || (uppercaseACodeUnit...uppercaseZCodeUnit).contains(unit)
+            || (lowercaseACodeUnit...lowercaseZCodeUnit).contains(unit)
+    }
+
+    private static func isObjectiveCIdentifierContinue(_ unit: unichar) -> Bool {
+        isObjectiveCIdentifierStart(unit) || (zeroCodeUnit...nineCodeUnit).contains(unit)
     }
 
     private static func deduplicated(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHighlightToken] {
-        var seen = Set<String>()
+        var seen = Set<ObjectiveCTokenKey>()
         var unique: [SyntaxHighlightToken] = []
         unique.reserveCapacity(tokens.count)
 
         for token in tokens {
-            let key = "\(rangeKey(token.range)):\(token.rawCaptureName)"
+            let key = ObjectiveCTokenKey(token)
             guard seen.insert(key).inserted else { continue }
             unique.append(token)
         }
         return unique
     }
 
-    private static func rangeKey(_ range: NSRange) -> String {
-        "\(range.location):\(range.length)"
-    }
-
-    private static let objectiveCIdentifierRegex = try! NSRegularExpression(
-        pattern: #"^[A-Za-z_][A-Za-z0-9_]*$"#
-    )
+    private static let structuralObjectiveCEditRegex = try! NSRegularExpression(
+        pattern: #"(?m)^\s*(?:@(?:class|end|implementation|interface|property|protocol)|typedef\b|[-+]\s*\(|[A-Za-z_][A-Za-z0-9_ <>,_*]*\([^;{}]*\)\s*[;{]|[A-Za-z_][A-Za-z0-9_ <>,_*]*\*+\s*[A-Za-z_][A-Za-z0-9_]*\s*;)|\bNS_(?:ENUM|OPTIONS)\b|^\s*#"#)
 
     private static let appleMacroRegex = try! NSRegularExpression(
         pattern: #"\b(?:NS_ASSUME_NONNULL_BEGIN|NS_ASSUME_NONNULL_END|NS_SWIFT_NAME|NS_ENUM|NS_OPTIONS)\b"#
@@ -1000,34 +1323,76 @@ enum ObjectiveCSyntaxOverlayTokenProvider {
     private static let parenthesizedSelfPrefixOperators: Set<Character> = [
         "+", "-", "*", "/", "%", "&", "|", "^"
     ]
+
+    private static let underscoreCodeUnit = unichar(95)
+    private static let uppercaseACodeUnit = unichar(65)
+    private static let uppercaseZCodeUnit = unichar(90)
+    private static let lowercaseACodeUnit = unichar(97)
+    private static let lowercaseZCodeUnit = unichar(122)
+    private static let zeroCodeUnit = unichar(48)
+    private static let nineCodeUnit = unichar(57)
+}
+
+private struct ObjectiveCTreeSymbolFacts {
+    var localTypes = Set<String>()
+    var localFunctions = Set<String>()
+    var localProperties = Set<String>()
+    var propertyDeclarations: [(name: String, range: NSRange)] = []
+    var selfMemberNameRangeKeys = Set<ObjectiveCRangeKey>()
+    var selfChainMemberNameRangeKeys = Set<ObjectiveCRangeKey>()
+    var selfChainCandidates: [(firstMember: String, fieldRange: NSRange)] = []
 }
 
 private struct ObjectiveCFileSymbolIndex {
     let localTypes: Set<String>
     let localFunctions: Set<String>
     let localProperties: Set<String>
-    private let propertyDeclarationNameRanges: [NSRange]
+    private let propertyDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>
+    private let selfMemberNameRangeKeys: Set<ObjectiveCRangeKey>
+    private let selfChainMemberNameRangeKeys: Set<ObjectiveCRangeKey>
 
-    init(source: NSString, tokens: [SyntaxHighlightToken]) {
-        var localTypes = Self.scanLocalTypes(source: source)
-        var localFunctions = Set<String>()
-        let propertyDeclarations = Self.scanLocalPropertyDeclarations(source: source, tokens: tokens)
-        let zeroArgumentMethodNameRanges = Self.zeroArgumentMethodNameRanges(in: source)
-        var localProperties = Set(propertyDeclarations.map { $0.name })
-
-        for token in tokens {
-            guard token.language == .objectiveC || token.language == nil,
-                  token.range.location >= 0,
-                  token.range.length > 0,
-                  token.range.upperBound <= source.length
-            else {
-                continue
+    init?(
+        source: NSString,
+        tokenIndex: ObjectiveCTokenIndex,
+        rootNode: Node? = nil,
+        allowsCancellation: Bool = false
+    ) {
+        if allowsCancellation, Task.isCancelled {
+            return nil
+        }
+        let treeFacts: ObjectiveCTreeSymbolFacts
+        if let rootNode {
+            guard let facts = Self.collectTreeSymbolFacts(
+                from: rootNode,
+                source: source,
+                tokenIndex: tokenIndex,
+                allowsCancellation: allowsCancellation
+            ) else {
+                return nil
             }
+            treeFacts = facts
+        } else {
+            treeFacts = ObjectiveCTreeSymbolFacts()
+        }
 
+        var localTypes = treeFacts.localTypes
+        var localFunctions = treeFacts.localFunctions
+        var propertyDeclarations = treeFacts.propertyDeclarations
+        let zeroArgumentMethodNameRanges = rootNode == nil ? Self.zeroArgumentMethodNameRanges(in: source) : []
+        var localProperties = treeFacts.localProperties
+        localProperties.formUnion(propertyDeclarations.map(\.name))
+
+        if rootNode == nil {
+            localTypes.formUnion(Self.scanLocalTypes(source: source))
+            propertyDeclarations.append(contentsOf: Self.scanLocalPropertyDeclarations(source: source, tokenIndex: tokenIndex))
+            localProperties.formUnion(propertyDeclarations.map(\.name))
+        }
+
+        for token in tokenIndex.identifierTokens {
+            if allowsCancellation, Task.isCancelled {
+                return nil
+            }
             let text = source.substring(with: token.range)
-            guard Self.isIdentifier(text) else {
-                continue
-            }
 
             switch token.syntaxID {
             case .identifierType:
@@ -1045,14 +1410,369 @@ private struct ObjectiveCFileSymbolIndex {
             }
         }
 
+        var selfChainMemberNameRangeKeys = treeFacts.selfChainMemberNameRangeKeys
+        for candidate in treeFacts.selfChainCandidates where localProperties.contains(candidate.firstMember) {
+            selfChainMemberNameRangeKeys.insert(ObjectiveCRangeKey(candidate.fieldRange))
+        }
+
         self.localTypes = localTypes
         self.localFunctions = localFunctions
         self.localProperties = localProperties
-        self.propertyDeclarationNameRanges = propertyDeclarations.map { $0.range }
+        self.propertyDeclarationNameRangeKeys = Set(propertyDeclarations.map { ObjectiveCRangeKey($0.range) })
+        self.selfMemberNameRangeKeys = treeFacts.selfMemberNameRangeKeys
+        self.selfChainMemberNameRangeKeys = selfChainMemberNameRangeKeys
     }
 
     func containsPropertyDeclarationNameRange(_ range: NSRange) -> Bool {
-        propertyDeclarationNameRanges.contains { NSEqualRanges($0, range) }
+        propertyDeclarationNameRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    func containsSelfMemberNameRange(_ range: NSRange) -> Bool {
+        selfMemberNameRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    func containsSelfChainMemberNameRange(_ range: NSRange) -> Bool {
+        selfChainMemberNameRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    private static func collectTreeSymbolFacts(
+        from rootNode: Node,
+        source: NSString,
+        tokenIndex: ObjectiveCTokenIndex,
+        allowsCancellation: Bool
+    ) -> ObjectiveCTreeSymbolFacts? {
+        var facts = ObjectiveCTreeSymbolFacts()
+        guard collectTreeSymbolFacts(
+            from: rootNode,
+            source: source,
+            tokenIndex: tokenIndex,
+            allowsCancellation: allowsCancellation,
+            into: &facts
+        ) else {
+            return nil
+        }
+        return facts
+    }
+
+    @discardableResult
+    private static func collectTreeSymbolFacts(
+        from node: Node,
+        source: NSString,
+        tokenIndex: ObjectiveCTokenIndex,
+        allowsCancellation: Bool,
+        into facts: inout ObjectiveCTreeSymbolFacts
+    ) -> Bool {
+        if allowsCancellation, Task.isCancelled {
+            return false
+        }
+        switch node.nodeType {
+        case "class_interface", "class_implementation", "protocol_declaration":
+            if let nameNode = primaryTypeIdentifier(in: node, source: source) {
+                facts.localTypes.insert(source.substring(with: nameNode.range))
+            }
+        case "class_declaration", "protocol_forward_declaration":
+            for nameNode in directIdentifierChildren(in: node) {
+                facts.localTypes.insert(source.substring(with: nameNode.range))
+            }
+        case "type_definition":
+            collectTypeDefinitionFacts(from: node, source: source, into: &facts)
+        case "enum_specifier", "struct_specifier", "union_specifier":
+            if let nameNode = node.child(byFieldName: "name") ?? directChild(in: node, nodeType: "type_identifier") {
+                facts.localTypes.insert(source.substring(with: nameNode.range))
+            }
+        case "property_declaration":
+            collectPropertyFacts(from: node, source: source, tokenIndex: tokenIndex, into: &facts)
+        case "method_declaration", "method_definition":
+            collectMethodFacts(from: node, source: source, into: &facts)
+        case "function_declarator":
+            collectFunctionDeclaratorFacts(from: node, source: source, into: &facts)
+        case "field_expression":
+            collectFieldExpressionFacts(from: node, source: source, into: &facts)
+        default:
+            break
+        }
+
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index) else { continue }
+            guard collectTreeSymbolFacts(
+                from: child,
+                source: source,
+                tokenIndex: tokenIndex,
+                allowsCancellation: allowsCancellation,
+                into: &facts
+            ) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func collectTypeDefinitionFacts(
+        from node: Node,
+        source: NSString,
+        into facts: inout ObjectiveCTreeSymbolFacts
+    ) {
+        for declarator in children(in: node, fieldName: "declarator") {
+            if let identifier = declaratorIdentifier(in: declarator, preferredTypes: ["type_identifier", "identifier"]) {
+                facts.localTypes.insert(source.substring(with: identifier.range))
+            }
+        }
+    }
+
+    private static func collectPropertyFacts(
+        from node: Node,
+        source: NSString,
+        tokenIndex: ObjectiveCTokenIndex,
+        into facts: inout ObjectiveCTreeSymbolFacts
+    ) {
+        guard let declarationRange = propertyStatementRange(startingAt: node.range.location, in: source) else {
+            return
+        }
+        let declaration = source.substring(with: declarationRange) as NSString
+        guard propertyDeclarationIsComplete(declaration),
+              !propertyDeclarationAppearsToSwallowFollowingDeclaration(in: declaration) else {
+            return
+        }
+
+        var didCollectFromToken = false
+        for range in tokenIndex.declarationOtherIdentifierRanges(in: declarationRange) {
+            let name = source.substring(with: range)
+            facts.localProperties.insert(name)
+            facts.propertyDeclarations.append((name: name, range: range))
+            didCollectFromToken = true
+        }
+
+        guard !didCollectFromToken else {
+            return
+        }
+        guard let relativeNameRange = propertyDeclaredNameRange(in: declaration) else {
+            return
+        }
+        let range = NSRange(
+            location: declarationRange.location + relativeNameRange.location,
+            length: relativeNameRange.length
+        )
+        guard range.upperBound <= source.length,
+              isIdentifierRange(range, in: source) else {
+            return
+        }
+        let name = source.substring(with: range)
+        facts.localProperties.insert(name)
+        facts.propertyDeclarations.append((name: name, range: range))
+    }
+
+    private static func propertyStatementRange(startingAt start: Int, in source: NSString) -> NSRange? {
+        guard start >= 0, start < source.length else {
+            return nil
+        }
+        var cursor = start
+        while cursor < source.length {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == ";" {
+                return NSRange(location: start, length: cursor - start + 1)
+            }
+            if character == "\n" || character == "\r" {
+                let nextLineStart = cursor + 1
+                if nextLineStart < source.length {
+                    var lookahead = nextLineStart
+                    while lookahead < source.length,
+                          isWhitespace(source.substring(with: NSRange(location: lookahead, length: 1))) {
+                        lookahead += 1
+                    }
+                    if lookahead < source.length {
+                        let next = source.substring(with: NSRange(location: lookahead, length: 1))
+                        if next == "@" || next == "-" || next == "+" {
+                            return nil
+                        }
+                    }
+                }
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func propertyDeclarationIsComplete(_ declaration: NSString) -> Bool {
+        var cursor = declaration.length - 1
+        while cursor >= 0 {
+            let character = declaration.substring(with: NSRange(location: cursor, length: 1))
+            if isWhitespace(character) {
+                if cursor == 0 {
+                    return false
+                }
+                cursor -= 1
+                continue
+            }
+            return character == ";"
+        }
+        return false
+    }
+
+    private static func collectMethodFacts(
+        from node: Node,
+        source: NSString,
+        into facts: inout ObjectiveCTreeSymbolFacts
+    ) {
+        let directIdentifiers = directIdentifierChildren(in: node)
+        guard directIdentifiers.count == 1,
+              !hasDirectChild(in: node, nodeType: "method_parameter"),
+              !hasDirectChild(in: node, nodeType: "keyword_declarator"),
+              let nameNode = directIdentifiers.first
+        else {
+            return
+        }
+        facts.localProperties.insert(source.substring(with: nameNode.range))
+    }
+
+    private static func collectFunctionDeclaratorFacts(
+        from node: Node,
+        source: NSString,
+        into facts: inout ObjectiveCTreeSymbolFacts
+    ) {
+        guard !hasAncestor(node, nodeTypes: [
+            "property_declaration",
+            "method_declaration",
+            "method_definition",
+            "method_parameter",
+            "parameter_declaration"
+        ]),
+              let declarator = node.child(byFieldName: "declarator"),
+              let identifier = declaratorIdentifier(in: declarator, preferredTypes: ["identifier"]) else {
+            return
+        }
+        facts.localFunctions.insert(source.substring(with: identifier.range))
+    }
+
+    private static func collectFieldExpressionFacts(
+        from node: Node,
+        source: NSString,
+        into facts: inout ObjectiveCTreeSymbolFacts
+    ) {
+        guard let fieldNode = node.child(byFieldName: "field"),
+              let argumentNode = node.child(byFieldName: "argument") else {
+            return
+        }
+
+        if expressionIsBareSelf(argumentNode, source: source) {
+            facts.selfMemberNameRangeKeys.insert(ObjectiveCRangeKey(fieldNode.range))
+        } else if let firstMember = firstSelfRootMemberName(in: argumentNode, source: source) {
+            facts.selfChainCandidates.append((firstMember: firstMember, fieldRange: fieldNode.range))
+        }
+    }
+
+    private static func primaryTypeIdentifier(in node: Node, source: NSString) -> Node? {
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index),
+                  child.nodeType == "identifier",
+                  node.fieldNameForChild(at: index) != "superclass",
+                  node.fieldNameForChild(at: index) != "category",
+                  child.range.upperBound <= source.length
+            else {
+                continue
+            }
+            return child
+        }
+        return nil
+    }
+
+    private static func directIdentifierChildren(in node: Node) -> [Node] {
+        var identifiers: [Node] = []
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index),
+                  child.nodeType == "identifier" || child.nodeType == "type_identifier"
+            else {
+                continue
+            }
+            identifiers.append(child)
+        }
+        return identifiers
+    }
+
+    private static func children(in node: Node, fieldName: String) -> [Node] {
+        var children: [Node] = []
+        for index in 0..<node.childCount {
+            guard node.fieldNameForChild(at: index) == fieldName,
+                  let child = node.child(at: index)
+            else {
+                continue
+            }
+            children.append(child)
+        }
+        return children
+    }
+
+    private static func directChild(in node: Node, nodeType: String) -> Node? {
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index),
+                  child.nodeType == nodeType
+            else {
+                continue
+            }
+            return child
+        }
+        return nil
+    }
+
+    private static func hasDirectChild(in node: Node, nodeType: String) -> Bool {
+        directChild(in: node, nodeType: nodeType) != nil
+    }
+
+    private static func declaratorIdentifier(in node: Node, preferredTypes: Set<String>) -> Node? {
+        if let nodeType = node.nodeType,
+           preferredTypes.contains(nodeType) {
+            return node
+        }
+        if let declarator = node.child(byFieldName: "declarator"),
+           let identifier = declaratorIdentifier(in: declarator, preferredTypes: preferredTypes) {
+            return identifier
+        }
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index),
+                  let identifier = declaratorIdentifier(in: child, preferredTypes: preferredTypes)
+            else {
+                continue
+            }
+            return identifier
+        }
+        return nil
+    }
+
+    private static func expressionIsBareSelf(_ node: Node, source: NSString) -> Bool {
+        guard node.range.upperBound <= source.length else {
+            return false
+        }
+        return source.substring(with: node.range)
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "self"
+    }
+
+    private static func firstSelfRootMemberName(in node: Node, source: NSString) -> String? {
+        guard node.nodeType == "field_expression",
+              let argument = node.child(byFieldName: "argument"),
+              let field = node.child(byFieldName: "field"),
+              field.range.upperBound <= source.length
+        else {
+            return nil
+        }
+        if expressionIsBareSelf(argument, source: source) {
+            return source.substring(with: field.range)
+        }
+        return firstSelfRootMemberName(in: argument, source: source)
+    }
+
+    private static func hasAncestor(_ node: Node, nodeTypes: Set<String>) -> Bool {
+        var current = node.parent
+        while let node = current {
+            if let nodeType = node.nodeType,
+               nodeTypes.contains(nodeType) {
+                return true
+            }
+            current = node.parent
+        }
+        return false
+    }
+
+    private static func range(_ outer: NSRange, contains inner: NSRange) -> Bool {
+        inner.location >= outer.location && inner.upperBound <= outer.upperBound
     }
 
     private static func scanLocalTypes(source: NSString) -> Set<String> {
@@ -1123,7 +1843,7 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static func scanLocalPropertyDeclarations(
         source: NSString,
-        tokens: [SyntaxHighlightToken]
+        tokenIndex: ObjectiveCTokenIndex
     ) -> [(name: String, range: NSRange)] {
         let string = source as String
         let fullRange = NSRange(location: 0, length: source.length)
@@ -1131,7 +1851,7 @@ private struct ObjectiveCFileSymbolIndex {
 
         for match in propertyDeclarationRegex.matches(in: string, range: fullRange) {
             let propertyKeywordRange = NSRange(location: match.range.location, length: "@property".count)
-            guard isCodeTokenRange(propertyKeywordRange, tokens: tokens, source: source) else {
+            guard tokenIndex.containsPropertyKeywordRange(propertyKeywordRange) else {
                 continue
             }
 
@@ -1149,40 +1869,12 @@ private struct ObjectiveCFileSymbolIndex {
             let name = source.substring(with: range)
             if isIdentifier(name),
                !typedefIgnoredIdentifiers.contains(name),
-               isCodeIdentifierRange(range, tokens: tokens, source: source) {
+               tokenIndex.containsIdentifierRange(range) {
                 declarations.append((name: name, range: range))
             }
         }
 
         return declarations
-    }
-
-    private static func isCodeTokenRange(
-        _ range: NSRange,
-        tokens: [SyntaxHighlightToken],
-        source: NSString
-    ) -> Bool {
-        tokens.contains { token in
-            guard NSEqualRanges(token.range, range),
-                  (token.language == .objectiveC || token.language == nil) else {
-                return false
-            }
-            return source.substring(with: token.range) == "@property"
-        }
-    }
-
-    private static func isCodeIdentifierRange(
-        _ range: NSRange,
-        tokens: [SyntaxHighlightToken],
-        source: NSString
-    ) -> Bool {
-        tokens.contains { token in
-            guard NSEqualRanges(token.range, range),
-                  (token.language == .objectiveC || token.language == nil) else {
-                return false
-            }
-            return isIdentifier(source.substring(with: token.range))
-        }
     }
 
     private static func propertyDeclaredNameRange(in declaration: NSString) -> NSRange? {
@@ -1578,10 +2270,36 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func isIdentifier(_ text: String) -> Bool {
-        identifierRegex.firstMatch(
-            in: text,
-            range: NSRange(location: 0, length: (text as NSString).length)
-        ) != nil
+        let nsText = text as NSString
+        return isIdentifierRange(NSRange(location: 0, length: nsText.length), in: nsText)
+    }
+
+    static func isIdentifierRange(_ range: NSRange, in source: NSString) -> Bool {
+        guard range.location >= 0,
+              range.length > 0,
+              range.upperBound <= source.length,
+              isASCIIIdentifierStart(source.character(at: range.location))
+        else {
+            return false
+        }
+        var cursor = range.location + 1
+        while cursor < range.upperBound {
+            guard isASCIIIdentifierContinue(source.character(at: cursor)) else {
+                return false
+            }
+            cursor += 1
+        }
+        return true
+    }
+
+    private static func isASCIIIdentifierStart(_ unit: unichar) -> Bool {
+        unit == 95
+            || (65...90).contains(unit)
+            || (97...122).contains(unit)
+    }
+
+    private static func isASCIIIdentifierContinue(_ unit: unichar) -> Bool {
+        isASCIIIdentifierStart(unit) || (48...57).contains(unit)
     }
 
     private static let localTypeRegexes: [NSRegularExpression] = [

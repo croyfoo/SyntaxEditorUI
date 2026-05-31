@@ -125,8 +125,102 @@ let package = Package(
             name: "SyntaxEditorUI",
             dependencies: [
                 "SyntaxEditorCore",
+                "SyntaxEditorUICommon",
+                "SyntaxEditorUISwiftUI",
+                .target(name: "SyntaxEditorUIAppKit", condition: .when(platforms: [.macOS])),
+                .target(name: "SyntaxEditorUIUIKit", condition: .when(platforms: [.iOS])),
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+            ]
+        ),
+        .target(
+            name: "SyntaxEditorUICommon",
+            dependencies: [
+                "SyntaxEditorCore",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+            ]
+        ),
+        .target(
+            name: "SyntaxEditorUIAppKit",
+            dependencies: [
+                "SyntaxEditorCore",
+                "SyntaxEditorUICommon",
                 .product(name: "ObservationBridge", package: "observationbridge"),
             ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+            ]
+        ),
+        .target(
+            name: "SyntaxEditorUIUIKit",
+            dependencies: [
+                "SyntaxEditorCore",
+                "SyntaxEditorUICommon",
+                .product(name: "ObservationBridge", package: "observationbridge"),
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+            ]
+        ),
+        .target(
+            name: "SyntaxEditorUISwiftUI",
+            dependencies: [
+                "SyntaxEditorCore",
+                .target(name: "SyntaxEditorUIAppKit", condition: .when(platforms: [.macOS])),
+                .target(name: "SyntaxEditorUIUIKit", condition: .when(platforms: [.iOS])),
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                .defaultIsolation(nil),
+                .strictMemorySafety(),
+            ]
+        ),
+        .testTarget(
+            name: "SyntaxEditorUICommonTests",
+            dependencies: [
+                "SyntaxEditorUICommon",
+            ]
+        ),
+        .testTarget(
+            name: "SyntaxEditorUIAppKitTests",
+            dependencies: [
+                "SyntaxEditorUIAppKit",
+                "SyntaxEditorUITestSupport",
+            ]
+        ),
+        .testTarget(
+            name: "SyntaxEditorUIUIKitTests",
+            dependencies: [
+                "SyntaxEditorUIUIKit",
+                "SyntaxEditorUITestSupport",
+            ]
+        ),
+        .testTarget(
+            name: "SyntaxEditorUISwiftUITests",
+            dependencies: [
+                "SyntaxEditorUISwiftUI",
+                "SyntaxEditorUITestSupport",
+            ]
+        ),
+        .target(
+            name: "SyntaxEditorUITestSupport",
+            dependencies: [
+                "SyntaxEditorCore",
+                "SyntaxEditorUI",
+                .product(name: "ObservationBridge", package: "observationbridge"),
+            ],
+            path: "Tests/SyntaxEditorUITestSupport",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
                 .defaultIsolation(nil),
@@ -149,6 +243,9 @@ let package = Package(
             name: "SyntaxEditorUITests",
             dependencies: [
                 "SyntaxEditorUI",
+                "SyntaxEditorUIAppKit",
+                "SyntaxEditorUIUIKit",
+                "SyntaxEditorUITestSupport",
                 .product(name: "ObservationBridge", package: "observationbridge"),
             ]
         ),

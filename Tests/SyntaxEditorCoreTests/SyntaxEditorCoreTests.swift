@@ -759,6 +759,14 @@ struct SyntaxEditorCoreTests {
         #expect(index.horizontalDocumentWidth(columnWidth: 2, textContainerInset: 10, lineFragmentPadding: 5) == 260)
     }
 
+    @Test("LineMetricsIndex estimates wrapped visual line counts")
+    func lineMetricsIndexEstimatesWrappedLineCount() {
+        let index = LineMetricsIndex(source: "1234567890\nabc\n", tabWidth: 4)
+
+        #expect(index.estimatedWrappedLineCount(maxColumnsPerLine: 4) == 5)
+        #expect(index.estimatedWrappedLineCount(maxColumnsPerLine: 20) == 3)
+    }
+
     @Test("LineMetricsIndex updates edited line ranges without full rebuild")
     func lineMetricsIndexIncrementalEdits() {
         var source = "abc\nabcdef"
@@ -5772,6 +5780,268 @@ struct SyntaxHighlighterEngineTests {
         #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
     }
 
+    @Test("SyntaxHighlighterEngine keeps Swift safe reference edits local")
+    func highlighterKeepsSwiftSafeReferenceEditsLocal() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item + 1
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "item + 1", with: "item + 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "item",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return item + 2"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine treats standalone Swift brace edits as structural")
+    func highlighterTreatsStandaloneSwiftBraceEditsAsStructural() {
+        let source = """
+        func render() -> Int
+        {
+            return 1
+        }
+        """
+        let nsSource = source as NSString
+        let openBraceRange = nsSource.range(of: "{")
+        let closeBraceRange = nsSource.range(of: "}", options: .backwards)
+
+        #expect(SwiftSyntaxOverlayTokenProvider.semanticTargetRange(openBraceRange, in: nsSource) == nil)
+        #expect(SwiftSyntaxOverlayTokenProvider.semanticTargetRange(closeBraceRange, in: nsSource) == nil)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Swift initializer edits local")
+    func highlighterKeepsSwiftInitializerEditsLocal() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item + 1
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "let item = 1", with: "let item = 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Swift semantic index after same-length closure parameter edits")
+    func highlighterRebuildsSwiftSemanticIndexAfterSameLengthClosureParameterEdits() async throws {
+        let source = """
+        func render(_ values: [Double]) -> [Double] {
+            values.map { foo in
+                foo + 1
+            }
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "foo", with: "sin")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine re-queries Swift identifiers that become keywords")
+    func highlighterRequeriesSwiftIdentifiersThatBecomeKeywords() async throws {
+        let source = "let value = tru\n"
+        let updatedSource = "let value = true\n"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+        let keywordRange = (updatedSource as NSString).range(of: "true")
+
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: keywordRange, syntaxID: .keyword, language: .swift)
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Swift semantic index after source-length edits")
+    func highlighterRebuildsSwiftSemanticIndexAfterSourceLengthEdits() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item + 1
+        }
+        """
+        let prefix = "// inserted comment\n"
+        let prefixedSource = prefix + source
+        let updatedSource = prefixedSource.replacingOccurrences(of: "item + 1", with: "item + 2")
+        let referenceMutation = try #require(TextMutation.diff(from: prefixedSource, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: prefixedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: prefixedSource,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(referenceMutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "item",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return item + 2"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine removes Swift semantic overlays after declaration syntax removal")
+    func highlighterRemovesSwiftSemanticOverlaysAfterDeclarationSyntaxRemoval() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item + 1
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "let item = 1", with: "item = 1")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+        let nsSource = updatedSource as NSString
+        let returnRange = nsSource.range(of: "return item + 1")
+        let itemRange = nsSource.range(of: "item", options: [], range: returnRange)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: itemRange, syntaxID: .identifierVariable, language: .swift)
+        } == false)
+    }
+
+    @Test("SyntaxHighlighterEngine uses Swift parser invalidation beyond semantic line ranges")
+    func highlighterUsesSwiftParserInvalidationBeyondSemanticLineRanges() async throws {
+        let source = """
+        let first = 1
+        let second = 2
+        let third = 3
+        """
+        let updatedSource = source.replacingOccurrences(of: "let second = 2", with: "/* let second = 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine removes stale Swift overlays after identifier typing edits")
+    func highlighterRemovesStaleSwiftOverlaysAfterIdentifierTypingEdits() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "return item", with: "return items")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(
+            syntaxIDs(
+                in: incremental.tokens,
+                source: updatedSource,
+                text: "items",
+                inOccurrenceOf: "return items"
+            ).last != .identifierVariable
+        )
+    }
+
     @Test("SyntaxHighlighterEngine reapplies Swift semantic overlays after distant declaration edits")
     func highlighterReappliesSwiftSemanticOverlaysAfterDistantDeclarationEdits() async throws {
         let source = """
@@ -5813,6 +6083,38 @@ struct SyntaxHighlighterEngineTests {
             inOccurrenceOf: "return value"
         )
         #expect(valueReference.styleKeys.first == "editor.syntax.identifier.variable")
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Swift semantic index after modifier declaration edits")
+    func highlighterRebuildsSwiftSemanticIndexAfterModifierDeclarationEdits() async throws {
+        let source = """
+        private let item = 1
+
+        func render() -> Int {
+            return item
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "private let item", with: "private let value")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+        let nsUpdatedSource = updatedSource as NSString
+        let returnLineRange = nsUpdatedSource.range(of: "return item")
+        let returnItemRange = nsUpdatedSource.range(of: "item", options: [], range: returnLineRange)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: returnItemRange, syntaxID: .identifierVariable, language: .swift)
+        } == false)
     }
 
     @Test("SyntaxHighlighterEngine strips stale Swift system macro overlays after local macro declarations")
@@ -7418,11 +7720,11 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(languageChange.tokens, fullJSON.tokens))
     }
 
-    @Test("SyntaxHighlighterEngine resets when mutation is not based on the current session source")
-    func highlighterResetsWhenMutationBaseDoesNotMatchSessionSource() async throws {
-        let sessionSource = "const value = 1;"
-        let stalePreviousSource = "let value = 1;"
-        let updatedSource = "let value = 2;"
+    @Test("SyntaxHighlighterEngine coalesces stale mutations against the current session source")
+    func highlighterCoalescesMutationBaseMismatchAgainstSessionSource() async throws {
+        let sessionSource = "const value = 1;\nconst other = 2;"
+        let stalePreviousSource = "const value = 2;\nconst other = 2;"
+        let updatedSource = "const value = 3;\nconst other = 2;"
         let staleMutation = try #require(TextMutation.diff(from: stalePreviousSource, to: updatedSource))
         let engine = SyntaxHighlighterEngine()
 
@@ -7437,7 +7739,171 @@ struct SyntaxHighlighterEngineTests {
             .reset(source: updatedSource, language: SyntaxLanguage.javascript, revision: 2)
 
         #expect(highlightTokensMatch(staleUpdate.tokens, full.tokens))
-        #expect(staleUpdate.refreshRange == NSRange(location: 0, length: updatedSource.utf16.count))
+        #expect(staleUpdate.refreshRange.location == 0)
+        #expect(staleUpdate.refreshRange.length < updatedSource.utf16.count)
+    }
+
+    @Test("SyntaxHighlighterEngine survives repeated paste-sized Swift updates")
+    func highlighterSurvivesRepeatedPasteSizedSwiftUpdates() async {
+        let engine = SyntaxHighlighterEngine()
+        var source = "struct PasteTarget {\n"
+        var result = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 1)
+
+        for index in 0..<8 {
+            let insertion = String(
+                repeating: "    let value\(index) = max(1, 2)\n",
+                count: 80
+            )
+            let mutation = SyntaxHighlightMutation(
+                location: source.utf16.count,
+                length: 0,
+                replacement: insertion
+            )
+            source += insertion
+            result = await engine.update(
+                source: source,
+                language: SyntaxLanguage.swift,
+                mutation: mutation,
+                revision: index + 2
+            )
+            #expect(result.source == source)
+            #expect(result.tokens.allSatisfy { $0.range.upperBound <= source.utf16.count })
+        }
+
+        source += "}\n"
+        result = await engine.update(
+            source: source,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(location: source.utf16.count - 2, length: 0, replacement: "}\n"),
+            revision: 20
+        )
+        let full = await SyntaxHighlighterEngine()
+            .reset(source: source, language: SyntaxLanguage.swift, revision: 20)
+
+        #expect(highlightTokensMatch(result.tokens, full.tokens))
+    }
+
+    @Test("SyntaxHighlighterEngine keeps switch-heavy Swift paste updates finite")
+    func highlighterKeepsSwitchHeavySwiftPasteUpdatesFinite() async {
+        let engine = SyntaxHighlighterEngine()
+        var source = """
+        struct PasteTarget {
+            func render(_ input: Int) {
+                switch input {
+                default:
+                    break
+                }
+            }
+        }
+
+        """
+        var result = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 1)
+
+        for pasteIndex in 0..<4 {
+            let insertion = (0..<60).map { caseIndex in
+                let valueIndex = pasteIndex * 60 + caseIndex
+                return """
+                    case \(valueIndex):
+                        let value\(valueIndex) = input + \(valueIndex)
+                        _ = value\(valueIndex)
+
+                """
+            }.joined()
+            let insertionLocation = (source as NSString).range(of: "        default:").location
+            let mutation = SyntaxHighlightMutation(
+                location: insertionLocation,
+                length: 0,
+                replacement: insertion
+            )
+            source = (source as NSString).replacingCharacters(
+                in: NSRange(location: insertionLocation, length: 0),
+                with: insertion
+            )
+            result = await engine.update(
+                source: source,
+                language: SyntaxLanguage.swift,
+                mutation: mutation,
+                revision: pasteIndex + 2
+            )
+
+            #expect(result.source == source)
+            #expect(result.tokens.allSatisfy { $0.range.upperBound <= source.utf16.count })
+        }
+
+        let full = await SyntaxHighlighterEngine()
+            .reset(source: source, language: SyntaxLanguage.swift, revision: 20)
+        #expect(highlightTokensMatch(result.tokens, full.tokens))
+    }
+
+    @Test("Swift semantic overlay exits before indexing cancelled paste work")
+    func swiftSemanticOverlayExitsBeforeIndexingCancelledPasteWork() async {
+        let source = String(
+            repeating: """
+            struct CancelledPaste {
+                func render(_ input: Int) {
+                    switch input {
+                    case 0:
+                        let value = input + 1
+                        _ = value
+                    default:
+                        break
+                    }
+                }
+            }
+
+            """,
+            count: 400
+        )
+        let task = Task {
+            var state: SwiftSemanticOverlayState?
+            return SwiftSyntaxOverlayTokenProvider.mergingOverlayResult(
+                tokens: [],
+                source: source,
+                state: &state
+            )
+        }
+        task.cancel()
+
+        let result = await task.value
+        #expect(result.isCancelled)
+        #expect(result.tokens.isEmpty)
+    }
+
+    @Test("SyntaxHighlighterEngine does not cache cancelled Swift reset tokens")
+    func highlighterDoesNotCacheCancelledSwiftResetTokens() async throws {
+        let source = String(
+            repeating: """
+            struct CancelledReset {
+                func render(_ input: Int) -> Int {
+                    let value = input + 1
+                    return value
+                }
+            }
+
+            """,
+            count: 500
+        )
+        let engine = SyntaxHighlighterEngine()
+        let resetTask = Task {
+            await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 1)
+        }
+        resetTask.cancel()
+        let cancelled = await resetTask.value
+
+        #expect(cancelled.tokens.isEmpty)
+
+        let updatedSource = source.replacingOccurrences(of: "input + 1", with: "input + 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incremental = await engine.update(
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation),
+            revision: 2
+        )
+        let full = await SyntaxHighlighterEngine()
+            .reset(source: updatedSource, language: SyntaxLanguage.swift, revision: 3)
+
+        #expect(incremental.tokens == full.tokens)
     }
 
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")
@@ -7468,6 +7934,23 @@ struct SyntaxHighlighterEngineTests {
             token.range.location >= 0 &&
                 token.range.length > 0 &&
                 token.range.upperBound <= sourceLength
+            })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps parser chunks UTF-16 boundary safe")
+    func highlighterKeepsParserChunksUTF16BoundarySafe() async {
+        let prefix = "// " + String(repeating: "a", count: 1020)
+        #expect(prefix.utf16.count == 1023)
+
+        let source = "\(prefix)😀\nlet value = 1\n"
+        let tokens = await SyntaxHighlighterEngine().reset(
+            source: source,
+            language: SyntaxLanguage.swift
+        ).tokens
+        let keywordRange = (source as NSString).range(of: "let")
+
+        #expect(tokens.contains { token in
+            token.syntaxID == .keyword && token.range == keywordRange
         })
     }
 
@@ -8985,6 +9468,353 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(incremental.tokens == full.tokens)
         #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C property-heavy reference edits equal to full reset")
+    func highlighterKeepsObjectiveCPropertyHeavyReferenceEditsEqualToFullReset() async throws {
+        let properties = (0..<120)
+            .map { "@property(nonatomic, copy) NSString *name\($0);" }
+            .joined(separator: "\n")
+        let source = """
+        @interface Heavy : NSObject
+        \(properties)
+        @end
+
+        @implementation Heavy
+        - (NSUInteger)length
+        {
+            NSUInteger value = self.name42.length + 1;
+            return value;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(of: "self.name42.length + 1", with: "self.name42.length + 2")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "name42",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name42.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name42.length"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after same-length property declaration edits")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterSameLengthPropertyDeclarationEdits() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic) NSInteger foo;
+        @end
+
+        @implementation Sample
+        - (NSInteger)value
+        {
+            return self.foo;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(of: "foo", with: "bar")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after source-length edits")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterSourceLengthEdits() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length + 1;
+        }
+        @end
+        """
+        let prefix = "// inserted comment\n"
+        let prefixedSource = prefix + source
+        let updatedSource = prefixedSource.replacingOccurrences(of: "self.name.length + 1", with: "self.name.length + 2")
+        let referenceMutation = try #require(TextMutation.diff(from: prefixedSource, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: prefixedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: prefixedSource,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(referenceMutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.name.length"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine removes Objective-C semantic overlays after property declaration removal")
+    func highlighterRemovesObjectiveCSemanticOverlaysAfterPropertyDeclarationRemoval() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length + 1;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "@property(nonatomic, copy) NSString *name;\n",
+            with: ""
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+        let nsSource = updatedSource as NSString
+        let returnRange = nsSource.range(of: "self.name.length")
+        let nameRange = nsSource.range(of: "name", options: [], range: returnRange)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: nameRange, syntaxID: .identifierVariable, language: .objectiveC)
+        } == false)
+    }
+
+    @Test("SyntaxHighlighterEngine uses Objective-C parser invalidation beyond semantic line ranges")
+    func highlighterUsesObjectiveCParserInvalidationBeyondSemanticLineRanges() async throws {
+        let source = """
+        int first = 1;
+        int second = 2;
+        int third = 3;
+        """
+        let updatedSource = source.replacingOccurrences(of: "int second = 2;", with: "/* int second = 2;")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine replaces Objective-C semantic overlays inside partial target range")
+    func highlighterReplacesObjectiveCSemanticOverlaysInsidePartialTargetRange() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @property(nonatomic, copy) NSString *title;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length + self.title.length;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "self.name.length",
+            with: "self.title.length",
+            options: [],
+            range: source.range(of: "self.name.length")
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "title",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return self.title.length"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine incrementally updates Objective-C reference sample like a full reset")
+    func highlighterIncrementallyUpdatesObjectiveCReferenceSampleLikeFullReset() async throws {
+        let source = try referenceSampleText(named: "Reference.m")
+        let updatedSource = source.replacingOccurrences(
+            of: "ReferenceTokenBase + 1",
+            with: "ReferenceTokenBase + 2",
+            options: [],
+            range: source.range(of: "ReferenceTokenBase + 1")
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C type shadows after declaration removal")
+    func highlighterStripsStaleObjectiveCTypeShadowsAfterDeclarationRemoval() async throws {
+        let source = """
+        @interface NSString : NSObject
+        @end
+
+        void run(void) {
+            NSString *value = nil;
+        }
+        """
+        let removedDeclaration = """
+        @interface NSString : NSObject
+        @end
+
+        """
+        let updatedSource = source.replacingOccurrences(of: removedDeclaration, with: "")
+        let mutation = SyntaxHighlightMutation(
+            location: 0,
+            length: (removedDeclaration as NSString).length,
+            replacement: ""
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        let systemType = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSString *value"
+        )
+        #expect(systemType.styleKeys.first == "editor.syntax.identifier.type.system")
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after type declaration rename")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterTypeDeclarationRename() async throws {
+        let source = """
+        @interface NSString : NSObject
+        @end
+
+        void run(void) {
+            NSString *value = nil;
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "@interface NSString", with: "@interface NSStringShadow")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        let systemType = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSString *value"
+        )
+        #expect(systemType.styleKeys.first == "editor.syntax.identifier.type.system")
     }
 
     @Test("SyntaxHighlighterEngine highlights HTML root and embedded languages")

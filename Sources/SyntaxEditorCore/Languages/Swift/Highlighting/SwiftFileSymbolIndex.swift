@@ -115,6 +115,70 @@ struct SwiftFileSymbolIndex {
         var operatorNameRanges: [NSRange] = []
         var enumCaseNameRanges: [NSRange] = []
         var genericParameterEntries: [(nameRange: NSRange, scopeRange: NSRange)] = []
+        var switchCaseClauseRanges: [NSRange] = []
+        var isCancelled = false
+    }
+
+    private struct ContainmentRangeIndex {
+        private let ranges: [NSRange]
+        private let startLocations: [Int]
+        private let parents: [Int?]
+
+        init(ranges unsortedRanges: [NSRange]) {
+            ranges = unsortedRanges
+                .filter { $0.location != NSNotFound && $0.length > 0 }
+                .sorted {
+                    if $0.location == $1.location {
+                        return $0.length > $1.length
+                    }
+                    return $0.location < $1.location
+                }
+            startLocations = ranges.map(\.location)
+
+            var parentIndexes = Array<Int?>(repeating: nil, count: ranges.count)
+            var stack: [Int] = []
+            for index in ranges.indices {
+                let range = ranges[index]
+                while let last = stack.last, ranges[last].upperBound < range.upperBound {
+                    stack.removeLast()
+                }
+                parentIndexes[index] = stack.last
+                stack.append(index)
+            }
+            parents = parentIndexes
+        }
+
+        func innermostRange(containing range: NSRange, within outerRange: NSRange) -> NSRange? {
+            guard !ranges.isEmpty,
+                  let initialIndex = lastRangeStartingBeforeOrAt(range.location)
+            else {
+                return nil
+            }
+
+            var index: Int? = initialIndex
+            while let currentIndex = index {
+                let candidate = ranges[currentIndex]
+                if SwiftFileSymbolIndex.range(candidate, contains: range) {
+                    return SwiftFileSymbolIndex.range(outerRange, contains: candidate) ? candidate : nil
+                }
+                index = parents[currentIndex]
+            }
+            return nil
+        }
+
+        private func lastRangeStartingBeforeOrAt(_ location: Int) -> Int? {
+            var lowerBound = 0
+            var upperBound = startLocations.count
+            while lowerBound < upperBound {
+                let middle = (lowerBound + upperBound) / 2
+                if startLocations[middle] <= location {
+                    lowerBound = middle + 1
+                } else {
+                    upperBound = middle
+                }
+            }
+            return lowerBound > 0 ? lowerBound - 1 : nil
+        }
     }
 
     private let source: NSString
@@ -129,44 +193,62 @@ struct SwiftFileSymbolIndex {
     private var typedValuesByName: [String: [TypedValue]] = [:]
     private var enumCasesByName: [String: [Entry]] = [:]
     private var genericParametersByName: [String: [Entry]] = [:]
-    private var braceRanges: [NSRange] = []
+    private var braceRangeIndex = ContainmentRangeIndex(ranges: [])
+    private var switchCaseClauseRanges: [NSRange] = []
+    private var switchCaseClauseRangeIndex = ContainmentRangeIndex(ranges: [])
     private var extensionScopeCandidates: [(qualifiedName: String, bodyRange: NSRange)] = []
+    private(set) var isCancelled = false
 
     init(source: NSString, tokens: [SyntaxHighlightToken], rootNode: Node? = nil) {
         self.source = source
         self.maskedSource = Self.maskedSource(from: source, tokens: tokens)
-        self.braceRanges = Self.braceRanges(from: rootNode, in: maskedSource)
+        self.braceRangeIndex = ContainmentRangeIndex(ranges: Self.braceRanges(from: rootNode, in: maskedSource))
 
         let treeFacts = rootNode.map { collectTreeDeclarationFacts(from: $0) }
+        if treeFacts?.isCancelled == true || Task.isCancelled {
+            isCancelled = true
+            return
+        }
         if let treeFacts {
             typeDeclarations = treeFacts.typeDeclarations
             functionDeclarations = treeFacts.functionDeclarations
             functionScopes = treeFacts.functionScopes
             extensionScopeCandidates = treeFacts.extensionScopeCandidates
+            switchCaseClauseRanges = treeFacts.switchCaseClauseRanges
+            switchCaseClauseRangeIndex = ContainmentRangeIndex(ranges: switchCaseClauseRanges)
         } else {
             collectTypeDeclarationCandidates()
+            if finishIfCancelled() { return }
             collectFunctionLikeDeclarations()
+            if finishIfCancelled() { return }
             extensionScopeCandidates = regexExtensionScopeCandidates()
         }
 
         collectExtensionScopes()
+        if finishIfCancelled() { return }
         collectTypeDeclarations()
+        if finishIfCancelled() { return }
         if let treeFacts {
             collectTypeAliasDeclarations(from: treeFacts.typeAliasNameRanges)
         } else {
             collectTypeAliasDeclarations()
         }
+        if finishIfCancelled() { return }
         collectFunctionDeclarationEntries()
+        if finishIfCancelled() { return }
         if treeFacts != nil {
             collectFunctionParameters()
         }
+        if finishIfCancelled() { return }
         if let treeFacts {
             collectMacroDeclarations(from: treeFacts.macroNameRanges)
             collectOperatorDeclarations(from: treeFacts.operatorNameRanges)
         } else {
             collectMacroDeclarations()
         }
+        if finishIfCancelled() { return }
         collectPatternBoundLocals()
+        if finishIfCancelled() { return }
         if let treeFacts {
             collectClosureParameters(from: treeFacts.closureRanges)
             collectValueDeclarations(from: treeFacts.valueDeclarations)
@@ -174,6 +256,7 @@ struct SwiftFileSymbolIndex {
             collectClosureParameters()
             collectValueDeclarations()
         }
+        if finishIfCancelled() { return }
         if let treeFacts {
             collectEnumCases(from: treeFacts.enumCaseNameRanges)
             collectGenericParameters(from: treeFacts.genericParameterEntries)
@@ -181,6 +264,7 @@ struct SwiftFileSymbolIndex {
             collectEnumCases()
             collectGenericParameters()
         }
+        if finishIfCancelled() { return }
         rebuildLookupTables()
     }
 
@@ -298,6 +382,14 @@ struct SwiftFileSymbolIndex {
 }
 
 private extension SwiftFileSymbolIndex {
+    mutating func finishIfCancelled() -> Bool {
+        guard Task.isCancelled else {
+            return false
+        }
+        isCancelled = true
+        return true
+    }
+
     mutating func rebuildLookupTables() {
         entriesByName = Dictionary(grouping: entries, by: \.name)
         typedValuesByName = Dictionary(grouping: typedValues, by: \.name)
@@ -312,6 +404,14 @@ private extension SwiftFileSymbolIndex {
     }
 
     private func collectTreeDeclarationFacts(from node: Node, into facts: inout TreeDeclarationFacts) {
+        guard !facts.isCancelled else {
+            return
+        }
+        if Task.isCancelled {
+            facts.isCancelled = true
+            return
+        }
+
         switch node.nodeType {
         case "class_declaration":
             collectClassDeclarationFacts(from: node, into: &facts)
@@ -348,11 +448,16 @@ private extension SwiftFileSymbolIndex {
             facts.enumCaseNameRanges.append(contentsOf: childRanges(in: node, fieldName: "name"))
         case "lambda_literal":
             facts.closureRanges.append(node.range)
+        case "switch_entry":
+            facts.switchCaseClauseRanges.append(node.range)
         default:
             break
         }
 
         for index in 0..<node.childCount {
+            guard !facts.isCancelled else {
+                return
+            }
             guard let child = node.child(at: index) else { continue }
             collectTreeDeclarationFacts(from: child, into: &facts)
         }
@@ -867,13 +972,16 @@ private extension SwiftFileSymbolIndex {
     mutating func collectValueDeclarations() {
         let sourceString = maskedSource as String
         for match in Self.valueDeclarationRegex.matches(in: sourceString, range: fullRange) {
+            if finishIfCancelled() { return }
             guard shouldIndexValueDeclarationKeyword(at: match.range.location) else {
                 continue
             }
 
             let declarationRange = valueDeclarationContentRange(after: match.range.upperBound)
             for segmentRange in topLevelCommaSeparatedRanges(in: declarationRange) {
+                if finishIfCancelled() { return }
                 for nameRange in valuePatternNameRanges(in: segmentRange) {
+                    if finishIfCancelled() { return }
                     indexValueDeclarationName(
                         at: nameRange,
                         segmentRange: segmentRange,
@@ -886,12 +994,15 @@ private extension SwiftFileSymbolIndex {
 
     private mutating func collectValueDeclarations(from declarations: [TreeValueDeclaration]) {
         for declaration in declarations {
+            if finishIfCancelled() { return }
             let declarationRange = NSRange(
                 location: declaration.bindingKeywordUpperBound,
                 length: max(0, declaration.range.upperBound - declaration.bindingKeywordUpperBound)
             )
             for segmentRange in topLevelCommaSeparatedRanges(in: declarationRange) {
+                if finishIfCancelled() { return }
                 for nameRange in valuePatternNameRanges(in: segmentRange) {
+                    if finishIfCancelled() { return }
                     indexValueDeclarationName(
                         at: nameRange,
                         segmentRange: segmentRange,
@@ -2048,18 +2159,7 @@ private extension SwiftFileSymbolIndex {
     }
 
     private func innermostBraceRange(containing range: NSRange, within outerRange: NSRange) -> NSRange? {
-        var best: NSRange?
-        for braceRange in braceRanges {
-            guard Self.range(outerRange, contains: braceRange),
-                  Self.range(braceRange, contains: range)
-            else {
-                continue
-            }
-            if best.map({ braceRange.length < $0.length }) ?? true {
-                best = braceRange
-            }
-        }
-        return best
+        braceRangeIndex.innermostRange(containing: range, within: outerRange)
     }
 
     private func conditionalBindingScopes(for range: NSRange, within outerRange: NSRange) -> [LocalBindingScope] {
@@ -2231,9 +2331,19 @@ private extension SwiftFileSymbolIndex {
     }
 
     private func switchCaseClauseRange(containing range: NSRange, within outerRange: NSRange) -> NSRange? {
+        if let indexedRange = switchCaseClauseRangeIndex.innermostRange(containing: range, within: outerRange) {
+            return indexedRange
+        }
+        if !switchCaseClauseRanges.isEmpty {
+            return nil
+        }
+
         var candidateLineRange = maskedSource.lineRange(for: NSRange(location: range.location, length: 0))
 
         while candidateLineRange.location >= outerRange.location {
+            if Task.isCancelled {
+                return nil
+            }
             let candidateLine = maskedSource.substring(with: candidateLineRange)
             let trimmed = candidateLine.trimmingCharacters(in: .whitespacesAndNewlines)
             if isSwitchCaseLine(trimmed),
@@ -2260,6 +2370,9 @@ private extension SwiftFileSymbolIndex {
         var location = currentLineRange.upperBound
 
         while location < outerRange.upperBound {
+            if Task.isCancelled {
+                return nil
+            }
             let lineRange = maskedSource.lineRange(for: NSRange(location: location, length: 0))
             let line = maskedSource.substring(with: lineRange)
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
