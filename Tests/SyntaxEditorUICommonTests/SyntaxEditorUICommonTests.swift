@@ -51,6 +51,32 @@ struct SyntaxEditorUICommonTests {
         #expect(TextLayoutGeometry.ranges(ranges, intersecting: NSRange(location: 20, length: 2)).isEmpty)
     }
 
+    @Test("Highlight token range index includes long tokens that start before the refresh range")
+    func highlightTokenRangeIndexIncludesLongTokensBeforeRefreshRange() {
+        let tokens = [
+            SyntaxHighlightToken(
+                range: NSRange(location: 0, length: 80),
+                rawCaptureName: "editor.syntax.swift.comment"
+            ),
+            SyntaxHighlightToken(
+                range: NSRange(location: 10, length: 2),
+                rawCaptureName: "editor.syntax.swift.keyword"
+            ),
+            SyntaxHighlightToken(
+                range: NSRange(location: 20, length: 2),
+                rawCaptureName: "editor.syntax.swift.string"
+            ),
+            SyntaxHighlightToken(
+                range: NSRange(location: 30, length: 2),
+                rawCaptureName: "editor.syntax.swift.keyword"
+            ),
+        ]
+        let index = HighlightTokenRangeIndex(tokens: tokens)
+
+        #expect(index.firstTokenIndex(intersecting: NSRange(location: 60, length: 1)) == 0)
+        #expect(index.firstTokenIndex(intersecting: NSRange(location: 81, length: 1)) == tokens.count)
+    }
+
     @Test("Document line metrics centralizes resize estimates without rebuilds")
     func documentLineMetricsCachesResizeEstimates() {
         let metrics = DocumentLineMetrics(

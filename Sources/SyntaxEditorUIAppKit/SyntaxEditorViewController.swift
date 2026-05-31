@@ -1239,7 +1239,8 @@ public final class SyntaxEditorView: NSScrollView {
             source: source,
             language: configuration.language,
             refreshRange: NSRange(location: 0, length: source.utf16.count),
-            mutation: nil
+            mutation: nil,
+            forceOperations: true
         )
     }
 
@@ -1339,7 +1340,8 @@ public final class SyntaxEditorView: NSScrollView {
         source expectedSource: String,
         language expectedLanguage: SyntaxLanguage,
         refreshRange: NSRange,
-        mutation: SyntaxHighlightMutation?
+        mutation: SyntaxHighlightMutation?,
+        forceOperations: Bool = false
     ) -> Bool {
         guard document.revision == expectedRevision else { return false }
         guard configuration.language == expectedLanguage,
@@ -1386,7 +1388,8 @@ public final class SyntaxEditorView: NSScrollView {
             targetRange: targetRange,
             textLength: textLength,
             baseAttributes: base,
-            mutation: mutation
+            mutation: mutation,
+            forceOperations: forceOperations
         )
         textView.typingAttributes = base
         applyMatchingBracketHighlight(force: true)
@@ -1487,14 +1490,16 @@ public final class SyntaxEditorView: NSScrollView {
         targetRange: NSRange,
         textLength: Int,
         baseAttributes: [NSAttributedString.Key: Any],
-        mutation: SyntaxHighlightMutation?
+        mutation: SyntaxHighlightMutation?,
+        forceOperations: Bool = false
     ) {
         guard let transaction = syntaxHighlightTransaction(
             for: tokens,
             targetRange: targetRange,
             textLength: textLength,
             baseAttributes: baseAttributes,
-            mutation: mutation
+            mutation: mutation,
+            forceOperations: forceOperations
         ) else {
             return
         }
@@ -1534,7 +1539,8 @@ public final class SyntaxEditorView: NSScrollView {
         targetRange: NSRange,
         textLength: Int,
         baseAttributes: [NSAttributedString.Key: Any],
-        mutation _: SyntaxHighlightMutation?
+        mutation _: SyntaxHighlightMutation?,
+        forceOperations: Bool = false
     ) -> HighlightStyleTransaction? {
         var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes)
         let runSet = syntaxHighlightRunSet(
@@ -1553,7 +1559,8 @@ public final class SyntaxEditorView: NSScrollView {
             mutation: nil,
             textLength: textLength,
             baseForeground: baseForeground,
-            baseFont: baseAttributes[.font] as? NSFont
+            baseFont: baseAttributes[.font] as? NSFont,
+            forceOperations: forceOperations
         )
     }
 
@@ -1607,7 +1614,8 @@ public final class SyntaxEditorView: NSScrollView {
         var runs: [SyntaxHighlightResolvedRun] = []
         runs.reserveCapacity(min(tokens.count, 1024))
 
-        let tokenStartIndex = firstTokenIndex(intersecting: targetRange, in: tokens)
+        let tokenRangeIndex = HighlightTokenRangeIndex(tokens: tokens)
+        let tokenStartIndex = tokenRangeIndex.firstTokenIndex(intersecting: targetRange)
         for token in tokens[tokenStartIndex...] {
             guard token.range.location < targetRange.upperBound else { break }
             let clamped = SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: textLength)
@@ -1643,23 +1651,6 @@ public final class SyntaxEditorView: NSScrollView {
         }
 
         return runs
-    }
-
-    private func firstTokenIndex(
-        intersecting range: NSRange,
-        in tokens: [SyntaxHighlightToken]
-    ) -> Int {
-        var lowerBound = 0
-        var upperBound = tokens.count
-        while lowerBound < upperBound {
-            let midIndex = (lowerBound + upperBound) / 2
-            if tokens[midIndex].range.upperBound <= range.location {
-                lowerBound = midIndex + 1
-            } else {
-                upperBound = midIndex
-            }
-        }
-        return lowerBound
     }
 
     private func subtractSyntaxHighlightRange(
