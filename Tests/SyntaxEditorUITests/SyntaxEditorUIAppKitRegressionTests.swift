@@ -1667,6 +1667,42 @@ extension SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
     }
 
+    @Test("SyntaxEditorView schedules macOS paste highlight while attribute highlight is applying")
+    @MainActor
+    func syntaxEditorViewMacSchedulesPasteHighlightWhileAttributeHighlightIsApplying() async {
+        let source = "let value = 1\n"
+        let pastedText = "let pasted = 2\n"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        editorView.setApplyingHighlightForTesting(true)
+        editorView.textView.insertText(pastedText, replacementRange: NSRange(location: 0, length: 0))
+        editorView.setApplyingHighlightForTesting(false)
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == pastedText + source)
+        #expect(model.document.textSnapshot() == pastedText + source)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
     @Test("SyntaxEditorView reflects editable and wrapping changes on macOS")
     @MainActor
     func syntaxEditorViewMacEditorStateObservation() async {

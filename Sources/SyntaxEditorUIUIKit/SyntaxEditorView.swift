@@ -394,6 +394,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         await highlightTask?.value
     }
 
+    internal func setApplyingHighlightForTesting(_ isApplying: Bool) {
+        isApplyingHighlight = isApplying
+    }
+
     internal var lineMetricsFullRebuildCountForTesting: Int {
         lineMetrics.fullRebuildCount
     }
@@ -1082,7 +1086,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         if allowsCommandTransform,
            !isApplyingModel,
-           !isApplyingHighlight,
            let result = commandEngine.transformInput(
                source: source,
                range: clampedRange,

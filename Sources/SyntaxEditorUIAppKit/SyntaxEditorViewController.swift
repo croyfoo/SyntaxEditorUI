@@ -332,6 +332,10 @@ public final class SyntaxEditorView: NSScrollView {
         await highlightTask?.value
     }
 
+    internal func setApplyingHighlightForTesting(_ isApplying: Bool) {
+        isApplyingHighlight = isApplying
+    }
+
     internal var bracketHighlightRangesForTesting: [NSRange] {
         matchedBracketRanges
     }
@@ -438,7 +442,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func textDidChange() {
-        guard !isApplyingModel, !isApplyingHighlight else {
+        guard !isApplyingModel else {
             pendingEditStartUTF16 = nil
             pendingUndoSelection = nil
             pendingHighlightMutation = nil
@@ -447,6 +451,13 @@ public final class SyntaxEditorView: NSScrollView {
 
         let previousText = document.textSnapshot()
         let nextText = textView.string
+        if isApplyingHighlight, nextText == previousText {
+            pendingEditStartUTF16 = nil
+            pendingUndoSelection = nil
+            pendingHighlightMutation = nil
+            return
+        }
+
         let mutation = pendingHighlightMutation ??
             TextMutation.diff(from: previousText, to: nextText).map(SyntaxHighlightMutation.init)
         let change: SyntaxEditorDocumentChange
@@ -513,7 +524,7 @@ public final class SyntaxEditorView: NSScrollView {
     private func textShouldChange(inRanges affectedRanges: [NSRange], replacementStrings: [String]) -> Bool {
         guard let affectedCharRange = affectedRanges.first else { return true }
         let replacementString = replacementStrings.first
-        guard !isApplyingModel, !isApplyingHighlight else {
+        guard !isApplyingModel else {
             pendingUndoSelection = nil
             return true
         }
