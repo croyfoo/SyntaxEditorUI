@@ -53,6 +53,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     var textContainerOrigin: NSPoint { .zero }
     var selectedRangeStorage = NSRange(location: 0, length: 0)
     var markedTextRangeStorage: NSRange?
+    var markedTextAttributedStringStorage: NSAttributedString?
     var mouseDraggingSelectionAnchors: [NSTextSelection]?
     var fragmentViewMap = NSMapTable<NSTextLayoutFragment, SyntaxEditorTextLayoutFragmentView>.weakToWeakObjects()
     var lastUsedFragmentViews: Set<SyntaxEditorTextLayoutFragmentView> = []
@@ -621,9 +622,11 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         guard isEditable else { return }
         let replacement = (string as? NSAttributedString)?.string ?? "\(string)"
         let markedRange = markedTextRangeStorage
+        let markedAttributedString = markedTextAttributedStringStorage
         let range = markedRange ?? effectiveReplacementRange(replacementRange)
         if markedRange != nil {
             markedTextRangeStorage = nil
+            markedTextAttributedStringStorage = nil
         }
         let didReplace = replaceText(
             in: range,
@@ -632,17 +635,19 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         )
         if !didReplace {
             markedTextRangeStorage = markedRange
+            markedTextAttributedStringStorage = markedAttributedString
         }
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         guard isEditable else { return }
-        let replacement = (string as? NSAttributedString)?.string ?? "\(string)"
+        let attributedReplacement = markedTextAttributedReplacement(from: string)
+        let replacement = attributedReplacement.string
         let range = markedTextRangeStorage ?? effectiveReplacementRange(replacementRange)
         let markedLength = replacement.utf16.count
         let didReplace = replaceText(
             in: range,
-            with: replacement,
+            with: attributedReplacement,
             selectedRange: NSRange(
                 location: range.location + min(max(0, selectedRange.location), markedLength),
                 length: min(max(0, selectedRange.length), markedLength)
@@ -650,10 +655,13 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         )
         guard didReplace else { return }
         markedTextRangeStorage = replacement.isEmpty ? nil : NSRange(location: range.location, length: markedLength)
+        markedTextAttributedStringStorage = replacement.isEmpty ? nil : attributedReplacement
+        applyMarkedTextAttributes()
     }
 
     func unmarkText() {
         markedTextRangeStorage = nil
+        markedTextAttributedStringStorage = nil
         updateSelectionRendering()
         needsDisplay = true
     }
@@ -662,6 +670,52 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     func markedRange() -> NSRange { markedTextRangeStorage ?? NSRange(location: NSNotFound, length: 0) }
     func hasMarkedText() -> Bool { markedTextRangeStorage != nil }
     func validAttributesForMarkedText() -> [NSAttributedString.Key] { [.underlineStyle, .underlineColor, .foregroundColor] }
+
+    private func markedTextAttributedReplacement(from string: Any) -> NSAttributedString {
+        guard let attributedString = string as? NSAttributedString else {
+            return NSAttributedString(string: "\(string)", attributes: typingAttributes)
+        }
+
+        let replacement = NSMutableAttributedString(
+            string: attributedString.string,
+            attributes: typingAttributes
+        )
+        let validAttributes = Set(validAttributesForMarkedText())
+        for location in 0..<attributedString.length {
+            let range = NSRange(location: location, length: 1)
+            let attributes = unsafe attributedString.attributes(at: location, effectiveRange: nil)
+            for (key, value) in attributes where validAttributes.contains(key) {
+                replacement.addAttribute(key, value: value, range: range)
+            }
+        }
+        return replacement
+    }
+
+    func applyMarkedTextAttributes() {
+        guard let markedRange = markedTextRangeStorage,
+              let attributedString = markedTextAttributedStringStorage
+        else {
+            return
+        }
+
+        let targetRange = SyntaxEditorRangeUtilities.clampedRange(markedRange, utf16Length: storage.length)
+        guard targetRange.length > 0 else { return }
+
+        let length = min(targetRange.length, attributedString.length)
+        guard length > 0 else { return }
+
+        textContentStorage.performEditingTransaction {
+            for offset in 0..<length {
+                let sourceAttributes = unsafe attributedString.attributes(at: offset, effectiveRange: nil)
+                let destinationRange = NSRange(location: targetRange.location + offset, length: 1)
+                for key in validAttributesForMarkedText() {
+                    if let value = sourceAttributes[key] {
+                        storage.addAttribute(key, value: value, range: destinationRange)
+                    }
+                }
+            }
+        }
+    }
 
     func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
         let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
@@ -977,11 +1031,25 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
 
     @discardableResult
     private func replaceText(in range: NSRange, with replacement: String, selectedRange: NSRange) -> Bool {
+        replaceText(
+            in: range,
+            with: NSAttributedString(string: replacement, attributes: typingAttributes),
+            selectedRange: selectedRange
+        )
+    }
+
+    @discardableResult
+    private func replaceText(
+        in range: NSRange,
+        with attributedReplacement: NSAttributedString,
+        selectedRange: NSRange
+    ) -> Bool {
+        let replacement = attributedReplacement.string
         guard shouldChangeText(inRanges: [range], replacementStrings: [replacement]) else { return false }
         let previousSource = storage.string
         textFinder.noteClientStringWillChange()
         textContentStorage.performEditingTransaction {
-            storage.replaceCharacters(in: range, with: NSAttributedString(string: replacement, attributes: typingAttributes))
+            storage.replaceCharacters(in: range, with: attributedReplacement)
         }
         lineMetrics.apply(
             edits: [SyntaxEditorTextEdit(range: range, replacement: replacement)],

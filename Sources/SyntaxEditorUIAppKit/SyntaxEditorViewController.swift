@@ -1391,6 +1391,7 @@ public final class SyntaxEditorView: NSScrollView {
             mutation: mutation,
             forceOperations: forceOperations
         )
+        textView.applyMarkedTextAttributes()
         textView.typingAttributes = base
         applyMatchingBracketHighlight(force: true)
         invalidateSyntaxHighlightDisplay(for: targetRange)
@@ -1461,6 +1462,7 @@ public final class SyntaxEditorView: NSScrollView {
         ) else { return false }
         guard !Task.isCancelled, document.revision == expectedRevision else { return false }
 
+        textView.applyMarkedTextAttributes()
         textView.typingAttributes = base
         applyMatchingBracketHighlight(force: true)
         invalidateSyntaxHighlightDisplay(for: targetRange)
@@ -1560,8 +1562,16 @@ public final class SyntaxEditorView: NSScrollView {
             textLength: textLength,
             baseForeground: baseForeground,
             baseFont: baseAttributes[.font] as? NSFont,
+            foregroundSuppressionRanges: foregroundSuppressionRanges(textLength: textLength),
             forceOperations: forceOperations
         )
+    }
+
+    private func foregroundSuppressionRanges(textLength: Int) -> [NSRange] {
+        let markedRange = textView.markedRange()
+        guard markedRange.location != NSNotFound else { return [] }
+        let clamped = SyntaxEditorRangeUtilities.clampedRange(markedRange, utf16Length: textLength)
+        return clamped.length > 0 ? [clamped] : []
     }
 
     private func syntaxHighlightRunSet(

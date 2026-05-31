@@ -1600,6 +1600,52 @@ extension SyntaxEditorUITests {
         #expect(editorView.textView.selectedRange() == NSRange(location: expectedSource.utf16.count, length: 0))
     }
 
+    @Test("SyntaxEditorView preserves macOS attributed marked text attributes")
+    @MainActor
+    func syntaxEditorViewMacPreservesAttributedMarkedTextAttributes() async {
+        let source = "let value = "
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let insertionRange = NSRange(location: source.utf16.count, length: 0)
+        let markedForeground = syntaxEditorUITestColor(hex: 0x1A7F37)
+        let markedUnderline = syntaxEditorUITestColor(hex: 0x0969DA)
+        let markedText = NSMutableAttributedString(string: "かな")
+        let markedTextRange = NSRange(location: 0, length: markedText.length)
+        markedText.addAttribute(
+            .underlineStyle,
+            value: NSUnderlineStyle.single.rawValue,
+            range: markedTextRange
+        )
+        markedText.addAttribute(.underlineColor, value: markedUnderline, range: markedTextRange)
+        markedText.addAttribute(.foregroundColor, value: markedForeground, range: markedTextRange)
+        editorView.textView.setSelectedRange(insertionRange)
+
+        editorView.textView.setMarkedText(
+            markedText,
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        await editorView.waitForPendingHighlightForTesting()
+
+        let installedRange = NSRange(location: insertionRange.location, length: markedText.length)
+        #expect(editorView.textView.markedRange() == installedRange)
+        #expect(macEditorUnderlineStyle(editorView, at: installedRange.location) == NSUnderlineStyle.single.rawValue)
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                editorView.textView.textStorage?.attribute(
+                    .underlineColor,
+                    at: installedRange.location,
+                    effectiveRange: nil
+                ) as? NSColor,
+                markedUnderline
+            )
+        )
+        #expect(syntaxEditorUITestColorsEqual(
+            macEditorPermanentForegroundColor(editorView, at: installedRange.location),
+            markedForeground
+        ))
+    }
+
     @Test("SyntaxEditorView preserves macOS highlights for observed document edits")
     @MainActor
     func syntaxEditorViewMacObservedDocumentEditsPreserveExistingHighlights() async {
