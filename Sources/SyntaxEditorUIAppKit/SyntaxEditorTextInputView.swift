@@ -640,7 +640,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         let replacement = (string as? NSAttributedString)?.string ?? "\(string)"
         let range = markedTextRangeStorage ?? effectiveReplacementRange(replacementRange)
         let markedLength = replacement.utf16.count
-        replaceText(
+        let didReplace = replaceText(
             in: range,
             with: replacement,
             selectedRange: NSRange(
@@ -648,6 +648,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
                 length: min(max(0, selectedRange.length), markedLength)
             )
         )
+        guard didReplace else { return }
         markedTextRangeStorage = replacement.isEmpty ? nil : NSRange(location: range.location, length: markedLength)
     }
 

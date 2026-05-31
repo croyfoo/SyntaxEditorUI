@@ -524,7 +524,7 @@ public final class SyntaxEditorView: NSScrollView {
 
     private func textShouldChange(inRanges affectedRanges: [NSRange], replacementStrings: [String]) -> Bool {
         guard let affectedCharRange = affectedRanges.first else { return true }
-        let replacementString = replacementStrings.first
+        let usesSingleReplacement = affectedRanges.count == 1 && replacementStrings.count == 1
         guard !isApplyingModel else {
             pendingUndoSelection = nil
             return true
@@ -539,7 +539,7 @@ public final class SyntaxEditorView: NSScrollView {
 
         pendingEditStartUTF16 = affectedCharRange.location
         pendingUndoSelection = affectedCharRange
-        guard let replacementString else {
+        guard usesSingleReplacement, let replacementString = replacementStrings.first else {
             pendingHighlightMutation = nil
             return true
         }

@@ -1527,6 +1527,53 @@ extension SyntaxEditorUITests {
         #expect(recorder.count == 1)
     }
 
+    @Test("SyntaxEditorView syncs macOS multi-range replacements from the final text")
+    @MainActor
+    func syntaxEditorViewMacMultiRangeReplacementSyncsFinalText() async {
+        let source = "abcde"
+        let expectedSource = "aXcYe"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+
+        let didAccept = editorView.textView.shouldReplaceCharacters(
+            inRanges: [
+                NSValue(range: NSRange(location: 1, length: 1)),
+                NSValue(range: NSRange(location: 3, length: 1)),
+            ],
+            with: ["X", "Y"]
+        )
+        #expect(didAccept)
+
+        editorView.textView.string = expectedSource
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == expectedSource)
+        #expect(model.document.textSnapshot() == expectedSource)
+    }
+
+    @Test("SyntaxEditorView keeps macOS marked range unchanged when marked text is handled as command input")
+    @MainActor
+    func syntaxEditorViewMacRejectedMarkedCommandDoesNotInstallMarkedRange() async {
+        let source = "let value = "
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let insertionRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.textView.setSelectedRange(insertionRange)
+
+        editorView.textView.setMarkedText(
+            "\"",
+            selectedRange: NSRange(location: 1, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        await editorView.waitForPendingHighlightForTesting()
+
+        let expectedSource = source + "\"\""
+        #expect(!editorView.textView.hasMarkedText())
+        #expect(editorView.textView.markedRange().location == NSNotFound)
+        #expect(editorView.textView.string == expectedSource)
+        #expect(model.document.textSnapshot() == expectedSource)
+    }
+
     @Test("SyntaxEditorView replaces macOS marked text when IME commits through insertText")
     @MainActor
     func syntaxEditorViewMacReplacesMarkedTextWhenIMECommitsThroughInsertText() async {

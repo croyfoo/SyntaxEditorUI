@@ -940,16 +940,36 @@ extension SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
 
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
+        let controller = UIViewController()
+        controller.loadViewIfNeeded()
+        controller.view.frame = window.bounds
+        editorView.frame = controller.view.bounds
+        editorView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        controller.view.addSubview(editorView)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
         editorView.overrideUserInterfaceStyle = .light
+        controller.view.layoutIfNeeded()
         editorView.refreshForColorAppearanceChange()
+        #expect(editorView.traitCollection.userInterfaceStyle == .light)
         let lightForeground = try #require(iOSEditorPermanentForegroundColor(editorView, at: 0))
 
         editorView.overrideUserInterfaceStyle = .dark
+        controller.view.layoutIfNeeded()
         editorView.refreshForColorAppearanceChange()
+        #expect(editorView.traitCollection.userInterfaceStyle == .dark)
         let darkBaseForeground = try #require(editorView.baseForegroundColorForTesting())
 
-        #expect(syntaxEditorUITestColorsEqual(iOSEditorPermanentForegroundColor(editorView, at: 0), darkBaseForeground))
-        #expect(!syntaxEditorUITestColorsEqual(lightForeground, darkBaseForeground))
+        withExtendedLifetime(window) {
+            #expect(syntaxEditorUITestColorsEqual(iOSEditorPermanentForegroundColor(editorView, at: 0), darkBaseForeground))
+            #expect(!syntaxEditorUITestColorsEqual(lightForeground, darkBaseForeground))
+        }
     }
 
     @Test("SyntaxEditorView reflects iOS background drawing configuration")
