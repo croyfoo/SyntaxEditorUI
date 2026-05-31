@@ -7764,6 +7764,23 @@ struct SyntaxHighlighterEngineTests {
             token.range.location >= 0 &&
                 token.range.length > 0 &&
                 token.range.upperBound <= sourceLength
+            })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps parser chunks UTF-16 boundary safe")
+    func highlighterKeepsParserChunksUTF16BoundarySafe() async {
+        let prefix = "// " + String(repeating: "a", count: 1020)
+        #expect(prefix.utf16.count == 1023)
+
+        let source = "\(prefix)😀\nlet value = 1\n"
+        let tokens = await SyntaxHighlighterEngine().reset(
+            source: source,
+            language: SyntaxLanguage.swift
+        ).tokens
+        let keywordRange = (source as NSString).range(of: "let")
+
+        #expect(tokens.contains { token in
+            token.syntaxID == .keyword && token.range == keywordRange
         })
     }
 

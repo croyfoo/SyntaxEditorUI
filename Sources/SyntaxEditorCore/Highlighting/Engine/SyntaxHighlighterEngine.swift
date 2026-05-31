@@ -1369,8 +1369,12 @@ private extension SyntaxHighlightSession {
             let end = min(location + chunkCodeUnits, limit)
             guard end > location else { return nil }
 
-            let range = NSRange(location..<end)
-            guard let stringRange = Range(range, in: source) else {
+            guard let stringRange = Self.stringRangeForUTF16Chunk(
+                location: location,
+                proposedEnd: end,
+                limit: limit,
+                in: source
+            ) else {
                 return nil
             }
             return source[stringRange].data(using: encoding)
@@ -1379,6 +1383,40 @@ private extension SyntaxHighlightSession {
             readHandler: readHandler,
             textProvider: source.predicateTextProvider
         )
+    }
+
+    static func stringRangeForUTF16Chunk(
+        location: Int,
+        proposedEnd: Int,
+        limit: Int,
+        in source: String
+    ) -> Range<String.Index>? {
+        guard location >= 0, location < limit else {
+            return nil
+        }
+
+        let clampedEnd = min(max(location + 1, proposedEnd), limit)
+        if let range = Range(NSRange(location..<clampedEnd), in: source) {
+            return range
+        }
+
+        if clampedEnd > location + 1 {
+            for end in stride(from: clampedEnd - 1, through: location + 1, by: -1) {
+                if let range = Range(NSRange(location..<end), in: source) {
+                    return range
+                }
+            }
+        }
+
+        if clampedEnd < limit {
+            for end in (clampedEnd + 1)...limit {
+                if let range = Range(NSRange(location..<end), in: source) {
+                    return range
+                }
+            }
+        }
+
+        return nil
     }
 
     static var nativeUTF16Encoding: String.Encoding {
