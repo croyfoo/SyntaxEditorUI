@@ -2507,6 +2507,81 @@ extension SyntaxEditorUITests {
         #expect(editorView.fragmentDisplayInvalidationCountForTesting > invalidationCount)
     }
 
+    @Test("SyntaxEditorView limits macOS incremental find candidates to visible fragments")
+    @MainActor
+    func syntaxEditorViewMacFindHighlightsIgnoreOffscreenRanges() {
+        let source = (0..<500)
+            .map { "match \($0)" }
+            .joined(separator: "\n")
+        let nsSource = source as NSString
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        let offscreenRanges = (250..<500).map { nsSource.range(of: "match \($0)") }
+        editorView.textView.setFindHighlightRangesForTesting(offscreenRanges)
+        #expect(editorView.textView.findHighlightRectsForTesting.isEmpty)
+
+        let visibleRange = nsSource.range(of: "match 0")
+        editorView.textView.setFindHighlightRangesForTesting(offscreenRanges + [visibleRange])
+        #expect(editorView.textView.findHighlightRectsForTesting.count == 1)
+    }
+
+    @Test("SyntaxEditorView excludes the current macOS find match from candidate highlights")
+    @MainActor
+    func syntaxEditorViewMacFindHighlightsExcludeCurrentMatch() {
+        let source = "m m m"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        editorView.textView.setSelectedRange(NSRange(location: 2, length: 1))
+        #expect(editorView.textView.selectedRange() == NSRange(location: 2, length: 1))
+        editorView.textView.setFindHighlightRangesForTesting([
+            NSRange(location: 0, length: 1),
+            NSRange(location: 4, length: 1),
+        ])
+        let nonCurrentMatchRectCount = editorView.textView.findHighlightRectsForTesting.count
+        #expect(nonCurrentMatchRectCount > 0)
+
+        editorView.textView.setFindHighlightRangesForTesting([
+            NSRange(location: 0, length: 1),
+            NSRange(location: 2, length: 1),
+            NSRange(location: 4, length: 1),
+        ])
+
+        #expect(editorView.textView.findHighlightRectsForTesting.count == nonCurrentMatchRectCount)
+    }
+
+    @Test("SyntaxEditorView clears macOS find candidate highlights")
+    @MainActor
+    func syntaxEditorViewMacClearsFindCandidateHighlights() {
+        let source = "m m m"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        editorView.textView.setFindHighlightRangesForTesting([
+            NSRange(location: 0, length: 1),
+            NSRange(location: 2, length: 1),
+        ])
+        #expect(!editorView.textView.findHighlightRectsForTesting.isEmpty)
+
+        editorView.textView.setFindHighlightRangesForTesting([])
+        #expect(editorView.textView.findHighlightRectsForTesting.isEmpty)
+
+        editorView.textView.setFindHighlightRangesForTesting([
+            NSRange(location: 4, length: 1),
+        ])
+        #expect(!editorView.textView.findHighlightRectsForTesting.isEmpty)
+
+        editorView.textView.setFindHighlightRangesForTesting(nil)
+        #expect(editorView.textView.findHighlightRectsForTesting.isEmpty)
+    }
+
     @Test("SyntaxEditorView resolves macOS text input character indexes from screen points")
     @MainActor
     func syntaxEditorViewMacResolvesCharacterIndexFromScreenPoint() {

@@ -11,6 +11,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     private let insertionIndicator = NSTextInsertionIndicator(frame: .zero)
     private var incrementalMatchRangesObservation: NSKeyValueObservation?
     private var findHighlightRangesOverrideForTesting: [NSRange]?
+    private var findHighlightRangeIndex = TextRangeIntersectionIndex(utf16Length: 0)
 
     var guardedUndoManager: UndoManager?
     var shortcutHandler: ((EditorShortcutAction) -> Bool)?
@@ -36,6 +37,8 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         didSet {
             guard isIncrementalSearchingEnabled != oldValue else { return }
             textFinder.isIncrementalSearchingEnabled = isIncrementalSearchingEnabled
+            rebuildFindHighlightRangeIndex()
+            updateFindHighlightsForVisibleFragments()
         }
     }
     var drawsBackground = false
@@ -109,9 +112,20 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         textSystem.layoutManager.delegate = self
         addSubview(textContentView)
         addSubview(insertionIndicator)
-        incrementalMatchRangesObservation = textFinder.observe(\.incrementalMatchRanges, options: [.new]) { [weak self] _, _ in
+        incrementalMatchRangesObservation = textFinder.observe(\.incrementalMatchRanges, options: [.new, .old]) { [weak self] _, change in
+            let changedRanges: [NSRange]?
+            switch change.kind {
+            case .insertion:
+                changedRanges = change.newValue?.map(\.rangeValue)
+            case .removal:
+                changedRanges = change.oldValue?.map(\.rangeValue)
+            case .replacement:
+                changedRanges = ((change.oldValue ?? []) + (change.newValue ?? [])).map(\.rangeValue)
+            default:
+                changedRanges = nil
+            }
             Task { @MainActor in
-                self?.updateFindHighlightsForVisibleFragments()
+                self?.handleIncrementalMatchRangesChange(changedRanges: changedRanges)
             }
         }
     }
@@ -188,6 +202,8 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             }
             setSelectedRange(NSRange(location: min(selectedRangeStorage.location, storage.length), length: 0))
             invalidateTextLayout()
+            rebuildFindHighlightRangeIndex()
+            updateFindHighlightsForVisibleFragments()
             didChangeText?()
         }
     }
@@ -1057,6 +1073,8 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         )
         setSelectedRange(selectedRange)
         invalidateTextLayout()
+        rebuildFindHighlightRangeIndex()
+        updateFindHighlightsForVisibleFragments()
         didChangeTextNotification()
         return true
     }
@@ -1067,12 +1085,14 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         }
         unsafe textFinder.findBarContainer = usesFindBar ? enclosingScrollView : nil
         textFinder.isIncrementalSearchingEnabled = isIncrementalSearchingEnabled
+        rebuildFindHighlightRangeIndex()
         updateFindHighlightsForVisibleFragments()
     }
 
     private func clearTextFinderAttachments() {
         textFinder.cancelFindIndicator()
         unsafe textFinder.findBarContainer = nil
+        rebuildFindHighlightRangeIndex()
         updateFindHighlightsForVisibleFragments()
     }
 
@@ -1399,6 +1419,17 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         }
     }
 
+    private func updateFindHighlightsForVisibleFragments(intersecting ranges: [NSRange]) {
+        layoutVisibleViewport()
+        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            let fragmentRange = textRange(for: fragmentView.layoutFragment)
+            guard !TextLayoutGeometry.ranges(ranges, intersecting: fragmentRange).isEmpty else {
+                continue
+            }
+            configureFindHighlights(for: fragmentView)
+        }
+    }
+
     func setNeedsDisplayForContentRect(_ rect: NSRect) {
         guard !rect.isEmpty else { return }
 
@@ -1628,24 +1659,49 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
 
     func setFindHighlightRangesForTesting(_ ranges: [NSRange]?) {
         findHighlightRangesOverrideForTesting = ranges
+        rebuildFindHighlightRangeIndex()
         updateFindHighlightsForVisibleFragments()
     }
 
+    private func currentFindHighlightRanges() -> [NSRange] {
+        if let findHighlightRangesOverrideForTesting {
+            return findHighlightRangesOverrideForTesting
+        }
+        guard usesFindBar, isIncrementalSearchingEnabled else {
+            return []
+        }
+        return textFinder.incrementalMatchRanges.map(\.rangeValue)
+    }
+
+    private func rebuildFindHighlightRangeIndex() {
+        findHighlightRangeIndex = TextRangeIntersectionIndex(
+            ranges: currentFindHighlightRanges(),
+            utf16Length: storage.length
+        )
+    }
+
+    private func handleIncrementalMatchRangesChange(changedRanges: [NSRange]?) {
+        guard findHighlightRangesOverrideForTesting == nil else { return }
+
+        rebuildFindHighlightRangeIndex()
+        if let changedRanges, !changedRanges.isEmpty {
+            updateFindHighlightsForVisibleFragments(intersecting: changedRanges)
+        } else {
+            updateFindHighlightsForVisibleFragments()
+        }
+    }
+
     private func configureFindHighlights(for fragmentView: SyntaxEditorTextLayoutFragmentView) {
-        let matchRanges = findHighlightRangesOverrideForTesting
-            ?? (usesFindBar && textFinder.isIncrementalSearchingEnabled
-                ? textFinder.incrementalMatchRanges.map(\.rangeValue)
-                : [])
-        guard !matchRanges.isEmpty else {
+        guard !findHighlightRangeIndex.isEmpty else {
             fragmentView.setFindHighlights(rects: [])
             return
         }
 
         let fragmentRange = textRange(for: fragmentView.layoutFragment)
-        let searchableRanges = matchRanges
-            .map { SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: storage.length) }
+        let sourceRanges = findHighlightRangeIndex
+            .sourceRanges(intersecting: fragmentRange)
             .filter { !isCurrentFindMatch($0) }
-        let ranges = TextLayoutGeometry.ranges(searchableRanges, intersecting: fragmentRange)
+        let ranges = TextLayoutGeometry.ranges(sourceRanges, intersecting: fragmentRange)
         guard !ranges.isEmpty else {
             fragmentView.setFindHighlights(rects: [])
             return
@@ -1762,12 +1818,8 @@ final class SyntaxEditorTextLayoutFragment: NSTextLayoutFragment {
 final class SyntaxEditorTextLayoutFragmentView: NSView {
     let layoutFragment: NSTextLayoutFragment
     weak var textInputView: SyntaxEditorTextInputView?
-    fileprivate static var findCandidateHighlightFillColor: NSColor {
-        NSColor.textColor.withAlphaComponent(0.14)
-    }
-    private static var findCandidateHighlightStrokeColor: NSColor {
-        NSColor.textColor.withAlphaComponent(0.32)
-    }
+    fileprivate static let findCandidateHighlightFillColor = dynamicTextColor(alpha: 0.14)
+    private static let findCandidateHighlightStrokeColor = dynamicTextColor(alpha: 0.32)
     fileprivate static let findCandidateHighlightCornerRadius: CGFloat = 3
     var findHighlightRects: [CGRect] = []
     var selectionHighlightRects: [CGRect] = []
@@ -1847,6 +1899,16 @@ final class SyntaxEditorTextLayoutFragmentView: NSView {
             path.fill()
             path.lineWidth = 1
             path.stroke()
+        }
+    }
+
+    private static func dynamicTextColor(alpha: CGFloat) -> NSColor {
+        NSColor(name: nil) { appearance in
+            var resolvedColor = NSColor.textColor.withAlphaComponent(alpha)
+            appearance.performAsCurrentDrawingAppearance {
+                resolvedColor = NSColor.textColor.withAlphaComponent(alpha)
+            }
+            return resolvedColor
         }
     }
 
