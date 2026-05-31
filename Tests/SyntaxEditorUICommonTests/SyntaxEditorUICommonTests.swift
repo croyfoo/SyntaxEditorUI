@@ -51,6 +51,32 @@ struct SyntaxEditorUICommonTests {
         #expect(TextLayoutGeometry.ranges(ranges, intersecting: NSRange(location: 20, length: 2)).isEmpty)
     }
 
+    @Test("Text range intersection index clips sorted ranges without scanning by fragment")
+    func textRangeIntersectionIndexClipsSortedRanges() {
+        let index = TextRangeIntersectionIndex(
+            ranges: [
+                NSRange(location: 8, length: 4),
+                NSRange(location: 0, length: 5),
+                NSRange(location: 20, length: 10),
+                NSRange(location: 4, length: 0),
+                NSRange(location: 3, length: 6),
+                NSRange(location: 12, length: 2),
+            ],
+            utf16Length: 24
+        )
+
+        #expect(index.ranges(intersecting: NSRange(location: 4, length: 16)) == [
+            NSRange(location: 4, length: 1),
+            NSRange(location: 4, length: 5),
+            NSRange(location: 8, length: 4),
+            NSRange(location: 12, length: 2),
+        ])
+        #expect(index.sourceRanges(intersecting: NSRange(location: 21, length: 10)) == [
+            NSRange(location: 20, length: 4),
+        ])
+        #expect(index.ranges(intersecting: NSRange(location: 24, length: 4)).isEmpty)
+    }
+
     @Test("Highlight token range index includes long tokens that start before the refresh range")
     func highlightTokenRangeIndexIncludesLongTokensBeforeRefreshRange() {
         let tokens = [
