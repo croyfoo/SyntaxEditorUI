@@ -572,6 +572,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let nsText = text as NSString
         let fullRange = NSRange(location: 0, length: nsText.length)
         return structuralObjectiveCEditRegex.firstMatch(in: text, range: fullRange) != nil
+            || objectiveCTextContainsVariableDeclarationLine(nsText)
     }
 
     private static func semanticIndexFingerprint(in source: NSString) -> Int {
@@ -596,6 +597,24 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let nsLine = line as NSString
         let fullRange = NSRange(location: 0, length: nsLine.length)
         return structuralObjectiveCEditRegex.firstMatch(in: line, range: fullRange) != nil
+            || objectiveCVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
+    }
+
+    private static func objectiveCTextContainsVariableDeclarationLine(_ text: NSString) -> Bool {
+        var location = 0
+        while location < text.length {
+            let lineRange = text.lineRange(for: NSRange(location: location, length: 0))
+            let line = text.substring(with: lineRange)
+            let nsLine = line as NSString
+            let fullRange = NSRange(location: 0, length: nsLine.length)
+            if objectiveCVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil {
+                return true
+            }
+            let nextLocation = lineRange.upperBound
+            guard nextLocation > location else { break }
+            location = nextLocation
+        }
+        return false
     }
 
     private static func isTypeDeclarationName(_ range: NSRange, text: String, in source: NSString) -> Bool {
@@ -1859,7 +1878,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static let structuralObjectiveCEditRegex = try! NSRegularExpression(
-        pattern: #"(?m)^\s*(?:@(?:class|end|implementation|interface|property|protocol)|typedef\b|[-+]\s*\(|[A-Za-z_][A-Za-z0-9_ <>,_*]*\([^;{}]*\)\s*[;{]|[A-Za-z_][A-Za-z0-9_ <>,_*]*\*+\s*[A-Za-z_][A-Za-z0-9_]*\s*;)|\bNS_(?:ENUM|OPTIONS)\b|^\s*#"#)
+        pattern: #"(?m)^\s*(?:@(?:class|end|implementation|interface|property|protocol)|typedef\b|static\b(?![^\n;{}]*\([^;{}]*\)\s*[;{])[^;\n{}]*(?:=|;)|[-+]\s*\(|[A-Za-z_][A-Za-z0-9_ <>,_*]*\([^;{}]*\)\s*[;{]|[A-Za-z_][A-Za-z0-9_ <>,_*]*\*+\s*[A-Za-z_][A-Za-z0-9_]*\s*;)|\bNS_(?:ENUM|OPTIONS)\b|^\s*#"#
+    )
+
+    private static let objectiveCVariableDeclarationLineRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do)\b)[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*;"#
+    )
 
     private static let preprocessorQuotedStringRegex = try! NSRegularExpression(
         pattern: #"@?"(?:\\.|[^"\\])*""#

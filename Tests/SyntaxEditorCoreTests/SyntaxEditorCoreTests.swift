@@ -9784,6 +9784,63 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens == full.tokens)
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after file-scope variable rename")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterFileScopeVariableRename() async throws {
+        let source = """
+        static NSString *const Foo = @"value";
+
+        NSString *readValue(void)
+        {
+            return Foo;
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "Foo = @\"value\"", with: "Bar = @\"value\"")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after ivar declaration rename")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterIvarDeclarationRename() async throws {
+        let source = """
+        @implementation Sample {
+            BOOL foo;
+        }
+
+        - (BOOL)value
+        {
+            return foo;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(of: "BOOL foo;", with: "BOOL bar;")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after source-length edits")
     func highlighterRebuildsObjectiveCSemanticIndexAfterSourceLengthEdits() async throws {
         let source = """
