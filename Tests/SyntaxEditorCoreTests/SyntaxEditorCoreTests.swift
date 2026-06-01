@@ -9940,6 +9940,46 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine recognizes Objective-C comma-separated variable declarations")
+    func highlighterRecognizesObjectiveCCommaSeparatedVariableDeclarations() async throws {
+        let source = """
+        static NSString *const Foo = @"foo", *Bar = @"bar";
+
+        @implementation Sample {
+            BOOL firstFlag, secondFlag;
+        }
+
+        - (BOOL)value
+        {
+            return secondFlag;
+        }
+        @end
+
+        NSString *readValue(void)
+        {
+            return Bar;
+        }
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "secondFlag",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return secondFlag;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Bar",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return Bar;"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine keeps Objective-C local shadows plain")
     func highlighterKeepsObjectiveCLocalShadowsPlain() async throws {
         let source = """
@@ -9990,6 +10030,13 @@ struct SyntaxHighlighterEngineTests {
         {
             NSString *Token = @"local";
             // }
+            NSLog(@"%@", Token);
+        }
+
+        void commaLocal(void)
+        {
+            NSString *Other = @"other", *Token = @"local";
+            // comma local use
             NSLog(@"%@", Token);
         }
         @end
@@ -10067,6 +10114,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "// }\n    NSLog(@\"%@\", Token);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "// comma local use\n    NSLog(@\"%@\", Token);"
         )
     }
 

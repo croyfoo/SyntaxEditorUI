@@ -2765,22 +2765,25 @@ private struct ObjectiveCFileSymbolIndex {
                   afterStatic == line.length || !isASCIIIdentifierContinue(line.character(at: afterStatic)) else {
                 continue
             }
-            let statementEnd = firstLocation(ofAny: ["=", ";"], in: line, before: line.length)
+            let statementEnd = firstLocation(ofAny: [";"], in: line, before: line.length)
+            let firstTerminator = firstLocation(ofAny: ["=", ";"], in: line, before: line.length)
             guard statementEnd != NSNotFound,
-                  line.range(of: "(", options: [], range: NSRange(location: 0, length: statementEnd)).location == NSNotFound,
-                  let relativeRange = identifierRange(before: statementEnd, in: line) else {
+                  firstTerminator != NSNotFound,
+                  line.range(of: "(", options: [], range: NSRange(location: 0, length: firstTerminator)).location == NSNotFound else {
                 continue
             }
-            let name = line.substring(with: relativeRange)
-            guard !typedefIgnoredIdentifiers.contains(name),
-                  name != "const",
-                  name != "static" else {
-                continue
+            for relativeRange in declarationNameRanges(in: line, statementEnd: statementEnd) {
+                let name = line.substring(with: relativeRange)
+                guard !typedefIgnoredIdentifiers.contains(name),
+                      name != "const",
+                      name != "static" else {
+                    continue
+                }
+                declarations.append((
+                    name: name,
+                    range: NSRange(location: lineRange.location + relativeRange.location, length: relativeRange.length)
+                ))
             }
-            declarations.append((
-                name: name,
-                range: NSRange(location: lineRange.location + relativeRange.location, length: relativeRange.length)
-            ))
         }
         return declarations
     }
@@ -2794,6 +2797,145 @@ private struct ObjectiveCFileSymbolIndex {
             cursor += 1
         }
         return line.length
+    }
+
+    private static func declarationNameRanges(in declaration: NSString, statementEnd: Int) -> [NSRange] {
+        let upperBound = min(max(0, statementEnd), declaration.length)
+        var ranges: [NSRange] = []
+        var segmentStart = 0
+        var cursor = 0
+        var parenDepth = 0
+        var bracketDepth = 0
+        var braceDepth = 0
+        var angleDepth = 0
+        while cursor < upperBound {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: declaration) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = declaration.substring(with: NSRange(location: cursor, length: 1))
+            if character == ",",
+               parenDepth == 0,
+               bracketDepth == 0,
+               braceDepth == 0,
+               angleDepth == 0 {
+                if let range = declarationNameRange(
+                    in: NSRange(location: segmentStart, length: cursor - segmentStart),
+                    declaration: declaration
+                ) {
+                    ranges.append(range)
+                }
+                segmentStart = cursor + 1
+                cursor += 1
+                continue
+            }
+            updateDeclarationDelimiterDepth(
+                character: character,
+                next: cursor + 1 < declaration.length
+                    ? declaration.substring(with: NSRange(location: cursor + 1, length: 1))
+                    : "",
+                parenDepth: &parenDepth,
+                bracketDepth: &bracketDepth,
+                braceDepth: &braceDepth,
+                angleDepth: &angleDepth
+            )
+            cursor += 1
+        }
+        if let range = declarationNameRange(
+            in: NSRange(location: segmentStart, length: upperBound - segmentStart),
+            declaration: declaration
+        ) {
+            ranges.append(range)
+        }
+        return ranges
+    }
+
+    private static func declarationNameRange(in segmentRange: NSRange, declaration: NSString) -> NSRange? {
+        let searchEnd = declarationAssignmentLocation(in: segmentRange, declaration: declaration) ?? segmentRange.upperBound
+        var end = min(searchEnd, declaration.length)
+        while end > segmentRange.location,
+              isWhitespace(declaration.substring(with: NSRange(location: end - 1, length: 1))) {
+            end -= 1
+        }
+        guard let range = identifierRange(before: end, in: declaration) else {
+            return nil
+        }
+        let name = declaration.substring(with: range)
+        guard isIdentifier(name),
+              !typedefIgnoredIdentifiers.contains(name),
+              name != "const",
+              name != "static" else {
+            return nil
+        }
+        return range
+    }
+
+    private static func declarationAssignmentLocation(in segmentRange: NSRange, declaration: NSString) -> Int? {
+        var cursor = max(0, segmentRange.location)
+        let upperBound = min(segmentRange.upperBound, declaration.length)
+        var parenDepth = 0
+        var bracketDepth = 0
+        var braceDepth = 0
+        var angleDepth = 0
+        while cursor < upperBound {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: declaration) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = declaration.substring(with: NSRange(location: cursor, length: 1))
+            if character == "=",
+               parenDepth == 0,
+               bracketDepth == 0,
+               braceDepth == 0,
+               angleDepth == 0 {
+                return cursor
+            }
+            updateDeclarationDelimiterDepth(
+                character: character,
+                next: cursor + 1 < declaration.length
+                    ? declaration.substring(with: NSRange(location: cursor + 1, length: 1))
+                    : "",
+                parenDepth: &parenDepth,
+                bracketDepth: &bracketDepth,
+                braceDepth: &braceDepth,
+                angleDepth: &angleDepth
+            )
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func updateDeclarationDelimiterDepth(
+        character: String,
+        next: String,
+        parenDepth: inout Int,
+        bracketDepth: inout Int,
+        braceDepth: inout Int,
+        angleDepth: inout Int
+    ) {
+        if character == "(" {
+            parenDepth += 1
+        } else if character == ")" {
+            parenDepth = max(0, parenDepth - 1)
+        } else if character == "[" {
+            bracketDepth += 1
+        } else if character == "]" {
+            bracketDepth = max(0, bracketDepth - 1)
+        } else if character == "{" {
+            braceDepth += 1
+        } else if character == "}" {
+            braceDepth = max(0, braceDepth - 1)
+        } else if character == "<",
+                  next != "<",
+                  parenDepth == 0,
+                  bracketDepth == 0,
+                  braceDepth == 0 {
+            angleDepth += 1
+        } else if character == ">",
+                  angleDepth > 0,
+                  next != ">" {
+            angleDepth -= 1
+        }
     }
 
     private static func scanVariableShadowRanges(
@@ -2916,44 +3058,62 @@ private struct ObjectiveCFileSymbolIndex {
             in: body as String,
             range: NSRange(location: 0, length: body.length)
         ) {
-            let nameRange = match.range(at: 1)
-            guard nameRange.location != NSNotFound else { continue }
-            let absoluteLocation = bodyRange.location + nameRange.location
-            guard !isInsideCommentOrLiteral(NSRange(location: absoluteLocation, length: nameRange.length), in: source) else {
+            let anchorRange = match.range(at: 1)
+            guard anchorRange.location != NSNotFound else { continue }
+            let absoluteLineRange = source.lineRange(
+                for: NSRange(location: bodyRange.location + anchorRange.location, length: 0)
+            )
+            let line = source.substring(with: absoluteLineRange) as NSString
+            let statementEnd = firstLocation(ofAny: [";"], in: line, before: line.length)
+            let firstTerminator = firstLocation(ofAny: ["=", ";"], in: line, before: line.length)
+            guard statementEnd != NSNotFound,
+                  firstTerminator != NSNotFound,
+                  line.range(of: "(", options: [], range: NSRange(location: 0, length: firstTerminator)).location == NSNotFound else {
                 continue
             }
-            let name = body.substring(with: nameRange)
-            guard shadowedNames.contains(name) else { continue }
-            let upperBound = localShadowUpperBound(startingAt: absoluteLocation, in: scope, source: source)
-            guard absoluteLocation < upperBound else { continue }
-            shadowSpans.append((
-                name: name,
-                range: NSRange(location: absoluteLocation, length: upperBound - absoluteLocation)
-            ))
+            for nameRange in declarationNameRanges(in: line, statementEnd: statementEnd) {
+                let absoluteLocation = absoluteLineRange.location + nameRange.location
+                guard !isInsideCommentOrLiteral(NSRange(location: absoluteLocation, length: nameRange.length), in: source) else {
+                    continue
+                }
+                let name = line.substring(with: nameRange)
+                guard shadowedNames.contains(name) else { continue }
+                let upperBound = localShadowUpperBound(startingAt: absoluteLocation, in: scope, source: source)
+                guard absoluteLocation < upperBound else { continue }
+                shadowSpans.append((
+                    name: name,
+                    range: NSRange(location: absoluteLocation, length: upperBound - absoluteLocation)
+                ))
+            }
         }
 
         for match in objectiveCForLoopVariableShadowDeclarationRegex.matches(
             in: body as String,
             range: NSRange(location: 0, length: body.length)
         ) {
-            let nameRange = match.range(at: 1)
-            guard nameRange.location != NSNotFound else { continue }
-            let absoluteLocation = bodyRange.location + nameRange.location
-            guard !isInsideCommentOrLiteral(NSRange(location: absoluteLocation, length: nameRange.length), in: source) else {
-                continue
-            }
-            let name = body.substring(with: nameRange)
-            guard shadowedNames.contains(name) else { continue }
             let upperBound = forLoopShadowUpperBound(
                 matchRange: NSRange(location: bodyRange.location + match.range.location, length: match.range.length),
                 fallbackUpperBound: scope.upperBound,
                 source: source
             )
-            guard absoluteLocation < upperBound else { continue }
-            shadowSpans.append((
-                name: name,
-                range: NSRange(location: absoluteLocation, length: upperBound - absoluteLocation)
-            ))
+            for nameRange in forLoopDeclarationNameRanges(
+                matchRange: NSRange(location: bodyRange.location + match.range.location, length: match.range.length),
+                source: source
+            ) {
+                let absoluteLocation = nameRange.location
+                guard !isInsideCommentOrLiteral(nameRange, in: source) else {
+                    continue
+                }
+                let name = source.substring(with: nameRange)
+                guard shadowedNames.contains(name),
+                      absoluteLocation < upperBound else {
+                    continue
+                }
+                shadowSpans.append((
+                    name: name,
+                    range: NSRange(location: absoluteLocation, length: upperBound - absoluteLocation)
+                ))
+            }
         }
     }
 
@@ -3004,6 +3164,73 @@ private struct ObjectiveCFileSymbolIndex {
             return min(lineRange.upperBound, fallbackUpperBound)
         }
         return min(source.length, fallbackUpperBound)
+    }
+
+    private static func forLoopDeclarationNameRanges(matchRange: NSRange, source: NSString) -> [NSRange] {
+        guard let openParen = nextLocation(ofAny: ["("], after: matchRange.location, in: source),
+              let closeParen = matchingCloseParenLocation(openingAt: openParen, in: source),
+              openParen < closeParen else {
+            return []
+        }
+        let clauseRange = NSRange(location: openParen + 1, length: closeParen - openParen - 1)
+        let clause = source.substring(with: clauseRange) as NSString
+        let declarationEnd = forLoopDeclarationEnd(in: clause)
+        guard declarationEnd != NSNotFound else {
+            return []
+        }
+        return declarationNameRanges(in: clause, statementEnd: declarationEnd)
+            .map { NSRange(location: clauseRange.location + $0.location, length: $0.length) }
+    }
+
+    private static func forLoopDeclarationEnd(in clause: NSString) -> Int {
+        var cursor = 0
+        var parenDepth = 0
+        var bracketDepth = 0
+        var braceDepth = 0
+        var angleDepth = 0
+        while cursor < clause.length {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: clause) {
+                cursor = nextCursor
+                continue
+            }
+            let character = clause.substring(with: NSRange(location: cursor, length: 1))
+            updateDeclarationDelimiterDepth(
+                character: character,
+                next: cursor + 1 < clause.length
+                    ? clause.substring(with: NSRange(location: cursor + 1, length: 1))
+                    : "",
+                parenDepth: &parenDepth,
+                bracketDepth: &bracketDepth,
+                braceDepth: &braceDepth,
+                angleDepth: &angleDepth
+            )
+            if parenDepth == 0,
+               bracketDepth == 0,
+               braceDepth == 0,
+               angleDepth == 0 {
+                if character == ";" {
+                    return cursor
+                }
+                if clauseHasStandaloneIn(at: cursor, in: clause) {
+                    return cursor
+                }
+            }
+            cursor += 1
+        }
+        return NSNotFound
+    }
+
+    private static func clauseHasStandaloneIn(at location: Int, in clause: NSString) -> Bool {
+        let keywordLength = "in".utf16.count
+        guard location + keywordLength <= clause.length,
+              clause.substring(with: NSRange(location: location, length: keywordLength)) == "in" else {
+            return false
+        }
+        let before = location == 0 ? nil : clause.character(at: location - 1)
+        let afterLocation = location + keywordLength
+        let after = afterLocation < clause.length ? clause.character(at: afterLocation) : nil
+        return before.map(isASCIIIdentifierContinue) != true
+            && after.map(isASCIIIdentifierContinue) != true
     }
 
     private static func innermostOpenBraceLocation(
@@ -3297,14 +3524,17 @@ private struct ObjectiveCFileSymbolIndex {
                     awaitingIvarBlock = false
                     continue
                 }
-                guard let relativeRange = implementationIvarNameRange(in: line) else {
+                let relativeRanges = implementationIvarNameRanges(in: line)
+                guard !relativeRanges.isEmpty else {
                     continue
                 }
-                let name = line.substring(with: relativeRange)
-                declarations.append((
-                    name: name,
-                    range: NSRange(location: lineRange.location + relativeRange.location, length: relativeRange.length)
-                ))
+                for relativeRange in relativeRanges {
+                    let name = line.substring(with: relativeRange)
+                    declarations.append((
+                        name: name,
+                        range: NSRange(location: lineRange.location + relativeRange.location, length: relativeRange.length)
+                    ))
+                }
                 continue
             }
 
@@ -3336,19 +3566,13 @@ private struct ObjectiveCFileSymbolIndex {
             || trimmedLine.hasPrefix("*/")
     }
 
-    private static func implementationIvarNameRange(in line: NSString) -> NSRange? {
+    private static func implementationIvarNameRanges(in line: NSString) -> [NSRange] {
         let semicolonRange = line.range(of: ";")
         guard semicolonRange.location != NSNotFound,
-              line.range(of: "(", options: [], range: NSRange(location: 0, length: semicolonRange.location)).location == NSNotFound,
-              let range = identifierRange(before: semicolonRange.location, in: line) else {
-            return nil
+              line.range(of: "(", options: [], range: NSRange(location: 0, length: semicolonRange.location)).location == NSNotFound else {
+            return []
         }
-        let name = line.substring(with: range)
-        guard isIdentifier(name),
-              !typedefIgnoredIdentifiers.contains(name) else {
-            return nil
-        }
-        return range
+        return declarationNameRanges(in: line, statementEnd: semicolonRange.location)
     }
 
     private static func firstLocation(ofAny needles: [String], in text: NSString, before end: Int) -> Int {
