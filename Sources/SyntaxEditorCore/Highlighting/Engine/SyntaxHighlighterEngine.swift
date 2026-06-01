@@ -211,6 +211,29 @@ package extension SyntaxHighlighting {
     }
 }
 
+public enum SyntaxEditorHighlighting {
+    public static func prepare(_ language: SyntaxLanguage) async {
+        await LanguageConfigurationRegistry.shared.prepare([language])
+    }
+
+    public static func prepare<S: Sequence>(_ languages: S) async where S.Element == SyntaxLanguage {
+        await LanguageConfigurationRegistry.shared.prepare(uniqueLanguages(languages))
+    }
+
+    private static func uniqueLanguages<S: Sequence>(_ languages: S) -> [SyntaxLanguage]
+        where S.Element == SyntaxLanguage
+    {
+        var seen = Set<SyntaxLanguage>()
+        var result: [SyntaxLanguage] = []
+
+        for language in languages where seen.insert(language).inserted {
+            result.append(language)
+        }
+
+        return result
+    }
+}
+
 package actor SyntaxHighlighterEngine: SyntaxHighlighting {
     private var session: SyntaxHighlightSession?
     private let registry: LanguageConfigurationRegistry
@@ -1921,6 +1944,15 @@ private actor LanguageConfigurationRegistry {
         }
         layeredSetupCache[language] = setup
         return setup
+    }
+
+    func prepare(_ languages: [SyntaxLanguage]) {
+        for language in languages {
+            guard layeredSetupCache.keys.contains(language) == false else {
+                continue
+            }
+            _ = highlightingSetup(for: language)
+        }
     }
 }
 
