@@ -677,6 +677,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let fullRange = NSRange(location: 0, length: nsLine.length)
         return structuralObjectiveCEditRegex.firstMatch(in: line, range: fullRange) != nil
             || objectiveCVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
+            || objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
             || objectiveCSemanticIndexFunctionSignatureLineRegex.firstMatch(in: line, range: fullRange) != nil
             || objectiveCSemanticIndexSplitFunctionNameLineRegex.firstMatch(in: line, range: fullRange) != nil
     }
@@ -688,7 +689,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             let line = text.substring(with: lineRange)
             let nsLine = line as NSString
             let fullRange = NSRange(location: 0, length: nsLine.length)
-            if objectiveCVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil {
+            if objectiveCVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
+                || objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil {
                 return true
             }
             let nextLocation = lineRange.upperBound
@@ -1724,7 +1726,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         case .number:
             return isBoxedExpressionDelimiterRange(token.range, in: source)
                 || isBoxedBooleanLiteralRange(token.range, in: source)
-                || isPotentialStaleBoxedExpressionDelimiterRange(token.range, in: source)
+                || isPotentialStaleBoxedLiteralNumberRange(token.range, in: source)
         case .declarationOther:
             return syntaxIDsAtSameRange.contains(.identifierFunction)
                 || syntaxIDsAtSameRange.contains(.identifier)
@@ -1829,6 +1831,25 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         }
         let character = source.substring(with: range)
         return character == "(" || character == ")"
+    }
+
+    private static func isPotentialStaleBoxedLiteralNumberRange(_ range: NSRange, in source: NSString) -> Bool {
+        guard range.location >= 0,
+              range.length > 0,
+              range.upperBound <= source.length else {
+            return false
+        }
+        if isPotentialStaleBoxedExpressionDelimiterRange(range, in: source) {
+            return true
+        }
+        let text = source.substring(with: range)
+        if ["@", "{", "}", "[", "]"].contains(text) {
+            return false
+        }
+        return objectiveCNumericLiteralTextRegex.firstMatch(
+            in: text,
+            range: NSRange(location: 0, length: (text as NSString).length)
+        ) == nil
     }
 
     private static func isBoxedBooleanLiteralRange(_ range: NSRange, in source: NSString) -> Bool {
@@ -1981,6 +2002,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do)\b)[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*(?:=|;)"#
     )
 
+    private static let objectiveCForLoopVariableDeclarationLineRegex = try! NSRegularExpression(
+        pattern: #"\bfor\s*\(\s*[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*(?:=|in\b)"#
+    )
+
     private static let objectiveCSemanticIndexFunctionSignatureLineRegex = try! NSRegularExpression(
         pattern: #"^\s*(?:[-+]\s*\(|(?:static\s+)?[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*\()"#
     )
@@ -1995,6 +2020,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static let boxedBooleanLiteralRegex = try! NSRegularExpression(
         pattern: #"@(YES|NO)\b"#
+    )
+
+    private static let objectiveCNumericLiteralTextRegex = try! NSRegularExpression(
+        pattern: #"^(?:0[xX][0-9A-Fa-f_]+|[0-9][0-9_]*(?:\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?)[uUlLfF]*$"#
     )
 
     private static let preprocessorObjectiveCMacroRegex = try! NSRegularExpression(
@@ -2928,24 +2957,27 @@ private struct ObjectiveCFileSymbolIndex {
 
         var ranges = Set<ObjectiveCRangeKey>()
         for scope in functionLikeScopes(in: source) {
-            var shadowStarts: [String: Int] = [:]
+            var parameterShadowStarts: [String: Int] = [:]
             collectParameterShadows(
                 in: NSRange(location: scope.location, length: scope.bodyOpenLocation - scope.location),
                 source: source,
                 shadowedNames: shadowedNames,
-                into: &shadowStarts
+                into: &parameterShadowStarts
             )
+            var shadowScopes = parameterShadowStarts.compactMap { name, start -> (name: String, range: NSRange)? in
+                guard start < scope.upperBound else { return nil }
+                return (name, NSRange(location: start, length: scope.upperBound - start))
+            }
             collectLocalVariableShadows(
                 in: scope,
                 source: source,
                 shadowedNames: shadowedNames,
-                into: &shadowStarts
+                into: &shadowScopes
             )
 
-            for (name, start) in shadowStarts {
-                guard start < scope.upperBound else { continue }
-                let scanRange = NSRange(location: start, length: scope.upperBound - start)
-                for range in identifierRanges(named: name, in: scanRange, source: source) {
+            for shadowScope in shadowScopes {
+                for range in identifierRanges(named: shadowScope.name, in: shadowScope.range, source: source) {
+                    guard !isInsideCommentOrLiteral(range, in: source) else { continue }
                     ranges.insert(ObjectiveCRangeKey(range))
                 }
             }
@@ -3074,7 +3106,7 @@ private struct ObjectiveCFileSymbolIndex {
         in scope: (location: Int, bodyOpenLocation: Int, upperBound: Int),
         source: NSString,
         shadowedNames: Set<String>,
-        into shadowStarts: inout [String: Int]
+        into shadowScopes: inout [(name: String, range: NSRange)]
     ) {
         let bodyStart = min(source.length, scope.bodyOpenLocation + 1)
         let bodyEnd = max(bodyStart, min(source.length, scope.upperBound - 1))
@@ -3104,7 +3136,11 @@ private struct ObjectiveCFileSymbolIndex {
                 }
                 let name = line.substring(with: nameRange)
                 guard shadowedNames.contains(name) else { continue }
-                shadowStarts[name] = min(shadowStarts[name] ?? absoluteLocation, absoluteLocation)
+                let upperBound = localVariableShadowUpperBound(startingAt: absoluteLocation, in: source, scope: scope)
+                shadowScopes.append((
+                    name: name,
+                    range: NSRange(location: absoluteLocation, length: max(0, upperBound - absoluteLocation))
+                ))
             }
         }
 
@@ -3112,8 +3148,10 @@ private struct ObjectiveCFileSymbolIndex {
             in: body as String,
             range: NSRange(location: 0, length: body.length)
         ) {
+            let matchRange = NSRange(location: bodyRange.location + match.range.location, length: match.range.length)
+            let upperBound = forLoopShadowUpperBound(matchRange: matchRange, source: source, scopeUpperBound: scope.upperBound)
             for nameRange in forLoopDeclarationNameRanges(
-                matchRange: NSRange(location: bodyRange.location + match.range.location, length: match.range.length),
+                matchRange: matchRange,
                 source: source
             ) {
                 let absoluteLocation = nameRange.location
@@ -3122,9 +3160,62 @@ private struct ObjectiveCFileSymbolIndex {
                 }
                 let name = source.substring(with: nameRange)
                 guard shadowedNames.contains(name) else { continue }
-                shadowStarts[name] = min(shadowStarts[name] ?? absoluteLocation, absoluteLocation)
+                shadowScopes.append((
+                    name: name,
+                    range: NSRange(location: absoluteLocation, length: max(0, upperBound - absoluteLocation))
+                ))
             }
         }
+    }
+
+    private static func localVariableShadowUpperBound(
+        startingAt location: Int,
+        in source: NSString,
+        scope: (location: Int, bodyOpenLocation: Int, upperBound: Int)
+    ) -> Int {
+        guard let openBrace = innermostOpenBraceLocation(
+            containing: location,
+            lowerBound: scope.bodyOpenLocation,
+            in: source
+        ),
+              let closeBrace = matchingClosingBraceLocation(in: source, openBraceLocation: openBrace) else {
+            return scope.upperBound
+        }
+        return min(scope.upperBound, closeBrace + 1)
+    }
+
+    private static func forLoopShadowUpperBound(
+        matchRange: NSRange,
+        source: NSString,
+        scopeUpperBound: Int
+    ) -> Int {
+        guard let openParen = nextLocation(ofAny: ["("], after: matchRange.location, in: source),
+              let closeParen = matchingCloseParenLocation(openingAt: openParen, in: source) else {
+            return min(scopeUpperBound, matchRange.upperBound)
+        }
+
+        var cursor = closeParen + 1
+        let upperBound = min(scopeUpperBound, source.length)
+        while cursor < upperBound {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: source) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                cursor += 1
+                continue
+            }
+            if character == "{",
+               let closeBrace = matchingClosingBraceLocation(in: source, openBraceLocation: cursor) {
+                return min(scopeUpperBound, closeBrace + 1)
+            }
+            if character == ";" {
+                return min(scopeUpperBound, cursor + 1)
+            }
+            cursor += 1
+        }
+        return scopeUpperBound
     }
 
     private static func forLoopDeclarationNameRanges(matchRange: NSRange, source: NSString) -> [NSRange] {
