@@ -4471,6 +4471,34 @@ extension SyntaxEditorUITests {
         #expect(editorView.selectedRange == NSRange(location: 4, length: 0))
     }
 
+    @Test("SyntaxEditorView inserts raw iOS tab in plain text")
+    @MainActor
+    func syntaxEditorViewIOSInsertPlainTextTabAtCaret() {
+        let source = "abcde"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.plainText)
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.selectedRange = NSRange(location: 2, length: 0)
+
+        let commands = editorView.keyCommands
+        #expect(hasSyntaxEditorKeyCommand(commands, input: "\t", modifierFlags: []))
+        #expect(!hasSyntaxEditorKeyCommand(commands, input: "\t", modifierFlags: [.shift]))
+        #expect(!hasSyntaxEditorKeyCommand(commands, input: "]", modifierFlags: [.command]))
+        #expect(!hasSyntaxEditorKeyCommand(commands, input: "[", modifierFlags: [.command]))
+        #expect(!hasSyntaxEditorKeyCommand(commands, input: "/", modifierFlags: [.command]))
+
+        let insertTabActionTarget = editorView.target(
+            forAction: NSSelectorFromString("handleInsertTabCommand"),
+            withSender: nil
+        ) as AnyObject?
+        #expect(insertTabActionTarget === editorView)
+
+        #expect(performSyntaxEditorSelector("handleInsertTabCommand", on: editorView))
+
+        #expect(model.model.text == "ab\tcde")
+        #expect(editorView.text == "ab\tcde")
+        #expect(editorView.selectedRange == NSRange(location: 3, length: 0))
+    }
+
     @Test("SyntaxEditorView uses native iOS undo stack for text input")
     @MainActor
     func syntaxEditorViewIOSNativeTextInputUndoRedo() {

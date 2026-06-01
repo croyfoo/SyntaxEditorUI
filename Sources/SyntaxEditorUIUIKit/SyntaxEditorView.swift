@@ -477,6 +477,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return model.isEditable
         }
 
+        if action == #selector(handleInsertTabCommand) {
+            return model.isEditable
+        }
+
         if isEditorCommandAction(action) {
             return model.isEditable && model.language.supportsCodeEditingCommands
         }
@@ -759,11 +763,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return commands
         }
 
+        commands.append(
+            makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleInsertTabCommand), title: "Insert Tab")
+        )
+
         if supportsCodeEditingCommands {
-            commands.append(contentsOf: [
-                makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleInsertTabCommand), title: "Insert Tab"),
-                makeKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleOutdentCommand), title: "Outdent"),
-            ])
+            commands.append(
+                makeKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleOutdentCommand), title: "Outdent")
+            )
         }
 
         commands.append(contentsOf: [
@@ -1532,7 +1539,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @objc private func handleInsertTabCommand() {
-        guard model.isEditable, model.language.supportsCodeEditingCommands else { return }
+        guard model.isEditable else { return }
+
+        guard model.language.supportsCodeEditingCommands else {
+            insertText("\t")
+            return
+        }
 
         guard let result = commandEngine.insertTab(
             source: text,
