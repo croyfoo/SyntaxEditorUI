@@ -554,7 +554,39 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let targetRange = source.lineRange(for: clamped)
         let contextRange = objectiveCUnsafeEditContextRange(around: targetRange, in: source)
         let context = source.substring(with: contextRange)
-        return objectiveCRefreshLooksStructural(context) ? nil : targetRange
+        guard !objectiveCRefreshLooksStructural(context) else {
+            return nil
+        }
+        return boxedExpressionRefreshRange(around: targetRange, in: source) ?? targetRange
+    }
+
+    private static func boxedExpressionRefreshRange(around targetRange: NSRange, in source: NSString) -> NSRange? {
+        var cursor = targetRange.location
+        let upperBound = min(source.length, targetRange.upperBound)
+        while cursor < upperBound {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            guard character == "(" else {
+                cursor += 1
+                continue
+            }
+            guard let closeParenRange = matchingCloseParenRange(openingAt: cursor, in: source) else {
+                cursor += 1
+                continue
+            }
+            let fullRange = NSRange(location: cursor, length: closeParenRange.upperBound - cursor)
+            if !rangesIntersect(fullRange, targetRange) {
+                cursor += 1
+                continue
+            }
+            return unionRange(targetRange, fullRange)
+        }
+        return nil
+    }
+
+    private static func unionRange(_ lhs: NSRange, _ rhs: NSRange) -> NSRange {
+        let lowerBound = min(lhs.location, rhs.location)
+        let upperBound = max(lhs.upperBound, rhs.upperBound)
+        return NSRange(location: lowerBound, length: upperBound - lowerBound)
     }
 
     private static func objectiveCUnsafeEditContextRange(around range: NSRange, in source: NSString) -> NSRange {
@@ -1716,6 +1748,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         case .number:
             return isBoxedExpressionDelimiterRange(token.range, in: source)
                 || isBoxedBooleanLiteralRange(token.range, in: source)
+                || isPotentialStaleBoxedExpressionDelimiterRange(token.range, in: source)
         case .declarationOther:
             return syntaxIDsAtSameRange.contains(.identifierFunction)
                 || syntaxIDsAtSameRange.contains(.identifier)
@@ -1810,6 +1843,16 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             return boxedExpressionOpeningParenLocation(closingAt: range.location, in: source) != nil
         }
         return false
+    }
+
+    private static func isPotentialStaleBoxedExpressionDelimiterRange(_ range: NSRange, in source: NSString) -> Bool {
+        guard range.length == 1,
+              range.location >= 0,
+              range.upperBound <= source.length else {
+            return false
+        }
+        let character = source.substring(with: range)
+        return character == "(" || character == ")"
     }
 
     private static func isBoxedBooleanLiteralRange(_ range: NSRange, in source: NSString) -> Bool {
@@ -1959,7 +2002,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     )
 
     private static let objectiveCVariableDeclarationLineRegex = try! NSRegularExpression(
-        pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do)\b)[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*;"#
+        pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do)\b)[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*(?:=|;)"#
     )
 
     private static let preprocessorQuotedStringRegex = try! NSRegularExpression(

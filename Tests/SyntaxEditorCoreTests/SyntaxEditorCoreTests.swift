@@ -9883,6 +9883,42 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens == full.tokens)
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after initialized local shadow renames")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterInitializedLocalShadowRename() async throws {
+        let source = """
+        static NSString *const Token = @"global";
+
+        void run(void)
+        {
+            NSString *Other = @"local";
+            NSLog(@"%@", Token);
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "Other", with: "Token")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine keeps Objective-C local statics out of file-scope overlays")
     func highlighterKeepsObjectiveCLocalStaticsOutOfFileScopeOverlays() async throws {
         let source = """
@@ -10149,6 +10185,39 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "return self.title.length"
         )
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C boxed expression delimiters across partial ranges")
+    func highlighterStripsStaleObjectiveCBoxedExpressionDelimitersAcrossPartialRanges() async throws {
+        let source = """
+        NSNumber *boxed(NSUInteger count)
+        {
+            return @(
+                count
+            );
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "return @(", with: "return (")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: ")",
+            inOccurrenceOf: "count\n    );"
+        ).contains(.number) == false)
     }
 
     @Test("SyntaxHighlighterEngine incrementally updates Objective-C reference sample like a full reset")
