@@ -10200,6 +10200,12 @@ struct SyntaxHighlighterEngineTests {
             NSLog(@"%@", Token);
         }
 
+        void commentBraceSignature(void) // {
+        {
+            NSString *Token = @"local";
+            NSLog(@"%@", Token);
+        }
+
         void blockScope(void)
         {
             {
@@ -10322,6 +10328,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "// }\n    NSLog(@\"%@\", Token);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "commentBraceSignature(void) // {\n{\n    NSString *Token"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

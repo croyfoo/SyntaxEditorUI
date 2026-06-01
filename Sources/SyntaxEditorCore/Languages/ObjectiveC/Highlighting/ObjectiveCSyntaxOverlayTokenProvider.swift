@@ -3026,8 +3026,7 @@ private struct ObjectiveCFileSymbolIndex {
                 continue
             }
 
-            let openBraceRange = line.range(of: "{")
-            if openBraceRange.location != NSNotFound {
+            if let openBraceRange = firstBraceRange(in: line, brace: "{") {
                 let openBraceLocation = lineRange.location + openBraceRange.location
                 if let closeBraceLocation = matchingClosingBraceLocation(in: source, openBraceLocation: openBraceLocation) {
                     scopes.append((
@@ -3037,7 +3036,7 @@ private struct ObjectiveCFileSymbolIndex {
                     ))
                 }
                 pendingStart = nil
-            } else if line.range(of: ";").location != NSNotFound {
+            } else if firstCodeCharacterRange(in: line, character: ";") != nil {
                 pendingStart = nil
             }
         }
@@ -3635,13 +3634,17 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func firstBraceRange(in line: NSString, brace: String, after location: Int = 0) -> NSRange? {
+        firstCodeCharacterRange(in: line, character: brace, after: location)
+    }
+
+    private static func firstCodeCharacterRange(in line: NSString, character: String, after location: Int = 0) -> NSRange? {
         var cursor = min(max(0, location), line.length)
         while cursor < line.length {
             if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: line) {
                 cursor = nextCursor
                 continue
             }
-            if line.substring(with: NSRange(location: cursor, length: 1)) == brace {
+            if line.substring(with: NSRange(location: cursor, length: 1)) == character {
                 return NSRange(location: cursor, length: 1)
             }
             cursor += 1
