@@ -2918,10 +2918,37 @@ private struct ObjectiveCFileSymbolIndex {
         ) {
             let nameRange = match.range(at: 1)
             guard nameRange.location != NSNotFound else { continue }
+            let absoluteLocation = bodyRange.location + nameRange.location
+            guard !isInsideCommentOrLiteral(NSRange(location: absoluteLocation, length: nameRange.length), in: source) else {
+                continue
+            }
             let name = body.substring(with: nameRange)
             guard shadowedNames.contains(name) else { continue }
-            let absoluteLocation = bodyRange.location + nameRange.location
             let upperBound = localShadowUpperBound(startingAt: absoluteLocation, in: scope, source: source)
+            guard absoluteLocation < upperBound else { continue }
+            shadowSpans.append((
+                name: name,
+                range: NSRange(location: absoluteLocation, length: upperBound - absoluteLocation)
+            ))
+        }
+
+        for match in objectiveCForLoopVariableShadowDeclarationRegex.matches(
+            in: body as String,
+            range: NSRange(location: 0, length: body.length)
+        ) {
+            let nameRange = match.range(at: 1)
+            guard nameRange.location != NSNotFound else { continue }
+            let absoluteLocation = bodyRange.location + nameRange.location
+            guard !isInsideCommentOrLiteral(NSRange(location: absoluteLocation, length: nameRange.length), in: source) else {
+                continue
+            }
+            let name = body.substring(with: nameRange)
+            guard shadowedNames.contains(name) else { continue }
+            let upperBound = forLoopShadowUpperBound(
+                matchRange: NSRange(location: bodyRange.location + match.range.location, length: match.range.length),
+                fallbackUpperBound: scope.upperBound,
+                source: source
+            )
             guard absoluteLocation < upperBound else { continue }
             shadowSpans.append((
                 name: name,
@@ -2935,22 +2962,72 @@ private struct ObjectiveCFileSymbolIndex {
         in scope: (location: Int, bodyOpenLocation: Int, upperBound: Int),
         source: NSString
     ) -> Int {
-        let lowerBound = min(max(0, scope.bodyOpenLocation), source.length)
-        var cursor = min(max(location - 1, lowerBound), source.length - 1)
-        while cursor >= lowerBound {
-            let character = source.substring(with: NSRange(location: cursor, length: 1))
-            if character == "{",
-               let closeBrace = matchingClosingBraceLocation(in: source, openBraceLocation: cursor),
-               closeBrace < scope.upperBound {
-                return closeBrace + 1
-            }
-            if character == "}" {
-                return min(source.length, scope.upperBound)
-            }
-            if cursor == 0 { break }
-            cursor -= 1
+        if let openBrace = innermostOpenBraceLocation(
+            containing: location,
+            lowerBound: scope.bodyOpenLocation,
+            in: source
+        ),
+           let closeBrace = matchingClosingBraceLocation(in: source, openBraceLocation: openBrace),
+           closeBrace < scope.upperBound {
+            return closeBrace + 1
         }
         return min(source.length, scope.upperBound)
+    }
+
+    private static func forLoopShadowUpperBound(
+        matchRange: NSRange,
+        fallbackUpperBound: Int,
+        source: NSString
+    ) -> Int {
+        guard let openParen = nextLocation(ofAny: ["("], after: matchRange.location, in: source),
+              let closeParen = matchingCloseParenLocation(openingAt: openParen, in: source) else {
+            return min(source.length, fallbackUpperBound)
+        }
+
+        var cursor = closeParen + 1
+        while cursor < min(source.length, fallbackUpperBound) {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: source) {
+                cursor = nextCursor
+                continue
+            }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if isWhitespace(character) {
+                cursor += 1
+                continue
+            }
+            if character == "{",
+               let closeBrace = matchingClosingBraceLocation(in: source, openBraceLocation: cursor),
+               closeBrace < fallbackUpperBound {
+                return closeBrace + 1
+            }
+            let lineRange = source.lineRange(for: NSRange(location: cursor, length: 0))
+            return min(lineRange.upperBound, fallbackUpperBound)
+        }
+        return min(source.length, fallbackUpperBound)
+    }
+
+    private static func innermostOpenBraceLocation(
+        containing location: Int,
+        lowerBound: Int,
+        in source: NSString
+    ) -> Int? {
+        let upperBound = min(max(0, location), source.length)
+        var stack: [Int] = []
+        var cursor = min(max(0, lowerBound), upperBound)
+        while cursor < upperBound {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: source) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == "{" {
+                stack.append(cursor)
+            } else if character == "}" {
+                _ = stack.popLast()
+            }
+            cursor += 1
+        }
+        return stack.last
     }
 
     private static func identifierRanges(named name: String, in range: NSRange, source: NSString) -> [NSRange] {
@@ -3046,15 +3123,37 @@ private struct ObjectiveCFileSymbolIndex {
         return nil
     }
 
+    private static func matchingCloseParenLocation(openingAt openParen: Int, in text: NSString) -> Int? {
+        var depth = 0
+        var cursor = openParen
+        while cursor < text.length {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: text) {
+                cursor = nextCursor
+                continue
+            }
+            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                depth -= 1
+                if depth == 0 {
+                    return cursor
+                }
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
     private static func matchingClosingBraceLocation(in source: NSString, openBraceLocation: Int) -> Int? {
         var cursor = openBraceLocation + 1
         var depth = 1
         while cursor < source.length {
-            let character = source.substring(with: NSRange(location: cursor, length: 1))
-            if character == "\"" || character == "'" {
-                cursor = indexAfterQuotedLiteral(startingAt: cursor, quote: character, in: source)
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: source) {
+                cursor = nextCursor
                 continue
             }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
             if character == "{", depth == 0 {
                 depth = 1
             } else if character == "{" {
@@ -3068,6 +3167,51 @@ private struct ObjectiveCFileSymbolIndex {
             cursor += 1
         }
         return nil
+    }
+
+    private static func indexAfterCommentOrQuotedLiteral(startingAt location: Int, in text: NSString) -> Int? {
+        guard location >= 0,
+              location < text.length else {
+            return nil
+        }
+        let character = text.substring(with: NSRange(location: location, length: 1))
+        let next = location + 1 < text.length
+            ? text.substring(with: NSRange(location: location + 1, length: 1))
+            : ""
+        if character == "\"" || character == "'" {
+            return indexAfterQuotedLiteral(startingAt: location, quote: character, in: text)
+        }
+        if character == "/", next == "/" {
+            return text.lineRange(for: NSRange(location: location, length: 0)).upperBound
+        }
+        if character == "/", next == "*" {
+            var cursor = location + 2
+            while cursor + 1 < text.length {
+                let current = text.substring(with: NSRange(location: cursor, length: 1))
+                let following = text.substring(with: NSRange(location: cursor + 1, length: 1))
+                if current == "*", following == "/" {
+                    return cursor + 2
+                }
+                cursor += 1
+            }
+            return text.length
+        }
+        return nil
+    }
+
+    private static func isInsideCommentOrLiteral(_ range: NSRange, in text: NSString) -> Bool {
+        var cursor = 0
+        while cursor < min(range.location, text.length) {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: text) {
+                if nextCursor > range.location {
+                    return true
+                }
+                cursor = nextCursor
+                continue
+            }
+            cursor += 1
+        }
+        return false
     }
 
     private static func objectiveCBraceDepth(
@@ -3167,7 +3311,7 @@ private struct ObjectiveCFileSymbolIndex {
             if awaitingIvarBlock {
                 if trimmed.hasPrefix("{") {
                     isInIvarBlock = true
-                } else if !trimmed.isEmpty {
+                } else if !trimmed.isEmpty && !isObjectiveCCommentOnlyLine(trimmed) {
                     awaitingIvarBlock = false
                 }
                 continue
@@ -3183,6 +3327,13 @@ private struct ObjectiveCFileSymbolIndex {
             }
         }
         return declarations
+    }
+
+    private static func isObjectiveCCommentOnlyLine(_ trimmedLine: String) -> Bool {
+        trimmedLine.hasPrefix("//")
+            || trimmedLine.hasPrefix("/*")
+            || trimmedLine.hasPrefix("*")
+            || trimmedLine.hasPrefix("*/")
     }
 
     private static func implementationIvarNameRange(in line: NSString) -> NSRange? {
@@ -3770,6 +3921,10 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static let objectiveCLocalVariableShadowDeclarationRegex = try! NSRegularExpression(
         pattern: #"(?m)^\s*(?:static\s+)?(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do)\b)[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)"#
+    )
+
+    private static let objectiveCForLoopVariableShadowDeclarationRegex = try! NSRegularExpression(
+        pattern: #"\bfor\s*\(\s*[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|in\b)"#
     )
 
     private static let nsEnumOptionsTypedefNameRegex = try! NSRegularExpression(

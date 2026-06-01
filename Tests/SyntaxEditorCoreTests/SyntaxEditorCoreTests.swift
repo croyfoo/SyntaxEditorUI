@@ -9969,6 +9969,29 @@ struct SyntaxHighlighterEngineTests {
             NSString *Token = @"local";
             return Token;
         }
+
+        void loop(NSArray<NSString *> *values)
+        {
+            for (NSString *Token in values) {
+                NSLog(@"%@", Token);
+            }
+            NSLog(@"%@", Token);
+        }
+
+        void commented(void)
+        {
+            /*
+            NSString *Token = nil;
+            */
+            NSLog(@"%@", Token);
+        }
+
+        void commentBrace(void)
+        {
+            NSString *Token = @"local";
+            // }
+            NSLog(@"%@", Token);
+        }
         @end
         """
         let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
@@ -9987,7 +10010,7 @@ struct SyntaxHighlighterEngineTests {
             text: "Token",
             syntaxID: .plain,
             language: .objectiveC,
-            inOccurrenceOf: "NSLog(@\"%@\", Token);\n    }"
+            inOccurrenceOf: "values) {\n        NSLog(@\"%@\", Token);"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -10004,6 +10027,46 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "return Token;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "for (NSString *Token in values)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);\n    }"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);\n}\n\nvoid commented"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "*/\n    NSLog(@\"%@\", Token);\n}\n\nvoid commentBrace"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "// }\n    NSLog(@\"%@\", Token);"
         )
     }
 
@@ -10027,6 +10090,33 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
             inOccurrenceOf: "NSLog(@\"%@\", Token);"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C ivars after implementation comments")
+    func highlighterKeepsObjectiveCIvarsAfterImplementationComments() async throws {
+        let source = """
+        @implementation Sample
+        // storage
+        {
+            BOOL enabled;
+        }
+
+        - (BOOL)value
+        {
+            return enabled;
+        }
+        @end
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "enabled",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return enabled;"
         )
     }
 
