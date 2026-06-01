@@ -1745,6 +1745,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             }
             return lineStartsWithPreprocessorDirective(containing: token.range, in: source)
                 && rangeIsContainedInPreprocessorToken(token.range, preprocessorRanges: preprocessorRanges)
+        case .preprocessor:
+            return syntaxIDsAtSameRange.contains(.plain)
+                && isObjectiveCCallName(token.range, in: source)
+                && !lineStartsWithPreprocessorDirective(containing: token.range, in: source)
         case .number:
             return isBoxedExpressionDelimiterRange(token.range, in: source)
                 || isBoxedBooleanLiteralRange(token.range, in: source)
