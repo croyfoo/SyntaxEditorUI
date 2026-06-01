@@ -9971,6 +9971,29 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine recognizes indented Objective-C file-scope variables after comments")
+    func highlighterRecognizesIndentedObjectiveCFileScopeVariablesAfterComments() async throws {
+        let source = """
+        // {
+            static NSString *const Token = @"global";
+
+        void run(void)
+        {
+            NSLog(@"%@", Token);
+        }
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after source-length edits")
     func highlighterRebuildsObjectiveCSemanticIndexAfterSourceLengthEdits() async throws {
         let source = """

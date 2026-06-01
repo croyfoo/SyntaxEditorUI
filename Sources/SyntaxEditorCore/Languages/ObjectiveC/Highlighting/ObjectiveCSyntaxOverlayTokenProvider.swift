@@ -2695,19 +2695,31 @@ private struct ObjectiveCFileSymbolIndex {
         var declarations: [(name: String, range: NSRange)] = []
         var location = 0
         var braceDepth = 0
+        var isInBlockComment = false
         while location < source.length {
             let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
             let line = source.substring(with: lineRange) as NSString
             let depthBeforeLine = braceDepth
             defer {
-                braceDepth = objectiveCBraceDepth(afterScanning: line, startingAt: braceDepth)
+                let result = objectiveCBraceDepth(
+                    afterScanning: line,
+                    startingAt: braceDepth,
+                    isInBlockComment: isInBlockComment
+                )
+                braceDepth = result.depth
+                isInBlockComment = result.isInBlockComment
                 let nextLocation = lineRange.upperBound
                 location = nextLocation > location ? nextLocation : source.length
             }
 
+            let codeStart = firstNonWhitespaceLocation(in: line)
+            let afterStatic = codeStart + "static".utf16.count
             guard depthBeforeLine == 0,
-                  line.length > 0,
-                  line.substring(to: min(line.length, "static".utf16.count)) == "static" else {
+                  !isInBlockComment,
+                  codeStart < line.length,
+                  line.length - codeStart >= "static".utf16.count,
+                  line.substring(with: NSRange(location: codeStart, length: "static".utf16.count)) == "static",
+                  afterStatic == line.length || !isASCIIIdentifierContinue(line.character(at: afterStatic)) else {
                 continue
             }
             let statementEnd = firstLocation(ofAny: ["=", ";"], in: line, before: line.length)
@@ -2728,6 +2740,17 @@ private struct ObjectiveCFileSymbolIndex {
             ))
         }
         return declarations
+    }
+
+    private static func firstNonWhitespaceLocation(in line: NSString) -> Int {
+        var cursor = 0
+        while cursor < line.length {
+            if !isWhitespace(line.substring(with: NSRange(location: cursor, length: 1))) {
+                return cursor
+            }
+            cursor += 1
+        }
+        return line.length
     }
 
     private static func scanVariableShadowRanges(
@@ -3004,11 +3027,37 @@ private struct ObjectiveCFileSymbolIndex {
         return nil
     }
 
-    private static func objectiveCBraceDepth(afterScanning line: NSString, startingAt depth: Int) -> Int {
+    private static func objectiveCBraceDepth(
+        afterScanning line: NSString,
+        startingAt depth: Int,
+        isInBlockComment: Bool
+    ) -> (depth: Int, isInBlockComment: Bool) {
         var result = depth
+        var isInBlockComment = isInBlockComment
         var cursor = 0
         while cursor < line.length {
             let character = line.substring(with: NSRange(location: cursor, length: 1))
+            let nextLocation = cursor + 1
+            let next = nextLocation < line.length
+                ? line.substring(with: NSRange(location: nextLocation, length: 1))
+                : nil
+            if isInBlockComment {
+                if character == "*", next == "/" {
+                    isInBlockComment = false
+                    cursor += 2
+                    continue
+                }
+                cursor += 1
+                continue
+            }
+            if character == "/", next == "/" {
+                break
+            }
+            if character == "/", next == "*" {
+                isInBlockComment = true
+                cursor += 2
+                continue
+            }
             if character == "\"" || character == "'" {
                 cursor = indexAfterQuotedLiteral(startingAt: cursor, quote: character, in: line)
                 continue
@@ -3020,7 +3069,7 @@ private struct ObjectiveCFileSymbolIndex {
             }
             cursor += 1
         }
-        return result
+        return (result, isInBlockComment)
     }
 
     private static func indexAfterQuotedLiteral(startingAt quoteLocation: Int, quote: String, in text: NSString) -> Int {
