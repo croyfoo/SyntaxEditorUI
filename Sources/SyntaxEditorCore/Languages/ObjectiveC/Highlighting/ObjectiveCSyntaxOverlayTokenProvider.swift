@@ -203,8 +203,14 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             index: index,
             targetRange: targetRange
         )
-            + appleMacroTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
-            + appleEnumTypedefTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
+            + objectiveCMacroTokens(
+                in: nsSource,
+                nonCodeRanges: preparation.nonCodeRanges,
+                targetRange: targetRange
+            )
+            + preprocessorStringTokens(in: nsSource, tokens: preparation.baseTokensForIndex, targetRange: targetRange)
+            + boxedExpressionDelimiterTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
+            + boxedBooleanLiteralTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
         let mergedTokens = deduplicated(
             mergedTokens(
                 baseTokens: preparation.outputBaseTokens,
@@ -243,7 +249,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
             let text = source.substring(with: token.range)
 
-            if appleMacroNames.contains(text) {
+            if token.syntaxID == .keyword, text == "Class" {
+                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .plain))
+                continue
+            }
+
+            if preprocessorObjectiveCMacroIdentifiers.contains(text) {
                 overlayTokens.append(canonicalToken(range: token.range, syntaxID: .preprocessor))
                 continue
             }
@@ -253,15 +264,67 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 continue
             }
 
+            if index.containsTypeDeclarationNameRange(token.range) {
+                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .declarationType))
+                continue
+            }
+
+            if index.containsSelfMemberNameRange(token.range) {
+                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariable))
+                continue
+            }
+
+            if index.containsSelfChainMemberNameRange(token.range) {
+                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariableSystem))
+                continue
+            }
+
+            if isSelfMemberName(token.range, in: source) {
+                if index.shouldTrackSelfMemberName(text) {
+                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariable))
+                }
+                continue
+            }
+
+            if index.containsIvarName(text),
+               !index.containsIvarDeclarationNameRange(token.range),
+               !index.containsShadowedVariableRange(token.range) {
+                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariable))
+                continue
+            }
+
+            if index.containsFileScopeVariableName(text),
+               !index.containsFileScopeVariableDeclarationNameRange(token.range),
+               !index.containsShadowedVariableRange(token.range) {
+                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariableSystem))
+                continue
+            }
+
+            if knownObjectiveCFunctionPointerCastCallees.contains(text),
+               isObjectiveCFunctionPointerCastCalleeName(token.range, in: source) {
+                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierFunctionSystem))
+                continue
+            }
+
+            if token.syntaxID == .plain,
+               isObjectiveCCallName(token.range, in: source) {
+                if index.containsLocalMacroName(text) {
+                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .preprocessor))
+                    continue
+                }
+                if index.localFunctions.contains(text) {
+                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierFunction))
+                    continue
+                }
+                if knownObjectiveCSystemFunctionNames.contains(text) {
+                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierFunctionSystem))
+                    continue
+                }
+            }
+
             switch token.syntaxID {
             case .identifier:
-                if (index.containsSelfMemberNameRange(token.range) && index.localProperties.contains(text)) ||
-                    (isSelfMemberName(token.range, in: source) && index.localProperties.contains(text)) {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariable))
-                } else if index.containsSelfChainMemberNameRange(token.range) ||
-                    isMemberNameInKnownSelfChain(token.range, in: source, localProperties: index.localProperties) {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariableSystem))
-                }
+                continue
 
             case .identifierType, .identifierTypeSystem:
                 guard !keywordLikeTypeNames.contains(text) else {
@@ -269,18 +332,19 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 }
                 if isTypeDeclarationName(token.range, text: text, in: source) {
                     overlayTokens.append(canonicalToken(range: token.range, syntaxID: .declarationType))
-                } else if index.localTypes.contains(text) || shouldTreatUnknownTypeAsProject(text) {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierType))
                 }
 
             case .identifierFunction:
+                guard !appleMacroFunctionNames.contains(text) else {
+                    continue
+                }
+                guard isObjectiveCFunctionOrMethodDeclarationName(token.range, in: source) else {
+                    continue
+                }
                 overlayTokens.append(canonicalToken(range: token.range, syntaxID: .declarationOther))
 
             case .identifierFunctionSystem:
-                if index.localFunctions.contains(text),
-                   isCFunctionCallName(token.range, in: source) {
-                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierFunction))
-                }
+                continue
 
             default:
                 continue
@@ -290,26 +354,44 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return overlayTokens
     }
 
-    private static func appleMacroTokens(
+    private static func preprocessorStringTokens(
         in source: NSString,
-        nonCodeRanges: [NSRange],
+        tokens: [SyntaxHighlightToken],
         targetRange: NSRange?
     ) -> [SyntaxHighlightToken] {
         let string = source as String
-        let searchRange = targetRange ?? NSRange(location: 0, length: source.length)
-        return appleMacroRegex.matches(in: string, range: searchRange).compactMap { match in
-            let range = match.range
-            guard range.location != NSNotFound,
-                  range.length > 0,
-                  !rangeIntersectsSortedRanges(range, nonCodeRanges)
-            else {
-                return nil
+        var overlayTokens: [SyntaxHighlightToken] = []
+        for token in tokens where (token.language == .objectiveC || token.language == nil)
+            && token.syntaxID == .preprocessor
+            && token.range.location >= 0
+            && token.range.length > 0
+            && token.range.upperBound <= source.length {
+            let scanRange = SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: source.length)
+            guard targetRange.map({ rangesIntersect(scanRange, $0) }) ?? true else {
+                continue
             }
-            return canonicalToken(range: range, syntaxID: .preprocessor)
+
+            for match in preprocessorQuotedStringRegex.matches(in: string, range: scanRange) {
+                var range = match.range
+                guard range.location != NSNotFound,
+                      range.length > 0,
+                      range.upperBound <= source.length else {
+                    continue
+                }
+                if source.substring(with: NSRange(location: range.location, length: 1)) == "@" {
+                    range = NSRange(location: range.location + 1, length: range.length - 1)
+                }
+                guard range.length > 0,
+                      targetRange.map({ rangesIntersect(range, $0) }) ?? true else {
+                    continue
+                }
+                overlayTokens.append(canonicalToken(range: range, syntaxID: .string))
+            }
         }
+        return overlayTokens
     }
 
-    private static func appleEnumTypedefTokens(
+    private static func objectiveCMacroTokens(
         in source: NSString,
         nonCodeRanges: [NSRange],
         targetRange: NSRange?
@@ -317,26 +399,100 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let string = source as String
         let searchRange = targetRange ?? NSRange(location: 0, length: source.length)
         var tokens: [SyntaxHighlightToken] = []
-        for match in appleEnumTypedefRegex.matches(in: string, range: searchRange) {
-            guard match.numberOfRanges == 5,
-                  !rangeIntersectsSortedRanges(match.range, nonCodeRanges)
-            else { continue }
 
-            let typedefRange = match.range(at: 1)
-            let macroRange = match.range(at: 2)
-            let declaredNameRange = match.range(at: 4)
-            guard typedefRange.location != NSNotFound,
-                  macroRange.location != NSNotFound,
-                  declaredNameRange.location != NSNotFound
-            else {
+        for match in preprocessorObjectiveCMacroRegex.matches(in: string, range: searchRange) {
+            let range = match.range
+            guard range.location != NSNotFound,
+                  range.length > 0,
+                  !rangeIntersectsSortedRanges(range, nonCodeRanges) else {
                 continue
             }
+            tokens.append(canonicalToken(range: range, syntaxID: .preprocessor))
+        }
 
-            tokens.append(canonicalToken(range: typedefRange, syntaxID: .keyword))
-            tokens.append(canonicalToken(range: macroRange, syntaxID: .preprocessor))
-            tokens.append(canonicalToken(range: declaredNameRange, syntaxID: .declarationType))
+        for match in macroLikeObjectiveCIdentifierRegex.matches(in: string, range: searchRange) {
+            let range = match.range
+            guard range.location != NSNotFound,
+                  range.length > 0,
+                  !rangeIntersectsSortedRanges(range, nonCodeRanges) else {
+                continue
+            }
+            let text = source.substring(with: range)
+            guard !preprocessorObjectiveCMacroIdentifiers.contains(text) else {
+                continue
+            }
+            guard objectiveCTypeIdentifierShouldStayPlain(range, text: text, in: source) else {
+                continue
+            }
+            tokens.append(canonicalToken(range: range, syntaxID: .plain))
+        }
+
+        return tokens
+    }
+
+    private static func boxedExpressionDelimiterTokens(
+        in source: NSString,
+        nonCodeRanges: [NSRange],
+        targetRange: NSRange?
+    ) -> [SyntaxHighlightToken] {
+        var tokens: [SyntaxHighlightToken] = []
+        var searchLocation = 0
+        while searchLocation < source.length {
+            let searchRange = NSRange(location: searchLocation, length: source.length - searchLocation)
+            let matchRange = source.range(of: "@(", options: [], range: searchRange)
+            guard matchRange.location != NSNotFound else {
+                break
+            }
+            let atRange = NSRange(location: matchRange.location, length: 1)
+            let openParenRange = NSRange(location: matchRange.location + 1, length: 1)
+            let closeParenRange = matchingCloseParenRange(
+                openingAt: openParenRange.location,
+                in: source
+            )
+            let fullRange = closeParenRange.map {
+                NSRange(location: atRange.location, length: $0.upperBound - atRange.location)
+            } ?? NSRange(location: atRange.location, length: 2)
+
+            var delimiterRanges = [atRange, openParenRange]
+            if let closeParenRange {
+                delimiterRanges.append(closeParenRange)
+            }
+
+            if delimiterRanges.allSatisfy({ !rangeIntersectsSortedRanges($0, nonCodeRanges) }),
+               targetRange.map({ rangesIntersect(fullRange, $0) }) ?? true {
+                tokens.append(canonicalToken(range: atRange, syntaxID: .number))
+                tokens.append(canonicalToken(range: openParenRange, syntaxID: .number))
+                if let closeParenRange {
+                    tokens.append(canonicalToken(range: closeParenRange, syntaxID: .number))
+                }
+            }
+
+            searchLocation = max(matchRange.upperBound, searchLocation + 1)
         }
         return tokens
+    }
+
+    private static func boxedBooleanLiteralTokens(
+        in source: NSString,
+        nonCodeRanges: [NSRange],
+        targetRange: NSRange?
+    ) -> [SyntaxHighlightToken] {
+        let string = source as String
+        let searchRange = targetRange ?? NSRange(location: 0, length: source.length)
+        return boxedBooleanLiteralRegex.matches(in: string, range: searchRange).flatMap { match -> [SyntaxHighlightToken] in
+            let range = match.range
+            guard range.location != NSNotFound,
+                  range.length > 0,
+                  !rangeIntersectsSortedRanges(range, nonCodeRanges)
+            else {
+                return []
+            }
+            let valueRange = NSRange(location: range.location + 1, length: range.length - 1)
+            return [
+                canonicalToken(range: range, syntaxID: .number),
+                canonicalToken(range: valueRange, syntaxID: .number)
+            ]
+        }
     }
 
     private static func nonCodeRanges(
@@ -391,7 +547,87 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let targetRange = source.lineRange(for: clamped)
         let contextRange = objectiveCUnsafeEditContextRange(around: targetRange, in: source)
         let context = source.substring(with: contextRange)
-        return objectiveCRefreshLooksStructural(context) ? nil : targetRange
+        guard !objectiveCRefreshLooksStructural(context) else {
+            return nil
+        }
+        return boxedExpressionRefreshRange(around: targetRange, in: source) ?? targetRange
+    }
+
+    private static func boxedExpressionRefreshRange(around targetRange: NSRange, in source: NSString) -> NSRange? {
+        var cursor = targetRange.location
+        let upperBound = min(source.length, targetRange.upperBound)
+        while cursor < upperBound {
+            if let nextCursor = locationAfterSkippedCommentOrLiteral(startingAt: cursor, in: source) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            guard character == "(" else {
+                cursor += 1
+                continue
+            }
+            guard let closeParenRange = matchingCloseParenRange(openingAt: cursor, in: source) else {
+                cursor += 1
+                continue
+            }
+            let fullRange = NSRange(location: cursor, length: closeParenRange.upperBound - cursor)
+            if !rangesIntersect(fullRange, targetRange) {
+                cursor += 1
+                continue
+            }
+            return unionRange(targetRange, fullRange)
+        }
+        return deletedBoxedExpressionRefreshRange(around: targetRange, in: source)
+    }
+
+    private static func deletedBoxedExpressionRefreshRange(around targetRange: NSRange, in source: NSString) -> NSRange? {
+        var cursor = targetRange.location
+        let upperBound = min(source.length, targetRange.upperBound)
+        while cursor < upperBound {
+            if let nextCursor = locationAfterSkippedCommentOrLiteral(startingAt: cursor, in: source) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == "@",
+               let closeParenRange = unmatchedClosingParenRange(after: cursor + 1, in: source) {
+                return unionRange(targetRange, closeParenRange)
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func unmatchedClosingParenRange(after location: Int, in source: NSString) -> NSRange? {
+        var cursor = min(max(0, location), source.length)
+        var depth = 0
+        while cursor < source.length {
+            if let nextCursor = locationAfterSkippedCommentOrLiteral(startingAt: cursor, in: source) {
+                cursor = nextCursor
+                continue
+            }
+
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == ";" || character == "{" || character == "}" {
+                return nil
+            }
+            if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                if depth == 0 {
+                    return NSRange(location: cursor, length: 1)
+                }
+                depth -= 1
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func unionRange(_ lhs: NSRange, _ rhs: NSRange) -> NSRange {
+        let lowerBound = min(lhs.location, rhs.location)
+        let upperBound = max(lhs.upperBound, rhs.upperBound)
+        return NSRange(location: lowerBound, length: upperBound - lowerBound)
     }
 
     private static func objectiveCUnsafeEditContextRange(around range: NSRange, in source: NSString) -> NSRange {
@@ -415,6 +651,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let nsText = text as NSString
         let fullRange = NSRange(location: 0, length: nsText.length)
         return structuralObjectiveCEditRegex.firstMatch(in: text, range: fullRange) != nil
+            || objectiveCTextContainsVariableDeclarationLine(nsText)
     }
 
     private static func semanticIndexFingerprint(in source: NSString) -> Int {
@@ -439,13 +676,28 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let nsLine = line as NSString
         let fullRange = NSRange(location: 0, length: nsLine.length)
         return structuralObjectiveCEditRegex.firstMatch(in: line, range: fullRange) != nil
+            || objectiveCVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
+            || objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
+            || objectiveCSemanticIndexFunctionSignatureLineRegex.firstMatch(in: line, range: fullRange) != nil
+            || objectiveCSemanticIndexSplitFunctionNameLineRegex.firstMatch(in: line, range: fullRange) != nil
     }
 
-    private static func shouldTreatUnknownTypeAsProject(_ name: String) -> Bool {
-        guard name.first?.isUppercase == true else {
-            return false
+    private static func objectiveCTextContainsVariableDeclarationLine(_ text: NSString) -> Bool {
+        var location = 0
+        while location < text.length {
+            let lineRange = text.lineRange(for: NSRange(location: location, length: 0))
+            let line = text.substring(with: lineRange)
+            let nsLine = line as NSString
+            let fullRange = NSRange(location: 0, length: nsLine.length)
+            if objectiveCVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
+                || objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil {
+                return true
+            }
+            let nextLocation = lineRange.upperBound
+            guard nextLocation > location else { break }
+            location = nextLocation
         }
-        return !ObjectiveCSystemSymbols.isSystemType(name)
+        return false
     }
 
     private static func isTypeDeclarationName(_ range: NSRange, text: String, in source: NSString) -> Bool {
@@ -469,12 +721,129 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return false
     }
 
-    private static func isCFunctionCallName(_ range: NSRange, in source: NSString) -> Bool {
-        let after = source.substring(from: min(range.upperBound, source.length))
-        guard let character = after.first(where: { !$0.isWhitespace }) else {
+    private static func objectiveCTypeIdentifierShouldStayPlain(
+        _ range: NSRange,
+        text: String,
+        in source: NSString
+    ) -> Bool {
+        let prefix = linePrefix(before: range, in: source)
+        if prefix.contains("@property"), isUppercaseMacroLikeIdentifier(text) {
+            return propertyMacroLikeIdentifierHasTrailingAttribute(range, in: source)
+        }
+        return prefix.range(
+            of: #"\bNS_(?:ENUM|OPTIONS)\s*\(\s*$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func propertyMacroLikeIdentifierHasTrailingAttribute(
+        _ range: NSRange,
+        in source: NSString
+    ) -> Bool {
+        let lineRange = source.lineRange(for: range)
+        guard range.upperBound < lineRange.upperBound else {
             return false
         }
-        return character == "("
+        let suffixRange = NSRange(
+            location: range.upperBound,
+            length: lineRange.upperBound - range.upperBound
+        )
+        let suffix = source.substring(with: suffixRange)
+        guard let semicolon = suffix.firstIndex(of: ";") else {
+            return false
+        }
+        let beforeSemicolon = suffix[..<semicolon]
+        return beforeSemicolon.contains { !$0.isWhitespace }
+    }
+
+    private static func isUppercaseMacroLikeIdentifier(_ text: String) -> Bool {
+        var hasUppercase = false
+        var hasSeparator = false
+        for scalar in text.unicodeScalars {
+            if scalar == "_" {
+                hasSeparator = true
+                continue
+            }
+            if CharacterSet.decimalDigits.contains(scalar) {
+                continue
+            }
+            guard CharacterSet.uppercaseLetters.contains(scalar) else {
+                return false
+            }
+            hasUppercase = true
+        }
+        return hasUppercase && hasSeparator
+    }
+
+    private static func isCFunctionCallName(_ range: NSRange, in source: NSString) -> Bool {
+        cCallOpeningParenLocation(after: range, in: source) != nil
+    }
+
+    private static func isObjectiveCCallName(_ range: NSRange, in source: NSString) -> Bool {
+        isCFunctionCallName(range, in: source)
+            && !lineStartsWithPreprocessorDirective(containing: range, in: source)
+            && !isObjectiveCCFunctionDeclarationName(range, in: source)
+    }
+
+    private static func isObjectiveCFunctionPointerCastCalleeName(_ range: NSRange, in source: NSString) -> Bool {
+        guard !lineStartsWithPreprocessorDirective(containing: range, in: source),
+              !functionPointerNameLooksLikeDeclaration(range, in: source)
+        else {
+            return false
+        }
+        var cursor = range.upperBound
+        while cursor < source.length {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                cursor += 1
+                continue
+            }
+            guard character == ")" else {
+                return false
+            }
+            cursor += 1
+            while cursor < source.length {
+                let next = source.substring(with: NSRange(location: cursor, length: 1))
+                if next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    cursor += 1
+                    continue
+                }
+                return next == "("
+            }
+            return false
+        }
+        return false
+    }
+
+    private static func cCallOpeningParenLocation(after range: NSRange, in source: NSString) -> Int? {
+        var cursor = range.upperBound
+        while cursor < source.length {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                cursor += 1
+                continue
+            }
+            return character == "(" ? cursor : nil
+        }
+        return nil
+    }
+
+    private static func functionPointerNameLooksLikeDeclaration(_ range: NSRange, in source: NSString) -> Bool {
+        let prefix = linePrefix(before: range, in: source)
+        if prefix.contains("@property") {
+            return true
+        }
+        let trimmedPrefix = prefix.trimmingCharacters(in: .whitespaces)
+        if trimmedPrefix.hasPrefix("typedef") {
+            return true
+        }
+        if trimmedPrefix.range(
+            of: #"^(?:[A-Za-z_][A-Za-z0-9_]*\s+)+\*+$"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+        return false
     }
 
     private static func looksLikeCFunctionDeclarationPrefix(before range: NSRange, in source: NSString) -> Bool {
@@ -492,21 +861,61 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return true
     }
 
+    private static func isObjectiveCFunctionOrMethodDeclarationName(_ range: NSRange, in source: NSString) -> Bool {
+        let prefix = linePrefix(before: range, in: source)
+        let trimmedPrefix = prefix.trimmingCharacters(in: .whitespaces)
+        if trimmedPrefix.hasPrefix("-") || trimmedPrefix.hasPrefix("+") {
+            return true
+        }
+        if prefix.contains("[") {
+            return false
+        }
+        return looksLikeCFunctionDeclarationPrefix(before: range, in: source)
+    }
+
+    fileprivate static func isObjectiveCCFunctionDeclarationName(_ range: NSRange, in source: NSString) -> Bool {
+        let prefix = linePrefix(before: range, in: source)
+        let trimmedPrefix = prefix.trimmingCharacters(in: .whitespaces)
+        guard !trimmedPrefix.hasPrefix("-"),
+              !trimmedPrefix.hasPrefix("+"),
+              !prefix.contains("[")
+        else {
+            return false
+        }
+        guard looksLikeCFunctionDeclarationPrefix(before: range, in: source),
+              let openParen = cCallOpeningParenLocation(after: range, in: source),
+              let closeParenRange = matchingCloseParenRange(openingAt: openParen, in: source)
+        else {
+            return false
+        }
+        var cursor = closeParenRange.upperBound
+        while cursor < source.length {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                cursor += 1
+                continue
+            }
+            return character == "{" || character == ";"
+        }
+        return false
+    }
+
     private static func isMessageReceiverName(_ range: NSRange, in source: NSString) -> Bool {
         previousNonWhitespaceCharacter(before: range, in: source) == "["
     }
 
-    private static func isSelfMemberName(_ range: NSRange, in source: NSString) -> Bool {
+    fileprivate static func isSelfMemberName(_ range: NSRange, in source: NSString) -> Bool {
         guard let expressionPrefix = memberAccessExpressionPrefix(before: range, in: source) else {
             return false
         }
         return expressionPrefixEndsWithSelf(expressionPrefix)
     }
 
-    private static func isMemberNameInKnownSelfChain(
+    fileprivate static func isMemberNameInKnownSelfChain(
         _ range: NSRange,
         in source: NSString,
-        localProperties: Set<String>
+        localProperties: Set<String>,
+        allowsHeaderBackedMembers: Bool
     ) -> Bool {
         guard let expressionPrefix = memberAccessExpressionPrefix(before: range, in: source) else {
             return false
@@ -529,7 +938,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 continue
             }
             let firstMember = expression.substring(with: firstMemberRange)
-            guard localProperties.contains(firstMember) else {
+            guard shouldTrackSelfMember(
+                firstMember,
+                localProperties: localProperties,
+                allowsHeaderBackedMembers: allowsHeaderBackedMembers
+            ) else {
                 continue
             }
             let beforeSelf = expression.substring(to: selfRange.location)
@@ -539,6 +952,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 continue
             }
             let suffix = expression.substring(from: match.range.upperBound)
+            if suffixStartsWithCall(suffix) || suffixContainsNestedMemberAccess(suffix) {
+                continue
+            }
             let hasUnmatchedClosing = hasUnmatchedClosingDelimiter(suffix)
             let allowsWrappedSelfChainClose = hasUnmatchedClosing
                 && !hasUnmatchedClosingSquareBracket(suffix)
@@ -549,6 +965,64 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 && (!hasUnmatchedClosing || allowsWrappedSelfChainClose) {
                 return true
             }
+        }
+        return false
+    }
+
+    fileprivate static func shouldTrackSelfMember(
+        _ name: String,
+        localProperties: Set<String>,
+        allowsHeaderBackedMembers: Bool
+    ) -> Bool {
+        if localProperties.contains(name) {
+            return true
+        }
+        guard allowsHeaderBackedMembers else {
+            return false
+        }
+
+        // Objective-C implementations can rely on properties declared in an imported
+        // header that the runtime highlighter cannot load. Keep a lexical fallback
+        // for header-backed self members, while avoiding macro-shaped declarations
+        // that Xcode leaves plain in the current fixtures.
+        return !isUppercaseMacroLikeIdentifier(name)
+    }
+
+    private static func suffixStartsWithCall(_ suffix: String) -> Bool {
+        var index = suffix.startIndex
+        while index < suffix.endIndex {
+            if let nextIndex = indexAfterSkippableTriviaOrLiteral(startingAt: index, in: suffix) {
+                index = nextIndex
+                continue
+            }
+            let character = suffix[index]
+            if character.isWhitespace {
+                index = suffix.index(after: index)
+                continue
+            }
+            return character == "("
+        }
+        return false
+    }
+
+    private static func suffixContainsNestedMemberAccess(_ suffix: String) -> Bool {
+        var index = suffix.startIndex
+        while index < suffix.endIndex {
+            if let nextIndex = indexAfterSkippableTriviaOrLiteral(startingAt: index, in: suffix) {
+                index = nextIndex
+                continue
+            }
+            let character = suffix[index]
+            if character == "." {
+                return true
+            }
+            if character == "-" {
+                let nextIndex = suffix.index(after: index)
+                if nextIndex < suffix.endIndex, suffix[nextIndex] == ">" {
+                    return true
+                }
+            }
+            index = suffix.index(after: index)
         }
         return false
     }
@@ -1126,6 +1600,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             syntaxIDsByRange[ObjectiveCRangeKey(token.range), default: []]
                 .formUnion(ObjectiveCSyntaxIDMask(syntaxID: token.syntaxID))
         }
+        let preprocessorRanges = tokens.compactMap { token -> NSRange? in
+            guard (token.language == .objectiveC || token.language == nil),
+                  token.syntaxID == .preprocessor else {
+                return nil
+            }
+            return token.range
+        }
 
         var baseTokensForIndex: [SyntaxHighlightToken] = []
         var outputBaseTokens: [SyntaxHighlightToken] = []
@@ -1140,6 +1621,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 token,
                 syntaxIDsAtSameRange: syntaxIDs,
                 source: source,
+                preprocessorRanges: preprocessorRanges,
                 strippingSemanticOverlaysIn: nil
             )
             if !stripsFromIndex {
@@ -1151,6 +1633,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                     token,
                     syntaxIDsAtSameRange: syntaxIDs,
                     source: source,
+                    preprocessorRanges: preprocessorRanges,
                     strippingSemanticOverlaysIn: $0
                 )
             } ?? stripsFromIndex
@@ -1197,6 +1680,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         _ token: SyntaxHighlightToken,
         syntaxIDsAtSameRange: ObjectiveCSyntaxIDMask,
         source: NSString,
+        preprocessorRanges: [NSRange],
         strippingSemanticOverlaysIn stripRange: NSRange?
     ) -> Bool {
         guard token.language == .objectiveC || token.language == nil else {
@@ -1207,9 +1691,45 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             return false
         }
         switch token.syntaxID {
+        case .plain:
+            guard token.range.upperBound <= source.length else {
+                return false
+            }
+            let text = source.substring(with: token.range)
+            return (text == "Class" && syntaxIDsAtSameRange.contains(.keyword))
+                || objectiveCTypeIdentifierShouldStayPlain(token.range, text: text, in: source)
         case .declarationType,
              .identifierConstantSystem:
             return true
+        case .identifierTypeSystem:
+            guard token.range.upperBound <= source.length else {
+                return false
+            }
+            return objectiveCTypeIdentifierShouldStayPlain(
+                token.range,
+                text: source.substring(with: token.range),
+                in: source
+            )
+        case .string:
+            guard token.range.location >= 0,
+                  token.range.length > 0,
+                  token.range.upperBound <= source.length,
+                  source.substring(with: NSRange(location: token.range.location, length: 1)) == "\"" else {
+                return false
+            }
+            return lineStartsWithPreprocessorDirective(containing: token.range, in: source)
+                && rangeIsContainedInPreprocessorToken(token.range, preprocessorRanges: preprocessorRanges)
+        case .preprocessor:
+            guard syntaxIDsAtSameRange.contains(.plain) else {
+                return false
+            }
+            let text = source.substring(with: token.range)
+            return !preprocessorObjectiveCMacroIdentifiers.contains(text)
+                && !lineStartsWithPreprocessorDirective(containing: token.range, in: source)
+        case .number:
+            return isBoxedExpressionDelimiterRange(token.range, in: source)
+                || isBoxedBooleanLiteralRange(token.range, in: source)
+                || isPotentialStaleBoxedLiteralNumberRange(token.range, in: source)
         case .declarationOther:
             return syntaxIDsAtSameRange.contains(.identifierFunction)
                 || syntaxIDsAtSameRange.contains(.identifier)
@@ -1228,8 +1748,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             if syntaxIDsAtSameRange.contains(.identifierFunctionSystem) {
                 return true
             }
-            return token.range.upperBound <= source.length
-                && isCFunctionCallName(token.range, in: source)
+            guard token.range.upperBound <= source.length else {
+                return false
+            }
+            if appleMacroFunctionNames.contains(source.substring(with: token.range)) {
+                return true
+            }
+            return isCFunctionCallName(token.range, in: source)
                 && !looksLikeCFunctionDeclarationPrefix(before: token.range, in: source)
         case .identifierVariable,
              .identifierVariableSystem:
@@ -1258,6 +1783,197 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return true
     }
 
+    private static func lineStartsWithPreprocessorDirective(containing range: NSRange, in source: NSString) -> Bool {
+        guard range.location >= 0,
+              range.location <= source.length else {
+            return false
+        }
+        let location = min(range.location, max(source.length - 1, 0))
+        let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+        let line = source.substring(with: lineRange)
+        return line.trimmingCharacters(in: .whitespaces).hasPrefix("#")
+    }
+
+    private static func rangeIsContainedInPreprocessorToken(
+        _ range: NSRange,
+        preprocessorRanges: [NSRange]
+    ) -> Bool {
+        preprocessorRanges.contains { preprocessorRange in
+            preprocessorRange != range
+                && preprocessorRange.location <= range.location
+                && preprocessorRange.upperBound >= range.upperBound
+        }
+    }
+
+    private static func isBoxedExpressionDelimiterRange(_ range: NSRange, in source: NSString) -> Bool {
+        guard range.length == 1,
+              range.location >= 0,
+              range.upperBound <= source.length else {
+            return false
+        }
+        let character = source.substring(with: range)
+        if character == "@" {
+            return range.upperBound < source.length
+                && source.substring(with: NSRange(location: range.upperBound, length: 1)) == "("
+        }
+        if character == "(" {
+            return range.location > 0
+                && source.substring(with: NSRange(location: range.location - 1, length: 1)) == "@"
+        }
+        if character == ")" {
+            return boxedExpressionOpeningParenLocation(closingAt: range.location, in: source) != nil
+        }
+        return false
+    }
+
+    private static func isPotentialStaleBoxedExpressionDelimiterRange(_ range: NSRange, in source: NSString) -> Bool {
+        guard range.length == 1,
+              range.location >= 0,
+              range.upperBound <= source.length else {
+            return false
+        }
+        let character = source.substring(with: range)
+        return character == "(" || character == ")"
+    }
+
+    private static func isPotentialStaleBoxedLiteralNumberRange(_ range: NSRange, in source: NSString) -> Bool {
+        guard range.location >= 0,
+              range.length > 0,
+              range.upperBound <= source.length else {
+            return false
+        }
+        if isPotentialStaleBoxedExpressionDelimiterRange(range, in: source) {
+            return true
+        }
+        let text = source.substring(with: range)
+        if ["@", "{", "}", "[", "]"].contains(text) {
+            return false
+        }
+        return objectiveCNumericLiteralTextRegex.firstMatch(
+            in: text,
+            range: NSRange(location: 0, length: (text as NSString).length)
+        ) == nil
+    }
+
+    private static func isBoxedBooleanLiteralRange(_ range: NSRange, in source: NSString) -> Bool {
+        guard range.location >= 0,
+              range.upperBound <= source.length else {
+            return false
+        }
+        let text = source.substring(with: range)
+        if text == "@NO" || text == "@YES" {
+            return true
+        }
+        guard text == "NO" || text == "YES",
+              range.location > 0 else {
+            return false
+        }
+        return source.substring(with: NSRange(location: range.location - 1, length: 1)) == "@"
+    }
+
+    private static func matchingCloseParenRange(openingAt openParenLocation: Int, in source: NSString) -> NSRange? {
+        guard openParenLocation >= 0,
+              openParenLocation < source.length,
+              source.substring(with: NSRange(location: openParenLocation, length: 1)) == "(" else {
+            return nil
+        }
+
+        var depth = 0
+        var cursor = openParenLocation
+        while cursor < source.length {
+            if let nextCursor = locationAfterSkippedCommentOrLiteral(startingAt: cursor, in: source) {
+                cursor = nextCursor
+                continue
+            }
+
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                depth -= 1
+                if depth == 0 {
+                    return NSRange(location: cursor, length: 1)
+                }
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func boxedExpressionOpeningParenLocation(closingAt closeParenLocation: Int, in source: NSString) -> Int? {
+        guard closeParenLocation > 0,
+              closeParenLocation < source.length,
+              source.substring(with: NSRange(location: closeParenLocation, length: 1)) == ")" else {
+            return nil
+        }
+
+        var depth = 0
+        var cursor = closeParenLocation
+        while cursor >= 0 {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == ")" {
+                depth += 1
+            } else if character == "(" {
+                depth -= 1
+                if depth == 0 {
+                    guard cursor > 0,
+                          source.substring(with: NSRange(location: cursor - 1, length: 1)) == "@" else {
+                        return nil
+                    }
+                    return cursor
+                }
+            }
+            if cursor == 0 {
+                break
+            }
+            cursor -= 1
+        }
+        return nil
+    }
+
+    private static func locationAfterSkippedCommentOrLiteral(startingAt location: Int, in source: NSString) -> Int? {
+        guard location >= 0,
+              location < source.length else {
+            return nil
+        }
+        let character = source.substring(with: NSRange(location: location, length: 1))
+        let next = location + 1 < source.length
+            ? source.substring(with: NSRange(location: location + 1, length: 1))
+            : ""
+
+        if character == "\"" || character == "'" {
+            var cursor = location + 1
+            while cursor < source.length {
+                if source.substring(with: NSRange(location: cursor, length: 1)) == character,
+                   !isEscaped(cursor, in: source) {
+                    return cursor + 1
+                }
+                cursor += 1
+            }
+            return source.length
+        }
+
+        if character == "/", next == "/" {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            return lineRange.upperBound
+        }
+
+        if character == "/", next == "*" {
+            var cursor = location + 2
+            while cursor + 1 < source.length {
+                let current = source.substring(with: NSRange(location: cursor, length: 1))
+                let following = source.substring(with: NSRange(location: cursor + 1, length: 1))
+                if current == "*", following == "/" {
+                    return cursor + 2
+                }
+                cursor += 1
+            }
+            return source.length
+        }
+
+        return nil
+    }
+
     private static func isObjectiveCIdentifierStart(_ unit: unichar) -> Bool {
         unit == underscoreCodeUnit
             || (uppercaseACodeUnit...uppercaseZCodeUnit).contains(unit)
@@ -1282,22 +1998,76 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static let structuralObjectiveCEditRegex = try! NSRegularExpression(
-        pattern: #"(?m)^\s*(?:@(?:class|end|implementation|interface|property|protocol)|typedef\b|[-+]\s*\(|[A-Za-z_][A-Za-z0-9_ <>,_*]*\([^;{}]*\)\s*[;{]|[A-Za-z_][A-Za-z0-9_ <>,_*]*\*+\s*[A-Za-z_][A-Za-z0-9_]*\s*;)|\bNS_(?:ENUM|OPTIONS)\b|^\s*#"#)
-
-    private static let appleMacroRegex = try! NSRegularExpression(
-        pattern: #"\b(?:NS_ASSUME_NONNULL_BEGIN|NS_ASSUME_NONNULL_END|NS_SWIFT_NAME|NS_ENUM|NS_OPTIONS)\b"#
+        pattern: #"(?m)^\s*(?:@(?:class|end|implementation|interface|property|protocol)|typedef\b|static\b(?![^\n;{}]*\([^;{}]*\)\s*[;{])[^;\n{}]*(?:=|;)|[-+]\s*\(|[A-Za-z_][A-Za-z0-9_ <>,_*]*\([^;{}]*\)\s*[;{]|[A-Za-z_][A-Za-z0-9_ <>,_*]*\*+\s*[A-Za-z_][A-Za-z0-9_]*\s*;)|\bNS_(?:ENUM|OPTIONS)\b|^\s*#"#
     )
 
-    private static let appleEnumTypedefRegex = try! NSRegularExpression(
-        pattern: #"\b(typedef)\s+(NS_ENUM|NS_OPTIONS)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
+    private static let objectiveCVariableDeclarationLineRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do)\b)[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*(?:=|;)"#
     )
 
-    private static let appleMacroNames: Set<String> = [
-        "NS_ASSUME_NONNULL_BEGIN",
-        "NS_ASSUME_NONNULL_END",
-        "NS_SWIFT_NAME",
+    private static let objectiveCForLoopVariableDeclarationLineRegex = try! NSRegularExpression(
+        pattern: #"\bfor\s*\(\s*[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*(?:=|in\b)"#
+    )
+
+    private static let objectiveCSemanticIndexFunctionSignatureLineRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?:[-+]\s*\(|(?:static\s+)?[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*\()"#
+    )
+
+    private static let objectiveCSemanticIndexSplitFunctionNameLineRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do|sizeof)\b)[A-Za-z_][A-Za-z0-9_]*\s*\([^;{}=]*\)"#
+    )
+
+    private static let preprocessorQuotedStringRegex = try! NSRegularExpression(
+        pattern: #"@?"(?:\\.|[^"\\])*""#
+    )
+
+    private static let boxedBooleanLiteralRegex = try! NSRegularExpression(
+        pattern: #"@(YES|NO)\b"#
+    )
+
+    private static let objectiveCNumericLiteralTextRegex = try! NSRegularExpression(
+        pattern: #"^(?:0[xX][0-9A-Fa-f_]+|[0-9][0-9_]*(?:\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?)[uUlLfF]*$"#
+    )
+
+    private static let preprocessorObjectiveCMacroRegex = try! NSRegularExpression(
+        pattern: #"\b(?:NS_ASSUME_NONNULL_BEGIN|NS_ASSUME_NONNULL_END|NS_ENUM|NS_OPTIONS|NS_SWIFT_NAME)\b"#
+    )
+
+    private static let macroLikeObjectiveCIdentifierRegex = try! NSRegularExpression(
+        pattern: #"\b[A-Z][A-Z0-9_]*_[A-Z0-9_]+\b"#
+    )
+
+    private static let appleMacroFunctionNames: Set<String> = [
         "NS_ENUM",
         "NS_OPTIONS",
+    ]
+
+    private static let preprocessorObjectiveCMacroIdentifiers: Set<String> = [
+        "NS_ASSUME_NONNULL_BEGIN",
+        "NS_ASSUME_NONNULL_END",
+        "NS_ENUM",
+        "NS_OPTIONS",
+        "NS_SWIFT_NAME",
+    ]
+
+    private static let knownObjectiveCSystemFunctionNames: Set<String> = [
+        "NSClassFromString",
+        "NSLog",
+        "NSMakeRange",
+        "NSSelectorFromString",
+        "NSStringFromSelector",
+        "calloc",
+        "dispatch_once",
+        "dlsym",
+        "free",
+        "objc_msgSend",
+        "sel_getName",
+        "strcmp",
+        "strstr",
+    ]
+
+    private static let knownObjectiveCFunctionPointerCastCallees: Set<String> = [
+        "objc_msgSend",
     ]
 
     private static func isObjectiveCIdentifierCharacter(_ character: Character) -> Bool {
@@ -1337,8 +2107,15 @@ private struct ObjectiveCTreeSymbolFacts {
     var localTypes = Set<String>()
     var localFunctions = Set<String>()
     var localProperties = Set<String>()
+    var localMacros = Set<String>()
+    var fileScopeVariables = Set<String>()
+    var ivars = Set<String>()
+    var typeDeclarations: [(name: String, range: NSRange)] = []
     var propertyDeclarations: [(name: String, range: NSRange)] = []
+    var fileScopeVariableDeclarations: [(name: String, range: NSRange)] = []
+    var ivarDeclarations: [(name: String, range: NSRange)] = []
     var selfMemberNameRangeKeys = Set<ObjectiveCRangeKey>()
+    var selfMemberCandidates: [(member: String, fieldRange: NSRange)] = []
     var selfChainMemberNameRangeKeys = Set<ObjectiveCRangeKey>()
     var selfChainCandidates: [(firstMember: String, fieldRange: NSRange)] = []
 }
@@ -1347,7 +2124,15 @@ private struct ObjectiveCFileSymbolIndex {
     let localTypes: Set<String>
     let localFunctions: Set<String>
     let localProperties: Set<String>
+    private let localMacros: Set<String>
+    private let fileScopeVariables: Set<String>
+    private let ivars: Set<String>
+    private let allowsHeaderBackedSelfMembers: Bool
+    private let typeDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>
     private let propertyDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>
+    private let fileScopeVariableDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>
+    private let ivarDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>
+    private let shadowedVariableRangeKeys: Set<ObjectiveCRangeKey>
     private let selfMemberNameRangeKeys: Set<ObjectiveCRangeKey>
     private let selfChainMemberNameRangeKeys: Set<ObjectiveCRangeKey>
 
@@ -1377,13 +2162,32 @@ private struct ObjectiveCFileSymbolIndex {
 
         var localTypes = treeFacts.localTypes
         var localFunctions = treeFacts.localFunctions
+        let localMacros = Self.scanDefinedMacroNames(source: source).union(treeFacts.localMacros)
+        var fileScopeVariables = treeFacts.fileScopeVariables
+        var ivars = treeFacts.ivars
+        var typeDeclarations = treeFacts.typeDeclarations
         var propertyDeclarations = treeFacts.propertyDeclarations
+        var fileScopeVariableDeclarations = treeFacts.fileScopeVariableDeclarations
+        var ivarDeclarations = treeFacts.ivarDeclarations
+        let allowsHeaderBackedSelfMembers = Self.hasQuotedHeaderImport(in: source)
         let zeroArgumentMethodNameRanges = rootNode == nil ? Self.zeroArgumentMethodNameRanges(in: source) : []
         var localProperties = treeFacts.localProperties
         localProperties.formUnion(propertyDeclarations.map(\.name))
+        let scannedLocalTypes = Self.scanLocalTypes(source: source)
+        localTypes.formUnion(scannedLocalTypes.names)
+        typeDeclarations.append(contentsOf: scannedLocalTypes.declarations)
+        let scannedFileScopeVariables = Self.scanFileScopeVariableDeclarations(source: source)
+        fileScopeVariables.formUnion(scannedFileScopeVariables.map(\.name))
+        fileScopeVariableDeclarations.append(contentsOf: scannedFileScopeVariables)
+        let scannedIvars = Self.scanImplementationIvarDeclarations(source: source)
+        ivars.formUnion(scannedIvars.map(\.name))
+        ivarDeclarations.append(contentsOf: scannedIvars)
+        let shadowedVariableRangeKeys = Self.scanVariableShadowRanges(
+            source: source,
+            shadowedNames: fileScopeVariables.union(ivars)
+        )
 
         if rootNode == nil {
-            localTypes.formUnion(Self.scanLocalTypes(source: source))
             propertyDeclarations.append(contentsOf: Self.scanLocalPropertyDeclarations(source: source, tokenIndex: tokenIndex))
             localProperties.formUnion(propertyDeclarations.map(\.name))
         }
@@ -1398,7 +2202,9 @@ private struct ObjectiveCFileSymbolIndex {
             case .identifierType:
                 localTypes.insert(text)
             case .identifierFunction:
-                localFunctions.insert(text)
+                if ObjectiveCSyntaxOverlayTokenProvider.isObjectiveCCFunctionDeclarationName(token.range, in: source) {
+                    localFunctions.insert(text)
+                }
                 if Self.isZeroArgumentMethodName(
                     token.range,
                     in: zeroArgumentMethodNameRanges
@@ -1410,21 +2216,96 @@ private struct ObjectiveCFileSymbolIndex {
             }
         }
 
+        var selfMemberNameRangeKeys = treeFacts.selfMemberNameRangeKeys
+        for candidate in treeFacts.selfMemberCandidates
+            where ObjectiveCSyntaxOverlayTokenProvider.shouldTrackSelfMember(
+                candidate.member,
+                localProperties: localProperties,
+                allowsHeaderBackedMembers: allowsHeaderBackedSelfMembers
+            ) {
+            selfMemberNameRangeKeys.insert(ObjectiveCRangeKey(candidate.fieldRange))
+        }
+
         var selfChainMemberNameRangeKeys = treeFacts.selfChainMemberNameRangeKeys
-        for candidate in treeFacts.selfChainCandidates where localProperties.contains(candidate.firstMember) {
+        for candidate in treeFacts.selfChainCandidates
+            where ObjectiveCSyntaxOverlayTokenProvider.shouldTrackSelfMember(
+                candidate.firstMember,
+                localProperties: localProperties,
+                allowsHeaderBackedMembers: allowsHeaderBackedSelfMembers
+            ) {
             selfChainMemberNameRangeKeys.insert(ObjectiveCRangeKey(candidate.fieldRange))
+        }
+
+        for token in tokenIndex.identifierTokens {
+            if allowsCancellation, Task.isCancelled {
+                return nil
+            }
+            let text = source.substring(with: token.range)
+            if ObjectiveCSyntaxOverlayTokenProvider.shouldTrackSelfMember(
+                text,
+                localProperties: localProperties,
+                allowsHeaderBackedMembers: allowsHeaderBackedSelfMembers
+            ),
+               ObjectiveCSyntaxOverlayTokenProvider.isSelfMemberName(token.range, in: source) {
+                selfMemberNameRangeKeys.insert(ObjectiveCRangeKey(token.range))
+                continue
+            }
+            if ObjectiveCSyntaxOverlayTokenProvider.isMemberNameInKnownSelfChain(
+                token.range,
+                in: source,
+                localProperties: localProperties,
+                allowsHeaderBackedMembers: allowsHeaderBackedSelfMembers
+            ) {
+                selfChainMemberNameRangeKeys.insert(ObjectiveCRangeKey(token.range))
+            }
         }
 
         self.localTypes = localTypes
         self.localFunctions = localFunctions
         self.localProperties = localProperties
+        self.localMacros = localMacros
+        self.fileScopeVariables = fileScopeVariables
+        self.ivars = ivars
+        self.allowsHeaderBackedSelfMembers = allowsHeaderBackedSelfMembers
+        self.typeDeclarationNameRangeKeys = Set(typeDeclarations.map { ObjectiveCRangeKey($0.range) })
         self.propertyDeclarationNameRangeKeys = Set(propertyDeclarations.map { ObjectiveCRangeKey($0.range) })
-        self.selfMemberNameRangeKeys = treeFacts.selfMemberNameRangeKeys
+        self.fileScopeVariableDeclarationNameRangeKeys = Set(fileScopeVariableDeclarations.map { ObjectiveCRangeKey($0.range) })
+        self.ivarDeclarationNameRangeKeys = Set(ivarDeclarations.map { ObjectiveCRangeKey($0.range) })
+        self.shadowedVariableRangeKeys = shadowedVariableRangeKeys
+        self.selfMemberNameRangeKeys = selfMemberNameRangeKeys
         self.selfChainMemberNameRangeKeys = selfChainMemberNameRangeKeys
+    }
+
+    func containsTypeDeclarationNameRange(_ range: NSRange) -> Bool {
+        typeDeclarationNameRangeKeys.contains(ObjectiveCRangeKey(range))
     }
 
     func containsPropertyDeclarationNameRange(_ range: NSRange) -> Bool {
         propertyDeclarationNameRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    func containsFileScopeVariableName(_ name: String) -> Bool {
+        fileScopeVariables.contains(name)
+    }
+
+    func containsFileScopeVariableDeclarationNameRange(_ range: NSRange) -> Bool {
+        fileScopeVariableDeclarationNameRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    func containsIvarName(_ name: String) -> Bool {
+        ivars.contains(name)
+    }
+
+    func containsIvarDeclarationNameRange(_ range: NSRange) -> Bool {
+        ivarDeclarationNameRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    func containsShadowedVariableRange(_ range: NSRange) -> Bool {
+        shadowedVariableRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    func containsLocalMacroName(_ name: String) -> Bool {
+        localMacros.contains(name)
     }
 
     func containsSelfMemberNameRange(_ range: NSRange) -> Bool {
@@ -1433,6 +2314,21 @@ private struct ObjectiveCFileSymbolIndex {
 
     func containsSelfChainMemberNameRange(_ range: NSRange) -> Bool {
         selfChainMemberNameRangeKeys.contains(ObjectiveCRangeKey(range))
+    }
+
+    func shouldTrackSelfMemberName(_ name: String) -> Bool {
+        ObjectiveCSyntaxOverlayTokenProvider.shouldTrackSelfMember(
+            name,
+            localProperties: localProperties,
+            allowsHeaderBackedMembers: allowsHeaderBackedSelfMembers
+        )
+    }
+
+    private static func hasQuotedHeaderImport(in source: NSString) -> Bool {
+        quotedHeaderImportRegex.firstMatch(
+            in: source as String,
+            range: NSRange(location: 0, length: source.length)
+        ) != nil
     }
 
     private static func collectTreeSymbolFacts(
@@ -1468,11 +2364,15 @@ private struct ObjectiveCFileSymbolIndex {
         switch node.nodeType {
         case "class_interface", "class_implementation", "protocol_declaration":
             if let nameNode = primaryTypeIdentifier(in: node, source: source) {
-                facts.localTypes.insert(source.substring(with: nameNode.range))
+                let name = source.substring(with: nameNode.range)
+                facts.localTypes.insert(name)
+                facts.typeDeclarations.append((name: name, range: nameNode.range))
             }
         case "class_declaration", "protocol_forward_declaration":
             for nameNode in directIdentifierChildren(in: node) {
-                facts.localTypes.insert(source.substring(with: nameNode.range))
+                let name = source.substring(with: nameNode.range)
+                facts.localTypes.insert(name)
+                facts.typeDeclarations.append((name: name, range: nameNode.range))
             }
         case "type_definition":
             collectTypeDefinitionFacts(from: node, source: source, into: &facts)
@@ -1512,9 +2412,23 @@ private struct ObjectiveCFileSymbolIndex {
         source: NSString,
         into facts: inout ObjectiveCTreeSymbolFacts
     ) {
+        let declaration = source.substring(with: node.range) as NSString
+        if let declaredName = nsEnumOptionsTypedefDeclaredName(in: declaration) {
+            facts.localTypes.insert(declaredName.name)
+            facts.typeDeclarations.append((
+                name: declaredName.name,
+                range: NSRange(
+                    location: node.range.location + declaredName.range.location,
+                    length: declaredName.range.length
+                )
+            ))
+            return
+        }
         for declarator in children(in: node, fieldName: "declarator") {
             if let identifier = declaratorIdentifier(in: declarator, preferredTypes: ["type_identifier", "identifier"]) {
-                facts.localTypes.insert(source.substring(with: identifier.range))
+                let name = source.substring(with: identifier.range)
+                facts.localTypes.insert(name)
+                facts.typeDeclarations.append((name: name, range: identifier.range))
             }
         }
     }
@@ -1542,9 +2456,6 @@ private struct ObjectiveCFileSymbolIndex {
             didCollectFromToken = true
         }
 
-        guard !didCollectFromToken else {
-            return
-        }
         guard let relativeNameRange = propertyDeclaredNameRange(in: declaration) else {
             return
         }
@@ -1557,7 +2468,12 @@ private struct ObjectiveCFileSymbolIndex {
             return
         }
         let name = source.substring(with: range)
-        facts.localProperties.insert(name)
+        if propertyReferenceShouldBeTracked(name: name, range: relativeNameRange, in: declaration) {
+            facts.localProperties.insert(name)
+        }
+        guard !didCollectFromToken else {
+            return
+        }
         facts.propertyDeclarations.append((name: name, range: range))
     }
 
@@ -1654,7 +2570,10 @@ private struct ObjectiveCFileSymbolIndex {
         }
 
         if expressionIsBareSelf(argumentNode, source: source) {
-            facts.selfMemberNameRangeKeys.insert(ObjectiveCRangeKey(fieldNode.range))
+            facts.selfMemberCandidates.append((
+                member: source.substring(with: fieldNode.range),
+                fieldRange: fieldNode.range
+            ))
         } else if let firstMember = firstSelfRootMemberName(in: argumentNode, source: source) {
             facts.selfChainCandidates.append((firstMember: firstMember, fieldRange: fieldNode.range))
         }
@@ -1775,10 +2694,11 @@ private struct ObjectiveCFileSymbolIndex {
         inner.location >= outer.location && inner.upperBound <= outer.upperBound
     }
 
-    private static func scanLocalTypes(source: NSString) -> Set<String> {
+    private static func scanLocalTypes(source: NSString) -> (names: Set<String>, declarations: [(name: String, range: NSRange)]) {
         let string = source as String
         let fullRange = NSRange(location: 0, length: source.length)
         var names = Set<String>()
+        var declarations: [(name: String, range: NSRange)] = []
 
         for regex in localTypeRegexes {
             for match in regex.matches(in: string, range: fullRange) {
@@ -1788,6 +2708,7 @@ private struct ObjectiveCFileSymbolIndex {
                 let name = source.substring(with: range)
                 if isIdentifier(name) {
                     names.insert(name)
+                    declarations.append((name: name, range: range))
                 }
             }
         }
@@ -1796,17 +2717,998 @@ private struct ObjectiveCFileSymbolIndex {
             let range = match.range
             let declaration = source.substring(with: range) as NSString
             if let name = typedefDeclaredName(in: declaration) {
+                let relativeRange = declaration.range(of: name, options: [.backwards])
+                guard relativeRange.location != NSNotFound else {
+                    continue
+                }
                 names.insert(name)
+                declarations.append((
+                    name: name,
+                    range: NSRange(location: range.location + relativeRange.location, length: relativeRange.length)
+                ))
             }
         }
 
+        return (names, declarations)
+    }
+
+    private static func scanDefinedMacroNames(source: NSString) -> Set<String> {
+        let string = source as String
+        let fullRange = NSRange(location: 0, length: source.length)
+        var names = Set<String>()
+        for match in definedMacroNameRegex.matches(in: string, range: fullRange) {
+            let range = match.range(at: 1)
+            guard range.location != NSNotFound else {
+                continue
+            }
+            names.insert(source.substring(with: range))
+        }
         return names
     }
 
-    static func typedefDeclaredName(in declaration: NSString) -> String? {
-        if declaration.range(of: "NS_ENUM").location != NSNotFound
-            || declaration.range(of: "NS_OPTIONS").location != NSNotFound {
+    private static func scanFileScopeVariableDeclarations(source: NSString) -> [(name: String, range: NSRange)] {
+        var declarations: [(name: String, range: NSRange)] = []
+        var location = 0
+        var braceDepth = 0
+        var isInBlockComment = false
+        while location < source.length {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            let line = source.substring(with: lineRange) as NSString
+            let depthBeforeLine = braceDepth
+            defer {
+                let result = objectiveCBraceDepth(
+                    afterScanning: line,
+                    startingAt: braceDepth,
+                    isInBlockComment: isInBlockComment
+                )
+                braceDepth = result.depth
+                isInBlockComment = result.isInBlockComment
+                let nextLocation = lineRange.upperBound
+                location = nextLocation > location ? nextLocation : source.length
+            }
+
+            let codeStart = firstNonWhitespaceLocation(in: line)
+            let afterStatic = codeStart + "static".utf16.count
+            guard depthBeforeLine == 0,
+                  !isInBlockComment,
+                  codeStart < line.length,
+                  line.length - codeStart >= "static".utf16.count,
+                  line.substring(with: NSRange(location: codeStart, length: "static".utf16.count)) == "static",
+                  afterStatic == line.length || !isASCIIIdentifierContinue(line.character(at: afterStatic)) else {
+                continue
+            }
+            let statementEnd = firstLocation(ofAny: [";"], in: line, before: line.length)
+            let firstTerminator = firstLocation(ofAny: ["=", ";"], in: line, before: line.length)
+            guard statementEnd != NSNotFound,
+                  firstTerminator != NSNotFound,
+                  line.range(of: "(", options: [], range: NSRange(location: 0, length: firstTerminator)).location == NSNotFound else {
+                continue
+            }
+            for relativeRange in declarationNameRanges(in: line, statementEnd: statementEnd) {
+                let name = line.substring(with: relativeRange)
+                guard !typedefIgnoredIdentifiers.contains(name),
+                      name != "const",
+                      name != "static" else {
+                    continue
+                }
+                declarations.append((
+                    name: name,
+                    range: NSRange(location: lineRange.location + relativeRange.location, length: relativeRange.length)
+                ))
+            }
+        }
+        return declarations
+    }
+
+    private static func firstNonWhitespaceLocation(in line: NSString) -> Int {
+        var cursor = 0
+        while cursor < line.length {
+            if !isWhitespace(line.substring(with: NSRange(location: cursor, length: 1))) {
+                return cursor
+            }
+            cursor += 1
+        }
+        return line.length
+    }
+
+    private static func declarationNameRanges(in declaration: NSString, statementEnd: Int) -> [NSRange] {
+        let upperBound = min(max(0, statementEnd), declaration.length)
+        var ranges: [NSRange] = []
+        var segmentStart = 0
+        var cursor = 0
+        var parenDepth = 0
+        var bracketDepth = 0
+        var braceDepth = 0
+        var angleDepth = 0
+        while cursor < upperBound {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: declaration) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = declaration.substring(with: NSRange(location: cursor, length: 1))
+            if character == ",",
+               parenDepth == 0,
+               bracketDepth == 0,
+               braceDepth == 0,
+               angleDepth == 0 {
+                if let range = declarationNameRange(
+                    in: NSRange(location: segmentStart, length: cursor - segmentStart),
+                    declaration: declaration
+                ) {
+                    ranges.append(range)
+                }
+                segmentStart = cursor + 1
+                cursor += 1
+                continue
+            }
+            updateDeclarationDelimiterDepth(
+                character: character,
+                next: cursor + 1 < declaration.length
+                    ? declaration.substring(with: NSRange(location: cursor + 1, length: 1))
+                    : "",
+                parenDepth: &parenDepth,
+                bracketDepth: &bracketDepth,
+                braceDepth: &braceDepth,
+                angleDepth: &angleDepth
+            )
+            cursor += 1
+        }
+        if let range = declarationNameRange(
+            in: NSRange(location: segmentStart, length: upperBound - segmentStart),
+            declaration: declaration
+        ) {
+            ranges.append(range)
+        }
+        return ranges
+    }
+
+    private static func declarationNameRange(in segmentRange: NSRange, declaration: NSString) -> NSRange? {
+        let searchEnd = declarationAssignmentLocation(in: segmentRange, declaration: declaration) ?? segmentRange.upperBound
+        var end = min(searchEnd, declaration.length)
+        while end > segmentRange.location,
+              isWhitespace(declaration.substring(with: NSRange(location: end - 1, length: 1))) {
+            end -= 1
+        }
+        guard let range = identifierRange(before: end, in: declaration) else {
             return nil
+        }
+        let name = declaration.substring(with: range)
+        guard isIdentifier(name),
+              !typedefIgnoredIdentifiers.contains(name),
+              name != "const",
+              name != "static" else {
+            return nil
+        }
+        return range
+    }
+
+    private static func declarationAssignmentLocation(in segmentRange: NSRange, declaration: NSString) -> Int? {
+        var cursor = max(0, segmentRange.location)
+        let upperBound = min(segmentRange.upperBound, declaration.length)
+        var parenDepth = 0
+        var bracketDepth = 0
+        var braceDepth = 0
+        var angleDepth = 0
+        while cursor < upperBound {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: declaration) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = declaration.substring(with: NSRange(location: cursor, length: 1))
+            if character == "=",
+               parenDepth == 0,
+               bracketDepth == 0,
+               braceDepth == 0,
+               angleDepth == 0 {
+                return cursor
+            }
+            updateDeclarationDelimiterDepth(
+                character: character,
+                next: cursor + 1 < declaration.length
+                    ? declaration.substring(with: NSRange(location: cursor + 1, length: 1))
+                    : "",
+                parenDepth: &parenDepth,
+                bracketDepth: &bracketDepth,
+                braceDepth: &braceDepth,
+                angleDepth: &angleDepth
+            )
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func updateDeclarationDelimiterDepth(
+        character: String,
+        next: String,
+        parenDepth: inout Int,
+        bracketDepth: inout Int,
+        braceDepth: inout Int,
+        angleDepth: inout Int
+    ) {
+        if character == "(" {
+            parenDepth += 1
+        } else if character == ")" {
+            parenDepth = max(0, parenDepth - 1)
+        } else if character == "[" {
+            bracketDepth += 1
+        } else if character == "]" {
+            bracketDepth = max(0, bracketDepth - 1)
+        } else if character == "{" {
+            braceDepth += 1
+        } else if character == "}" {
+            braceDepth = max(0, braceDepth - 1)
+        } else if character == "<",
+                  next != "<",
+                  parenDepth == 0,
+                  bracketDepth == 0,
+                  braceDepth == 0 {
+            angleDepth += 1
+        } else if character == ">",
+                  angleDepth > 0,
+                  next != ">" {
+            angleDepth -= 1
+        }
+    }
+
+    private static func scanVariableShadowRanges(
+        source: NSString,
+        shadowedNames: Set<String>
+    ) -> Set<ObjectiveCRangeKey> {
+        guard !shadowedNames.isEmpty else {
+            return []
+        }
+
+        var ranges = Set<ObjectiveCRangeKey>()
+        for scope in functionLikeScopes(in: source) {
+            var parameterShadowStarts: [String: Int] = [:]
+            collectParameterShadows(
+                in: NSRange(location: scope.location, length: scope.bodyOpenLocation - scope.location),
+                source: source,
+                shadowedNames: shadowedNames,
+                into: &parameterShadowStarts
+            )
+            var shadowScopes = parameterShadowStarts.compactMap { name, start -> (name: String, range: NSRange)? in
+                guard start < scope.upperBound else { return nil }
+                return (name, NSRange(location: start, length: scope.upperBound - start))
+            }
+            collectLocalVariableShadows(
+                in: scope,
+                source: source,
+                shadowedNames: shadowedNames,
+                into: &shadowScopes
+            )
+
+            for shadowScope in shadowScopes {
+                for range in identifierRanges(named: shadowScope.name, in: shadowScope.range, source: source) {
+                    guard !isInsideCommentOrLiteral(range, in: source) else { continue }
+                    ranges.insert(ObjectiveCRangeKey(range))
+                }
+            }
+        }
+        return ranges
+    }
+
+    private static func functionLikeScopes(in source: NSString) -> [(location: Int, bodyOpenLocation: Int, upperBound: Int)] {
+        var scopes: [(location: Int, bodyOpenLocation: Int, upperBound: Int)] = []
+        var pendingStart: Int?
+        var pendingSplitCFunctionStart: Int?
+        var location = 0
+
+        while location < source.length {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            let line = source.substring(with: lineRange) as NSString
+            let lineString = line as String
+            defer {
+                let nextLocation = lineRange.upperBound
+                location = nextLocation > location ? nextLocation : source.length
+            }
+
+            if pendingStart == nil,
+               objectiveCFunctionLikeSignatureLineRegex.firstMatch(
+                in: lineString,
+                range: NSRange(location: 0, length: line.length)
+               ) != nil {
+                pendingStart = lineRange.location
+                pendingSplitCFunctionStart = nil
+            } else if pendingStart == nil,
+                      let splitStart = pendingSplitCFunctionStart,
+                      isObjectiveCSplitCFunctionNameLine(line) {
+                pendingStart = splitStart
+                pendingSplitCFunctionStart = nil
+            } else if pendingStart == nil,
+                      isObjectiveCSplitCFunctionReturnTypeLine(line) {
+                pendingSplitCFunctionStart = lineRange.location
+            } else if pendingStart == nil {
+                pendingSplitCFunctionStart = nil
+            }
+
+            guard let start = pendingStart else {
+                continue
+            }
+
+            if let openBraceRange = firstBraceRange(in: line, brace: "{") {
+                let openBraceLocation = lineRange.location + openBraceRange.location
+                if let closeBraceLocation = matchingClosingBraceLocation(in: source, openBraceLocation: openBraceLocation) {
+                    scopes.append((
+                        location: start,
+                        bodyOpenLocation: openBraceLocation,
+                        upperBound: closeBraceLocation + 1
+                    ))
+                }
+                pendingStart = nil
+            } else if firstCodeCharacterRange(in: line, character: ";") != nil {
+                pendingStart = nil
+            }
+        }
+
+        return scopes
+    }
+
+    private static func isObjectiveCSplitCFunctionReturnTypeLine(_ line: NSString) -> Bool {
+        let trimmed = (line as String).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.hasPrefix("#"),
+              !trimmed.hasPrefix("@"),
+              !trimmed.hasPrefix("-"),
+              !trimmed.hasPrefix("+"),
+              !trimmed.hasPrefix("//"),
+              !trimmed.hasPrefix("/*"),
+              !trimmed.contains("("),
+              !trimmed.contains(")"),
+              !trimmed.contains("="),
+              !trimmed.contains(";"),
+              !trimmed.contains("{"),
+              !trimmed.contains("}") else {
+            return false
+        }
+
+        let nsTrimmed = trimmed as NSString
+        guard let firstIdentifier = identifierRegex.firstMatch(
+            in: trimmed,
+            range: NSRange(location: 0, length: nsTrimmed.length)
+        ) else {
+            return false
+        }
+        let leadingIdentifier = nsTrimmed.substring(with: firstIdentifier.range)
+        return !objectiveCStatementLeadingIdentifiers.contains(leadingIdentifier)
+    }
+
+    private static func isObjectiveCSplitCFunctionNameLine(_ line: NSString) -> Bool {
+        let string = line as String
+        let fullRange = NSRange(location: 0, length: line.length)
+        guard objectiveCSplitCFunctionNameLineRegex.firstMatch(in: string, range: fullRange) != nil,
+              firstLocation(ofAny: ["="], in: line, before: line.length) == NSNotFound else {
+            return false
+        }
+        return true
+    }
+
+    private static func collectParameterShadows(
+        in headerRange: NSRange,
+        source: NSString,
+        shadowedNames: Set<String>,
+        into shadowStarts: inout [String: Int]
+    ) {
+        guard headerRange.length > 0 else { return }
+        let header = source.substring(with: headerRange) as NSString
+        let matches = identifierRegex.matches(in: header as String, range: NSRange(location: 0, length: header.length))
+        for match in matches {
+            let name = header.substring(with: match.range)
+            guard shadowedNames.contains(name),
+                  methodParameterNameRange(match.range, in: header)
+                    || cParameterNameRange(match.range, in: header) else {
+                continue
+            }
+            let absoluteLocation = headerRange.location + match.range.location
+            shadowStarts[name] = min(shadowStarts[name] ?? absoluteLocation, absoluteLocation)
+        }
+    }
+
+    private static func collectLocalVariableShadows(
+        in scope: (location: Int, bodyOpenLocation: Int, upperBound: Int),
+        source: NSString,
+        shadowedNames: Set<String>,
+        into shadowScopes: inout [(name: String, range: NSRange)]
+    ) {
+        let bodyStart = min(source.length, scope.bodyOpenLocation + 1)
+        let bodyEnd = max(bodyStart, min(source.length, scope.upperBound - 1))
+        let bodyRange = NSRange(location: bodyStart, length: bodyEnd - bodyStart)
+        let body = source.substring(with: bodyRange) as NSString
+        for match in objectiveCLocalVariableShadowDeclarationRegex.matches(
+            in: body as String,
+            range: NSRange(location: 0, length: body.length)
+        ) {
+            let anchorRange = match.range(at: 1)
+            guard anchorRange.location != NSNotFound else { continue }
+            let absoluteLineRange = source.lineRange(
+                for: NSRange(location: bodyRange.location + anchorRange.location, length: 0)
+            )
+            let line = source.substring(with: absoluteLineRange) as NSString
+            let statementEnd = firstLocation(ofAny: [";"], in: line, before: line.length)
+            let firstTerminator = firstLocation(ofAny: ["=", ";"], in: line, before: line.length)
+            guard statementEnd != NSNotFound,
+                  firstTerminator != NSNotFound,
+                  line.range(of: "(", options: [], range: NSRange(location: 0, length: firstTerminator)).location == NSNotFound else {
+                continue
+            }
+            for nameRange in declarationNameRanges(in: line, statementEnd: statementEnd) {
+                let absoluteLocation = absoluteLineRange.location + nameRange.location
+                guard !isInsideCommentOrLiteral(NSRange(location: absoluteLocation, length: nameRange.length), in: source) else {
+                    continue
+                }
+                let name = line.substring(with: nameRange)
+                guard shadowedNames.contains(name) else { continue }
+                let upperBound = localVariableShadowUpperBound(startingAt: absoluteLocation, in: source, scope: scope)
+                shadowScopes.append((
+                    name: name,
+                    range: NSRange(location: absoluteLocation, length: max(0, upperBound - absoluteLocation))
+                ))
+            }
+        }
+
+        for match in objectiveCForLoopVariableShadowDeclarationRegex.matches(
+            in: body as String,
+            range: NSRange(location: 0, length: body.length)
+        ) {
+            let matchRange = NSRange(location: bodyRange.location + match.range.location, length: match.range.length)
+            let upperBound = forLoopShadowUpperBound(matchRange: matchRange, source: source, scopeUpperBound: scope.upperBound)
+            for nameRange in forLoopDeclarationNameRanges(
+                matchRange: matchRange,
+                source: source
+            ) {
+                let absoluteLocation = nameRange.location
+                guard !isInsideCommentOrLiteral(nameRange, in: source) else {
+                    continue
+                }
+                let name = source.substring(with: nameRange)
+                guard shadowedNames.contains(name) else { continue }
+                shadowScopes.append((
+                    name: name,
+                    range: NSRange(location: absoluteLocation, length: max(0, upperBound - absoluteLocation))
+                ))
+            }
+        }
+    }
+
+    private static func localVariableShadowUpperBound(
+        startingAt location: Int,
+        in source: NSString,
+        scope: (location: Int, bodyOpenLocation: Int, upperBound: Int)
+    ) -> Int {
+        guard let openBrace = innermostOpenBraceLocation(
+            containing: location,
+            lowerBound: scope.bodyOpenLocation,
+            in: source
+        ),
+              let closeBrace = matchingClosingBraceLocation(in: source, openBraceLocation: openBrace) else {
+            return scope.upperBound
+        }
+        return min(scope.upperBound, closeBrace + 1)
+    }
+
+    private static func forLoopShadowUpperBound(
+        matchRange: NSRange,
+        source: NSString,
+        scopeUpperBound: Int
+    ) -> Int {
+        guard let openParen = nextLocation(ofAny: ["("], after: matchRange.location, in: source),
+              let closeParen = matchingCloseParenLocation(openingAt: openParen, in: source) else {
+            return min(scopeUpperBound, matchRange.upperBound)
+        }
+
+        var cursor = closeParen + 1
+        let upperBound = min(scopeUpperBound, source.length)
+        while cursor < upperBound {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: source) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                cursor += 1
+                continue
+            }
+            if character == "{",
+               let closeBrace = matchingClosingBraceLocation(in: source, openBraceLocation: cursor) {
+                return min(scopeUpperBound, closeBrace + 1)
+            }
+            if character == ";" {
+                return min(scopeUpperBound, cursor + 1)
+            }
+            cursor += 1
+        }
+        return scopeUpperBound
+    }
+
+    private static func forLoopDeclarationNameRanges(matchRange: NSRange, source: NSString) -> [NSRange] {
+        guard let openParen = nextLocation(ofAny: ["("], after: matchRange.location, in: source),
+              let closeParen = matchingCloseParenLocation(openingAt: openParen, in: source),
+              openParen < closeParen else {
+            return []
+        }
+        let clauseRange = NSRange(location: openParen + 1, length: closeParen - openParen - 1)
+        let clause = source.substring(with: clauseRange) as NSString
+        let declarationEnd = forLoopDeclarationEnd(in: clause)
+        guard declarationEnd != NSNotFound else {
+            return []
+        }
+        return declarationNameRanges(in: clause, statementEnd: declarationEnd)
+            .map { NSRange(location: clauseRange.location + $0.location, length: $0.length) }
+    }
+
+    private static func forLoopDeclarationEnd(in clause: NSString) -> Int {
+        var cursor = 0
+        var parenDepth = 0
+        var bracketDepth = 0
+        var braceDepth = 0
+        var angleDepth = 0
+        while cursor < clause.length {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: clause) {
+                cursor = nextCursor
+                continue
+            }
+            let character = clause.substring(with: NSRange(location: cursor, length: 1))
+            updateDeclarationDelimiterDepth(
+                character: character,
+                next: cursor + 1 < clause.length
+                    ? clause.substring(with: NSRange(location: cursor + 1, length: 1))
+                    : "",
+                parenDepth: &parenDepth,
+                bracketDepth: &bracketDepth,
+                braceDepth: &braceDepth,
+                angleDepth: &angleDepth
+            )
+            if parenDepth == 0,
+               bracketDepth == 0,
+               braceDepth == 0,
+               angleDepth == 0 {
+                if character == ";" {
+                    return cursor
+                }
+                if clauseHasStandaloneIn(at: cursor, in: clause) {
+                    return cursor
+                }
+            }
+            cursor += 1
+        }
+        return NSNotFound
+    }
+
+    private static func clauseHasStandaloneIn(at location: Int, in clause: NSString) -> Bool {
+        let keywordLength = "in".utf16.count
+        guard location + keywordLength <= clause.length,
+              clause.substring(with: NSRange(location: location, length: keywordLength)) == "in" else {
+            return false
+        }
+        let before = location == 0 ? nil : clause.character(at: location - 1)
+        let afterLocation = location + keywordLength
+        let after = afterLocation < clause.length ? clause.character(at: afterLocation) : nil
+        return before.map(isASCIIIdentifierContinue) != true
+            && after.map(isASCIIIdentifierContinue) != true
+    }
+
+    private static func innermostOpenBraceLocation(
+        containing location: Int,
+        lowerBound: Int,
+        in source: NSString
+    ) -> Int? {
+        let upperBound = min(max(0, location), source.length)
+        var stack: [Int] = []
+        var cursor = min(max(0, lowerBound), upperBound)
+        while cursor < upperBound {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: source) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == "{" {
+                stack.append(cursor)
+            } else if character == "}" {
+                _ = stack.popLast()
+            }
+            cursor += 1
+        }
+        return stack.last
+    }
+
+    private static func identifierRanges(named name: String, in range: NSRange, source: NSString) -> [NSRange] {
+        identifierRegex
+            .matches(in: source as String, range: range)
+            .compactMap { match in
+                source.substring(with: match.range) == name ? match.range : nil
+            }
+    }
+
+    private static func methodParameterNameRange(_ range: NSRange, in header: NSString) -> Bool {
+        guard let closeParen = previousNonWhitespaceLocation(before: range.location, in: header),
+              header.substring(with: NSRange(location: closeParen, length: 1)) == ")",
+              let openParen = matchingOpeningParenLocation(before: closeParen, in: header),
+              let beforeType = previousNonWhitespaceLocation(before: openParen, in: header) else {
+            return false
+        }
+        return header.substring(with: NSRange(location: beforeType, length: 1)) == ":"
+    }
+
+    private static func cParameterNameRange(_ range: NSRange, in header: NSString) -> Bool {
+        guard let delimiterBefore = previousLocation(ofAny: ["(", ","], before: range.location, in: header),
+              let delimiterAfter = nextLocation(ofAny: [")", ","], after: range.upperBound, in: header),
+              delimiterBefore < range.location,
+              range.upperBound <= delimiterAfter else {
+            return false
+        }
+        let segmentRange = NSRange(location: delimiterBefore + 1, length: delimiterAfter - delimiterBefore - 1)
+        let segment = header.substring(with: segmentRange) as NSString
+        guard let relativeNameRange = identifierRange(before: segment.length, in: segment) else {
+            return false
+        }
+        return segmentRange.location + relativeNameRange.location == range.location
+            && relativeNameRange.length == range.length
+    }
+
+    private static func previousNonWhitespaceLocation(before location: Int, in text: NSString) -> Int? {
+        guard location > 0 else { return nil }
+        var cursor = min(location, text.length) - 1
+        while cursor >= 0 {
+            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            if !isWhitespace(character) {
+                return cursor
+            }
+            if cursor == 0 { break }
+            cursor -= 1
+        }
+        return nil
+    }
+
+    private static func matchingOpeningParenLocation(before closeParen: Int, in text: NSString) -> Int? {
+        var depth = 0
+        var cursor = closeParen
+        while cursor >= 0 {
+            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            if character == ")" {
+                depth += 1
+            } else if character == "(" {
+                depth -= 1
+                if depth == 0 {
+                    return cursor
+                }
+            }
+            if cursor == 0 { break }
+            cursor -= 1
+        }
+        return nil
+    }
+
+    private static func previousLocation(ofAny needles: [String], before location: Int, in text: NSString) -> Int? {
+        guard location > 0 else { return nil }
+        var cursor = min(location, text.length) - 1
+        while cursor >= 0 {
+            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            if needles.contains(character) {
+                return cursor
+            }
+            if cursor == 0 { break }
+            cursor -= 1
+        }
+        return nil
+    }
+
+    private static func nextLocation(ofAny needles: [String], after location: Int, in text: NSString) -> Int? {
+        var cursor = min(max(0, location), text.length)
+        while cursor < text.length {
+            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            if needles.contains(character) {
+                return cursor
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func matchingCloseParenLocation(openingAt openParen: Int, in text: NSString) -> Int? {
+        var depth = 0
+        var cursor = openParen
+        while cursor < text.length {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: text) {
+                cursor = nextCursor
+                continue
+            }
+            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                depth -= 1
+                if depth == 0 {
+                    return cursor
+                }
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func matchingClosingBraceLocation(in source: NSString, openBraceLocation: Int) -> Int? {
+        var cursor = openBraceLocation + 1
+        var depth = 1
+        while cursor < source.length {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: source) {
+                cursor = nextCursor
+                continue
+            }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == "{", depth == 0 {
+                depth = 1
+            } else if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return cursor
+                }
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func indexAfterCommentOrQuotedLiteral(startingAt location: Int, in text: NSString) -> Int? {
+        guard location >= 0,
+              location < text.length else {
+            return nil
+        }
+        let character = text.substring(with: NSRange(location: location, length: 1))
+        let next = location + 1 < text.length
+            ? text.substring(with: NSRange(location: location + 1, length: 1))
+            : ""
+        if character == "\"" || character == "'" {
+            return indexAfterQuotedLiteral(startingAt: location, quote: character, in: text)
+        }
+        if character == "/", next == "/" {
+            return text.lineRange(for: NSRange(location: location, length: 0)).upperBound
+        }
+        if character == "/", next == "*" {
+            var cursor = location + 2
+            while cursor + 1 < text.length {
+                let current = text.substring(with: NSRange(location: cursor, length: 1))
+                let following = text.substring(with: NSRange(location: cursor + 1, length: 1))
+                if current == "*", following == "/" {
+                    return cursor + 2
+                }
+                cursor += 1
+            }
+            return text.length
+        }
+        return nil
+    }
+
+    private static func isInsideCommentOrLiteral(_ range: NSRange, in text: NSString) -> Bool {
+        var cursor = 0
+        while cursor < min(range.location, text.length) {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: text) {
+                if nextCursor > range.location {
+                    return true
+                }
+                cursor = nextCursor
+                continue
+            }
+            cursor += 1
+        }
+        return false
+    }
+
+    private static func objectiveCBraceDepth(
+        afterScanning line: NSString,
+        startingAt depth: Int,
+        isInBlockComment: Bool
+    ) -> (depth: Int, isInBlockComment: Bool) {
+        var result = depth
+        var isInBlockComment = isInBlockComment
+        var cursor = 0
+        while cursor < line.length {
+            let character = line.substring(with: NSRange(location: cursor, length: 1))
+            let nextLocation = cursor + 1
+            let next = nextLocation < line.length
+                ? line.substring(with: NSRange(location: nextLocation, length: 1))
+                : nil
+            if isInBlockComment {
+                if character == "*", next == "/" {
+                    isInBlockComment = false
+                    cursor += 2
+                    continue
+                }
+                cursor += 1
+                continue
+            }
+            if character == "/", next == "/" {
+                break
+            }
+            if character == "/", next == "*" {
+                isInBlockComment = true
+                cursor += 2
+                continue
+            }
+            if character == "\"" || character == "'" {
+                cursor = indexAfterQuotedLiteral(startingAt: cursor, quote: character, in: line)
+                continue
+            }
+            if character == "{" {
+                result += 1
+            } else if character == "}" {
+                result = max(0, result - 1)
+            }
+            cursor += 1
+        }
+        return (result, isInBlockComment)
+    }
+
+    private static func indexAfterQuotedLiteral(startingAt quoteLocation: Int, quote: String, in text: NSString) -> Int {
+        var cursor = quoteLocation + 1
+        var isEscaped = false
+        while cursor < text.length {
+            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == quote {
+                return cursor + 1
+            }
+            cursor += 1
+        }
+        return text.length
+    }
+
+    private static func scanImplementationIvarDeclarations(source: NSString) -> [(name: String, range: NSRange)] {
+        var declarations: [(name: String, range: NSRange)] = []
+        var location = 0
+        var awaitingIvarBlock = false
+        var isInIvarBlock = false
+
+        while location < source.length {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            let line = source.substring(with: lineRange) as NSString
+            let trimmed = (line as String).trimmingCharacters(in: .whitespacesAndNewlines)
+            defer {
+                let nextLocation = lineRange.upperBound
+                location = nextLocation > location ? nextLocation : source.length
+            }
+
+            if isInIvarBlock {
+                let closeBraceRange = firstBraceRange(in: line, brace: "}")
+                let ivarSegmentLength = closeBraceRange?.location ?? line.length
+                appendImplementationIvarDeclarations(
+                    in: line.substring(with: NSRange(location: 0, length: ivarSegmentLength)) as NSString,
+                    lineOffset: lineRange.location,
+                    to: &declarations
+                )
+                if closeBraceRange != nil {
+                    isInIvarBlock = false
+                    awaitingIvarBlock = false
+                }
+                continue
+            }
+
+            if awaitingIvarBlock {
+                if let openBraceRange = firstBraceRange(in: line, brace: "{") {
+                    let segmentStart = openBraceRange.upperBound
+                    let closeBraceRange = firstBraceRange(in: line, brace: "}", after: segmentStart)
+                    let segmentUpperBound = closeBraceRange?.location ?? line.length
+                    appendImplementationIvarDeclarations(
+                        in: line.substring(with: NSRange(location: segmentStart, length: segmentUpperBound - segmentStart)) as NSString,
+                        lineOffset: lineRange.location + segmentStart,
+                        to: &declarations
+                    )
+                    isInIvarBlock = closeBraceRange == nil
+                    awaitingIvarBlock = closeBraceRange == nil
+                } else if !trimmed.isEmpty && !isObjectiveCCommentOnlyLine(trimmed) {
+                    awaitingIvarBlock = false
+                }
+                continue
+            }
+
+            guard trimmed.hasPrefix("@implementation") else {
+                continue
+            }
+            if let openBraceRange = firstBraceRange(in: line, brace: "{") {
+                let segmentStart = openBraceRange.upperBound
+                let closeBraceRange = firstBraceRange(in: line, brace: "}", after: segmentStart)
+                let segmentUpperBound = closeBraceRange?.location ?? line.length
+                appendImplementationIvarDeclarations(
+                    in: line.substring(with: NSRange(location: segmentStart, length: segmentUpperBound - segmentStart)) as NSString,
+                    lineOffset: lineRange.location + segmentStart,
+                    to: &declarations
+                )
+                isInIvarBlock = closeBraceRange == nil
+                awaitingIvarBlock = false
+            } else {
+                awaitingIvarBlock = true
+            }
+        }
+        return declarations
+    }
+
+    private static func isObjectiveCCommentOnlyLine(_ trimmedLine: String) -> Bool {
+        trimmedLine.hasPrefix("//")
+            || trimmedLine.hasPrefix("/*")
+            || trimmedLine.hasPrefix("*")
+            || trimmedLine.hasPrefix("*/")
+    }
+
+    private static func firstBraceRange(in line: NSString, brace: String, after location: Int = 0) -> NSRange? {
+        firstCodeCharacterRange(in: line, character: brace, after: location)
+    }
+
+    private static func firstCodeCharacterRange(in line: NSString, character: String, after location: Int = 0) -> NSRange? {
+        var cursor = min(max(0, location), line.length)
+        while cursor < line.length {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: line) {
+                cursor = nextCursor
+                continue
+            }
+            if line.substring(with: NSRange(location: cursor, length: 1)) == character {
+                return NSRange(location: cursor, length: 1)
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func appendImplementationIvarDeclarations(
+        in segment: NSString,
+        lineOffset: Int,
+        to declarations: inout [(name: String, range: NSRange)]
+    ) {
+        var statementStart = 0
+        while statementStart < segment.length {
+            let searchRange = NSRange(location: statementStart, length: segment.length - statementStart)
+            let semicolonRange = segment.range(of: ";", options: [], range: searchRange)
+            guard semicolonRange.location != NSNotFound else {
+                return
+            }
+
+            let statementRange = NSRange(
+                location: statementStart,
+                length: semicolonRange.upperBound - statementStart
+            )
+            let statement = segment.substring(with: statementRange) as NSString
+            for relativeRange in implementationIvarNameRanges(in: statement) {
+                let name = statement.substring(with: relativeRange)
+                declarations.append((
+                    name: name,
+                    range: NSRange(
+                        location: lineOffset + statementStart + relativeRange.location,
+                        length: relativeRange.length
+                    )
+                ))
+            }
+            statementStart = semicolonRange.upperBound
+        }
+    }
+
+    private static func implementationIvarNameRanges(in line: NSString) -> [NSRange] {
+        let semicolonRange = line.range(of: ";")
+        guard semicolonRange.location != NSNotFound,
+              line.range(of: "(", options: [], range: NSRange(location: 0, length: semicolonRange.location)).location == NSNotFound else {
+            return []
+        }
+        return declarationNameRanges(in: line, statementEnd: semicolonRange.location)
+    }
+
+    private static func firstLocation(ofAny needles: [String], in text: NSString, before end: Int) -> Int {
+        var result = NSNotFound
+        let range = NSRange(location: 0, length: max(0, min(end, text.length)))
+        for needle in needles {
+            let match = text.range(of: needle, options: [], range: range)
+            if match.location != NSNotFound,
+               result == NSNotFound || match.location < result {
+                result = match.location
+            }
+        }
+        return result
+    }
+
+    static func typedefDeclaredName(in declaration: NSString) -> String? {
+        if let declaredName = nsEnumOptionsTypedefDeclaredName(in: declaration) {
+            return declaredName.name
         }
         if let blockName = blockTypedefDeclaredName(in: declaration) {
             return blockName
@@ -1824,6 +3726,21 @@ private struct ObjectiveCFileSymbolIndex {
             }
         }
         return nil
+    }
+
+    private static func nsEnumOptionsTypedefDeclaredName(in declaration: NSString) -> (name: String, range: NSRange)? {
+        let string = declaration as String
+        guard let match = nsEnumOptionsTypedefNameRegex.firstMatch(
+            in: string,
+            range: NSRange(location: 0, length: declaration.length)
+        ) else {
+            return nil
+        }
+        let range = match.range(at: 1)
+        guard range.location != NSNotFound else {
+            return nil
+        }
+        return (declaration.substring(with: range), range)
     }
 
     private static func blockTypedefDeclaredName(in declaration: NSString) -> String? {
@@ -2059,6 +3976,29 @@ private struct ObjectiveCFileSymbolIndex {
 
         end = trimmingTrailingPropertySyntax(in: declaration, end: end)
         return NSRange(location: 0, length: max(0, end))
+    }
+
+    private static func propertyReferenceShouldBeTracked(
+        name: String,
+        range: NSRange,
+        in declaration: NSString
+    ) -> Bool {
+        guard isUppercaseIdentifier(name),
+              name.contains("_") else {
+            return true
+        }
+
+        let trailingStart = range.upperBound
+        guard trailingStart < declaration.length else {
+            return true
+        }
+        let trailing = declaration.substring(from: trailingStart)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trailing.isEmpty == false,
+              trailing != ";" else {
+            return true
+        }
+        return false
     }
 
     private static func trimmingTrailingPropertySyntax(in declaration: NSString, end: Int) -> Int {
@@ -2313,6 +4253,30 @@ private struct ObjectiveCFileSymbolIndex {
         pattern: #"@property\b[^\n;]*(?:\n(?!\s*(?:[-+]|@))[^\n;]*)*;"#
     )
 
+    private static let definedMacroNameRegex = try! NSRegularExpression(
+        pattern: #"(?m)^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)"#
+    )
+
+    private static let objectiveCFunctionLikeSignatureLineRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?:[-+]\s*\(|(?:static\s+)?[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*\()"#
+    )
+
+    private static let objectiveCSplitCFunctionNameLineRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do|sizeof)\b)[A-Za-z_][A-Za-z0-9_]*\s*\([^;{}=]*\)"#
+    )
+
+    private static let objectiveCLocalVariableShadowDeclarationRegex = try! NSRegularExpression(
+        pattern: #"(?m)^\s*(?:static\s+)?(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do)\b)[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)"#
+    )
+
+    private static let objectiveCForLoopVariableShadowDeclarationRegex = try! NSRegularExpression(
+        pattern: #"\bfor\s*\(\s*[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|in\b)"#
+    )
+
+    private static let nsEnumOptionsTypedefNameRegex = try! NSRegularExpression(
+        pattern: #"\btypedef\s+NS_(?:ENUM|OPTIONS)\s*\([^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)"#
+    )
+
     private static let blockPropertyNameRegex = try! NSRegularExpression(
         pattern: #"@property\b[^;]*\(\s*\^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
     )
@@ -2352,24 +4316,13 @@ private struct ObjectiveCFileSymbolIndex {
         "void", "id", "BOOL", "NSInteger", "NSUInteger", "NSString",
         "NSError", "NSRange", "nullable", "nonnull", "_Nullable", "_Nonnull"
     ]
-}
 
-private enum ObjectiveCSystemSymbols {
-    static func isSystemType(_ name: String) -> Bool {
-        if knownTypeNames.contains(name) {
-            return true
-        }
-        return knownTypePrefixes.contains { name.hasPrefix($0) }
-    }
-
-    private static let knownTypeNames: Set<String> = [
-        "BOOL", "Class", "IMP", "NSInteger", "NSUInteger", "NSRange", "SEL",
-        "char", "double", "float", "id", "instancetype", "int", "long",
-        "short", "unichar", "unsigned", "void"
+    private static let objectiveCStatementLeadingIdentifiers: Set<String> = [
+        "return", "if", "for", "while", "switch", "case", "break", "continue",
+        "goto", "else", "do", "sizeof"
     ]
 
-    private static let knownTypePrefixes: [String] = [
-        "NS", "CF", "CG", "CA", "CI", "UI", "AV", "WK", "MTL", "OS", "dispatch_"
-    ]
-
+    private static let quotedHeaderImportRegex = try! NSRegularExpression(
+        pattern: #"(?m)^\s*#\s*(?:import|include)\s*"[^"]+\.h""#
+    )
 }

@@ -4023,6 +4023,8 @@ struct SyntaxHighlighterEngineTests {
         }
         @end
         """
+        let nsSource = source as NSString
+        let typeRange = nsSource.range(of: "ReferenceObject")
         let phases = await collectHighlightPhases(
             await SyntaxHighlighterEngine().resetPhases(source: source, language: .objectiveC, revision: 0)
         )
@@ -4032,7 +4034,12 @@ struct SyntaxHighlighterEngineTests {
         #expect(phases.map(\.phase) == [.syntacticFastPass, .complete])
         #expect(phases.allSatisfy { $0.source == source && $0.language == .objectiveC && $0.revision == 0 })
         #expect(fastPass.tokens.isEmpty == false)
-        #expect(complete.tokens.isEmpty == false)
+        #expect(fastPass.tokens.contains {
+            tokenIntersects($0, range: typeRange, syntaxID: .declarationType, language: .objectiveC)
+        } == false)
+        #expect(complete.tokens.contains {
+            tokenIntersects($0, range: typeRange, syntaxID: .declarationType, language: .objectiveC)
+        })
     }
 
     @Test("SyntaxHighlighterEngine keeps non-deferred languages single phase")
@@ -8237,6 +8244,9 @@ struct SyntaxHighlighterEngineTests {
         #if defined(DEBUG)
         #define ReferenceEnabled 1
         #endif
+        #if TARGET_OS_OSX || TARGET_OS_IOS
+        #define ReferencePlatform 1
+        #endif
 
         /*
         - (NSString *)commentedTitle;
@@ -8306,6 +8316,7 @@ struct SyntaxHighlighterEngineTests {
             if (self == nil) {
                 return nil;
             }
+            (void)[self respondsToSelector:NSSelectorFromString(@"init")];
             return self;
         }
 
@@ -8315,6 +8326,7 @@ struct SyntaxHighlighterEngineTests {
             id (^block)(id) = self.handler;
             id (^qualifiedBlock)(id) = self.qualifiedHandler;
             int (*callbackValue)(int) = self.callback;
+            NSInteger callbackResult = (*callbackValue)(1);
             int (**doubleCallbackValue)(int) = self.doubleCallback;
             int (*nullableCallbackValue)(int) = self.nullableCallback;
             NSString *handlerDescription = self.handler.description;
@@ -8330,6 +8342,7 @@ struct SyntaxHighlighterEngineTests {
             NSInteger statusWithAttr = self.HTTP_STATUS_WITH_ATTR;
             NSInteger secondStatusWithAttr = self.SECOND_STATUS_WITH_ATTR;
             NSUInteger count = self.name.length;
+            NSNumber *boxedCount = @(count);
             NSUInteger literalCommentArgumentLength = Foo(@"//", self.name.length);
             NSUInteger commentedChainLength = self.name /* comment */ .length;
             NSUInteger itemCount = self.items[0].count;
@@ -8405,6 +8418,8 @@ struct SyntaxHighlighterEngineTests {
         let defineRange = nsSource.range(of: "#define")
         let macroNameRange = nsSource.range(of: "ReferenceLog")
         let debugMacroRange = nsSource.range(of: "DEBUG")
+        let platformMacroRange = nsSource.range(of: "TARGET_OS_OSX")
+        let platformIOMacroRange = nsSource.range(of: "TARGET_OS_IOS")
         let interfaceRange = nsSource.range(of: "@interface")
         let selfRange = nsSource.range(of: "self")
         let propertyDeclarationRange = nsSource.range(of: "@property (nonatomic, copy) NSString *name;")
@@ -8433,6 +8448,12 @@ struct SyntaxHighlighterEngineTests {
         })
         #expect(tokens.contains {
             tokenIntersects($0, range: debugMacroRange, syntaxID: .preprocessor, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: platformMacroRange, syntaxID: .preprocessor, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: platformIOMacroRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         let defineSnapshot = try semanticSnapshot(
             in: tokens,
@@ -8472,6 +8493,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .preprocessor,
             language: .objectiveC,
             inOccurrenceOf: "#define ReferenceLog(format, ...)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "\"[Reference] \"",
+            syntaxID: .string,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog((@\"[Reference] \" format)"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -8691,8 +8720,16 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "NS_SWIFT_NAME",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "refinedTitle",
-            syntaxID: .declarationOther,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;"
         )
@@ -8716,7 +8753,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "HTTP_STATUS_WITH_ATTR",
-            syntaxID: .declarationOther,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic) MyEnum HTTP_STATUS_WITH_ATTR MY_ATTR;"
         )
@@ -8724,7 +8761,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "SECOND_STATUS_WITH_ATTR",
-            syntaxID: .declarationOther,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic) MY_ENUM SECOND_STATUS_WITH_ATTR MY_ATTR;"
         )
@@ -8779,6 +8816,38 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "NSSelectorFromString",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "[self respondsToSelector:NSSelectorFromString"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "NSNumber *boxedCount = @(count);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "(",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "NSNumber *boxedCount = @(count);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: ")",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "NSNumber *boxedCount = @(count);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "name",
             syntaxID: .identifierVariable,
             language: .objectiveC,
@@ -8807,6 +8876,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.callback"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "callbackValue",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "(*callbackValue)(1)"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -8924,7 +9001,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "HTTP_STATUS_WITH_ATTR",
-            syntaxID: .identifierVariable,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "self.HTTP_STATUS_WITH_ATTR"
         )
@@ -8932,7 +9009,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "SECOND_STATUS_WITH_ATTR",
-            syntaxID: .identifierVariable,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "self.SECOND_STATUS_WITH_ATTR"
         )
@@ -9208,7 +9285,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "count",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "self.items[other.length].count"
         )
@@ -9222,7 +9299,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "description",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "self.handler(value).description"
         )
@@ -9230,7 +9307,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "description",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: #"self.handler(@")").description"#
         )
@@ -9238,7 +9315,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "description",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: #"self.handler(@"[").description"#
         )
@@ -9246,7 +9323,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "description",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: #"self.handler(@";").description"#
         )
@@ -9389,6 +9466,50 @@ struct SyntaxHighlighterEngineTests {
             text: "length",
             inOccurrenceOf: "self.notAProperty.length"
         ).contains(.identifierVariableSystem) == false)
+
+        let headerBackedSource = """
+        #import "HeaderBacked.h"
+
+        @implementation HeaderBacked
+        - (NSUInteger)length
+        {
+            NSUInteger titleLength = self.title.length;
+            NSUInteger otherLength = other.length;
+            struct ReferenceSize size;
+            NSUInteger fieldLength = size.field;
+            return titleLength + otherLength + fieldLength;
+        }
+        @end
+        """
+        let headerBackedTokens = await engine.render(source: headerBackedSource, language: .objectiveC)
+        _ = try effectiveSemanticSnapshot(
+            in: headerBackedTokens,
+            source: headerBackedSource,
+            text: "title",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.title.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerBackedTokens,
+            source: headerBackedSource,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.title.length"
+        )
+        #expect(syntaxIDs(
+            in: headerBackedTokens,
+            source: headerBackedSource,
+            text: "length",
+            inOccurrenceOf: "other.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: headerBackedTokens,
+            source: headerBackedSource,
+            text: "field",
+            inOccurrenceOf: "size.field"
+        ).contains(.identifierVariableSystem) == false)
     }
 
     @Test("SyntaxHighlighterEngine aligns focused Objective-C reference tokens")
@@ -9510,7 +9631,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "ReferenceErrorDomain",
-            syntaxID: .identifier,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "static NSString *const ReferenceErrorDomain"
         )
@@ -9518,7 +9639,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "index",
-            syntaxID: .identifier,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "- (unichar)characterAtIndex:(NSUInteger)index"
         )
@@ -9526,7 +9647,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "symbol",
-            syntaxID: .identifier,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "void *symbol = dlsym"
         )
@@ -9545,6 +9666,54 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierFunctionSystem,
             language: .objectiveC,
             inOccurrenceOf: "return ((id (*)(id, SEL))objc_msgSend)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSSelectorFromString",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSSelectorFromString(selectorName)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceLog",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "ReferenceLog(@\"display %@\""
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceSetError",
+            syntaxID: .identifierFunction,
+            language: .objectiveC,
+            inOccurrenceOf: "return ReferenceSetError(error, 1"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceErrorDomain",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "errorWithDomain:ReferenceErrorDomain"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceTokenBase",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "code:ReferenceTokenBase + 1"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "_itemsByIdentifier",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return [_itemsByIdentifier copy];"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -9582,7 +9751,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "NSLocalizedDescriptionKey",
-            syntaxID: .identifier,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
         )
@@ -9621,11 +9790,11 @@ struct SyntaxHighlighterEngineTests {
             in: incremental.tokens,
             source: updatedSource,
             text: "LocalFunction",
-            syntaxID: .identifierFunctionSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "LocalFunction();"
         )
-        #expect(functionCall.styleKeys.first == "editor.syntax.identifier.function.system")
+        #expect(functionCall.styleKeys.first == "editor.syntax.plain")
         #expect(syntaxIDs(
             in: incremental.tokens,
             source: updatedSource,
@@ -9708,12 +9877,6 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(syntaxIDs(
-            in: incremental.tokens,
-            source: updatedSource,
-            text: "name",
-            inOccurrenceOf: "NSString *name"
-        ).contains(.declarationOther) == false)
     }
 
     @Test("SyntaxHighlighterEngine keeps Objective-C semantic refresh ranges local")
@@ -9825,6 +9988,648 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after file-scope variable rename")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterFileScopeVariableRename() async throws {
+        let source = """
+        static NSString *const Foo = @"value";
+
+        NSString *readValue(void)
+        {
+            return Foo;
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "Foo = @\"value\"", with: "Bar = @\"value\"")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after ivar declaration rename")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterIvarDeclarationRename() async throws {
+        let source = """
+        @implementation Sample {
+            BOOL foo;
+        }
+
+        - (BOOL)value
+        {
+            return foo;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(of: "BOOL foo;", with: "BOOL bar;")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after initialized local shadow renames")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterInitializedLocalShadowRename() async throws {
+        let source = """
+        static NSString *const Token = @"global";
+
+        void run(void)
+        {
+            NSString *Other = @"local";
+            NSLog(@"%@", Token);
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "Other", with: "Token")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after split parameter shadow renames")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterSplitParameterShadowRename() async throws {
+        let source = """
+        static NSString *const Token = @"global";
+
+        void run(NSString *Other)
+        {
+            NSLog(@"%@", Token);
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "Other", with: "Token")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after for-loop shadow renames")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterForLoopShadowRename() async throws {
+        let source = """
+        static NSString *const Token = @"global";
+
+        void run(NSArray<NSString *> *values)
+        {
+            for (NSString *Other in values) {
+                NSLog(@"%@", Token);
+            }
+            NSLog(@"%@", Token);
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "Other", with: "Token")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "values) {\n        NSLog(@\"%@\", Token);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C local macro call overlays after macro removal")
+    func highlighterStripsStaleObjectiveCLocalMacroCallOverlaysAfterMacroRemoval() async throws {
+        let source = """
+        #define ReferenceLog(format, ...) NSLog(format, ##__VA_ARGS__)
+
+        void run(void)
+        {
+            ReferenceLog(@"value");
+        }
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "#define ReferenceLog(format, ...) NSLog(format, ##__VA_ARGS__)\n\n",
+            with: ""
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "ReferenceLog",
+            inOccurrenceOf: "ReferenceLog(@\"value\")"
+        ).contains(.preprocessor) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C local macro overlays after call opener deletion")
+    func highlighterStripsStaleObjectiveCLocalMacroOverlaysAfterCallOpenerDeletion() async throws {
+        let source = """
+        #define ReferenceLog(format, ...) NSLog(format, ##__VA_ARGS__)
+
+        void run(void)
+        {
+            ReferenceLog(@"value");
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "ReferenceLog(", with: "ReferenceLog ")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "ReferenceLog",
+            inOccurrenceOf: "ReferenceLog @\"value\")"
+        ).contains(.preprocessor) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C local statics out of file-scope overlays")
+    func highlighterKeepsObjectiveCLocalStaticsOutOfFileScopeOverlays() async throws {
+        let source = """
+        void run(void)
+        {
+        static NSInteger counter = 0;
+        counter += 1;
+        }
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "counter",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "counter += 1"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine recognizes Objective-C comma-separated variable declarations")
+    func highlighterRecognizesObjectiveCCommaSeparatedVariableDeclarations() async throws {
+        let source = """
+        static NSString *const Foo = @"foo", *Bar = @"bar";
+
+        @implementation Sample {
+            BOOL firstFlag, secondFlag;
+        }
+
+        - (BOOL)value
+        {
+            return secondFlag;
+        }
+        @end
+
+        NSString *readValue(void)
+        {
+            return Bar;
+        }
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "secondFlag",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return secondFlag;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Bar",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "return Bar;"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C local shadows plain")
+    func highlighterKeepsObjectiveCLocalShadowsPlain() async throws {
+        let source = """
+        static NSString *const Token = @"global";
+
+        @implementation Sample {
+            BOOL enabled;
+        }
+
+        - (BOOL)value
+        {
+            BOOL enabled;
+            return enabled;
+        }
+
+        void run(void)
+        {
+            if (YES) {
+                NSString *Token = @"local";
+                NSLog(@"%@", Token);
+            }
+            NSLog(@"%@", Token);
+        }
+
+        NSString *readValue(void)
+        {
+            NSString *Token = @"local";
+            return Token;
+        }
+
+        void loop(NSArray<NSString *> *values)
+        {
+            for (NSString *Token in values) {
+                NSLog(@"%@", Token);
+            }
+            NSLog(@"%@", Token);
+        }
+
+        void
+        splitRun(void)
+        {
+            NSString *Token = @"local";
+            NSLog(@"%@", Token);
+        }
+
+        void
+        splitParameter(NSString *Token)
+        {
+            NSLog(@"%@", Token);
+        }
+
+        void commented(void)
+        {
+            /*
+            NSString *Token = nil;
+            */
+            NSLog(@"%@", Token);
+        }
+
+        void commentBrace(void)
+        {
+            NSString *Token = @"local";
+            // }
+            NSLog(@"%@", Token);
+        }
+
+        void commentBraceSignature(void) // {
+        {
+            NSString *Token = @"local";
+            NSLog(@"%@", Token);
+        }
+
+        void blockScope(void)
+        {
+            {
+                NSString *Token = @"local";
+                NSLog(@"%@", Token);
+            }
+            NSLog(@"%@", Token);
+        }
+
+        void commaLocal(void)
+        {
+            NSString *Other = @"other", *Token = @"local";
+            // comma local use
+            NSLog(@"%@", Token);
+        }
+        @end
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "enabled",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "return enabled"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "values) {\n        NSLog(@\"%@\", Token);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "return Token;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "for (NSString *Token in values)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);\n    }"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);\n}\n\nvoid\nsplitRun"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "splitRun(void)\n{\n    NSString *Token"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);\n}\n\nvoid\nsplitParameter"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "splitParameter(NSString *Token)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);\n}\n\nvoid commented"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "*/\n    NSLog(@\"%@\", Token);\n}\n\nvoid commentBrace"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "// }\n    NSLog(@\"%@\", Token);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "commentBraceSignature(void) // {\n{\n    NSString *Token"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSString *Token = @\"local\";\n        NSLog(@\"%@\", Token);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);\n}\n\nvoid commaLocal"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "// comma local use\n    NSLog(@\"%@\", Token);"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine recognizes indented Objective-C file-scope variables after comments")
+    func highlighterRecognizesIndentedObjectiveCFileScopeVariablesAfterComments() async throws {
+        let source = """
+        // {
+            static NSString *const Token = @"global";
+
+        void run(void)
+        {
+            NSLog(@"%@", Token);
+        }
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine handles inline Objective-C implementation ivar blocks")
+    func highlighterHandlesInlineObjectiveCImplementationIvarBlocks() async throws {
+        let source = """
+        @implementation Sample { BOOL _flag; }
+        - (BOOL)value
+        {
+            BOOL temporary;
+            return _flag;
+        }
+        - (BOOL)other
+        {
+            return temporary;
+        }
+        @end
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "_flag",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return _flag;"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "temporary",
+            inOccurrenceOf: "return temporary;"
+        ).contains(.identifierVariable) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C ivars after implementation comments")
+    func highlighterKeepsObjectiveCIvarsAfterImplementationComments() async throws {
+        let source = """
+        @implementation Sample
+        // storage
+        {
+            BOOL enabled;
+        }
+
+        - (BOOL)value
+        {
+            return enabled;
+        }
+        @end
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "enabled",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return enabled;"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine ignores Objective-C comment braces before ivar blocks")
+    func highlighterIgnoresObjectiveCCommentBracesBeforeIvarBlocks() async throws {
+        let source = """
+        @implementation Sample
+        // {
+        - (BOOL)value
+        {
+            BOOL temporary;
+            return temporary;
+        }
+        - (BOOL)other
+        {
+            return temporary;
+        }
+        @end
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "temporary",
+            inOccurrenceOf: "return temporary;\n}"
+        ).contains(.identifierVariable) == false)
     }
 
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after source-length edits")
@@ -9982,6 +10787,103 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "return self.title.length"
         )
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C boxed expression delimiters across partial ranges")
+    func highlighterStripsStaleObjectiveCBoxedExpressionDelimitersAcrossPartialRanges() async throws {
+        let source = """
+        NSNumber *boxed(NSUInteger count)
+        {
+            return @(
+                count
+            );
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "return @(", with: "return (")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: ")",
+            inOccurrenceOf: "count\n    );"
+        ).contains(.number) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C boxed expression delimiters after opener deletion")
+    func highlighterStripsStaleObjectiveCBoxedExpressionDelimitersAfterOpenerDeletion() async throws {
+        let source = """
+        NSNumber *boxed(NSUInteger count)
+        {
+            return @(
+                count
+            );
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "return @(", with: "return @")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: ")",
+            inOccurrenceOf: "count\n    );"
+        ).contains(.number) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C boxed boolean overlays after identifier replacement")
+    func highlighterStripsStaleObjectiveCBoxedBooleanOverlaysAfterIdentifierReplacement() async throws {
+        let source = """
+        id boxed(BOOL flag)
+        {
+            return @YES;
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "@YES", with: "flag")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "flag",
+            inOccurrenceOf: "return flag;"
+        ).contains(.number) == false)
     }
 
     @Test("SyntaxHighlighterEngine incrementally updates Objective-C reference sample like a full reset")

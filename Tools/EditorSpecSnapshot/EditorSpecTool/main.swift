@@ -187,15 +187,15 @@ private enum ToolError: Error, CustomStringConvertible {
             Usage:
               swift run EditorSpecTool editor-tokens --file <path> [--language swift] [--pretty]
               swift run EditorSpecTool source-model-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty] [--no-text]
-              swift run EditorSpecTool xcode-classification-tokens --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--no-text]
+              swift run EditorSpecTool xcode-classification-tokens --file <path> [--language swift|css|objectiveC] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-semantic-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--no-text]
-              swift run EditorSpecTool xcode-rendered-tokens --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--pretty] [--no-text]
-              swift run EditorSpecTool xcode-dvt-rendered-tokens --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--pretty] [--no-text]
+              swift run EditorSpecTool xcode-rendered-tokens --file <path> [--language swift|css|objectiveC] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--pretty] [--no-text]
+              swift run EditorSpecTool xcode-dvt-rendered-tokens --file <path> [--language objectiveC] [--xcode /Applications/Xcode.app] [--xcode-theme default-dark] [--pretty] [--no-text]
               swift run EditorSpecTool xcode-dvt-language-diagnostics --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty]
               swift run EditorSpecTool xcode-source-editor-view-diagnostics --file <path> [--language swift] [--xcode /Applications/Xcode.app] [--pretty]
               swift run EditorSpecTool diff --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--pretty] [--include-matches]
-              swift run EditorSpecTool classification-diff --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--include-matches]
-              swift run EditorSpecTool rendered-diff --file <path> [--language swift|css] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--include-matches]
+              swift run EditorSpecTool classification-diff --file <path> [--language swift|css|objectiveC] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--pretty] [--include-matches]
+              swift run EditorSpecTool rendered-diff --file <path> [--language swift|css|objectiveC] [--xcode /Applications/Xcode.app] [--semantic-depth current-file|sdk] [--xcode-theme default-dark] [--appearance dark] [--pretty] [--include-matches]
             """
         case let .missingArgument(argument):
             "Missing value for \(argument)"
@@ -656,7 +656,7 @@ private enum EditorSpecTool {
                 }
         }
 
-        if options.language == .css {
+        if options.language == .css || options.language == .objectiveC {
             let classificationTokens = try xcodeClassificationTokens(
                 options: options,
                 source: source,
@@ -751,7 +751,7 @@ private enum EditorSpecTool {
             )
         }
 
-        guard options.language == .css else {
+        guard options.language == .css || options.language == .objectiveC else {
             throw ToolError.invalidLanguage(options.language.identifier)
         }
 
@@ -763,7 +763,7 @@ private enum EditorSpecTool {
     }
 
     private static func sourceEditorClassificationSupports(language: SyntaxLanguage) -> Bool {
-        language == .swift || language == .css
+        language == .swift || language == .css || language == .objectiveC
     }
 
     @MainActor
@@ -819,7 +819,9 @@ private enum EditorSpecTool {
         includeText: Bool
     ) throws -> [XcodeClassificationTokenRecord] {
         #if canImport(SourceEditor) && canImport(SourceModelSupport) && canImport(SymbolCache) && canImport(SymbolCacheIndexing) && canImport(SymbolCacheSupport)
-        let dataSource = sourceEditorGenericDataSource(options: options, source: source)
+        let dataSource = options.language == .objectiveC
+            ? sourceEditorObjectiveCDataSource(options: options, source: source)
+            : sourceEditorGenericDataSource(options: options, source: source)
         return try sourceEditorClassificationTokens(dataSource: dataSource, source: source, includeText: includeText)
         #else
         throw ToolError.xcodeTool("SourceEditor.framework token probe is available on macOS only.")
@@ -1002,6 +1004,31 @@ private enum EditorSpecTool {
             formattingOptions: SourceEditorFormattingOptions(),
             documentSettings: nil
         )
+    }
+
+    private static func sourceEditorObjectiveCDataSource(options: Options, source: String) -> SourceEditorDataSource {
+        let baseLanguage = SourceModelEditorLanguage(
+            name: options.language.displayName,
+            identifier: sourceEditorLanguageIdentifier(for: options.language),
+            languageService: SourceModelLanguageService.self,
+            lineDataFactory: DefaultSourceEditorLineDataFactory(),
+            editableRangeSnapshot: nil
+        )
+        let language = SymbolCacheEditorLanguage(delegateLanguage: baseLanguage)
+        let symbolCacheComposite = sourceEditorSymbolCacheComposite(options: options)
+        let documentSettings = BasicSymbolCacheDocumentSettings(symbolCacheComposite: symbolCacheComposite)
+        let dataSource = SourceEditorDataSource(
+            name: URL(fileURLWithPath: options.filePath).lastPathComponent,
+            language: language,
+            usingMutableString: NSMutableString(string: source),
+            formattingOptions: SourceEditorFormattingOptions(),
+            documentSettings: documentSettings
+        )
+        if let languageService = dataSource.languageService as? SymbolCacheLanguageService {
+            languageService.symbolCacheComposite = symbolCacheComposite
+            languageService.documentSettingsChanged(options.filePath)
+        }
+        return dataSource
     }
 
     private static func sourceEditorLanguageIdentifier(for language: SyntaxLanguage) -> String {

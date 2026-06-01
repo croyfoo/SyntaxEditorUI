@@ -1,8 +1,9 @@
 # Objective-C Highlighting Alignment
 
 Objective-C should be aligned against Xcode, but it should not simply reuse the
-Swift semantic model. The current evidence points to a more lexical
-DVT/xclangspec-driven path for Objective-C.
+Swift semantic model. Current evidence points to Xcode's same staged
+SourceEditor pipeline, with Objective-C buckets coming from SourceModel and
+SourceEditor UIKind classification rather than Swift's symbol model.
 
 ## Current Runtime Shape
 
@@ -12,11 +13,11 @@ DVT/xclangspec-driven path for Objective-C.
   `tree-sitter-grammars/tree-sitter-objc`
 - Verification:
   - `EditorSpecTool diff` for SourceModel range/spec investigation.
-  - `EditorSpecTool rendered-diff` and `xcode-dvt-rendered-tokens` for visible
-    Xcode editor color.
-
-`classification-diff` is Swift-focused and should not be treated as the ObjC
-oracle.
+  - `EditorSpecTool classification-diff` and `xcode-classification-tokens` for
+    SourceEditor UIKind buckets.
+  - `EditorSpecTool rendered-diff` for SourceEditor bucket colors.
+  - `EditorSpecTool xcode-dvt-rendered-tokens` only for standalone DVT/theme
+    checks.
 
 ## What We Learned
 
@@ -50,8 +51,12 @@ Runtime implication:
   reference color.
 - Method parameter names are local parameter names, but arbitrary identifier
   references should not be promoted just because they look like parameters.
-- `self.property` is a stronger signal than a bare identifier. Xcode colors it
-  as a resolved member when the project/index can resolve it.
+- Current-file SourceEditor classification under-reports some live Objective-C
+  lexical-scope coloring. In an open Xcode editor, `self.<known property>`
+  chains receive delayed lexical-scope colors even when the current-file probe
+  reports `plain`. Selector references are less stable in the current probes, so
+  the runtime preserves their base/source-model bucket instead of forcing them
+  into a local-function color.
 
 The current runtime maps these xclangspec `name.*` roles onto existing
 `EditorSourceSyntaxID` values because the generated theme table does not yet
@@ -59,18 +64,31 @@ ship exact `xcode.syntax.name.*` slots:
 
 - class/interface/protocol declaration name -> `.declarationType`
 - method/C function declaration name -> `.declarationOther`
-- same-file C function call -> `.identifierFunction`
-- external C function or message selector -> `.identifierFunctionSystem`
-- `self.` local property/getter -> `.identifierVariable`
-- other dotted member -> `.identifierVariableSystem`
+- most type references in ObjC type positions -> `.identifierTypeSystem`.
+  This is a lexical/import-aware approximation, not a resolved symbol table.
+- same-file C function calls -> `.identifierFunction`
+- known imported/system C calls used by the reference fixture, including
+  `objc_msgSend` casts and Foundation/Objective-C runtime helpers ->
+  `.identifierFunctionSystem`
+- parameters, locals, and labels -> `.plain`
+- file-scope constants and implementation ivars -> lexical variable buckets
+  on references, while their declarations remain declaration-shaped or plain
+  according to the surrounding syntax.
+- message selector references -> preserve the base/source-model bucket
+- `self.<known property>` -> `.identifierVariable`
+- member references chained from a known or header-backed `self` property ->
+  `.identifierVariableSystem`
 - Objective-C dictionary literal `@`, `{`, and `}` -> `.number`
-- known external constants observed in Foundation-style contexts, such as
-  `NSLocalizedDescriptionKey`, -> `.identifierConstantSystem`
+- Objective-C boxed expression delimiters in `@(value)` and boxed booleans
+  `@YES` / `@NO` -> `.number`
+- Apple macro identifiers such as `NS_ASSUME_NONNULL_*`, `NS_SWIFT_NAME`,
+  `NS_ENUM`, and `NS_OPTIONS` -> `.preprocessor`; `NS_ENUM`/`NS_OPTIONS`
+  typedef names -> `.declarationType`
 
 This is a visual compatibility mapping, not a claim that Xcode's internal
 syntax ID is identical.
 
-### DVT Rendered Tokens Are the Better Visual Oracle
+### SourceEditor Classification Is Not the Whole Oracle
 
 SourceModel often reports structural Objective-C buckets:
 
@@ -79,29 +97,52 @@ SourceModel often reports structural Objective-C buckets:
 - category names and parentheses -> `name.partial`
 - `NS_ENUM(...)` container -> `name.tree`
 
-DVT rendered tokens show many of these ranges as ordinary identifier/plain
-color in Xcode's visible editor. For example, class names, Foundation type
-names, method names, property names, and category names are generally not
-colored like Swift's semantic type/function buckets.
+SourceEditor classification exposes useful UI buckets from the same staged
+editor path. Current probes show Objective-C ranges classified as
+`typeDeclaration` and `otherDeclaration` for class/interface, property, method,
+and function declaration names.
+
+The current-file probe is not deep enough for all live Objective-C lexical
+scope. It still reports some `self.<property>` member references as `plain`,
+while the live Xcode editor colors those ranges after its delayed pass. For
+those cases, use live Xcode screenshots plus `ObjectiveC.xclangspec`/SourceModel
+range shape as the evidence instead of treating `classification-diff` as a
+zero-difference oracle. Selector references should not be promoted only from
+shape; that over-colors system selectors and makes the runtime diverge from the
+working baseline.
+
+The same SourceEditor current-file probe can leave common Apple macro forms such
+as `NS_ASSUME_NONNULL_BEGIN`, `NS_ASSUME_NONNULL_END`, `NS_SWIFT_NAME`,
+`NS_ENUM`, and `NS_OPTIONS` plain in the reference header. In a live Xcode
+editor, those macro identifiers use the preprocessor color. That behavior also
+matches `ObjectiveC.xclangspec`'s identifier rule shape: Objective-C identifiers
+enable `CheckPreprocessorKnownMacros`, so known macro identifiers can be colored
+by the editor's macro knowledge even when a current-file probe reports only
+`plain`.
 
 Runtime implication:
 
 - Do not force Objective-C identifiers into `.identifierTypeSystem` or
   `.identifierFunctionSystem` just because SourceModel uses `name.*`.
-- Keep most non-keyword identifiers as `.identifier`.
+- Keep most non-declaration identifiers as `.plain` or their base lexical
+  bucket.
+- Preserve the delayed fast-pass behavior: the lexical pass can appear first,
+  and the Objective-C overlay is expected to arrive in the complete phase.
 
-However, standalone `DVTTextStorage` snapshots are not enough for project-aware
-ObjC semantics. In current probes, `xcode-dvt-rendered-tokens` reports many
-live-editor-colored ranges as plain identifiers because it does not have the
-same indexed project/header context as an open Xcode editor.
+Standalone `DVTTextStorage` snapshots are not enough for project-aware ObjC
+semantics. In current probes, `xcode-dvt-rendered-tokens` reports many
+SourceEditor-classified ranges as ordinary identifiers because it does not have
+the same staged SourceEditor classification path as an open Xcode editor.
 
 The useful split is:
 
 - `ObjectiveC.xclangspec`: reliable for lexical rule shape and role names.
-- live Xcode editor in a real project: reliable for header/index-aware visual
-  behavior.
+- `xcode-classification-tokens` / `classification-diff`: best current tool
+  probe for declaration UIKind buckets and broad app-path behavior.
+- live Xcode editor in a real project: required for Objective-C lexical-scope
+  colors such as `self` property/member chains.
 - standalone DVT rendered probes: useful for theme/color extraction and shallow
-  lexical checks, but not a complete ObjC semantic oracle.
+  lexical checks only.
 
 ### Runtime Overlay Shape
 
@@ -111,7 +152,8 @@ It intentionally stays file-local and conservative:
 - It builds a per-source symbol index from the current `.m`/`.h` text and the
   base query tokens.
 - It records local type declarations from `@interface`, `@implementation`,
-  `@protocol`, `@class`, `NS_ENUM`, `NS_OPTIONS`, and ordinary typedef forms.
+  `@protocol`, `@class`, block typedefs, and ordinary typedef forms that the
+  SourceEditor current-file oracle classifies as declarations.
 - It records local C function and method declaration names.
 - It records local properties from `@property` declarations and zero-argument
   getter methods.
@@ -121,19 +163,46 @@ It intentionally stays file-local and conservative:
 Current overlay behavior:
 
 - declaration class/interface/protocol names become `.declarationType`.
-- superclass and Foundation/AppKit-style names remain `.identifierTypeSystem`.
-- same-file C function calls become `.identifierFunction`.
-- other C calls and message selector names become `.identifierFunctionSystem`.
-- `self.property` is `.identifierVariable` when the property/getter is declared
-  in the same source text.
-- `object.property` / chained member names are `.identifierVariableSystem`.
-- bare parameters, locals, labels, strings, comments, and preprocessor ranges
-  remain plain or their base lexical classification.
+- superclass names in `@interface ... : Superclass` become
+  `.identifierTypeSystem` in the live-editor approximation, even though the
+  current-file SourceEditor probe may classify that position as a declaration.
+- type references in ObjC type positions become `.identifierTypeSystem`.
+- same-file C calls, external C calls, bare parameters, locals, and labels
+  are split: same-file calls receive `.identifierFunction`, a small set of
+  imported/runtime helpers receive `.identifierFunctionSystem`, and bare
+  parameters, locals, and labels remain `.plain` or their base lexical
+  classification.
+- message selector references keep the base/source-model bucket; the runtime
+  does not force system selectors to local function color.
+- references to properties declared in the current source as `self.property`
+  become `.identifierVariable`.
+- members chained from a known or quoted-header-backed `self` property, such as
+  `self.text.length`, become `.identifierVariableSystem`; direct
+  macro-shaped names that are not known properties stay plain.
+- function-like macro invocations declared in the current file, such as
+  `ReferenceLog(...)`, use the preprocessor color.
+- file-scope constant references and implementation ivar references receive
+  lexical variable colors because Xcode's live editor colors those after the
+  delayed pass; local variables and parameters stay plain. When a local shadows
+  a file-scope name, the runtime suppresses that file-scope color from the
+  shadow declaration through the enclosing function. This is intentionally
+  conservative because the earlier block-exact heuristic regressed live lexical
+  coloring.
+- property declarations become `.declarationOther` only where the app-path
+  oracle classifies the property name as `otherDeclaration`; macro-suffixed
+  declarations that SourceEditor leaves plain stay plain.
+- boxed expression delimiters in `@(value)` are `.number`.
+- boxed boolean literals `@YES` / `@NO` are `.number`.
+- quoted strings inside broad preprocessor macro bodies are split back to
+  `.string`.
 
-This intentionally does not ingest companion headers. A `.m` file only uses
-symbols that are present in the current source text or visible through the base
-tokens. For Mini this means the visible `Reference.m` needs enough declarations
-in the same text to approximate Xcode's indexed project behavior.
+This intentionally does not parse arbitrary companion headers. A `.m` file only
+receives its displayed source text in the runtime highlighter, so a quoted
+`#import "Header.h"` cannot be resolved the way Xcode resolves it through the
+project index. Objective-C compensates with a lexical fallback: when an
+implementation imports a quoted header, member chains rooted at `self` can be
+colored like Xcode's delayed lexical-scope pass, while unrelated member names and
+macro-shaped false positives stay plain.
 
 ### Objective-C Keyword Set Is Mostly xclangspec-Driven
 
@@ -141,7 +210,8 @@ The current query treats language keywords and common Objective-C pseudo-keyword
 identifiers as keywords, including:
 
 - `self`, `super`, `_cmd`
-- `id`, `instancetype`, `Class`, `SEL`, `IMP`, `BOOL`
+- `id`, `instancetype`, `SEL`, `IMP`, `BOOL`; `Class` is plain in current
+  SourceEditor classification
 - nullability and ownership qualifiers such as `nullable`, `nonnull`,
   `__weak`, `__strong`
 - property attributes such as `nonatomic`, `copy`, `assign`, and getter/setter
@@ -160,27 +230,42 @@ alone cannot always reproduce Xcode's finer behavior inside:
 #define ReferenceLog(format, ...) NSLog((@"[Reference] " format), ##__VA_ARGS__)
 ```
 
-Known gap:
+Current mitigation:
 
 - Xcode can identify macro-body identifiers and strings more precisely.
-- The current query colors the broad preprocessor range and cannot split every
-  nested string/identifier without a custom overlay/scanner.
+- The overlay splits common quoted string literals inside broad preprocessor
+  ranges, matching the visible `@"..."` macro-body case where Xcode keeps `@`
+  in the preprocessor color and colors the quoted string.
+- Macro-body identifiers remain broader preprocessor tokens unless there is
+  stronger evidence for a narrower app-path bucket.
 
-### NS_ENUM Is a Grammar Limitation
+### Apple Macro Typedefs Need Live-Editor Compensation
 
 `tree-sitter-objc` currently parses `typedef NS_ENUM(NSInteger, Name) { ... }`
 poorly in the reference header. In observed parses it can become a bogus
 `function_definition` with an `ERROR`, which also affects following declarations.
+Separately, the SourceEditor current-file classification probe may leave the
+macro name and enum/options typedef name plain in the header fixture. Live Xcode
+does not: the macro identifiers are preprocessor-colored and the typedef name is
+colored like a type declaration.
 
-Current mitigation:
+Runtime policy:
 
 - Query-level special cases keep `typedef` keyword-colored.
-- `NS_ENUM` names and surrounding structural ranges remain imperfect.
+- Force `NS_ENUM`, `NS_OPTIONS`, `NS_SWIFT_NAME`, and
+  `NS_ASSUME_NONNULL_*` into the preprocessor bucket outside comments and
+  strings.
+- Use a small overlay scanner for `NS_ENUM`/`NS_OPTIONS` typedef names so the
+  declaration color survives tree-sitter recovery failures.
+- Keep macro arguments such as `NSInteger`/`NSUInteger` plain when Xcode leaves
+  them plain in the macro argument position.
 
 Possible future work:
 
-- Fork/fix `tree-sitter-objc` grammar for `NS_ENUM`/`NS_OPTIONS`.
-- Or add an Objective-C overlay scanner for the common Apple macro forms.
+- Fork/fix `tree-sitter-objc` grammar for `NS_ENUM`/`NS_OPTIONS`; the runtime
+  scanner is a compatibility layer, not a parser replacement.
+- Re-check live Xcode on a real indexed project when changing the known macro
+  set, because the current-file SourceEditor probe is too shallow here.
 
 ## Current Fixture Policy
 
@@ -228,6 +313,14 @@ swift run EditorSpecTool diff \
   --file Tools/Mini/Mini/ReferenceSamples/Reference.m \
   --language objectiveC --pretty
 
+swift run EditorSpecTool xcode-classification-tokens \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.m \
+  --language objectiveC --pretty
+
+swift run EditorSpecTool classification-diff \
+  --file Tools/Mini/Mini/ReferenceSamples/Reference.m \
+  --language objectiveC --pretty
+
 swift run EditorSpecTool rendered-diff \
   --file Tools/Mini/Mini/ReferenceSamples/Reference.m \
   --language objectiveC --pretty
@@ -241,16 +334,21 @@ swift test --filter SyntaxHighlighterEngine
 
 ## Known Limits
 
-- Companion header symbols are out of scope for the runtime overlay.
-  `Reference.m` can approximate Xcode only for symbols present in the current
-  `.m` source text or captured by the local scanner.
-- No full method/property resolution. The current member rule distinguishes
-  `self.` local properties and dotted system members; it does not resolve
-  receiver types or selector families.
-- Current `DVTTextStorage` rendered snapshots are still shallow for project
-  header/index semantics; live Xcode can color some `SourceModelBridge.m`
-  identifiers after indexing that the standalone DVT route reports as ordinary
-  identifiers.
-- Preprocessor macro body token splitting is incomplete.
-- `NS_ENUM`/`NS_OPTIONS` require grammar work or a small overlay if exact Xcode
-  behavior is required.
+- Full companion-header parsing is out of scope for the runtime overlay.
+  `Reference.m` approximates Xcode with current-source symbols plus the
+  quoted-header `self` member fallback; it does not build a project symbol
+  index.
+- Method selector and member lexical-scope coloring is still not full
+  Objective-C name resolution. Quoted header imports enable the fallback, but
+  the runtime does not read or validate the imported header contents.
+- Current SourceEditor probes are current-file oriented and miss some delayed
+  live-editor lexical-scope ranges. A non-zero `classification-diff` caused by
+  `self` property/member chains can be expected.
+- Standalone `DVTTextStorage` rendered snapshots are shallow for SourceEditor
+  delayed classification and project header/index semantics.
+- Preprocessor macro body token splitting is still incomplete outside common
+  quoted string literals and function-like macro invocations whose names are
+  declared in the current file.
+- `NS_ENUM`/`NS_OPTIONS` grammar recovery is still weak. The runtime compensates
+  only for the macro identifiers and typedef names observed in the reference
+  header; it does not attempt to parse enum case semantics.
