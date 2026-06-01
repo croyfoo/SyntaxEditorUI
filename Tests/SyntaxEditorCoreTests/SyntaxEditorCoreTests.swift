@@ -10040,6 +10040,39 @@ struct SyntaxHighlighterEngineTests {
         ).contains(.preprocessor) == false)
     }
 
+    @Test("SyntaxHighlighterEngine strips stale Objective-C local macro overlays after call opener deletion")
+    func highlighterStripsStaleObjectiveCLocalMacroOverlaysAfterCallOpenerDeletion() async throws {
+        let source = """
+        #define ReferenceLog(format, ...) NSLog(format, ##__VA_ARGS__)
+
+        void run(void)
+        {
+            ReferenceLog(@"value");
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "ReferenceLog(", with: "ReferenceLog ")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "ReferenceLog",
+            inOccurrenceOf: "ReferenceLog @\"value\")"
+        ).contains(.preprocessor) == false)
+    }
+
     @Test("SyntaxHighlighterEngine keeps Objective-C local statics out of file-scope overlays")
     func highlighterKeepsObjectiveCLocalStaticsOutOfFileScopeOverlays() async throws {
         let source = """
