@@ -167,6 +167,12 @@
   condition: (identifier) @editor.syntax.objectivec.preprocessor)
 (preproc_elif
   condition: (identifier) @editor.syntax.objectivec.preprocessor)
+(preproc_if
+  condition: (_
+    (identifier) @editor.syntax.objectivec.preprocessor))
+(preproc_elif
+  condition: (_
+    (identifier) @editor.syntax.objectivec.preprocessor))
 
 ; BEGIN GENERATED EDITOR SYNTAX WORDS: objectivec-attributes
 [

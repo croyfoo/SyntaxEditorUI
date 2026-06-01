@@ -8084,7 +8084,7 @@ struct SyntaxHighlighterEngineTests {
         #if defined(DEBUG)
         #define ReferenceEnabled 1
         #endif
-        #if TARGET_OS_OSX
+        #if TARGET_OS_OSX || TARGET_OS_IOS
         #define ReferencePlatform 1
         #endif
 
@@ -8259,6 +8259,7 @@ struct SyntaxHighlighterEngineTests {
         let macroNameRange = nsSource.range(of: "ReferenceLog")
         let debugMacroRange = nsSource.range(of: "DEBUG")
         let platformMacroRange = nsSource.range(of: "TARGET_OS_OSX")
+        let platformIOMacroRange = nsSource.range(of: "TARGET_OS_IOS")
         let interfaceRange = nsSource.range(of: "@interface")
         let selfRange = nsSource.range(of: "self")
         let propertyDeclarationRange = nsSource.range(of: "@property (nonatomic, copy) NSString *name;")
@@ -8290,6 +8291,9 @@ struct SyntaxHighlighterEngineTests {
         })
         #expect(tokens.contains {
             tokenIntersects($0, range: platformMacroRange, syntaxID: .preprocessor, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: platformIOMacroRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         let defineSnapshot = try semanticSnapshot(
             in: tokens,
@@ -9325,7 +9329,11 @@ struct SyntaxHighlighterEngineTests {
         @implementation HeaderBacked
         - (NSUInteger)length
         {
-            return self.title.length;
+            NSUInteger titleLength = self.title.length;
+            NSUInteger otherLength = other.length;
+            struct ReferenceSize size;
+            NSUInteger fieldLength = size.field;
+            return titleLength + otherLength + fieldLength;
         }
         @end
         """
@@ -9346,6 +9354,18 @@ struct SyntaxHighlighterEngineTests {
             language: .objectiveC,
             inOccurrenceOf: "self.title.length"
         )
+        #expect(syntaxIDs(
+            in: headerBackedTokens,
+            source: headerBackedSource,
+            text: "length",
+            inOccurrenceOf: "other.length"
+        ).contains(.identifierVariableSystem) == false)
+        #expect(syntaxIDs(
+            in: headerBackedTokens,
+            source: headerBackedSource,
+            text: "field",
+            inOccurrenceOf: "size.field"
+        ).contains(.identifierVariableSystem) == false)
     }
 
     @Test("SyntaxHighlighterEngine aligns focused Objective-C reference tokens")

@@ -286,13 +286,6 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 continue
             }
 
-            if index.allowsHeaderBackedMemberFallback,
-               memberAccessExpressionPrefix(before: token.range, in: source) != nil,
-               !isUppercaseMacroLikeIdentifier(text) {
-                overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierVariableSystem))
-                continue
-            }
-
             if index.containsIvarName(text),
                !index.containsIvarDeclarationNameRange(token.range),
                !index.containsShadowedVariableRange(token.range) {
@@ -2310,10 +2303,6 @@ private struct ObjectiveCFileSymbolIndex {
             localProperties: localProperties,
             allowsHeaderBackedMembers: allowsHeaderBackedSelfMembers
         )
-    }
-
-    var allowsHeaderBackedMemberFallback: Bool {
-        allowsHeaderBackedSelfMembers
     }
 
     private static func hasQuotedHeaderImport(in source: NSString) -> Bool {
