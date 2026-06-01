@@ -2381,6 +2381,76 @@ extension SyntaxEditorUITests {
         #expect(!editorView.textView.validateUserInterfaceItem(pasteItem))
     }
 
+    @Test("SyntaxEditorView provides AppKit contextual edit menu")
+    @MainActor
+    func syntaxEditorViewMacProvidesContextualEditMenu() throws {
+        let source = "let answer = 42"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
+        let editorView = SyntaxEditorView(testContext: model)
+        let window = attachMacEditorWindow(editorView)
+        defer { window.orderOut(nil) }
+
+        let pasteboard = NSPasteboard.general
+        let previousPasteboardString = pasteboard.string(forType: .string)
+        defer {
+            pasteboard.clearContents()
+            if let previousPasteboardString {
+                pasteboard.setString(previousPasteboardString, forType: .string)
+            }
+        }
+
+        editorView.textView.setSelectedRange(NSRange(location: 4, length: 6))
+        let previousSelection = editorView.textView.selectedRange()
+        pasteboard.clearContents()
+        pasteboard.setString("value", forType: .string)
+
+        let event = try #require(NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: NSPoint(x: 12, y: 12),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ))
+        let menu = try #require(editorView.textView.menu(for: event))
+
+        #expect(window.firstResponder === editorView.textView)
+        #expect(editorView.textView.selectedRange() == previousSelection)
+        #expect(menu.items.count == 3)
+        #expect(menu.items[0].title == "Cut")
+        #expect(menu.items[0].action == #selector(NSText.cut(_:)))
+        #expect(menu.items[0].keyEquivalent == "")
+        #expect(menu.items[0].target === editorView.textView)
+        #expect(menu.items[1].title == "Copy")
+        #expect(menu.items[1].action == #selector(NSText.copy(_:)))
+        #expect(menu.items[1].keyEquivalent == "")
+        #expect(menu.items[1].target === editorView.textView)
+        #expect(menu.items[2].title == "Paste")
+        #expect(menu.items[2].action == #selector(NSText.paste(_:)))
+        #expect(menu.items[2].keyEquivalent == "")
+        #expect(menu.items[2].target === editorView.textView)
+
+        menu.update()
+        #expect(menu.items[0].isEnabled)
+        #expect(menu.items[1].isEnabled)
+        #expect(menu.items[2].isEnabled)
+
+        pasteboard.clearContents()
+        model.model.isEditable = false
+        editorView.synchronizeDocumentForTesting()
+
+        menu.update()
+        #expect(!menu.items[0].isEnabled)
+        #expect(menu.items[1].isEnabled)
+        #expect(!menu.items[2].isEnabled)
+
+        editorView.textView.isSelectable = false
+        #expect(editorView.textView.menu(for: event) == nil)
+    }
+
     @Test("SyntaxEditorView leaves AppKit paste key equivalents to the active search field")
     @MainActor
     func syntaxEditorViewMacLeavesPasteKeyEquivalentToActiveSearchField() throws {

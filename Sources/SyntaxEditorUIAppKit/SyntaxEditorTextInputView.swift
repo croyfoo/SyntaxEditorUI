@@ -4,7 +4,7 @@ import SyntaxEditorCore
 import SyntaxEditorUICommon
 
 @MainActor
-final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient, @preconcurrency NSTextFinderClient, @preconcurrency NSTextLayoutManagerDelegate, @preconcurrency NSTextViewportLayoutControllerDelegate {
+final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient, @preconcurrency NSTextFinderClient, @preconcurrency NSTextLayoutManagerDelegate, @preconcurrency NSTextViewportLayoutControllerDelegate, NSUserInterfaceValidations {
     let textSystem: EditorTextSystem
     let textContentView = SyntaxEditorTextContentView()
     private let textFinder = NSTextFinder()
@@ -273,6 +273,12 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         textFinder.performAction(action)
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard isSelectable else { return nil }
+        unsafe window?.makeFirstResponder(self)
+        return makeContextualEditMenu()
+    }
+
     func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
         if item.action == #selector(undo(_:)) {
             return undoManager?.canUndo ?? false
@@ -304,6 +310,20 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             return canHandle
         }
         return true
+    }
+
+    private func makeContextualEditMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(makeContextualEditMenuItem(title: "Cut", action: #selector(cut(_:))))
+        menu.addItem(makeContextualEditMenuItem(title: "Copy", action: #selector(copy(_:))))
+        menu.addItem(makeContextualEditMenuItem(title: "Paste", action: #selector(paste(_:))))
+        return menu
+    }
+
+    private func makeContextualEditMenuItem(title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
