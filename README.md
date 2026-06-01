@@ -1,14 +1,14 @@
 # SyntaxEditorUI
 
-`SyntaxEditorUI` is a Swift package for building editable, syntax-highlighted code views on iOS and macOS.
+`SyntaxEditorUI` is a Swift package for building editable plain-text and syntax-highlighted code views on iOS and macOS.
 It provides SwiftUI, UIKit, and AppKit entry points with built-in language support, editor shortcuts, and common code-editing behavior.
 
 ## Features
 
 - Editable code views for SwiftUI, UIKit, and AppKit apps.
-- Syntax highlighting for CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
+- Plain Text editing plus syntax highlighting for CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
 - Embedded JavaScript and CSS highlighting inside HTML.
-- Code-aware editing behavior:
+- Code-aware editing behavior for supported syntax-highlighted languages:
   - bracket and quote auto-pairing
   - smart newline indentation
   - line indent and outdent
@@ -21,10 +21,10 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 
 ## Shortcuts
 
-- `Tab`: Insert spaces at the caret; indent selected lines
-- `Shift-Tab`: Outdent
-- `Cmd+]`: Indent
-- `Cmd+[` : Outdent
+- `Tab`: Insert spaces at the caret; indent selected lines in syntax-highlighted language modes
+- `Shift-Tab`: Outdent in syntax-highlighted language modes
+- `Cmd+]`: Indent in syntax-highlighted language modes
+- `Cmd+[` : Outdent in syntax-highlighted language modes
 - `Cmd+/`: Toggle comment (HTML/JavaScript/CSS/Objective-C/Swift/TOML/XML)
 - `Ctrl+Shift+Cmd+L`: Toggle line wrapping
 - `Cmd++`: Increase font size
@@ -73,7 +73,13 @@ let editorView = SyntaxEditorView(model: model)
 let editorViewController = SyntaxEditorViewController(model: model)
 ```
 
-Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
+Use `SyntaxLanguage.plainText` when an editor should behave as strict plain text without syntax highlighting or code-aware editing transforms:
+
+```swift
+let notesModel = SyntaxEditorModel(text: "Notes", language: .plainText)
+```
+
+Supported languages are available through `SyntaxLanguage`: Plain Text, CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
 
 To move first-use highlighting setup out of the editor load path, prepare the languages your app expects to show:
 
@@ -127,6 +133,7 @@ GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `
 These notes apply when upgrading from `v0.10.x` or earlier to `v0.11.0`.
 
 - `SyntaxEditorDocument` and `SyntaxEditorConfiguration` have been removed. Create and own a single `SyntaxEditorModel` for text, selection, language, editability, wrapping, theme, background drawing, and font-size state.
+- `SyntaxLanguage.plainText` has been added. Update exhaustive switches over `SyntaxLanguage` to handle plain text, and use `.plainText` for editors that should not run syntax highlighting or code-aware editing transforms.
 - `textSnapshot()` has been removed. Read, write, and observe `model.text` directly. Use `model.replaceText(_:selectedRange:)` when replacement and selection should be updated together.
 - Replace `SyntaxEditor(document:configuration:)` with `SyntaxEditor(model)`.
 - Replace `SyntaxEditorView(document:configuration:)` and `SyntaxEditorViewController(document:configuration:)` with `SyntaxEditorView(model:)` and `SyntaxEditorViewController(model:)`.

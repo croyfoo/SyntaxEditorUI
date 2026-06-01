@@ -2,6 +2,7 @@ import Foundation
 import SwiftTreeSitter
 
 public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
+    case plainText = "plain-text"
     case css
     case html
     case javascript
@@ -75,6 +76,8 @@ struct SyntaxTreeSitterSupport: Sendable {
 extension SyntaxLanguage {
     var support: any SyntaxLanguageSupport {
         switch self {
+        case .plainText:
+            PlainTextLanguage()
         case .css:
             CSSLanguage()
         case .html:
@@ -98,7 +101,19 @@ extension SyntaxLanguage {
         identifier
     }
 
-    var treeSitterSupport: SyntaxTreeSitterSupport {
+    package static var syntaxHighlightedCases: [SyntaxLanguage] {
+        allCases.filter(\.supportsSyntaxHighlighting)
+    }
+
+    package var supportsSyntaxHighlighting: Bool {
+        treeSitterSupport != nil
+    }
+
+    package var supportsCodeEditingCommands: Bool {
+        support.supportsCodeEditingCommands
+    }
+
+    var treeSitterSupport: SyntaxTreeSitterSupport? {
         support.treeSitterSupport
     }
 

@@ -1033,6 +1033,8 @@ private enum EditorSpecTool {
 
     private static func sourceEditorLanguageIdentifier(for language: SyntaxLanguage) -> String {
         switch language {
+        case .plainText:
+            preconditionFailure("Plain text does not have an Xcode SourceEditor language identifier.")
         case .css:
             return "xcode.lang.css"
         case .html:

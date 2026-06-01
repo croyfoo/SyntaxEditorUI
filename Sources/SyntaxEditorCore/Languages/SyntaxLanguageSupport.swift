@@ -4,7 +4,8 @@ protocol SyntaxLanguageSupport: Sendable {
     var language: SyntaxLanguage { get }
     var displayName: String { get }
     var aliases: Set<String> { get }
-    var treeSitterSupport: SyntaxTreeSitterSupport { get }
+    var treeSitterSupport: SyntaxTreeSitterSupport? { get }
+    var supportsCodeEditingCommands: Bool { get }
 
     init()
 
@@ -15,6 +16,10 @@ protocol SyntaxLanguageSupport: Sendable {
 extension SyntaxLanguageSupport {
     var aliases: Set<String> {
         [language.identifier]
+    }
+
+    var supportsCodeEditingCommands: Bool {
+        true
     }
 }
 

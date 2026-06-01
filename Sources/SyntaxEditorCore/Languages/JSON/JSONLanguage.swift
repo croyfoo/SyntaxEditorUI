@@ -7,7 +7,7 @@ struct JSONLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .json }
     var displayName: String { "JSON" }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
+    var treeSitterSupport: SyntaxTreeSitterSupport? {
         SyntaxTreeSitterSupport(
             name: "JSON",
             bundleName: "TreeSitterJSON_TreeSitterJSON",

@@ -23,6 +23,11 @@ struct BracketHighlightRenderer {
 
 extension SyntaxEditorView {
     func applyMatchingBracketHighlight(force: Bool = false) {
+        guard model.language.supportsCodeEditingCommands else {
+            clearMatchingBracketHighlight()
+            return
+        }
+
         let source = text
         let selection = selectedRange
 

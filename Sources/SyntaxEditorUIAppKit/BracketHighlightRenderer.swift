@@ -4,6 +4,11 @@ import SyntaxEditorCore
 
 extension SyntaxEditorView {
     func applyMatchingBracketHighlight(force: Bool = false) {
+        guard model.language.supportsCodeEditingCommands else {
+            clearMatchingBracketHighlight()
+            return
+        }
+
         let source = textView.string
         let selection = textView.selectedRange()
 

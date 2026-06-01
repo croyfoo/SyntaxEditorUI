@@ -382,11 +382,17 @@ private extension HighlightingSetup {
         for language: SyntaxLanguage,
         resolver: LanguageConfigurationResolver = .shared
     ) -> HighlightingSetup? {
+        guard language.supportsSyntaxHighlighting else {
+            return nil
+        }
+
         guard let rootConfiguration = resolver.configuration(for: language) else {
             return nil
         }
 
-        let support = language.treeSitterSupport
+        guard let support = language.treeSitterSupport else {
+            return nil
+        }
         let injectedAliases = resolver.supportedInjectedAliases(
             for: support,
             rootConfiguration: rootConfiguration
@@ -2056,7 +2062,10 @@ private extension LanguageConfigurationResolver {
             break
         }
 
-        let support = language.treeSitterSupport
+        guard let support = language.treeSitterSupport else {
+            configurations[language] = .missing
+            return nil
+        }
         let configuration = makeConfiguration(for: language, support: support)
         if let configuration {
             configurations[language] = .resolved(configuration)

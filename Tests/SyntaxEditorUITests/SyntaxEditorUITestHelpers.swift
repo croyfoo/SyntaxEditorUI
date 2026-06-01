@@ -416,8 +416,9 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
         revision: Int,
         refreshRange: NSRange?
     ) -> SyntaxHighlightResult {
-        SyntaxHighlightResult(
-            tokens: tokens ?? self.tokens,
+        let resolvedTokens = language == .plainText ? [] : tokens ?? self.tokens
+        return SyntaxHighlightResult(
+            tokens: resolvedTokens,
             source: source,
             language: language,
             revision: revision,

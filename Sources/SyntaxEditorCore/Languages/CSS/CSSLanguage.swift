@@ -7,7 +7,7 @@ struct CSSLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .css }
     var displayName: String { "CSS" }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
+    var treeSitterSupport: SyntaxTreeSitterSupport? {
         SyntaxTreeSitterSupport(
             name: "CSS",
             bundleName: "TreeSitterCSS_TreeSitterCSS",

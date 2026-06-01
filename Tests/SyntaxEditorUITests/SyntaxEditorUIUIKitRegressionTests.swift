@@ -1031,6 +1031,42 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
 
+    @Test("SyntaxEditorView clears iOS syntax runs when switching to plain text")
+    @MainActor
+    func syntaxEditorViewIOSClearsSyntaxRunsWhenSwitchingToPlainText() async {
+        let source = "const answer = 42;"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 5),
+                    rawCaptureName: "editor.syntax.javascript.keyword",
+                    language: .javascript
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(editorView.syntaxForegroundColorForTesting(at: 0) != nil)
+
+        model.model.language = .plainText
+        editorView.synchronizeDocumentForTesting()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.syntaxForegroundColorForTesting(at: 0) == nil)
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+    }
+
     @Test("SyntaxEditorView reapplies iOS same-style tokens after empty-style splits")
     @MainActor
     func syntaxEditorViewIOSReappliesSameStyleTokensAfterEmptyStyleSplits() async {

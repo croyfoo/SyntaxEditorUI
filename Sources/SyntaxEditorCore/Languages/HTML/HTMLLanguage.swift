@@ -8,7 +8,7 @@ struct HTMLLanguage: SyntaxLanguageSupport {
     var language: SyntaxLanguage { .html }
     var displayName: String { "HTML" }
     var aliases: Set<String> { ["html", "htm"] }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
+    var treeSitterSupport: SyntaxTreeSitterSupport? {
         SyntaxTreeSitterSupport(
             name: "HTML",
             bundleName: "TreeSitterHTML_TreeSitterHTML",

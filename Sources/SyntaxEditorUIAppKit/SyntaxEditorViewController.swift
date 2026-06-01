@@ -1056,7 +1056,7 @@ public final class SyntaxEditorView: NSScrollView {
     private func canHandleShortcut(_ action: EditorShortcutAction) -> Bool {
         switch action {
         case .indent, .outdent, .toggleComment:
-            model.isEditable
+            model.isEditable && model.language.supportsCodeEditingCommands
         case .toggleLineWrapping, .increaseFontSize, .decreaseFontSize, .resetFontSize:
             true
         }
@@ -1085,14 +1085,15 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func runInsertTabCommand() -> Bool {
-        guard model.isEditable else {
+        guard model.isEditable, model.language.supportsCodeEditingCommands else {
             return false
         }
 
         let source = textView.string
         guard let result = commandEngine.insertTab(
             source: source,
-            selection: textView.selectedRange()
+            selection: textView.selectedRange(),
+            language: model.language
         ) else {
             return false
         }
@@ -1101,14 +1102,15 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func runIndentCommand() -> Bool {
-        guard model.isEditable else {
+        guard model.isEditable, model.language.supportsCodeEditingCommands else {
             return false
         }
 
         let source = textView.string
         guard let result = commandEngine.indentSelection(
             source: source,
-            selection: textView.selectedRange()
+            selection: textView.selectedRange(),
+            language: model.language
         ) else {
             return false
         }
@@ -1117,14 +1119,15 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func runOutdentCommand() -> Bool {
-        guard model.isEditable else {
+        guard model.isEditable, model.language.supportsCodeEditingCommands else {
             return false
         }
 
         let source = textView.string
         guard let result = commandEngine.outdentSelection(
             source: source,
-            selection: textView.selectedRange()
+            selection: textView.selectedRange(),
+            language: model.language
         ) else {
             return false
         }
@@ -1133,7 +1136,7 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func runToggleCommentCommand() -> Bool {
-        guard model.isEditable else {
+        guard model.isEditable, model.language.supportsCodeEditingCommands else {
             return false
         }
 

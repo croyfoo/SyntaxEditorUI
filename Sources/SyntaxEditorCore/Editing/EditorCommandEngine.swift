@@ -53,6 +53,10 @@ package final class EditorCommandEngine {
     ) -> EditorCommandResult? {
         let nsSource = source as NSString
         let safeRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: nsSource.length)
+        guard language.supportsCodeEditingCommands else {
+            invalidateTransientState()
+            return nil
+        }
         let singleCharacterInput = replacementText.utf16.count == 1 ? replacementText.first : nil
 
         if !(singleCharacterInput.map(isQuote) ?? false) {
@@ -64,7 +68,7 @@ package final class EditorCommandEngine {
         }
 
         if replacementText == "\t" {
-            return insertTab(source: source, selection: safeRange)
+            return insertTab(source: source, selection: safeRange, language: language)
         }
 
         if deletionIntent == .backward, replacementText.isEmpty, safeRange.length == 1 {
@@ -87,13 +91,22 @@ package final class EditorCommandEngine {
         return nil
     }
 
-    package func insertTab(source: String, selection: NSRange) -> EditorCommandResult? {
+    package func insertTab(
+        source: String,
+        selection: NSRange,
+        language: SyntaxLanguage
+    ) -> EditorCommandResult? {
+        guard language.supportsCodeEditingCommands else {
+            invalidateTransientState()
+            return nil
+        }
+
         invalidateTransientState()
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
 
         guard safeSelection.length == 0 else {
-            return indentSelection(source: source, selection: safeSelection)
+            return indentSelection(source: source, selection: safeSelection, language: language)
         }
 
         let lineRange = nsSource.lineRange(for: NSRange(location: safeSelection.location, length: 0))
@@ -114,7 +127,16 @@ package final class EditorCommandEngine {
         )
     }
 
-    package func indentSelection(source: String, selection: NSRange) -> EditorCommandResult? {
+    package func indentSelection(
+        source: String,
+        selection: NSRange,
+        language: SyntaxLanguage
+    ) -> EditorCommandResult? {
+        guard language.supportsCodeEditingCommands else {
+            invalidateTransientState()
+            return nil
+        }
+
         invalidateTransientState()
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
@@ -131,7 +153,16 @@ package final class EditorCommandEngine {
         )
     }
 
-    package func outdentSelection(source: String, selection: NSRange) -> EditorCommandResult? {
+    package func outdentSelection(
+        source: String,
+        selection: NSRange,
+        language: SyntaxLanguage
+    ) -> EditorCommandResult? {
+        guard language.supportsCodeEditingCommands else {
+            invalidateTransientState()
+            return nil
+        }
+
         invalidateTransientState()
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
@@ -165,6 +196,7 @@ package final class EditorCommandEngine {
         language: SyntaxLanguage
     ) -> EditorCommandResult? {
         invalidateTransientState()
+        guard language.supportsCodeEditingCommands else { return nil }
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         guard let edit = language.toggleComment(source: source, selection: safeSelection) else { return nil }
