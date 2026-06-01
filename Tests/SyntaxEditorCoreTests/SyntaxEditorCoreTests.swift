@@ -10320,6 +10320,32 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine ignores Objective-C comment braces before ivar blocks")
+    func highlighterIgnoresObjectiveCCommentBracesBeforeIvarBlocks() async throws {
+        let source = """
+        @implementation Sample
+        // {
+        - (BOOL)value
+        {
+            BOOL temporary;
+            return temporary;
+        }
+        - (BOOL)other
+        {
+            return temporary;
+        }
+        @end
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "temporary",
+            inOccurrenceOf: "return temporary;\n}"
+        ).contains(.identifierVariable) == false)
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after source-length edits")
     func highlighterRebuildsObjectiveCSemanticIndexAfterSourceLengthEdits() async throws {
         let source = """

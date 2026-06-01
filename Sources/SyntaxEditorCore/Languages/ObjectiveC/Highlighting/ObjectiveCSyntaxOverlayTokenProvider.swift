@@ -3477,16 +3477,14 @@ private struct ObjectiveCFileSymbolIndex {
             }
 
             if isInIvarBlock {
-                let closeBraceRange = line.range(of: "}")
-                let ivarSegmentLength = closeBraceRange.location == NSNotFound
-                    ? line.length
-                    : closeBraceRange.location
+                let closeBraceRange = firstBraceRange(in: line, brace: "}")
+                let ivarSegmentLength = closeBraceRange?.location ?? line.length
                 appendImplementationIvarDeclarations(
                     in: line.substring(with: NSRange(location: 0, length: ivarSegmentLength)) as NSString,
                     lineOffset: lineRange.location,
                     to: &declarations
                 )
-                if closeBraceRange.location != NSNotFound {
+                if closeBraceRange != nil {
                     isInIvarBlock = false
                     awaitingIvarBlock = false
                 }
@@ -3540,9 +3538,18 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func firstBraceRange(in line: NSString, brace: String, after location: Int = 0) -> NSRange? {
-        let start = min(max(0, location), line.length)
-        let range = line.range(of: brace, options: [], range: NSRange(location: start, length: line.length - start))
-        return range.location == NSNotFound ? nil : range
+        var cursor = min(max(0, location), line.length)
+        while cursor < line.length {
+            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: line) {
+                cursor = nextCursor
+                continue
+            }
+            if line.substring(with: NSRange(location: cursor, length: 1)) == brace {
+                return NSRange(location: cursor, length: 1)
+            }
+            cursor += 1
+        }
+        return nil
     }
 
     private static func appendImplementationIvarDeclarations(
