@@ -8147,6 +8147,39 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens == full.tokens)
     }
 
+    @Test("SyntaxHighlighterEngine keeps current session after cancelled reset")
+    func highlighterKeepsCurrentSessionAfterCancelledReset() async throws {
+        let source = """
+        const first = 1;
+        const second = 2;
+        """
+        let engine = SyntaxHighlighterEngine()
+        _ = await engine.reset(source: source, language: SyntaxLanguage.javascript, revision: 1)
+
+        let resetTask = Task {
+            await engine.reset(
+                source: "const stale = 0;",
+                language: SyntaxLanguage.javascript,
+                revision: 2
+            )
+        }
+        resetTask.cancel()
+        let cancelled = await resetTask.value
+        #expect(cancelled.tokens.isEmpty)
+
+        let updatedSource = source.replacingOccurrences(of: "second = 2", with: "second = 3")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incremental = await engine.update(
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(mutation),
+            revision: 3
+        )
+
+        #expect(incremental.tokens.isEmpty == false)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+    }
+
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")
     func highlighterKeepsUnsupportedInjectionsDirect() async {
         let engine = SyntaxHighlighterEngine()

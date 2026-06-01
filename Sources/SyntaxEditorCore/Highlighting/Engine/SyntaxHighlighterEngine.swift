@@ -281,13 +281,22 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         revision: Int,
         emitFastPass: ((SyntaxHighlightResult) -> Void)?
     ) async -> SyntaxHighlightResult {
-        guard let setup = await registry.highlightingSetup(for: language) else {
+        let setup = await registry.highlightingSetup(for: language)
+        guard !Task.isCancelled else {
+            return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
+        }
+
+        guard let setup else {
             session = nil
             return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
         }
 
         let nextSession = SyntaxHighlightSession(language: language, setup: setup)
         let result = nextSession.reset(source: source, revision: revision, emitFastPass: emitFastPass)
+        guard !Task.isCancelled else {
+            return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
+        }
+
         session = nextSession
         return result
     }
