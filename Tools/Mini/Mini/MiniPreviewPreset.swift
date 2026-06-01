@@ -12,6 +12,7 @@ extension MiniPreviewPreset:Hashable,Identifiable{
 
 struct MiniPreviewPreset {
     enum ID: String, CaseIterable, Sendable {
+        case plainText = "plain-text"
         case css
         case html
         case javascript
@@ -50,6 +51,18 @@ struct MiniPreviewPreset {
     var accessibilityIdentifier: String {
         "mini.language.\(id.rawValue)"
     }
+
+    static let plainText = MiniPreviewPreset(
+        id: .plainText,
+        sampleFilename: "Reference.txt",
+        fallbackSampleText: """
+        Plain text note
+
+        Parentheses (like this), quotes "like this", and brackets [like this]
+        stay ordinary text in this mode.
+        """,
+        language: SyntaxLanguage.plainText
+    )
 
     static let css = MiniPreviewPreset(
         id: .css,
@@ -164,6 +177,7 @@ struct MiniPreviewPreset {
     )
 
     static let all: [MiniPreviewPreset] = [
+        plainText,
         css,
         html,
         javascript,
