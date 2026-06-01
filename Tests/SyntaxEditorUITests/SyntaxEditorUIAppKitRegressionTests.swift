@@ -1146,6 +1146,77 @@ extension SyntaxEditorUITests {
         #expect(drawnLineCount < layoutFragment.textLineFragments.count)
     }
 
+    @Test("SyntaxEditorView keeps macOS rendering attribute validation local during jump scrolls")
+    @MainActor
+    func syntaxEditorViewMacKeepsRenderingAttributeValidationLocalDuringJumpScrolls() async throws {
+        let repeatedToken = "let wrappedValue = wrappedValue "
+        let repeatCount = 1_600
+        let source = String(repeating: repeatedToken, count: repeatCount)
+        let tokenStride = repeatedToken.utf16.count
+        let tokens = (0..<repeatCount).map { index in
+            SyntaxHighlightToken(
+                range: NSRange(location: index * tokenStride, length: 3),
+                rawCaptureName: "editor.syntax.swift.keyword"
+            )
+        }
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x0000FF),
+            keyword: syntaxEditorUITestColor(hex: 0xFF0000),
+            background: syntaxEditorUITestColor(hex: 0x000000)
+        )
+        let resetGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorUITestHighlighter(tokens: tokens, resetGate: resetGate)
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: true,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        layoutMacEditorView(editorView, width: 180, height: 140)
+
+        await resetGate.waitUntilSuspended()
+        let initialFragmentView = try #require(macEditorVisibleFragmentViews(editorView).first)
+        let initialFragmentRange = editorView.textView.textRange(for: initialFragmentView.layoutFragment)
+        #expect(initialFragmentRange.length > source.utf16.count / 2)
+
+        editorView.textView.resetSyntaxRenderingAttributeCountersForTesting()
+        await resetGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+
+        let initialValidatedLength = editorView.textView.syntaxRenderingAttributeUTF16LengthForTesting
+        let initialValidatedColorRuns = editorView.textView.syntaxRenderingAttributeColorRunCountForTesting
+        #expect(initialValidatedLength > 0)
+        #expect(initialValidatedLength < source.utf16.count / 4)
+        #expect(initialValidatedColorRuns > 0)
+        #expect(initialValidatedColorRuns < tokens.count / 4)
+
+        editorView.contentView.scroll(to: NSPoint(x: 0, y: 8_000))
+        editorView.reflectScrolledClipView(editorView.contentView)
+        editorView.textView.layoutVisibleViewport()
+
+        let scrolledFragmentView = try #require(
+            macEditorVisibleFragmentViews(editorView)
+                .first { $0.frame.intersects(editorView.textView.visibleRect) }
+        )
+        let scrolledFragmentRange = editorView.textView.textRange(for: scrolledFragmentView.layoutFragment)
+        let scrolledTargetRanges = editorView.textView.syntaxRenderingAttributeTargetRangesForTesting(
+            in: scrolledFragmentView.layoutFragment
+        )
+        let scrolledTargetLength = scrolledTargetRanges.reduce(0) { $0 + $1.length }
+        #expect(!scrolledTargetRanges.isEmpty)
+        #expect(scrolledFragmentRange.length > source.utf16.count / 2)
+        #expect(scrolledTargetLength < scrolledFragmentRange.length / 4)
+
+        editorView.textView.resetSyntaxRenderingAttributeCountersForTesting()
+        editorView.textView.invalidateSyntaxRenderingAttributes(
+            for: [NSRange(location: 0, length: source.utf16.count)]
+        )
+        #expect(editorView.textView.syntaxRenderingAttributeUTF16LengthForTesting > 0)
+        #expect(editorView.textView.syntaxRenderingAttributeUTF16LengthForTesting < source.utf16.count / 4)
+        #expect(editorView.textView.syntaxRenderingAttributeColorRunCountForTesting < tokens.count / 4)
+    }
+
     @Test("SyntaxEditorView replaces stale macOS syntax colors after new highlight epochs")
     @MainActor
     func syntaxEditorViewMacReplacesStaleSyntaxColorsAfterNewEpochs() async {
