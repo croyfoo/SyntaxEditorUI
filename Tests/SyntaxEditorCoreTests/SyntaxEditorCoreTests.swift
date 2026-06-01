@@ -8648,14 +8648,6 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
-            text: "respondsToSelector",
-            syntaxID: .identifierFunction,
-            language: .objectiveC,
-            inOccurrenceOf: "[self respondsToSelector:NSSelectorFromString"
-        )
-        _ = try effectiveSemanticSnapshot(
-            in: tokens,
-            source: source,
             text: "NSSelectorFromString",
             syntaxID: .identifierFunctionSystem,
             language: .objectiveC,
@@ -9225,25 +9217,9 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "stringWithFormat",
-            syntaxID: .identifierFunction,
+            syntaxID: .identifierFunctionSystem,
             language: .objectiveC,
             inOccurrenceOf: "stringWithFormat:@\"Hello"
-        )
-        _ = try effectiveSemanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "description",
-            syntaxID: .identifierFunction,
-            language: .objectiveC,
-            inOccurrenceOf: "[self.name description].length"
-        )
-        _ = try effectiveSemanticSnapshot(
-            in: tokens,
-            source: source,
-            text: "stringFrom",
-            syntaxID: .identifierFunction,
-            language: .objectiveC,
-            inOccurrenceOf: "[formatter stringFrom:self.name].length"
         )
         #expect(tokens.contains {
             tokenIntersects($0, range: selfRange, syntaxID: .keyword, language: .objectiveC)
@@ -10132,7 +10108,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "Token",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);"
         )
@@ -10164,7 +10140,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "Token",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);\n}\n\nvoid\nsplitRun"
         )

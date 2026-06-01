@@ -52,9 +52,11 @@ Runtime implication:
 - Method parameter names are local parameter names, but arbitrary identifier
   references should not be promoted just because they look like parameters.
 - Current-file SourceEditor classification under-reports some live Objective-C
-  lexical-scope coloring. In an open Xcode editor, method selector references
-  and `self.<known property>` chains receive delayed lexical-scope colors even
-  when the current-file probe reports `plain`.
+  lexical-scope coloring. In an open Xcode editor, `self.<known property>`
+  chains receive delayed lexical-scope colors even when the current-file probe
+  reports `plain`. Selector references are less stable in the current probes, so
+  the runtime preserves their base/source-model bucket instead of forcing them
+  into a local-function color.
 
 The current runtime maps these xclangspec `name.*` roles onto existing
 `EditorSourceSyntaxID` values because the generated theme table does not yet
@@ -72,13 +74,10 @@ ship exact `xcode.syntax.name.*` slots:
 - file-scope constants and implementation ivars -> lexical variable buckets
   on references, while their declarations remain declaration-shaped or plain
   according to the surrounding syntax.
-- message selector references -> `.identifierFunction`
+- message selector references -> preserve the base/source-model bucket
 - `self.<known property>` -> `.identifierVariable`
 - member references chained from a known or header-backed `self` property ->
   `.identifierVariableSystem`
-- member references in implementation files with quoted companion-header imports
-  -> `.identifierVariableSystem`, because the runtime cannot load that header
-  but Xcode's live editor sees the imported declarations.
 - Objective-C dictionary literal `@`, `{`, and `}` -> `.number`
 - Objective-C boxed expression delimiters in `@(value)` and boxed booleans
   `@YES` / `@NO` -> `.number`
@@ -104,11 +103,13 @@ editor path. Current probes show Objective-C ranges classified as
 and function declaration names.
 
 The current-file probe is not deep enough for all live Objective-C lexical
-scope. It still reports method selector references and `self.<property>` member
-references as `plain`, while the live Xcode editor colors those ranges after its
-delayed pass. For those cases, use live Xcode screenshots plus
-`ObjectiveC.xclangspec`/SourceModel range shape as the evidence instead of
-treating `classification-diff` as a zero-difference oracle.
+scope. It still reports some `self.<property>` member references as `plain`,
+while the live Xcode editor colors those ranges after its delayed pass. For
+those cases, use live Xcode screenshots plus `ObjectiveC.xclangspec`/SourceModel
+range shape as the evidence instead of treating `classification-diff` as a
+zero-difference oracle. Selector references should not be promoted only from
+shape; that over-colors system selectors and makes the runtime diverge from the
+working baseline.
 
 The same SourceEditor current-file probe can leave common Apple macro forms such
 as `NS_ASSUME_NONNULL_BEGIN`, `NS_ASSUME_NONNULL_END`, `NS_SWIFT_NAME`,
@@ -139,7 +140,7 @@ The useful split is:
 - `xcode-classification-tokens` / `classification-diff`: best current tool
   probe for declaration UIKind buckets and broad app-path behavior.
 - live Xcode editor in a real project: required for Objective-C lexical-scope
-  colors such as selector references and `self` property/member chains.
+  colors such as `self` property/member chains.
 - standalone DVT rendered probes: useful for theme/color extraction and shallow
   lexical checks only.
 
@@ -171,20 +172,22 @@ Current overlay behavior:
   imported/runtime helpers receive `.identifierFunctionSystem`, and bare
   parameters, locals, and labels remain `.plain` or their base lexical
   classification.
-- message selector references become `.identifierFunction`, matching live Xcode
-  lexical-scope coloring.
+- message selector references keep the base/source-model bucket; the runtime
+  does not force system selectors to local function color.
 - references to properties declared in the current source as `self.property`
   become `.identifierVariable`.
 - members chained from a known or quoted-header-backed `self` property, such as
   `self.text.length`, become `.identifierVariableSystem`; direct
   macro-shaped names that are not known properties stay plain.
-- unrelated member names in `.m` files with quoted companion-header imports are
-  colored `.identifierVariableSystem` as a header-backed lexical fallback.
 - function-like macro invocations declared in the current file, such as
   `ReferenceLog(...)`, use the preprocessor color.
 - file-scope constant references and implementation ivar references receive
   lexical variable colors because Xcode's live editor colors those after the
-  delayed pass; local variables and parameters stay plain.
+  delayed pass; local variables and parameters stay plain. When a local shadows
+  a file-scope name, the runtime suppresses that file-scope color from the
+  shadow declaration through the enclosing function. This is intentionally
+  conservative because the earlier block-exact heuristic regressed live lexical
+  coloring.
 - property declarations become `.declarationOther` only where the app-path
   oracle classifies the property name as `otherDeclaration`; macro-suffixed
   declarations that SourceEditor leaves plain stay plain.
@@ -197,9 +200,9 @@ This intentionally does not parse arbitrary companion headers. A `.m` file only
 receives its displayed source text in the runtime highlighter, so a quoted
 `#import "Header.h"` cannot be resolved the way Xcode resolves it through the
 project index. Objective-C compensates with a lexical fallback: when an
-implementation imports a quoted header, header-backed member names are colored
-like Xcode's delayed lexical-scope pass, while macro-shaped false positives stay
-plain.
+implementation imports a quoted header, member chains rooted at `self` can be
+colored like Xcode's delayed lexical-scope pass, while unrelated member names and
+macro-shaped false positives stay plain.
 
 ### Objective-C Keyword Set Is Mostly xclangspec-Driven
 
@@ -333,13 +336,14 @@ swift test --filter SyntaxHighlighterEngine
 
 - Full companion-header parsing is out of scope for the runtime overlay.
   `Reference.m` approximates Xcode with current-source symbols plus the
-  quoted-header lexical fallback; it does not build a project symbol index.
+  quoted-header `self` member fallback; it does not build a project symbol
+  index.
 - Method selector and member lexical-scope coloring is still not full
   Objective-C name resolution. Quoted header imports enable the fallback, but
   the runtime does not read or validate the imported header contents.
 - Current SourceEditor probes are current-file oriented and miss some delayed
   live-editor lexical-scope ranges. A non-zero `classification-diff` caused by
-  selector references or `self` property/member chains can be expected.
+  `self` property/member chains can be expected.
 - Standalone `DVTTextStorage` rendered snapshots are shallow for SourceEditor
   delayed classification and project header/index semantics.
 - Preprocessor macro body token splitting is still incomplete outside common
