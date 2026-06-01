@@ -9850,6 +9850,69 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens == full.tokens)
     }
 
+    @Test("SyntaxHighlighterEngine keeps Objective-C local statics out of file-scope overlays")
+    func highlighterKeepsObjectiveCLocalStaticsOutOfFileScopeOverlays() async throws {
+        let source = """
+        void run(void)
+        {
+        static NSInteger counter = 0;
+        counter += 1;
+        }
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "counter",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "counter += 1"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C local shadows plain")
+    func highlighterKeepsObjectiveCLocalShadowsPlain() async throws {
+        let source = """
+        static NSString *const Token = @"global";
+
+        @implementation Sample {
+            BOOL enabled;
+        }
+
+        - (BOOL)value
+        {
+            BOOL enabled;
+            return enabled;
+        }
+
+        void run(void)
+        {
+            NSString *Token = @"local";
+            NSLog(@"%@", Token);
+        }
+        @end
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "enabled",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "return enabled"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token)"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after source-length edits")
     func highlighterRebuildsObjectiveCSemanticIndexAfterSourceLengthEdits() async throws {
         let source = """
