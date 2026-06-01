@@ -7,7 +7,7 @@ struct TOMLLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .toml }
     var displayName: String { "TOML" }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
+    var treeSitterSupport: SyntaxTreeSitterSupport? {
         SyntaxTreeSitterSupport(
             name: "TOML",
             bundleName: "TreeSitterTOML_TreeSitterTOML",

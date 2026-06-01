@@ -345,9 +345,10 @@ private enum EditorSpecTool {
     }
 
     private static func writeSourceEditorViewDiagnostics(options: Options) throws {
+        let languageIdentifier = try sourceModelBridgeLanguageIdentifier(for: options.language)
         let diagnostics = try SourceModelBridge.sourceEditorViewDiagnostics(
             filePath: options.filePath,
-            language: options.language.identifier,
+            language: languageIdentifier,
             toolchainAppPath: options.xcodePath
         )
         let writingOptions: JSONSerialization.WritingOptions = options.pretty
@@ -359,9 +360,10 @@ private enum EditorSpecTool {
     }
 
     private static func writeLanguageDiagnostics(options: Options) throws {
+        let languageIdentifier = try sourceModelBridgeLanguageIdentifier(for: options.language)
         let diagnostics = try SourceModelBridge.languageDiagnostics(
             filePath: options.filePath,
-            language: options.language.identifier,
+            language: languageIdentifier,
             toolchainAppPath: options.xcodePath
         )
         let writingOptions: JSONSerialization.WritingOptions = options.pretty
@@ -626,9 +628,10 @@ private enum EditorSpecTool {
     }
 
     private static func sourceModelSnapshot(options: Options, includeText: Bool) throws -> NSDictionary {
+        let languageIdentifier = try sourceModelBridgeLanguageIdentifier(for: options.language)
         let snapshot = try SourceModelBridge.snapshot(
             filePath: options.filePath,
-            language: options.language.identifier,
+            language: languageIdentifier,
             toolchainAppPath: options.xcodePath,
             includeText: includeText
         )
@@ -690,14 +693,24 @@ private enum EditorSpecTool {
 
     @MainActor
     private static func xcodeRenderedSnapshot(options: Options, includeText: Bool) throws -> NSDictionary {
+        let languageIdentifier = try sourceModelBridgeLanguageIdentifier(for: options.language)
         let snapshot = try SourceModelBridge.renderedSnapshot(
             filePath: options.filePath,
-            language: options.language.identifier,
+            language: languageIdentifier,
             toolchainAppPath: options.xcodePath,
             themeName: options.xcodeThemeName,
             includeText: includeText
         )
         return snapshot as NSDictionary
+    }
+
+    private static func sourceModelBridgeLanguageIdentifier(for language: SyntaxLanguage) throws -> String {
+        switch language {
+        case .plainText:
+            throw ToolError.invalidLanguage(language.identifier)
+        default:
+            return language.identifier
+        }
     }
 
     private static func editorTokens(source: String, language: SyntaxLanguage) async throws -> [EditorTokenRecord] {
@@ -819,9 +832,12 @@ private enum EditorSpecTool {
         includeText: Bool
     ) throws -> [XcodeClassificationTokenRecord] {
         #if canImport(SourceEditor) && canImport(SourceModelSupport) && canImport(SymbolCache) && canImport(SymbolCacheIndexing) && canImport(SymbolCacheSupport)
-        let dataSource = options.language == .objectiveC
-            ? sourceEditorObjectiveCDataSource(options: options, source: source)
-            : sourceEditorGenericDataSource(options: options, source: source)
+        let dataSource: SourceEditorDataSource
+        if options.language == .objectiveC {
+            dataSource = try sourceEditorObjectiveCDataSource(options: options, source: source)
+        } else {
+            dataSource = try sourceEditorGenericDataSource(options: options, source: source)
+        }
         return try sourceEditorClassificationTokens(dataSource: dataSource, source: source, includeText: includeText)
         #else
         throw ToolError.xcodeTool("SourceEditor.framework token probe is available on macOS only.")
@@ -989,10 +1005,11 @@ private enum EditorSpecTool {
         return dataSourceWithSettings
     }
 
-    private static func sourceEditorGenericDataSource(options: Options, source: String) -> SourceEditorDataSource {
+    private static func sourceEditorGenericDataSource(options: Options, source: String) throws -> SourceEditorDataSource {
+        let languageIdentifier = try sourceEditorLanguageIdentifier(for: options.language)
         let language = SourceModelEditorLanguage(
             name: options.language.displayName,
-            identifier: sourceEditorLanguageIdentifier(for: options.language),
+            identifier: languageIdentifier,
             languageService: SourceModelLanguageService.self,
             lineDataFactory: DefaultSourceEditorLineDataFactory(),
             editableRangeSnapshot: nil
@@ -1006,10 +1023,11 @@ private enum EditorSpecTool {
         )
     }
 
-    private static func sourceEditorObjectiveCDataSource(options: Options, source: String) -> SourceEditorDataSource {
+    private static func sourceEditorObjectiveCDataSource(options: Options, source: String) throws -> SourceEditorDataSource {
+        let languageIdentifier = try sourceEditorLanguageIdentifier(for: options.language)
         let baseLanguage = SourceModelEditorLanguage(
             name: options.language.displayName,
-            identifier: sourceEditorLanguageIdentifier(for: options.language),
+            identifier: languageIdentifier,
             languageService: SourceModelLanguageService.self,
             lineDataFactory: DefaultSourceEditorLineDataFactory(),
             editableRangeSnapshot: nil
@@ -1031,8 +1049,10 @@ private enum EditorSpecTool {
         return dataSource
     }
 
-    private static func sourceEditorLanguageIdentifier(for language: SyntaxLanguage) -> String {
+    private static func sourceEditorLanguageIdentifier(for language: SyntaxLanguage) throws -> String {
         switch language {
+        case .plainText:
+            throw ToolError.invalidLanguage(language.identifier)
         case .css:
             return "xcode.lang.css"
         case .html:

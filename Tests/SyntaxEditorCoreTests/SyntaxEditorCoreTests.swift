@@ -108,6 +108,8 @@ private func repositoryRootURL() -> URL {
 
 private func highlightQueryURL(language: SyntaxLanguage) -> URL {
     let directoryName = switch language {
+    case .plainText:
+        preconditionFailure("Plain text does not have highlight queries.")
     case .css:
         "CSSQueries"
     case .html:
@@ -133,6 +135,8 @@ private func highlightQueryURL(language: SyntaxLanguage) -> URL {
 
 private func canonicalCaptureLanguageName(for language: SyntaxLanguage) -> String {
     switch language {
+    case .plainText:
+        "plaintext"
     case .css:
         "css"
     case .html:
@@ -154,6 +158,8 @@ private func canonicalCaptureLanguageName(for language: SyntaxLanguage) -> Strin
 
 private func languageImplementationDirectoryName(for language: SyntaxLanguage) -> String {
     switch language {
+    case .plainText:
+        "PlainText"
     case .css:
         "CSS"
     case .html:
@@ -374,6 +380,12 @@ private extension SyntaxHighlighterEngine {
 struct SyntaxEditorCoreTests {
     @Test("SyntaxLanguage.named maps supported values")
     func builtinSyntaxLanguagesNamed() {
+        #expect(SyntaxLanguage.named("plain")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage.named("plaintext")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage.named("plain-text")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage.named("text")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage.named("txt")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage.named("text/plain")?.identifier == SyntaxLanguage.plainText.identifier)
         #expect(SyntaxLanguage.named("css")?.identifier == SyntaxLanguage.css.identifier)
         #expect(SyntaxLanguage.named("html")?.identifier == SyntaxLanguage.html.identifier)
         #expect(SyntaxLanguage.named("HTM")?.identifier == SyntaxLanguage.html.identifier)
@@ -426,6 +438,16 @@ struct SyntaxEditorCoreTests {
 
         model.resetFontSize()
         #expect(model.fontSizeDelta == 0)
+    }
+
+    @Test("SyntaxEditorModel defaults to JavaScript")
+    @MainActor
+    func syntaxEditorModelDefaultsToJavaScript() {
+        let model = SyntaxEditorModel()
+
+        #expect(model.language == .javascript)
+        #expect(SyntaxLanguage.all.contains(.plainText))
+        #expect(SyntaxLanguage.syntaxHighlightedCases.contains(.plainText) == false)
     }
 
     @Test("SyntaxEditorModel font size commands clamp at rendered bounds")
@@ -573,7 +595,7 @@ struct SyntaxEditorCoreTests {
 
     @Test("Built-in highlight queries use canonical editor syntax captures")
     func builtInHighlightQueriesUseCanonicalCaptures() throws {
-        for language in SyntaxLanguage.allCases {
+        for language in SyntaxLanguage.syntaxHighlightedCases {
             let source = try String(contentsOf: highlightQueryURL(language: language), encoding: .utf8)
             let captures = captureNames(inQuerySource: source)
             let prefix = "editor.syntax.\(canonicalCaptureLanguageName(for: language))."
@@ -619,6 +641,8 @@ struct SyntaxEditorCoreTests {
         for language in SyntaxLanguage.allCases {
             let directoryName = languageImplementationDirectoryName(for: language)
             let typeName = switch language {
+            case .plainText:
+                "PlainTextLanguage"
             case .css:
                 "CSSLanguage"
             case .html:
@@ -1048,7 +1072,8 @@ struct SyntaxEditorCoreTests {
         let source = "a\nb\n"
         let result = engine.indentSelection(
             source: source,
-            selection: NSRange(location: 0, length: 3)
+            selection: NSRange(location: 0, length: 3),
+            language: .javascript
         )
 
         #expect(applying(result, to: source) == "    a\n    b\n")
@@ -1060,7 +1085,8 @@ struct SyntaxEditorCoreTests {
         let source = "abcde"
         let result = engine.insertTab(
             source: source,
-            selection: NSRange(location: 2, length: 0)
+            selection: NSRange(location: 2, length: 0),
+            language: .javascript
         )
 
         #expect(applying(result, to: source) == "ab  cde")
@@ -1073,7 +1099,8 @@ struct SyntaxEditorCoreTests {
         let source = "あbc"
         let result = engine.insertTab(
             source: source,
-            selection: NSRange(location: "あ".utf16.count, length: 0)
+            selection: NSRange(location: "あ".utf16.count, length: 0),
+            language: .javascript
         )
 
         #expect(applying(result, to: source) == "あ  bc")
@@ -1087,7 +1114,8 @@ struct SyntaxEditorCoreTests {
         let source = "\(prefix)bc"
         let result = engine.insertTab(
             source: source,
-            selection: NSRange(location: prefix.utf16.count, length: 0)
+            selection: NSRange(location: prefix.utf16.count, length: 0),
+            language: .javascript
         )
 
         #expect(applying(result, to: source) == "\(prefix)   bc")
@@ -1101,7 +1129,8 @@ struct SyntaxEditorCoreTests {
         let source = "\(prefix)bc"
         let result = engine.insertTab(
             source: source,
-            selection: NSRange(location: prefix.utf16.count, length: 0)
+            selection: NSRange(location: prefix.utf16.count, length: 0),
+            language: .javascript
         )
 
         #expect(applying(result, to: source) == "\(prefix)  bc")
@@ -1114,7 +1143,8 @@ struct SyntaxEditorCoreTests {
         let source = "a\nb\n"
         let result = engine.insertTab(
             source: source,
-            selection: NSRange(location: 0, length: 3)
+            selection: NSRange(location: 0, length: 3),
+            language: .javascript
         )
 
         #expect(applying(result, to: source) == "    a\n    b\n")
@@ -1126,7 +1156,8 @@ struct SyntaxEditorCoreTests {
         let source = "a\n"
         let result = engine.indentSelection(
             source: source,
-            selection: NSRange(location: source.utf16.count, length: 0)
+            selection: NSRange(location: source.utf16.count, length: 0),
+            language: .javascript
         )
 
         #expect(applying(result, to: source) == "a\n    ")
@@ -1138,7 +1169,8 @@ struct SyntaxEditorCoreTests {
         let source = "    a\n    b\n"
         let result = engine.outdentSelection(
             source: source,
-            selection: NSRange(location: 0, length: 11)
+            selection: NSRange(location: 0, length: 11),
+            language: .javascript
         )
 
         #expect(applying(result, to: source) == "a\nb\n")
@@ -1150,11 +1182,70 @@ struct SyntaxEditorCoreTests {
         let source = "x\n    y"
         let result = engine.outdentSelection(
             source: source,
-            selection: NSRange(location: 4, length: 0)
+            selection: NSRange(location: 4, length: 0),
+            language: .javascript
         )
 
         #expect(applying(result, to: source) == "x\ny")
         #expect(result?.selectedRange == NSRange(location: 2, length: 0))
+    }
+
+    @Test("EditorCommandEngine returns no custom edits for strict plain text")
+    func editorCommandEngineReturnsNoCustomEditsForPlainText() {
+        let engine = EditorCommandEngine()
+        let source = "()"
+
+        #expect(engine.transformInput(
+            source: source,
+            range: NSRange(location: 0, length: 0),
+            replacementText: "(",
+            language: .plainText
+        ) == nil)
+        #expect(engine.transformInput(
+            source: source,
+            range: NSRange(location: 0, length: 0),
+            replacementText: "\"",
+            language: .plainText
+        ) == nil)
+        #expect(engine.transformInput(
+            source: source,
+            range: NSRange(location: 1, length: 0),
+            replacementText: "\n",
+            language: .plainText
+        ) == nil)
+        #expect(engine.transformInput(
+            source: source,
+            range: NSRange(location: 0, length: 0),
+            replacementText: "\t",
+            language: .plainText
+        ) == nil)
+        #expect(engine.transformInput(
+            source: source,
+            range: NSRange(location: 0, length: 1),
+            replacementText: "",
+            language: .plainText,
+            deletionIntent: .backward
+        ) == nil)
+        #expect(engine.insertTab(
+            source: source,
+            selection: NSRange(location: 0, length: 0),
+            language: .plainText
+        ) == nil)
+        #expect(engine.indentSelection(
+            source: source,
+            selection: NSRange(location: 0, length: 0),
+            language: .plainText
+        ) == nil)
+        #expect(engine.outdentSelection(
+            source: "    x",
+            selection: NSRange(location: 0, length: 0),
+            language: .plainText
+        ) == nil)
+        #expect(engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: 0),
+            language: .plainText
+        ) == nil)
     }
 
     @Test("EditorCommandEngine toggles JavaScript line comments")
@@ -2807,7 +2898,8 @@ struct SyntaxEditorCoreTests {
 
         _ = engine.indentSelection(
             source: "value\n",
-            selection: NSRange(location: 0, length: 0)
+            selection: NSRange(location: 0, length: 0),
+            language: .javascript
         )
 
         let third = engine.transformInput(
@@ -3844,6 +3936,32 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.isEmpty)
     }
 
+    @Test("SyntaxHighlighterEngine returns no tokens for plain text")
+    func highlighterReturnsNoTokensForPlainText() async {
+        let engine = SyntaxHighlighterEngine()
+        let source = "plain text\nwith (brackets)"
+
+        let reset = await engine.reset(source: source, language: .plainText)
+        #expect(reset.tokens.isEmpty)
+        #expect(reset.refreshRange == NSRange(location: 0, length: source.utf16.count))
+
+        let update = await engine.update(
+            previousSource: source,
+            source: source + "\n",
+            language: .plainText,
+            mutation: SyntaxHighlightMutation(location: source.utf16.count, length: 0, replacement: "\n")
+        )
+        #expect(update.tokens.isEmpty)
+        #expect(update.refreshRange == NSRange(location: 0, length: (source + "\n").utf16.count))
+
+        let phases = await collectHighlightPhases(
+            await engine.resetPhases(source: source, language: .plainText, revision: 2)
+        )
+        #expect(phases.count == 1)
+        #expect(phases.first?.tokens.isEmpty == true)
+        #expect(phases.first?.phase == .complete)
+    }
+
     @Test("SyntaxHighlighterEngine produces highlight tokens for lightweight direct languages")
     func highlighterProducesTokensForLightweightDirectLanguages() async {
         let engine = sharedSyntaxHighlighterEngine
@@ -3870,7 +3988,7 @@ struct SyntaxHighlighterEngineTests {
         await SyntaxEditorHighlighting.prepare(.swift)
         await SyntaxEditorHighlighting.prepare([.html, .swift, .html, .objectiveC])
 
-        await expectPreparedLanguagesRender(SyntaxLanguage.all)
+        await expectPreparedLanguagesRender(SyntaxLanguage.syntaxHighlightedCases)
     }
 
     @Test("SyntaxEditorHighlighting handles concurrent repeated prepare calls")
@@ -3969,6 +4087,8 @@ struct SyntaxHighlighterEngineTests {
 
     private func smokeSource(for language: SyntaxLanguage) -> String {
         switch language {
+        case .plainText:
+            "plain text"
         case .css:
             "body { color: red; }"
         case .html:

@@ -1031,6 +1031,42 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
 
+    @Test("SyntaxEditorView clears iOS syntax runs when switching to plain text")
+    @MainActor
+    func syntaxEditorViewIOSClearsSyntaxRunsWhenSwitchingToPlainText() async {
+        let source = "const answer = 42;"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 5),
+                    rawCaptureName: "editor.syntax.javascript.keyword",
+                    language: .javascript
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(editorView.syntaxForegroundColorForTesting(at: 0) != nil)
+
+        model.model.language = .plainText
+        editorView.synchronizeDocumentForTesting()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.syntaxForegroundColorForTesting(at: 0) == nil)
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+    }
+
     @Test("SyntaxEditorView reapplies iOS same-style tokens after empty-style splits")
     @MainActor
     func syntaxEditorViewIOSReappliesSameStyleTokensAfterEmptyStyleSplits() async {
@@ -4433,6 +4469,34 @@ extension SyntaxEditorUITests {
         #expect(model.model.text == "ab  cde")
         #expect(editorView.text == "ab  cde")
         #expect(editorView.selectedRange == NSRange(location: 4, length: 0))
+    }
+
+    @Test("SyntaxEditorView inserts raw iOS tab in plain text")
+    @MainActor
+    func syntaxEditorViewIOSInsertPlainTextTabAtCaret() {
+        let source = "abcde"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.plainText)
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.selectedRange = NSRange(location: 2, length: 0)
+
+        let commands = editorView.keyCommands
+        #expect(hasSyntaxEditorKeyCommand(commands, input: "\t", modifierFlags: []))
+        #expect(!hasSyntaxEditorKeyCommand(commands, input: "\t", modifierFlags: [.shift]))
+        #expect(!hasSyntaxEditorKeyCommand(commands, input: "]", modifierFlags: [.command]))
+        #expect(!hasSyntaxEditorKeyCommand(commands, input: "[", modifierFlags: [.command]))
+        #expect(!hasSyntaxEditorKeyCommand(commands, input: "/", modifierFlags: [.command]))
+
+        let insertTabActionTarget = editorView.target(
+            forAction: NSSelectorFromString("handleInsertTabCommand"),
+            withSender: nil
+        ) as AnyObject?
+        #expect(insertTabActionTarget === editorView)
+
+        #expect(performSyntaxEditorSelector("handleInsertTabCommand", on: editorView))
+
+        #expect(model.model.text == "ab\tcde")
+        #expect(editorView.text == "ab\tcde")
+        #expect(editorView.selectedRange == NSRange(location: 3, length: 0))
     }
 
     @Test("SyntaxEditorView uses native iOS undo stack for text input")

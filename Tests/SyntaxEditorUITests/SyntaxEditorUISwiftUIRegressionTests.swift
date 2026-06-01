@@ -222,7 +222,7 @@ extension SyntaxEditorUITests {
             language: SyntaxLanguage.swift,
             colorTheme: initialTheme
         )
-        let replacementDocument = SyntaxEditorModel(text: "abc new = 1")
+        let replacementDocument = SyntaxEditorModel(text: "abc new = 1", language: .swift)
 
 #if canImport(UIKit)
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)

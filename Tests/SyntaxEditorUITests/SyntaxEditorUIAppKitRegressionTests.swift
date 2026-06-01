@@ -709,6 +709,41 @@ extension SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
     }
 
+    @Test("SyntaxEditorView clears macOS syntax runs when switching to plain text")
+    @MainActor
+    func syntaxEditorViewMacClearsSyntaxRunsWhenSwitchingToPlainText() async {
+        let source = "let value = 1"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(editorView.syntaxColorRunCountForTesting == 1)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        model.model.language = .plainText
+        editorView.synchronizeDocumentForTesting()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.syntaxColorRunCountForTesting == 0)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+    }
+
     @Test("SyntaxEditorView applies built-in macOS theme base font to plain and highlighted text")
     @MainActor
     func syntaxEditorViewMacAppliesBuiltInThemeBaseFont() async throws {
@@ -2539,6 +2574,24 @@ extension SyntaxEditorUITests {
         #expect(model.model.text == "ab  cde")
         #expect(editorView.textView.string == "ab  cde")
         #expect(editorView.textView.selectedRange() == NSRange(location: 4, length: 0))
+    }
+
+    @Test("SyntaxEditorView inserts raw macOS tab in plain text")
+    @MainActor
+    func syntaxEditorViewMacInsertPlainTextTabAtCaret() {
+        let source = "abcde"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.plainText)
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.textView.setSelectedRange(NSRange(location: 2, length: 0))
+
+        #expect(editorView.textView(
+            editorView.textView,
+            doCommandBy: #selector(NSResponder.insertTab(_:))
+        ))
+
+        #expect(model.model.text == "ab\tcde")
+        #expect(editorView.textView.string == "ab\tcde")
+        #expect(editorView.textView.selectedRange() == NSRange(location: 3, length: 0))
     }
 
     @Test("SyntaxEditorView accepts macOS first responder keyboard input")

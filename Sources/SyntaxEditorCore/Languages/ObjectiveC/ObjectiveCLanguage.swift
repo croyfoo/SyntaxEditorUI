@@ -8,7 +8,7 @@ struct ObjectiveCLanguage: SyntaxLanguageSupport {
     var language: SyntaxLanguage { .objectiveC }
     var displayName: String { "Objective-C" }
     var aliases: Set<String> { ["objective-c", "objectivec", "objc"] }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
+    var treeSitterSupport: SyntaxTreeSitterSupport? {
         SyntaxTreeSitterSupport(
             name: "Objective-C",
             bundleName: "TreeSitterObjc_TreeSitterObjc",

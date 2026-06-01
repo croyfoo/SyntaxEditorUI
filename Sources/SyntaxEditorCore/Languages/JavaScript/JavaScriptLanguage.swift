@@ -8,7 +8,7 @@ struct JavaScriptLanguage: SyntaxLanguageSupport {
     var language: SyntaxLanguage { .javascript }
     var displayName: String { "JavaScript" }
     var aliases: Set<String> { ["javascript", "js"] }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
+    var treeSitterSupport: SyntaxTreeSitterSupport? {
         SyntaxTreeSitterSupport(
             name: "JavaScript",
             bundleName: "TreeSitterJavaScript_TreeSitterJavaScript",

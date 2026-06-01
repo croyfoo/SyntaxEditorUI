@@ -7,7 +7,7 @@ struct SwiftLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .swift }
     var displayName: String { "Swift" }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
+    var treeSitterSupport: SyntaxTreeSitterSupport? {
         SyntaxTreeSitterSupport(
             name: "Swift",
             bundleName: "TreeSitterSwift_TreeSitterSwift",

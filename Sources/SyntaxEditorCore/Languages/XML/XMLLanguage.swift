@@ -7,7 +7,7 @@ struct XMLLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .xml }
     var displayName: String { "XML" }
-    var treeSitterSupport: SyntaxTreeSitterSupport {
+    var treeSitterSupport: SyntaxTreeSitterSupport? {
         SyntaxTreeSitterSupport(
             name: "XML",
             bundleName: "TreeSitterXML_TreeSitterXML",

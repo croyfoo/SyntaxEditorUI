@@ -130,6 +130,8 @@ package enum EditorSyntaxCapture {
 private extension SyntaxLanguage {
     var editorSyntaxCaptureIdentifier: String {
         switch self {
+        case .plainText:
+            "plaintext"
         case .css:
             "css"
         case .html:
@@ -151,6 +153,8 @@ private extension SyntaxLanguage {
 
     static func editorSyntaxCaptureLanguage(named rawName: String) -> SyntaxLanguage? {
         switch rawName {
+        case "plaintext", "plain-text", "plain", "text":
+            .plainText
         case "css":
             .css
         case "html":

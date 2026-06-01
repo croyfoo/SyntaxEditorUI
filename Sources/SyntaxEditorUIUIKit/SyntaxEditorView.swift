@@ -473,8 +473,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return true
         }
 
-        if isEditorCommandAction(action) {
+        if action == #selector(handlePasteCommand) {
             return model.isEditable
+        }
+
+        if action == #selector(handleInsertTabCommand) {
+            return model.isEditable
+        }
+
+        if isEditorCommandAction(action) {
+            return model.isEditable && model.language.supportsCodeEditingCommands
         }
 
         switch action {
@@ -748,15 +756,24 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func editorKeyCommands() -> [UIKeyCommand]? {
-        var commands = SyntaxEditorMenu.makeKeyCommands(includeEditingCommands: model.isEditable)
+        let supportsCodeEditingCommands = model.isEditable && model.language.supportsCodeEditingCommands
+        var commands = SyntaxEditorMenu.makeKeyCommands(includeEditingCommands: supportsCodeEditingCommands)
 
         guard model.isEditable else {
             return commands
         }
 
+        commands.append(
+            makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleInsertTabCommand), title: "Insert Tab")
+        )
+
+        if supportsCodeEditingCommands {
+            commands.append(
+                makeKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleOutdentCommand), title: "Outdent")
+            )
+        }
+
         commands.append(contentsOf: [
-            makeKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleInsertTabCommand), title: "Insert Tab"),
-            makeKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleOutdentCommand), title: "Outdent"),
             makeKeyCommand(
                 input: "v",
                 modifierFlags: [.command],
@@ -774,7 +791,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         return action == #selector(handleInsertTabCommand)
             || action == #selector(handleOutdentCommand)
-            || action == #selector(handlePasteCommand)
     }
 
     func isLineWrappingCommandAction(_ action: Selector) -> Bool {
@@ -1510,11 +1526,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @objc private func handleIndentCommand() {
-        guard model.isEditable else { return }
+        guard model.isEditable, model.language.supportsCodeEditingCommands else { return }
 
         guard let result = commandEngine.indentSelection(
             source: text,
-            selection: selectedRange
+            selection: selectedRange,
+            language: model.language
         ) else {
             return
         }
@@ -1524,9 +1541,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     @objc private func handleInsertTabCommand() {
         guard model.isEditable else { return }
 
+        guard model.language.supportsCodeEditingCommands else {
+            insertText("\t")
+            return
+        }
+
         guard let result = commandEngine.insertTab(
             source: text,
-            selection: selectedRange
+            selection: selectedRange,
+            language: model.language
         ) else {
             return
         }
@@ -1534,11 +1557,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @objc private func handleOutdentCommand() {
-        guard model.isEditable else { return }
+        guard model.isEditable, model.language.supportsCodeEditingCommands else { return }
 
         guard let result = commandEngine.outdentSelection(
             source: text,
-            selection: selectedRange
+            selection: selectedRange,
+            language: model.language
         ) else {
             return
         }
@@ -1546,7 +1570,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @objc private func handleToggleCommentCommand() {
-        guard model.isEditable else { return }
+        guard model.isEditable, model.language.supportsCodeEditingCommands else { return }
 
         guard let result = commandEngine.toggleComment(
             source: text,
