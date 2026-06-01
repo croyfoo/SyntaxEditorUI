@@ -351,6 +351,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 overlayTokens.append(canonicalToken(range: token.range, syntaxID: .declarationOther))
 
             case .identifierFunctionSystem:
+                if isObjectiveCMessageSelectorName(token.range, in: source) {
+                    overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierFunction))
+                }
                 continue
 
             default:
@@ -822,6 +825,77 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static func isMessageReceiverName(_ range: NSRange, in source: NSString) -> Bool {
         previousNonWhitespaceCharacter(before: range, in: source) == "["
+    }
+
+    private static func isObjectiveCMessageSelectorName(_ range: NSRange, in source: NSString) -> Bool {
+        guard !isMessageReceiverName(range, in: source) else {
+            return false
+        }
+        guard let next = nextNonWhitespaceCharacter(after: range, in: source),
+              next == ":" || next == "]" else {
+            return false
+        }
+
+        let lowerBound = objectiveCStatementStart(before: range.location, in: source)
+        var depth = 0
+        var cursor = lowerBound
+        while cursor < range.location {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == "\"" || character == "'" {
+                cursor = indexAfterObjectiveCQuotedLiteral(startingAt: cursor, quote: character, in: source)
+                continue
+            }
+            if character == "[" {
+                depth += 1
+            } else if character == "]" {
+                depth = max(0, depth - 1)
+            }
+            cursor += 1
+        }
+        return depth > 0
+    }
+
+    private static func objectiveCStatementStart(before location: Int, in source: NSString) -> Int {
+        guard location > 0 else { return 0 }
+        var cursor = min(location, source.length) - 1
+        while cursor >= 0 {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == ";" || character == "{" || character == "}" {
+                return cursor + 1
+            }
+            if cursor == 0 { break }
+            cursor -= 1
+        }
+        return 0
+    }
+
+    private static func nextNonWhitespaceCharacter(after range: NSRange, in source: NSString) -> Character? {
+        var cursor = min(range.upperBound, source.length)
+        while cursor < source.length {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                return character.first
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func indexAfterObjectiveCQuotedLiteral(startingAt quoteLocation: Int, quote: String, in text: NSString) -> Int {
+        var cursor = quoteLocation + 1
+        var isEscaped = false
+        while cursor < text.length {
+            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == quote {
+                return cursor + 1
+            }
+            cursor += 1
+        }
+        return text.length
     }
 
     fileprivate static func isSelfMemberName(_ range: NSRange, in source: NSString) -> Bool {
@@ -2666,24 +2740,23 @@ private struct ObjectiveCFileSymbolIndex {
 
         var ranges = Set<ObjectiveCRangeKey>()
         for scope in functionLikeScopes(in: source) {
-            var shadowStarts: [String: Int] = [:]
+            var shadowSpans: [(name: String, range: NSRange)] = []
             collectParameterShadows(
                 in: NSRange(location: scope.location, length: scope.bodyOpenLocation - scope.location),
                 source: source,
                 shadowedNames: shadowedNames,
-                into: &shadowStarts
+                scopeUpperBound: scope.upperBound,
+                into: &shadowSpans
             )
             collectLocalVariableShadows(
                 in: scope,
                 source: source,
                 shadowedNames: shadowedNames,
-                into: &shadowStarts
+                into: &shadowSpans
             )
 
-            for (name, start) in shadowStarts {
-                guard start < scope.upperBound else { continue }
-                let scanRange = NSRange(location: start, length: scope.upperBound - start)
-                for range in identifierRanges(named: name, in: scanRange, source: source) {
+            for span in shadowSpans where span.range.length > 0 {
+                for range in identifierRanges(named: span.name, in: span.range, source: source) {
                     ranges.insert(ObjectiveCRangeKey(range))
                 }
             }
@@ -2740,7 +2813,8 @@ private struct ObjectiveCFileSymbolIndex {
         in headerRange: NSRange,
         source: NSString,
         shadowedNames: Set<String>,
-        into shadowStarts: inout [String: Int]
+        scopeUpperBound: Int,
+        into shadowSpans: inout [(name: String, range: NSRange)]
     ) {
         guard headerRange.length > 0 else { return }
         let header = source.substring(with: headerRange) as NSString
@@ -2753,7 +2827,12 @@ private struct ObjectiveCFileSymbolIndex {
                 continue
             }
             let absoluteLocation = headerRange.location + match.range.location
-            shadowStarts[name] = min(shadowStarts[name] ?? absoluteLocation, absoluteLocation)
+            let upperBound = min(source.length, scopeUpperBound)
+            guard absoluteLocation < upperBound else { continue }
+            shadowSpans.append((
+                name: name,
+                range: NSRange(location: absoluteLocation, length: upperBound - absoluteLocation)
+            ))
         }
     }
 
@@ -2761,7 +2840,7 @@ private struct ObjectiveCFileSymbolIndex {
         in scope: (location: Int, bodyOpenLocation: Int, upperBound: Int),
         source: NSString,
         shadowedNames: Set<String>,
-        into shadowStarts: inout [String: Int]
+        into shadowSpans: inout [(name: String, range: NSRange)]
     ) {
         let bodyStart = min(source.length, scope.bodyOpenLocation + 1)
         let bodyEnd = max(bodyStart, min(source.length, scope.upperBound - 1))
@@ -2776,8 +2855,36 @@ private struct ObjectiveCFileSymbolIndex {
             let name = body.substring(with: nameRange)
             guard shadowedNames.contains(name) else { continue }
             let absoluteLocation = bodyRange.location + nameRange.location
-            shadowStarts[name] = min(shadowStarts[name] ?? absoluteLocation, absoluteLocation)
+            let upperBound = localShadowUpperBound(startingAt: absoluteLocation, in: scope, source: source)
+            guard absoluteLocation < upperBound else { continue }
+            shadowSpans.append((
+                name: name,
+                range: NSRange(location: absoluteLocation, length: upperBound - absoluteLocation)
+            ))
         }
+    }
+
+    private static func localShadowUpperBound(
+        startingAt location: Int,
+        in scope: (location: Int, bodyOpenLocation: Int, upperBound: Int),
+        source: NSString
+    ) -> Int {
+        let lowerBound = min(max(0, scope.bodyOpenLocation), source.length)
+        var cursor = min(max(location - 1, lowerBound), source.length - 1)
+        while cursor >= lowerBound {
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == "{",
+               let closeBrace = matchingClosingBraceLocation(in: source, openBraceLocation: cursor),
+               closeBrace < scope.upperBound {
+                return closeBrace + 1
+            }
+            if character == "}" {
+                return min(source.length, scope.upperBound)
+            }
+            if cursor == 0 { break }
+            cursor -= 1
+        }
+        return min(source.length, scope.upperBound)
     }
 
     private static func identifierRanges(named name: String, in range: NSRange, source: NSString) -> [NSRange] {
@@ -3566,7 +3673,7 @@ private struct ObjectiveCFileSymbolIndex {
     )
 
     private static let objectiveCFunctionLikeSignatureLineRegex = try! NSRegularExpression(
-        pattern: #"^\s*(?:[-+]\s*\(|(?:static\s+)?[A-Za-z_][A-Za-z0-9_ <>,_*]*\s+[A-Za-z_][A-Za-z0-9_]*\s*\()"#
+        pattern: #"^\s*(?:[-+]\s*\(|(?:static\s+)?[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*\()"#
     )
 
     private static let objectiveCLocalVariableShadowDeclarationRegex = try! NSRegularExpression(

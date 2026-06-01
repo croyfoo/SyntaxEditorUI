@@ -8156,6 +8156,7 @@ struct SyntaxHighlighterEngineTests {
             if (self == nil) {
                 return nil;
             }
+            (void)[self respondsToSelector:NSSelectorFromString(@"init")];
             return self;
         }
 
@@ -8639,6 +8640,22 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierFunctionSystem,
             language: .objectiveC,
             inOccurrenceOf: "NSSelectorFromString(selectorName)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "respondsToSelector",
+            syntaxID: .identifierFunction,
+            language: .objectiveC,
+            inOccurrenceOf: "[self respondsToSelector:NSSelectorFromString"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSSelectorFromString",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "[self respondsToSelector:NSSelectorFromString"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -9204,9 +9221,25 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "stringWithFormat",
-            syntaxID: .identifierFunctionSystem,
+            syntaxID: .identifierFunction,
             language: .objectiveC,
             inOccurrenceOf: "stringWithFormat:@\"Hello"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "description",
+            syntaxID: .identifierFunction,
+            language: .objectiveC,
+            inOccurrenceOf: "[self.name description].length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "stringFrom",
+            syntaxID: .identifierFunction,
+            language: .objectiveC,
+            inOccurrenceOf: "[formatter stringFrom:self.name].length"
         )
         #expect(tokens.contains {
             tokenIntersects($0, range: selfRange, syntaxID: .keyword, language: .objectiveC)
@@ -9888,8 +9921,17 @@ struct SyntaxHighlighterEngineTests {
 
         void run(void)
         {
-            NSString *Token = @"local";
+            if (YES) {
+                NSString *Token = @"local";
+                NSLog(@"%@", Token);
+            }
             NSLog(@"%@", Token);
+        }
+
+        NSString *readValue(void)
+        {
+            NSString *Token = @"local";
+            return Token;
         }
         @end
         """
@@ -9909,7 +9951,23 @@ struct SyntaxHighlighterEngineTests {
             text: "Token",
             syntaxID: .plain,
             language: .objectiveC,
-            inOccurrenceOf: "NSLog(@\"%@\", Token)"
+            inOccurrenceOf: "NSLog(@\"%@\", Token);\n    }"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "return Token;"
         )
     }
 
