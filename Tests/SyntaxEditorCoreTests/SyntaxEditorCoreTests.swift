@@ -3861,6 +3861,133 @@ struct SyntaxHighlighterEngineTests {
         }
     }
 
+    @Test("SyntaxEditorHighlighting handles overlapping prepare request patterns")
+    func highlightingPrepareHandlesOverlappingRequestPatterns() async {
+        await SyntaxEditorHighlighting.prepare(.html)
+        await SyntaxEditorHighlighting.prepare([.swift, .html])
+        await SyntaxEditorHighlighting.prepare(.html)
+        await SyntaxEditorHighlighting.prepare(SyntaxLanguage.all)
+        await SyntaxEditorHighlighting.prepare(.swift)
+        await SyntaxEditorHighlighting.prepare([.html, .swift, .html, .objectiveC])
+
+        await expectPreparedLanguagesRender(SyntaxLanguage.all)
+    }
+
+    @Test("SyntaxEditorHighlighting handles concurrent repeated prepare calls")
+    func highlightingPrepareHandlesConcurrentRepeatedCalls() async {
+        let requests: [[SyntaxLanguage]] = [
+            [.html],
+            [.swift, .html],
+            [.html, .swift, .html],
+            SyntaxLanguage.all,
+            [.objectiveC, .swift, .objectiveC],
+        ]
+
+        await withTaskGroup(of: Void.self) { group in
+            for request in requests {
+                group.addTask {
+                    await SyntaxEditorHighlighting.prepare(request)
+                }
+            }
+            for _ in 0..<4 {
+                group.addTask {
+                    await SyntaxEditorHighlighting.prepare(.swift)
+                }
+                group.addTask {
+                    await SyntaxEditorHighlighting.prepare(.html)
+                }
+            }
+        }
+
+        await expectPreparedLanguagesRender([.swift, .html, .objectiveC])
+    }
+
+    @Test("SyntaxEditorHighlighting handles all-language prepare racing specific work")
+    func highlightingPrepareHandlesAllLanguagePrepareRacingSpecificWork() async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await SyntaxEditorHighlighting.prepare(SyntaxLanguage.all)
+            }
+            group.addTask {
+                await SyntaxEditorHighlighting.prepare(.swift)
+            }
+            group.addTask {
+                await SyntaxEditorHighlighting.prepare([.html, .swift])
+            }
+            group.addTask {
+                _ = await SyntaxHighlighterEngine().render(
+                    source: smokeSource(for: .swift),
+                    language: .swift
+                )
+            }
+            group.addTask {
+                _ = await SyntaxHighlighterEngine().render(
+                    source: smokeSource(for: .html),
+                    language: .html
+                )
+            }
+        }
+
+        await expectPreparedLanguagesRender([.swift, .html])
+    }
+
+    @Test("SyntaxEditorHighlighting tolerates prepare while highlighting prepares setup")
+    func highlightingPrepareToleratesConcurrentHighlightingSetup() async {
+        let source = """
+        @interface ReferenceObject
+        @property(nonatomic) NSInteger count;
+        @end
+        """
+
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<4 {
+                group.addTask {
+                    await SyntaxEditorHighlighting.prepare([.objectiveC, .objectiveC])
+                }
+            }
+            group.addTask {
+                _ = await SyntaxHighlighterEngine().render(source: source, language: .objectiveC)
+            }
+            group.addTask {
+                await SyntaxEditorHighlighting.prepare(.objectiveC)
+            }
+        }
+
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .objectiveC)
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
+    }
+
+    private func expectPreparedLanguagesRender(_ languages: [SyntaxLanguage]) async {
+        let engine = SyntaxHighlighterEngine()
+        for language in languages {
+            let tokens = await engine.render(source: smokeSource(for: language), language: language)
+            #expect(tokens.isEmpty == false)
+            #expect(tokens.allSatisfy { $0.range.length > 0 })
+        }
+    }
+
+    private func smokeSource(for language: SyntaxLanguage) -> String {
+        switch language {
+        case .css:
+            "body { color: red; }"
+        case .html:
+            "<script>const answer = 42;</script><style>body { color: red; }</style>"
+        case .javascript:
+            "const answer = 42;"
+        case .json:
+            "{\"enabled\": true, \"count\": 1}"
+        case .objectiveC:
+            "@interface ReferenceObject\n@property(nonatomic) NSInteger count;\n@end"
+        case .swift:
+            "let answer = 42"
+        case .toml:
+            "title = \"Reference\"\n"
+        case .xml:
+            "<root attr=\"value\">text</root>"
+        }
+    }
+
     @Test("SyntaxHighlighterEngine emits Swift syntactic fast pass before semantic completion")
     func highlighterEmitsSwiftSyntacticFastPassBeforeSemanticCompletion() async throws {
         let source = "let value: Int = 1\n"
@@ -8018,6 +8145,39 @@ struct SyntaxHighlighterEngineTests {
             .reset(source: updatedSource, language: SyntaxLanguage.swift, revision: 3)
 
         #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps current session after cancelled reset")
+    func highlighterKeepsCurrentSessionAfterCancelledReset() async throws {
+        let source = """
+        const first = 1;
+        const second = 2;
+        """
+        let engine = SyntaxHighlighterEngine()
+        _ = await engine.reset(source: source, language: SyntaxLanguage.javascript, revision: 1)
+
+        let resetTask = Task {
+            await engine.reset(
+                source: "const stale = 0;",
+                language: SyntaxLanguage.javascript,
+                revision: 2
+            )
+        }
+        resetTask.cancel()
+        let cancelled = await resetTask.value
+        #expect(cancelled.tokens.isEmpty)
+
+        let updatedSource = source.replacingOccurrences(of: "second = 2", with: "second = 3")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incremental = await engine.update(
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(mutation),
+            revision: 3
+        )
+
+        #expect(incremental.tokens.isEmpty == false)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")

@@ -1,5 +1,11 @@
 import SyntaxEditorUI
 
+private func prepareBundledSyntaxLanguages() {
+    Task.detached {
+        await SyntaxEditorHighlighting.prepare(SyntaxLanguage.all)
+    }
+}
+
 #if canImport(UIKit)
 import UIKit
 
@@ -10,6 +16,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        prepareBundledSyntaxLanguages()
+
         if #available(iOS 26.0, *) {
             UIMainMenuSystem.shared.setBuildConfiguration(UIMainMenuSystem.Configuration()) { builder in
                 SyntaxEditorMenu.insertEditorMenu(into: builder)
@@ -78,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        prepareBundledSyntaxLanguages()
         installStandardMainMenuIfNeeded()
 
         let windowController = MiniWindowController(

@@ -75,6 +75,14 @@ let editorViewController = SyntaxEditorViewController(model: model)
 
 Supported languages are available through `SyntaxLanguage`: CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
 
+To move first-use highlighting setup out of the editor load path, prepare the languages your app expects to show:
+
+```swift
+Task.detached {
+    await SyntaxEditorHighlighting.prepare([.swift, .html])
+}
+```
+
 Set `model.drawsBackground = false` when the surrounding view should provide the editor background while syntax colors and editor decorations remain active. Use `model.fontSizeDelta`, `increaseFontSize()`, `decreaseFontSize()`, and `resetFontSize()` for Xcode-style point-size adjustments relative to the selected theme.
 
 Use `SyntaxEditorMenu` when an app wants to expose editor shortcuts in an `Editor` menu. On iOS 26 and later, install it from the app delegate's main menu configuration:
