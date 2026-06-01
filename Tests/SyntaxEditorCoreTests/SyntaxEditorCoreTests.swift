@@ -10054,6 +10054,19 @@ struct SyntaxHighlighterEngineTests {
             NSLog(@"%@", Token);
         }
 
+        void
+        splitRun(void)
+        {
+            NSString *Token = @"local";
+            NSLog(@"%@", Token);
+        }
+
+        void
+        splitParameter(NSString *Token)
+        {
+            NSLog(@"%@", Token);
+        }
+
         void commented(void)
         {
             /*
@@ -10133,7 +10146,39 @@ struct SyntaxHighlighterEngineTests {
             text: "Token",
             syntaxID: .identifierVariableSystem,
             language: .objectiveC,
-            inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);\n}\n\nvoid commented"
+            inOccurrenceOf: "}\n    NSLog(@\"%@\", Token);\n}\n\nvoid\nsplitRun"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "splitRun(void)\n{\n    NSString *Token"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);\n}\n\nvoid\nsplitParameter"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "splitParameter(NSString *Token)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);\n}\n\nvoid commented"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

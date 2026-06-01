@@ -2979,6 +2979,7 @@ private struct ObjectiveCFileSymbolIndex {
     private static func functionLikeScopes(in source: NSString) -> [(location: Int, bodyOpenLocation: Int, upperBound: Int)] {
         var scopes: [(location: Int, bodyOpenLocation: Int, upperBound: Int)] = []
         var pendingStart: Int?
+        var pendingSplitCFunctionStart: Int?
         var location = 0
 
         while location < source.length {
@@ -2996,6 +2997,17 @@ private struct ObjectiveCFileSymbolIndex {
                 range: NSRange(location: 0, length: line.length)
                ) != nil {
                 pendingStart = lineRange.location
+                pendingSplitCFunctionStart = nil
+            } else if pendingStart == nil,
+                      let splitStart = pendingSplitCFunctionStart,
+                      isObjectiveCSplitCFunctionNameLine(line) {
+                pendingStart = splitStart
+                pendingSplitCFunctionStart = nil
+            } else if pendingStart == nil,
+                      isObjectiveCSplitCFunctionReturnTypeLine(line) {
+                pendingSplitCFunctionStart = lineRange.location
+            } else if pendingStart == nil {
+                pendingSplitCFunctionStart = nil
             }
 
             guard let start = pendingStart else {
@@ -3019,6 +3031,45 @@ private struct ObjectiveCFileSymbolIndex {
         }
 
         return scopes
+    }
+
+    private static func isObjectiveCSplitCFunctionReturnTypeLine(_ line: NSString) -> Bool {
+        let trimmed = (line as String).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.hasPrefix("#"),
+              !trimmed.hasPrefix("@"),
+              !trimmed.hasPrefix("-"),
+              !trimmed.hasPrefix("+"),
+              !trimmed.hasPrefix("//"),
+              !trimmed.hasPrefix("/*"),
+              !trimmed.contains("("),
+              !trimmed.contains(")"),
+              !trimmed.contains("="),
+              !trimmed.contains(";"),
+              !trimmed.contains("{"),
+              !trimmed.contains("}") else {
+            return false
+        }
+
+        let nsTrimmed = trimmed as NSString
+        guard let firstIdentifier = identifierRegex.firstMatch(
+            in: trimmed,
+            range: NSRange(location: 0, length: nsTrimmed.length)
+        ) else {
+            return false
+        }
+        let leadingIdentifier = nsTrimmed.substring(with: firstIdentifier.range)
+        return !objectiveCStatementLeadingIdentifiers.contains(leadingIdentifier)
+    }
+
+    private static func isObjectiveCSplitCFunctionNameLine(_ line: NSString) -> Bool {
+        let string = line as String
+        let fullRange = NSRange(location: 0, length: line.length)
+        guard objectiveCSplitCFunctionNameLineRegex.firstMatch(in: string, range: fullRange) != nil,
+              firstLocation(ofAny: ["="], in: line, before: line.length) == NSNotFound else {
+            return false
+        }
+        return true
     }
 
     private static func collectParameterShadows(
@@ -4147,6 +4198,10 @@ private struct ObjectiveCFileSymbolIndex {
         pattern: #"^\s*(?:[-+]\s*\(|(?:static\s+)?[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*\()"#
     )
 
+    private static let objectiveCSplitCFunctionNameLineRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do|sizeof)\b)[A-Za-z_][A-Za-z0-9_]*\s*\([^;{}=]*\)"#
+    )
+
     private static let objectiveCLocalVariableShadowDeclarationRegex = try! NSRegularExpression(
         pattern: #"(?m)^\s*(?:static\s+)?(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do)\b)[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)"#
     )
@@ -4197,6 +4252,11 @@ private struct ObjectiveCFileSymbolIndex {
         "const", "unsigned", "signed", "short", "long", "int", "char",
         "void", "id", "BOOL", "NSInteger", "NSUInteger", "NSString",
         "NSError", "NSRange", "nullable", "nonnull", "_Nullable", "_Nonnull"
+    ]
+
+    private static let objectiveCStatementLeadingIdentifiers: Set<String> = [
+        "return", "if", "for", "while", "switch", "case", "break", "continue",
+        "goto", "else", "do", "sizeof"
     ]
 
     private static let quotedHeaderImportRegex = try! NSRegularExpression(
