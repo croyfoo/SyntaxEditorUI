@@ -2576,6 +2576,24 @@ extension SyntaxEditorUITests {
         #expect(editorView.textView.selectedRange() == NSRange(location: 4, length: 0))
     }
 
+    @Test("SyntaxEditorView inserts raw macOS tab in plain text")
+    @MainActor
+    func syntaxEditorViewMacInsertPlainTextTabAtCaret() {
+        let source = "abcde"
+        let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.plainText)
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.textView.setSelectedRange(NSRange(location: 2, length: 0))
+
+        #expect(editorView.textView(
+            editorView.textView,
+            doCommandBy: #selector(NSResponder.insertTab(_:))
+        ))
+
+        #expect(model.model.text == "ab\tcde")
+        #expect(editorView.textView.string == "ab\tcde")
+        #expect(editorView.textView.selectedRange() == NSRange(location: 3, length: 0))
+    }
+
     @Test("SyntaxEditorView accepts macOS first responder keyboard input")
     @MainActor
     func syntaxEditorViewMacAcceptsFirstResponderKeyboardInput() {

@@ -1085,8 +1085,13 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func runInsertTabCommand() -> Bool {
-        guard model.isEditable, model.language.supportsCodeEditingCommands else {
+        guard model.isEditable else {
             return false
+        }
+
+        guard model.language.supportsCodeEditingCommands else {
+            textView.insertText("\t", replacementRange: NSRange(location: NSNotFound, length: 0))
+            return true
         }
 
         let source = textView.string
