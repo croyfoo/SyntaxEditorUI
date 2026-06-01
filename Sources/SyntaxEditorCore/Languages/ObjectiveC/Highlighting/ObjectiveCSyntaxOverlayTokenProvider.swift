@@ -554,6 +554,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         var cursor = targetRange.location
         let upperBound = min(source.length, targetRange.upperBound)
         while cursor < upperBound {
+            if let nextCursor = locationAfterSkippedCommentOrLiteral(startingAt: cursor, in: source) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
             let character = source.substring(with: NSRange(location: cursor, length: 1))
             guard character == "(" else {
                 cursor += 1
@@ -569,6 +573,50 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 continue
             }
             return unionRange(targetRange, fullRange)
+        }
+        return deletedBoxedExpressionRefreshRange(around: targetRange, in: source)
+    }
+
+    private static func deletedBoxedExpressionRefreshRange(around targetRange: NSRange, in source: NSString) -> NSRange? {
+        var cursor = targetRange.location
+        let upperBound = min(source.length, targetRange.upperBound)
+        while cursor < upperBound {
+            if let nextCursor = locationAfterSkippedCommentOrLiteral(startingAt: cursor, in: source) {
+                cursor = min(nextCursor, upperBound)
+                continue
+            }
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == "@",
+               let closeParenRange = unmatchedClosingParenRange(after: cursor + 1, in: source) {
+                return unionRange(targetRange, closeParenRange)
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func unmatchedClosingParenRange(after location: Int, in source: NSString) -> NSRange? {
+        var cursor = min(max(0, location), source.length)
+        var depth = 0
+        while cursor < source.length {
+            if let nextCursor = locationAfterSkippedCommentOrLiteral(startingAt: cursor, in: source) {
+                cursor = nextCursor
+                continue
+            }
+
+            let character = source.substring(with: NSRange(location: cursor, length: 1))
+            if character == ";" || character == "{" || character == "}" {
+                return nil
+            }
+            if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                if depth == 0 {
+                    return NSRange(location: cursor, length: 1)
+                }
+                depth -= 1
+            }
+            cursor += 1
         }
         return nil
     }
@@ -626,6 +674,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let fullRange = NSRange(location: 0, length: nsLine.length)
         return structuralObjectiveCEditRegex.firstMatch(in: line, range: fullRange) != nil
             || objectiveCVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
+            || objectiveCSemanticIndexFunctionSignatureLineRegex.firstMatch(in: line, range: fullRange) != nil
+            || objectiveCSemanticIndexSplitFunctionNameLineRegex.firstMatch(in: line, range: fullRange) != nil
     }
 
     private static func objectiveCTextContainsVariableDeclarationLine(_ text: NSString) -> Bool {
@@ -1926,6 +1976,14 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static let objectiveCVariableDeclarationLineRegex = try! NSRegularExpression(
         pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do)\b)[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*(?:=|;)"#
+    )
+
+    private static let objectiveCSemanticIndexFunctionSignatureLineRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?:[-+]\s*\(|(?:static\s+)?[A-Za-z_][A-Za-z0-9_ <>,_*]*[ \t*]+[A-Za-z_][A-Za-z0-9_]*\s*\()"#
+    )
+
+    private static let objectiveCSemanticIndexSplitFunctionNameLineRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?!(?:return|if|for|while|switch|case|break|continue|goto|else|do|sizeof)\b)[A-Za-z_][A-Za-z0-9_]*\s*\([^;{}=]*\)"#
     )
 
     private static let preprocessorQuotedStringRegex = try! NSRegularExpression(
@@ -3419,28 +3477,34 @@ private struct ObjectiveCFileSymbolIndex {
             }
 
             if isInIvarBlock {
-                if trimmed.hasPrefix("}") {
+                let closeBraceRange = line.range(of: "}")
+                let ivarSegmentLength = closeBraceRange.location == NSNotFound
+                    ? line.length
+                    : closeBraceRange.location
+                appendImplementationIvarDeclarations(
+                    in: line.substring(with: NSRange(location: 0, length: ivarSegmentLength)) as NSString,
+                    lineOffset: lineRange.location,
+                    to: &declarations
+                )
+                if closeBraceRange.location != NSNotFound {
                     isInIvarBlock = false
                     awaitingIvarBlock = false
-                    continue
-                }
-                let relativeRanges = implementationIvarNameRanges(in: line)
-                guard !relativeRanges.isEmpty else {
-                    continue
-                }
-                for relativeRange in relativeRanges {
-                    let name = line.substring(with: relativeRange)
-                    declarations.append((
-                        name: name,
-                        range: NSRange(location: lineRange.location + relativeRange.location, length: relativeRange.length)
-                    ))
                 }
                 continue
             }
 
             if awaitingIvarBlock {
-                if trimmed.hasPrefix("{") {
-                    isInIvarBlock = true
+                if let openBraceRange = firstBraceRange(in: line, brace: "{") {
+                    let segmentStart = openBraceRange.upperBound
+                    let closeBraceRange = firstBraceRange(in: line, brace: "}", after: segmentStart)
+                    let segmentUpperBound = closeBraceRange?.location ?? line.length
+                    appendImplementationIvarDeclarations(
+                        in: line.substring(with: NSRange(location: segmentStart, length: segmentUpperBound - segmentStart)) as NSString,
+                        lineOffset: lineRange.location + segmentStart,
+                        to: &declarations
+                    )
+                    isInIvarBlock = closeBraceRange == nil
+                    awaitingIvarBlock = closeBraceRange == nil
                 } else if !trimmed.isEmpty && !isObjectiveCCommentOnlyLine(trimmed) {
                     awaitingIvarBlock = false
                 }
@@ -3450,8 +3514,17 @@ private struct ObjectiveCFileSymbolIndex {
             guard trimmed.hasPrefix("@implementation") else {
                 continue
             }
-            if trimmed.contains("{") {
-                isInIvarBlock = true
+            if let openBraceRange = firstBraceRange(in: line, brace: "{") {
+                let segmentStart = openBraceRange.upperBound
+                let closeBraceRange = firstBraceRange(in: line, brace: "}", after: segmentStart)
+                let segmentUpperBound = closeBraceRange?.location ?? line.length
+                appendImplementationIvarDeclarations(
+                    in: line.substring(with: NSRange(location: segmentStart, length: segmentUpperBound - segmentStart)) as NSString,
+                    lineOffset: lineRange.location + segmentStart,
+                    to: &declarations
+                )
+                isInIvarBlock = closeBraceRange == nil
+                awaitingIvarBlock = false
             } else {
                 awaitingIvarBlock = true
             }
@@ -3464,6 +3537,44 @@ private struct ObjectiveCFileSymbolIndex {
             || trimmedLine.hasPrefix("/*")
             || trimmedLine.hasPrefix("*")
             || trimmedLine.hasPrefix("*/")
+    }
+
+    private static func firstBraceRange(in line: NSString, brace: String, after location: Int = 0) -> NSRange? {
+        let start = min(max(0, location), line.length)
+        let range = line.range(of: brace, options: [], range: NSRange(location: start, length: line.length - start))
+        return range.location == NSNotFound ? nil : range
+    }
+
+    private static func appendImplementationIvarDeclarations(
+        in segment: NSString,
+        lineOffset: Int,
+        to declarations: inout [(name: String, range: NSRange)]
+    ) {
+        var statementStart = 0
+        while statementStart < segment.length {
+            let searchRange = NSRange(location: statementStart, length: segment.length - statementStart)
+            let semicolonRange = segment.range(of: ";", options: [], range: searchRange)
+            guard semicolonRange.location != NSNotFound else {
+                return
+            }
+
+            let statementRange = NSRange(
+                location: statementStart,
+                length: semicolonRange.upperBound - statementStart
+            )
+            let statement = segment.substring(with: statementRange) as NSString
+            for relativeRange in implementationIvarNameRanges(in: statement) {
+                let name = statement.substring(with: relativeRange)
+                declarations.append((
+                    name: name,
+                    range: NSRange(
+                        location: lineOffset + statementStart + relativeRange.location,
+                        length: relativeRange.length
+                    )
+                ))
+            }
+            statementStart = semicolonRange.upperBound
+        }
     }
 
     private static func implementationIvarNameRanges(in line: NSString) -> [NSRange] {

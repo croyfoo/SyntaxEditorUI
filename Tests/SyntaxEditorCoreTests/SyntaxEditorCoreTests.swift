@@ -9915,6 +9915,41 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after split parameter shadow renames")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterSplitParameterShadowRename() async throws {
+        let source = """
+        static NSString *const Token = @"global";
+
+        void run(NSString *Other)
+        {
+            NSLog(@"%@", Token);
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "Other", with: "Token")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "Token",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine strips stale Objective-C local macro call overlays after macro removal")
     func highlighterStripsStaleObjectiveCLocalMacroCallOverlaysAfterMacroRemoval() async throws {
         let source = """
@@ -10225,6 +10260,39 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine handles inline Objective-C implementation ivar blocks")
+    func highlighterHandlesInlineObjectiveCImplementationIvarBlocks() async throws {
+        let source = """
+        @implementation Sample { BOOL _flag; }
+        - (BOOL)value
+        {
+            BOOL temporary;
+            return _flag;
+        }
+        - (BOOL)other
+        {
+            return temporary;
+        }
+        @end
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "_flag",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return _flag;"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "temporary",
+            inOccurrenceOf: "return temporary;"
+        ).contains(.identifierVariable) == false)
+    }
+
     @Test("SyntaxHighlighterEngine keeps Objective-C ivars after implementation comments")
     func highlighterKeepsObjectiveCIvarsAfterImplementationComments() async throws {
         let source = """
@@ -10420,6 +10488,39 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "return @(", with: "return (")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: ")",
+            inOccurrenceOf: "count\n    );"
+        ).contains(.number) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine strips stale Objective-C boxed expression delimiters after opener deletion")
+    func highlighterStripsStaleObjectiveCBoxedExpressionDelimitersAfterOpenerDeletion() async throws {
+        let source = """
+        NSNumber *boxed(NSUInteger count)
+        {
+            return @(
+                count
+            );
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "return @(", with: "return @")
         let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
