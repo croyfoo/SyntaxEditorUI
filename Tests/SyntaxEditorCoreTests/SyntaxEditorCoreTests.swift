@@ -3902,6 +3902,35 @@ struct SyntaxHighlighterEngineTests {
         await expectPreparedLanguagesRender([.swift, .html, .objectiveC])
     }
 
+    @Test("SyntaxEditorHighlighting handles all-language prepare racing specific work")
+    func highlightingPrepareHandlesAllLanguagePrepareRacingSpecificWork() async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await SyntaxEditorHighlighting.prepare(SyntaxLanguage.all)
+            }
+            group.addTask {
+                await SyntaxEditorHighlighting.prepare(.swift)
+            }
+            group.addTask {
+                await SyntaxEditorHighlighting.prepare([.html, .swift])
+            }
+            group.addTask {
+                _ = await SyntaxHighlighterEngine().render(
+                    source: smokeSource(for: .swift),
+                    language: .swift
+                )
+            }
+            group.addTask {
+                _ = await SyntaxHighlighterEngine().render(
+                    source: smokeSource(for: .html),
+                    language: .html
+                )
+            }
+        }
+
+        await expectPreparedLanguagesRender([.swift, .html])
+    }
+
     @Test("SyntaxEditorHighlighting tolerates prepare while highlighting prepares setup")
     func highlightingPrepareToleratesConcurrentHighlightingSetup() async {
         let source = """

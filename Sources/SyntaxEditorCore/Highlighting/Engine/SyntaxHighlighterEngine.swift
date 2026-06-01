@@ -213,11 +213,14 @@ package extension SyntaxHighlighting {
 
 public enum SyntaxEditorHighlighting {
     public static func prepare(_ language: SyntaxLanguage) async {
-        await LanguageConfigurationRegistry.shared.prepare([language])
+        _ = await LanguageConfigurationRegistry.shared.highlightingSetup(for: language)
     }
 
     public static func prepare<S: Sequence>(_ languages: S) async where S.Element == SyntaxLanguage {
-        await LanguageConfigurationRegistry.shared.prepare(uniqueLanguages(languages))
+        let registry = LanguageConfigurationRegistry.shared
+        for language in uniqueLanguages(languages) {
+            _ = await registry.highlightingSetup(for: language)
+        }
     }
 
     private static func uniqueLanguages<S: Sequence>(_ languages: S) -> [SyntaxLanguage]
@@ -406,6 +409,20 @@ private extension HighlightingSetup {
 private enum CachedLanguageConfiguration {
     case resolved(LanguageConfiguration)
     case missing
+}
+
+private enum CachedHighlightingSetup: Sendable {
+    case resolved(HighlightingSetup)
+    case missing
+
+    var setup: HighlightingSetup? {
+        switch self {
+        case .resolved(let setup):
+            setup
+        case .missing:
+            nil
+        }
+    }
 }
 
 private final class SyntaxHighlightSession {
@@ -1931,28 +1948,37 @@ private actor LanguageConfigurationRegistry {
     static let shared = LanguageConfigurationRegistry()
 
     private let resolver = LanguageConfigurationResolver.shared
-    private var layeredSetupCache: [SyntaxLanguage: HighlightingSetup?] = [:]
+    private var layeredSetupCache: [SyntaxLanguage: CachedHighlightingSetup] = [:]
+    private var setupTasks: [SyntaxLanguage: Task<HighlightingSetup?, Never>] = [:]
 
-    func highlightingSetup(for language: SyntaxLanguage) -> HighlightingSetup? {
+    func highlightingSetup(for language: SyntaxLanguage) async -> HighlightingSetup? {
         if let cached = layeredSetupCache[language] {
-            return cached
+            return cached.setup
         }
 
-        guard let setup = HighlightingSetup.resolved(for: language, resolver: resolver) else {
-            layeredSetupCache[language] = nil
-            return nil
+        if let task = setupTasks[language] {
+            return await task.value
         }
-        layeredSetupCache[language] = setup
+
+        let resolver = resolver
+        let task = Task.detached {
+            HighlightingSetup.resolved(for: language, resolver: resolver)
+        }
+        setupTasks[language] = task
+
+        let setup = await task.value
+        setupTasks[language] = nil
+        cache(setup, for: language)
         return setup
     }
 
-    func prepare(_ languages: [SyntaxLanguage]) {
-        for language in languages {
-            guard layeredSetupCache.keys.contains(language) == false else {
-                continue
-            }
-            _ = highlightingSetup(for: language)
+    private func cache(_ setup: HighlightingSetup?, for language: SyntaxLanguage) {
+        guard let setup else {
+            layeredSetupCache[language] = .missing
+            return
         }
+
+        layeredSetupCache[language] = .resolved(setup)
     }
 }
 
