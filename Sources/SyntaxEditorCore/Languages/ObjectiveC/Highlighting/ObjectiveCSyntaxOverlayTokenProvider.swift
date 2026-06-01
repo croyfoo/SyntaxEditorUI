@@ -418,6 +418,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 continue
             }
             let text = source.substring(with: range)
+            guard !preprocessorObjectiveCMacroIdentifiers.contains(text) else {
+                continue
+            }
             guard objectiveCTypeIdentifierShouldStayPlain(range, text: text, in: source) else {
                 continue
             }

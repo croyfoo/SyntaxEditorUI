@@ -8560,6 +8560,14 @@ struct SyntaxHighlighterEngineTests {
         _ = try effectiveSemanticSnapshot(
             in: tokens,
             source: source,
+            text: "NS_SWIFT_NAME",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "@property (nonatomic, copy) NSString *renamedTitle NS_SWIFT_NAME(displayTitle);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
             text: "refinedTitle",
             syntaxID: .plain,
             language: .objectiveC,
