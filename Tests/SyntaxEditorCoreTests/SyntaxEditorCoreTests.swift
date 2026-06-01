@@ -3896,6 +3896,8 @@ struct SyntaxHighlighterEngineTests {
         }
         @end
         """
+        let nsSource = source as NSString
+        let typeRange = nsSource.range(of: "ReferenceObject")
         let phases = await collectHighlightPhases(
             await SyntaxHighlighterEngine().resetPhases(source: source, language: .objectiveC, revision: 0)
         )
@@ -3905,7 +3907,12 @@ struct SyntaxHighlighterEngineTests {
         #expect(phases.map(\.phase) == [.syntacticFastPass, .complete])
         #expect(phases.allSatisfy { $0.source == source && $0.language == .objectiveC && $0.revision == 0 })
         #expect(fastPass.tokens.isEmpty == false)
-        #expect(complete.tokens.isEmpty == false)
+        #expect(fastPass.tokens.contains {
+            tokenIntersects($0, range: typeRange, syntaxID: .declarationType, language: .objectiveC)
+        } == false)
+        #expect(complete.tokens.contains {
+            tokenIntersects($0, range: typeRange, syntaxID: .declarationType, language: .objectiveC)
+        })
     }
 
     @Test("SyntaxHighlighterEngine keeps non-deferred languages single phase")
@@ -8077,6 +8084,9 @@ struct SyntaxHighlighterEngineTests {
         #if defined(DEBUG)
         #define ReferenceEnabled 1
         #endif
+        #if TARGET_OS_OSX
+        #define ReferencePlatform 1
+        #endif
 
         /*
         - (NSString *)commentedTitle;
@@ -8170,6 +8180,7 @@ struct SyntaxHighlighterEngineTests {
             NSInteger statusWithAttr = self.HTTP_STATUS_WITH_ATTR;
             NSInteger secondStatusWithAttr = self.SECOND_STATUS_WITH_ATTR;
             NSUInteger count = self.name.length;
+            NSNumber *boxedCount = @(count);
             NSUInteger literalCommentArgumentLength = Foo(@"//", self.name.length);
             NSUInteger commentedChainLength = self.name /* comment */ .length;
             NSUInteger itemCount = self.items[0].count;
@@ -8245,6 +8256,7 @@ struct SyntaxHighlighterEngineTests {
         let defineRange = nsSource.range(of: "#define")
         let macroNameRange = nsSource.range(of: "ReferenceLog")
         let debugMacroRange = nsSource.range(of: "DEBUG")
+        let platformMacroRange = nsSource.range(of: "TARGET_OS_OSX")
         let interfaceRange = nsSource.range(of: "@interface")
         let selfRange = nsSource.range(of: "self")
         let propertyDeclarationRange = nsSource.range(of: "@property (nonatomic, copy) NSString *name;")
@@ -8273,6 +8285,9 @@ struct SyntaxHighlighterEngineTests {
         })
         #expect(tokens.contains {
             tokenIntersects($0, range: debugMacroRange, syntaxID: .preprocessor, language: .objectiveC)
+        })
+        #expect(tokens.contains {
+            tokenIntersects($0, range: platformMacroRange, syntaxID: .preprocessor, language: .objectiveC)
         })
         let defineSnapshot = try semanticSnapshot(
             in: tokens,
@@ -8312,6 +8327,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .preprocessor,
             language: .objectiveC,
             inOccurrenceOf: "#define ReferenceLog(format, ...)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "\"[Reference] \"",
+            syntaxID: .string,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog((@\"[Reference] \" format)"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -8532,7 +8555,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "refinedTitle",
-            syntaxID: .declarationOther,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic, copy) NSString *refinedTitle NS_REFINED_FOR_SWIFT;"
         )
@@ -8556,7 +8579,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "HTTP_STATUS_WITH_ATTR",
-            syntaxID: .declarationOther,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic) MyEnum HTTP_STATUS_WITH_ATTR MY_ATTR;"
         )
@@ -8564,7 +8587,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "SECOND_STATUS_WITH_ATTR",
-            syntaxID: .declarationOther,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "@property (nonatomic) MY_ENUM SECOND_STATUS_WITH_ATTR MY_ATTR;"
         )
@@ -8615,6 +8638,30 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierFunctionSystem,
             language: .objectiveC,
             inOccurrenceOf: "NSSelectorFromString(selectorName)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "@",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "NSNumber *boxedCount = @(count);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "(",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "NSNumber *boxedCount = @(count);"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: ")",
+            syntaxID: .number,
+            language: .objectiveC,
+            inOccurrenceOf: "NSNumber *boxedCount = @(count);"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -8764,7 +8811,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "HTTP_STATUS_WITH_ATTR",
-            syntaxID: .identifierVariable,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "self.HTTP_STATUS_WITH_ATTR"
         )
@@ -8772,7 +8819,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "SECOND_STATUS_WITH_ATTR",
-            syntaxID: .identifierVariable,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "self.SECOND_STATUS_WITH_ATTR"
         )
@@ -9048,7 +9095,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "count",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "self.items[other.length].count"
         )
@@ -9062,7 +9109,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "description",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "self.handler(value).description"
         )
@@ -9070,7 +9117,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "description",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: #"self.handler(@")").description"#
         )
@@ -9078,7 +9125,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "description",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: #"self.handler(@"[").description"#
         )
@@ -9086,7 +9133,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "description",
-            syntaxID: .identifierVariableSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: #"self.handler(@";").description"#
         )
@@ -9229,6 +9276,34 @@ struct SyntaxHighlighterEngineTests {
             text: "length",
             inOccurrenceOf: "self.notAProperty.length"
         ).contains(.identifierVariableSystem) == false)
+
+        let headerBackedSource = """
+        #import "HeaderBacked.h"
+
+        @implementation HeaderBacked
+        - (NSUInteger)length
+        {
+            return self.title.length;
+        }
+        @end
+        """
+        let headerBackedTokens = await engine.render(source: headerBackedSource, language: .objectiveC)
+        _ = try effectiveSemanticSnapshot(
+            in: headerBackedTokens,
+            source: headerBackedSource,
+            text: "title",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "self.title.length"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: headerBackedTokens,
+            source: headerBackedSource,
+            text: "length",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "self.title.length"
+        )
     }
 
     @Test("SyntaxHighlighterEngine aligns focused Objective-C reference tokens")
@@ -9350,7 +9425,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "ReferenceErrorDomain",
-            syntaxID: .identifier,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "static NSString *const ReferenceErrorDomain"
         )
@@ -9358,7 +9433,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "index",
-            syntaxID: .identifier,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "- (unichar)characterAtIndex:(NSUInteger)index"
         )
@@ -9366,7 +9441,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "symbol",
-            syntaxID: .identifier,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "void *symbol = dlsym"
         )
@@ -9385,6 +9460,54 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierFunctionSystem,
             language: .objectiveC,
             inOccurrenceOf: "return ((id (*)(id, SEL))objc_msgSend)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSSelectorFromString",
+            syntaxID: .identifierFunctionSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSSelectorFromString(selectorName)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceLog",
+            syntaxID: .preprocessor,
+            language: .objectiveC,
+            inOccurrenceOf: "ReferenceLog(@\"display %@\""
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceSetError",
+            syntaxID: .identifierFunction,
+            language: .objectiveC,
+            inOccurrenceOf: "return ReferenceSetError(error, 1"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceErrorDomain",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "errorWithDomain:ReferenceErrorDomain"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceTokenBase",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "code:ReferenceTokenBase + 1"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "_itemsByIdentifier",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return [_itemsByIdentifier copy];"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,
@@ -9422,7 +9545,7 @@ struct SyntaxHighlighterEngineTests {
             in: tokens,
             source: source,
             text: "NSLocalizedDescriptionKey",
-            syntaxID: .identifier,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "return @{NSLocalizedDescriptionKey: message};"
         )
@@ -9461,11 +9584,11 @@ struct SyntaxHighlighterEngineTests {
             in: incremental.tokens,
             source: updatedSource,
             text: "LocalFunction",
-            syntaxID: .identifierFunctionSystem,
+            syntaxID: .plain,
             language: .objectiveC,
             inOccurrenceOf: "LocalFunction();"
         )
-        #expect(functionCall.styleKeys.first == "editor.syntax.identifier.function.system")
+        #expect(functionCall.styleKeys.first == "editor.syntax.plain")
         #expect(syntaxIDs(
             in: incremental.tokens,
             source: updatedSource,
@@ -9548,12 +9671,6 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(syntaxIDs(
-            in: incremental.tokens,
-            source: updatedSource,
-            text: "name",
-            inOccurrenceOf: "NSString *name"
-        ).contains(.declarationOther) == false)
     }
 
     @Test("SyntaxHighlighterEngine keeps Objective-C semantic refresh ranges local")

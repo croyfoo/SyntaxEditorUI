@@ -51,6 +51,7 @@ struct SyntaxOverlaySyntaxIDMask: OptionSet {
     static let identifierFunctionSystem = Self(rawValue: 1 << 4)
     static let declarationType = Self(rawValue: 1 << 5)
     static let declarationOther = Self(rawValue: 1 << 6)
+    static let keyword = Self(rawValue: 1 << 7)
 
     init(rawValue: UInt32) {
         self.rawValue = rawValue
@@ -72,6 +73,8 @@ struct SyntaxOverlaySyntaxIDMask: OptionSet {
             self = .declarationType
         case .declarationOther:
             self = .declarationOther
+        case .keyword:
+            self = .keyword
         default:
             self = []
         }
