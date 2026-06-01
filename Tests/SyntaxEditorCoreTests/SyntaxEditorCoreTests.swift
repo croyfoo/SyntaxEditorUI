@@ -8165,6 +8165,7 @@ struct SyntaxHighlighterEngineTests {
             id (^block)(id) = self.handler;
             id (^qualifiedBlock)(id) = self.qualifiedHandler;
             int (*callbackValue)(int) = self.callback;
+            NSInteger callbackResult = (*callbackValue)(1);
             int (**doubleCallbackValue)(int) = self.doubleCallback;
             int (*nullableCallbackValue)(int) = self.nullableCallback;
             NSString *handlerDescription = self.handler.description;
@@ -8694,6 +8695,14 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "self.callback"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "callbackValue",
+            syntaxID: .plain,
+            language: .objectiveC,
+            inOccurrenceOf: "(*callbackValue)(1)"
         )
         _ = try effectiveSemanticSnapshot(
             in: tokens,

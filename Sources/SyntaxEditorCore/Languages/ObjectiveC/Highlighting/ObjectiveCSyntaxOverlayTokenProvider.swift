@@ -305,7 +305,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 continue
             }
 
-            if isObjectiveCFunctionPointerCastCalleeName(token.range, in: source) {
+            if knownObjectiveCFunctionPointerCastCallees.contains(text),
+               isObjectiveCFunctionPointerCastCalleeName(token.range, in: source) {
                 overlayTokens.append(canonicalToken(range: token.range, syntaxID: .identifierFunctionSystem))
                 continue
             }
@@ -1928,6 +1929,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         "sel_getName",
         "strcmp",
         "strstr",
+    ]
+
+    private static let knownObjectiveCFunctionPointerCastCallees: Set<String> = [
+        "objc_msgSend",
     ]
 
     private static func isObjectiveCIdentifierCharacter(_ character: Character) -> Bool {

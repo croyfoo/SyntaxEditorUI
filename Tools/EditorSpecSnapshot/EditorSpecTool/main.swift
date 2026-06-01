@@ -656,7 +656,7 @@ private enum EditorSpecTool {
                 }
         }
 
-        if options.language == .css {
+        if options.language == .css || options.language == .objectiveC {
             let classificationTokens = try xcodeClassificationTokens(
                 options: options,
                 source: source,
