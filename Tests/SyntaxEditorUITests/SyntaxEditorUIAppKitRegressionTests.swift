@@ -1051,23 +1051,24 @@ extension SyntaxEditorUITests {
         #expect(
             syntaxEditorUITestColorsEqual(
                 macEditorPermanentForegroundColor(editorView, at: deferredLocation),
-                syntaxEditorDenseHighlightColor(in: theme, at: deferredLocation)
+                theme.baseForeground
             )
         )
     }
 
-    @Test("SyntaxEditorView draws macOS fragment colors without rendering attribute application")
+    @Test("SyntaxEditorView draws macOS syntax foregrounds through TextKit fragments")
     @MainActor
-    func syntaxEditorViewMacDrawsFragmentColorsWithoutRenderingAttributeApplication() async throws {
-        let source = "let value = 1"
+    func syntaxEditorViewMacDrawsSyntaxForegroundsThroughTextKitFragments() async throws {
+        let source = "let let let let let let let"
         let theme = syntaxEditorUITestColorTheme(
-            baseForeground: syntaxEditorUITestColor(hex: 0x102030),
-            keyword: syntaxEditorUITestColor(hex: 0x703050)
+            baseForeground: syntaxEditorUITestColor(hex: 0x0000FF),
+            keyword: syntaxEditorUITestColor(hex: 0xFF0000),
+            background: syntaxEditorUITestColor(hex: 0x000000)
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
                 SyntaxHighlightToken(
-                    range: NSRange(location: 0, length: 3),
+                    range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ]
@@ -1075,29 +1076,74 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(
             text: source,
             language: SyntaxLanguage.swift,
-            colorTheme: theme
+            colorTheme: theme,
+            fontSizeDelta: 8
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
-        layoutMacEditorView(editorView)
+        layoutMacEditorView(editorView, width: 320, height: 140)
 
         await editorView.waitForPendingHighlightForTesting()
         let fragmentView = try #require(macEditorVisibleFragmentViews(editorView).first)
         let styleEpoch = editorView.syntaxForegroundMaterializationCountForTesting
-        let renderingAttributeApplicationCount = editorView
-            .syntaxRenderingAttributeApplicationCountForTesting
 
-        let image = NSImage(size: fragmentView.bounds.size)
-        image.lockFocus()
-        fragmentView.draw(fragmentView.bounds)
-        image.unlockFocus()
+        let renderedKeywordColor = macEditorRenderedFragmentContainsDominantColor(
+            fragmentView,
+            targetColor: theme.keyword,
+            backgroundColor: theme.background
+        )
 
         #expect(editorView.syntaxForegroundMaterializationCountForTesting == styleEpoch)
+        #expect(renderedKeywordColor)
         #expect(
-            editorView.syntaxRenderingAttributeApplicationCountForTesting
-                == renderingAttributeApplicationCount
+            syntaxEditorUITestColorsEqual(
+                macEditorPermanentForegroundColor(editorView, at: 0),
+                theme.baseForeground
+            )
         )
-        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
-        #expect(syntaxEditorUITestColorsEqual(macEditorPermanentForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
+    @Test("SyntaxEditorView clips macOS TextKit fragment drawing to dirty lines")
+    @MainActor
+    func syntaxEditorViewMacClipsTextKitFragmentDrawingToDirtyLines() async throws {
+        let source = Array(repeating: "let wrappedValue = wrappedValue", count: 12).joined(separator: " ")
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x0000FF),
+            keyword: syntaxEditorUITestColor(hex: 0xFF0000),
+            background: syntaxEditorUITestColor(hex: 0x000000)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: source.utf16.count),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: true,
+            colorTheme: theme,
+            fontSizeDelta: 4
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        layoutMacEditorView(editorView, width: 180, height: 160)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let fragmentView = try #require(macEditorVisibleFragmentViews(editorView).first)
+        let layoutFragment = try #require(fragmentView.layoutFragment as? SyntaxEditorTextLayoutFragment)
+        #expect(layoutFragment.textLineFragments.count > 3)
+
+        let initialDrawCount = layoutFragment.lineFragmentDrawCountForTesting
+        macEditorDrawFragment(
+            fragmentView,
+            dirtyRect: NSRect(x: 0, y: 0, width: fragmentView.bounds.width, height: 4),
+            backgroundColor: theme.background
+        )
+        let drawnLineCount = layoutFragment.lineFragmentDrawCountForTesting - initialDrawCount
+
+        #expect(drawnLineCount > 0)
+        #expect(drawnLineCount < layoutFragment.textLineFragments.count)
     }
 
     @Test("SyntaxEditorView replaces stale macOS syntax colors after new highlight epochs")
@@ -1134,7 +1180,12 @@ extension SyntaxEditorUITests {
         editorView.synchronizeDocumentForTesting()
 
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
-        #expect(syntaxEditorUITestColorsEqual(macEditorPermanentForegroundColor(editorView, at: 0), updatedTheme.keyword))
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorPermanentForegroundColor(editorView, at: 0),
+                updatedTheme.baseForeground
+            )
+        )
     }
 
     @Test("SyntaxEditorView keeps macOS syntax colors while typing awaits highlight")

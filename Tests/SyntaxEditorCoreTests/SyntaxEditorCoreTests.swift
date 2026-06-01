@@ -6309,6 +6309,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
         _ = try effectiveSemanticSnapshot(
             in: incremental.tokens,
             source: updatedSource,
@@ -10203,6 +10204,32 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine ignores Objective-C declaration-like text inside comments and strings")
+    func highlighterIgnoresObjectiveCDeclarationLikeTextInsideCommentsAndStrings() async throws {
+        let source = """
+        static NSString *const Token = @"global";
+
+        void run(void)
+        {
+            /*
+            NSString *Token = @"local";
+            */
+            NSString *text = @"NSString *Token = @\\"local\\";";
+            NSLog(@"%@", Token);
+        }
+        """
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "Token",
+            syntaxID: .identifierVariableSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSLog(@\"%@\", Token);"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after split parameter shadow renames")
     func highlighterRebuildsObjectiveCSemanticIndexAfterSplitParameterShadowRename() async throws {
         let source = """
@@ -10752,8 +10779,8 @@ struct SyntaxHighlighterEngineTests {
         ).contains(.identifierVariable) == false)
     }
 
-    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after source-length edits")
-    func highlighterRebuildsObjectiveCSemanticIndexAfterSourceLengthEdits() async throws {
+    @Test("SyntaxHighlighterEngine keeps Objective-C semantic overlays after source-length edits")
+    func highlighterKeepsObjectiveCSemanticOverlaysAfterSourceLengthEdits() async throws {
         let source = """
         @interface Sample : NSObject
         @property(nonatomic, copy) NSString *name;
@@ -10789,6 +10816,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
         _ = try effectiveSemanticSnapshot(
             in: incremental.tokens,
             source: updatedSource,

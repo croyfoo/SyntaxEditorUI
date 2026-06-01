@@ -1175,7 +1175,7 @@ public final class SyntaxEditorView: NSScrollView {
         pendingHighlightApplication = nil
 
         let highlighter = self.highlighter
-        highlightTask = Task(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation] in
+        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation] in
             await Task.yield()
             guard !Task.isCancelled else {
                 return
@@ -1535,8 +1535,11 @@ public final class SyntaxEditorView: NSScrollView {
         ) else {
             return
         }
-        TextEditingTransaction.apply(transaction.operations, to: textSystem.textContentStorage)
+        applySyntaxHighlightStyleOperations(
+            transaction.operations
+        )
         textSystem.styleStore.commit(transaction)
+        invalidateSyntaxRenderingAttributes(for: targetRange)
     }
 
     private func installSyntaxHighlightRenderingIncrementally(
@@ -1556,14 +1559,47 @@ public final class SyntaxEditorView: NSScrollView {
         ) else {
             return false
         }
-        let didApply = await TextEditingTransaction.applyIncrementally(
+        let didApply = await applySyntaxHighlightStyleOperationsIncrementally(
             transaction.operations,
-            to: textSystem.textContentStorage,
             shouldContinue: { model.revision == expectedRevision }
         )
         guard didApply else { return false }
         textSystem.styleStore.commit(transaction)
+        invalidateSyntaxRenderingAttributes(for: targetRange)
         return true
+    }
+
+    private func applySyntaxHighlightStyleOperations(
+        _ operations: HighlightStyleOperations
+    ) {
+        guard !operations.isEmpty else { return }
+
+        TextEditingTransaction.apply(
+            HighlightStyleOperations(colorOperations: [], fontOperations: operations.fontOperations),
+            to: textSystem.textContentStorage
+        )
+    }
+
+    private func applySyntaxHighlightStyleOperationsIncrementally(
+        _ operations: HighlightStyleOperations,
+        shouldContinue: @MainActor () -> Bool
+    ) async -> Bool {
+        guard !operations.isEmpty else { return true }
+
+        let fontOperations = HighlightStyleOperations(
+            colorOperations: [],
+            fontOperations: operations.fontOperations
+        )
+        let didApplyFonts = await TextEditingTransaction.applyIncrementally(
+            fontOperations,
+            to: textSystem.textContentStorage,
+            shouldContinue: shouldContinue
+        )
+        return didApplyFonts && !Task.isCancelled && shouldContinue()
+    }
+
+    private func invalidateSyntaxRenderingAttributes(for range: NSRange) {
+        textView.invalidateSyntaxRenderingAttributes(for: [range])
     }
 
     private func syntaxHighlightTransaction(
@@ -2004,7 +2040,8 @@ public final class SyntaxEditorView: NSScrollView {
                 baseForeground: baseForeground,
                 baseFont: base[.font] as? NSFont
             )
-            TextEditingTransaction.apply(operations, to: textSystem.textContentStorage)
+            applySyntaxHighlightStyleOperations(operations)
+            invalidateSyntaxRenderingAttributes(for: NSRange(location: 0, length: textStorage.length))
         }
         invalidateVisibleTextDisplay()
     }
@@ -2033,7 +2070,8 @@ public final class SyntaxEditorView: NSScrollView {
                 baseForeground: baseForeground,
                 baseFont: base[.font] as? NSFont
             )
-            TextEditingTransaction.apply(mutationOperations, to: textSystem.textContentStorage)
+            applySyntaxHighlightStyleOperations(mutationOperations)
+            invalidateSyntaxRenderingAttributes(for: invalidatedRange)
         }
         textView.setNeedsDisplayForTextRanges([invalidatedRange])
     }

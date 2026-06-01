@@ -1643,7 +1643,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         )
 
         let highlighter = self.highlighter
-        highlightTask = Task(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation] in
+        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation] in
             await Task.yield()
             guard !Task.isCancelled else {
                 return

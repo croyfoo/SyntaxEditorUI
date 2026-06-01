@@ -6,9 +6,7 @@ private typealias ObjectiveCTokenKey = SyntaxOverlayTokenKey
 private typealias ObjectiveCSyntaxIDMask = SyntaxOverlaySyntaxIDMask
 
 struct ObjectiveCSemanticOverlayState: SyntaxOverlayState {
-    fileprivate var index: ObjectiveCFileSymbolIndex?
-    fileprivate var indexedSourceUTF16Length: Int
-    fileprivate var indexedDeclarationFingerprint: Int
+    fileprivate var index: ObjectiveCSemanticIndex?
 }
 
 typealias ObjectiveCSemanticOverlayResult = SyntaxOverlayResult
@@ -17,8 +15,115 @@ private struct ObjectiveCOverlayPreparation {
     let baseTokensForIndex: [SyntaxHighlightToken]
     let outputBaseTokens: [SyntaxHighlightToken]
     let preservedOverlayTokens: [SyntaxHighlightToken]
-    let nonCodeRanges: [NSRange]
+    let nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex
     let tokenIndex: ObjectiveCTokenIndex
+}
+
+private struct ObjectiveCSemanticIndex {
+    let fileSymbols: ObjectiveCFileSymbolIndex
+    let sourceUTF16Length: Int
+    let structuralFingerprint: Int
+
+    func shifted(
+        by mutation: SyntaxHighlightMutation,
+        sourceUTF16Length nextSourceUTF16Length: Int
+    ) -> ObjectiveCSemanticIndex? {
+        guard let shiftedSymbols = fileSymbols.shifted(
+            by: mutation,
+            sourceUTF16Length: nextSourceUTF16Length
+        ) else {
+            return nil
+        }
+        return ObjectiveCSemanticIndex(
+            fileSymbols: shiftedSymbols,
+            sourceUTF16Length: nextSourceUTF16Length,
+            structuralFingerprint: structuralFingerprint
+        )
+    }
+}
+
+private struct ObjectiveCNonCodeRangeIndex {
+    let ranges: [NSRange]
+
+    init(ranges: [NSRange]) {
+        self.ranges = Self.normalized(ranges)
+    }
+
+    init(tokens: [SyntaxHighlightToken], sourceLength: Int) {
+        self.init(ranges: tokens.compactMap { token -> NSRange? in
+            guard token.language == .objectiveC || token.language == nil else {
+                return nil
+            }
+            switch token.syntaxID {
+            case .comment, .string, .character:
+                return SyntaxEditorRangeUtilities.clampedRange(token.range, utf16Length: sourceLength)
+            default:
+                return nil
+            }
+        })
+    }
+
+    func intersects(_ range: NSRange) -> Bool {
+        guard range.length > 0 else { return false }
+        let index = lowerBoundForRangeEnding(after: range.location)
+        guard index < ranges.count else { return false }
+        return SyntaxEditorRangeUtilities.intersection(of: range, and: ranges[index]).length > 0
+    }
+
+    func contains(_ location: Int) -> Bool {
+        guard location >= 0 else { return false }
+        let index = lowerBoundForRangeEnding(after: location)
+        guard index < ranges.count else { return false }
+        let range = ranges[index]
+        return range.location <= location && location < range.upperBound
+    }
+
+    func upperBoundOfRange(containing location: Int) -> Int? {
+        guard location >= 0 else { return nil }
+        let index = lowerBoundForRangeEnding(after: location)
+        guard index < ranges.count else { return nil }
+        let range = ranges[index]
+        guard range.location <= location && location < range.upperBound else { return nil }
+        return range.upperBound
+    }
+
+    private func lowerBoundForRangeEnding(after location: Int) -> Int {
+        var lower = 0
+        var upper = ranges.count
+        while lower < upper {
+            let midpoint = (lower + upper) / 2
+            if ranges[midpoint].upperBound <= location {
+                lower = midpoint + 1
+            } else {
+                upper = midpoint
+            }
+        }
+        return lower
+    }
+
+    private static func normalized(_ ranges: [NSRange]) -> [NSRange] {
+        let sortedRanges = ranges
+            .filter { $0.length > 0 }
+            .sorted {
+                if $0.location != $1.location {
+                    return $0.location < $1.location
+                }
+                return $0.length < $1.length
+            }
+        guard var current = sortedRanges.first else { return [] }
+        var result: [NSRange] = []
+        for range in sortedRanges.dropFirst() {
+            if range.location <= current.upperBound {
+                let upperBound = max(current.upperBound, range.upperBound)
+                current = NSRange(location: current.location, length: upperBound - current.location)
+            } else {
+                result.append(current)
+                current = range
+            }
+        }
+        result.append(current)
+        return result
+    }
 }
 
 private struct ObjectiveCIndexedToken {
@@ -136,6 +241,24 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         refreshRange: NSRange? = nil,
         state: inout ObjectiveCSemanticOverlayState?
     ) -> ObjectiveCSemanticOverlayResult {
+        mergingOverlayResult(
+            tokens: tokens,
+            source: source,
+            rootNode: rootNode,
+            refreshRange: refreshRange,
+            mutation: nil,
+            state: &state
+        )
+    }
+
+    static func mergingOverlayResult(
+        tokens: [SyntaxHighlightToken],
+        source: String,
+        rootNode: Node? = nil,
+        refreshRange: NSRange? = nil,
+        mutation: SyntaxHighlightMutation?,
+        state: inout ObjectiveCSemanticOverlayState?
+    ) -> ObjectiveCSemanticOverlayResult {
         let nsSource = source as NSString
         guard nsSource.length > 0 else {
             state = nil
@@ -149,27 +272,47 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let proposedTargetRange = refreshRange.map {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
-        let previousState = state
-        let declarationFingerprint = semanticIndexFingerprint(in: nsSource)
-        let declarationFingerprintChanged = previousState.map {
-            $0.indexedDeclarationFingerprint != declarationFingerprint
+        let previousIndex = state?.index
+        let shouldCheckStructuralFingerprint = mutation.map {
+            objectiveCMutationCanChangeSemanticSignature($0, in: nsSource)
         } ?? true
+        let structuralFingerprint = if let previousIndex, !shouldCheckStructuralFingerprint {
+            previousIndex.structuralFingerprint
+        } else {
+            semanticIndexFingerprint(in: nsSource)
+        }
+        let structuralFingerprintChanged = shouldCheckStructuralFingerprint
+            ? (previousIndex.map { $0.structuralFingerprint != structuralFingerprint } ?? true)
+            : false
+        let localStructuralTargetRange = if structuralFingerprintChanged,
+                                            let mutation,
+                                            previousIndex != nil {
+            objectiveCLocalStructuralRefreshRange(for: mutation, in: nsSource)
+        } else {
+            nil as NSRange?
+        }
         let targetRange = proposedTargetRange == nil
-            || previousState?.index == nil
-            || declarationFingerprintChanged
+            || previousIndex == nil
+            || (structuralFingerprintChanged && localStructuralTargetRange == nil)
             ? nil
-            : proposedTargetRange
+            : (localStructuralTargetRange ?? proposedTargetRange)
         let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
         let shouldRebuildIndex = proposedTargetRange == nil
-            || previousState?.index == nil
-            || previousState?.indexedSourceUTF16Length != nsSource.length
-            || declarationFingerprintChanged
-        let index: ObjectiveCFileSymbolIndex
-        var rebuiltState: ObjectiveCSemanticOverlayState?
-        if shouldRebuildIndex {
+            || previousIndex == nil
+            || structuralFingerprintChanged
+            || (previousIndex?.sourceUTF16Length != nsSource.length && mutation == nil)
+        let shiftedPreviousIndex = mutation.flatMap { mutation in
+            previousIndex?.shifted(
+                by: mutation,
+                sourceUTF16Length: nsSource.length
+            )
+        }
+        let semanticIndex: ObjectiveCSemanticIndex
+        if shouldRebuildIndex || (mutation != nil && shiftedPreviousIndex == nil) {
             guard let rebuiltIndex = ObjectiveCFileSymbolIndex(
                 source: nsSource,
                 tokenIndex: preparation.tokenIndex,
+                nonCodeRangeIndex: preparation.nonCodeRangeIndex,
                 rootNode: rootNode,
                 allowsCancellation: true
             ) else {
@@ -179,14 +322,15 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                     isCancelled: true
                 )
             }
-            index = rebuiltIndex
-            rebuiltState = ObjectiveCSemanticOverlayState(
-                index: rebuiltIndex,
-                indexedSourceUTF16Length: nsSource.length,
-                indexedDeclarationFingerprint: declarationFingerprint
+            semanticIndex = ObjectiveCSemanticIndex(
+                fileSymbols: rebuiltIndex,
+                sourceUTF16Length: nsSource.length,
+                structuralFingerprint: structuralFingerprint
             )
+        } else if let shiftedIndex = shiftedPreviousIndex {
+            semanticIndex = shiftedIndex
         } else {
-            index = previousState!.index!
+            semanticIndex = previousIndex!
         }
 
         guard !Task.isCancelled else {
@@ -200,26 +344,32 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let overlayTokens = semanticTokens(
             from: preparation.baseTokensForIndex,
             source: nsSource,
-            index: index,
+            index: semanticIndex.fileSymbols,
             targetRange: targetRange
         )
             + objectiveCMacroTokens(
                 in: nsSource,
-                nonCodeRanges: preparation.nonCodeRanges,
+                nonCodeRanges: preparation.nonCodeRangeIndex.ranges,
                 targetRange: targetRange
             )
             + preprocessorStringTokens(in: nsSource, tokens: preparation.baseTokensForIndex, targetRange: targetRange)
-            + boxedExpressionDelimiterTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
-            + boxedBooleanLiteralTokens(in: nsSource, nonCodeRanges: preparation.nonCodeRanges, targetRange: targetRange)
+            + boxedExpressionDelimiterTokens(
+                in: nsSource,
+                nonCodeRanges: preparation.nonCodeRangeIndex.ranges,
+                targetRange: targetRange
+            )
+            + boxedBooleanLiteralTokens(
+                in: nsSource,
+                nonCodeRanges: preparation.nonCodeRangeIndex.ranges,
+                targetRange: targetRange
+            )
         let mergedTokens = deduplicated(
             mergedTokens(
                 baseTokens: preparation.outputBaseTokens,
                 overlayTokens: preparation.preservedOverlayTokens + overlayTokens
             )
         )
-        if let rebuiltState {
-            state = rebuiltState
-        }
+        state = ObjectiveCSemanticOverlayState(index: semanticIndex)
         return ObjectiveCSemanticOverlayResult(
             tokens: mergedTokens,
             refreshRangeOverride: targetRange,
@@ -660,10 +810,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         var location = 0
         while location < source.length {
             let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
-            let line = source.substring(with: lineRange)
-            if objectiveCLineCanAffectSemanticIndex(line) {
-                hasher.combine(line)
-            }
+            let line = source.substring(with: lineRange) as NSString
+            appendObjectiveCSemanticIndexSignature(
+                from: line,
+                lineOffset: lineRange.location,
+                into: &hasher
+            )
             let nextLocation = lineRange.upperBound
             guard nextLocation > location else { break }
             location = nextLocation
@@ -672,14 +824,190 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return hasher.finalize()
     }
 
-    private static func objectiveCLineCanAffectSemanticIndex(_ line: String) -> Bool {
+    private static func objectiveCMutationCanChangeSemanticSignature(
+        _ mutation: SyntaxHighlightMutation,
+        in source: NSString
+    ) -> Bool {
+        if mutation.replacement.rangeOfCharacter(from: .newlines) != nil {
+            return true
+        }
+        if mutation.replacement.rangeOfCharacter(
+            from: CharacterSet(charactersIn: "#@{}();")
+        ) != nil {
+            return true
+        }
+
+        let replacementLength = mutation.replacement.utf16.count
+        let changedLocation = min(max(0, mutation.location), source.length)
+        let changedStart = max(0, changedLocation - (mutation.length > 0 ? 1 : 0))
+        let changedEnd = min(source.length, max(changedLocation + max(1, replacementLength), changedStart + 1))
+        let changedRange = NSRange(location: changedStart, length: changedEnd - changedStart)
+        let lineRange = source.lineRange(for: changedRange)
+        let line = source.substring(with: lineRange) as NSString
+        let lineString = line as String
+        let fullRange = NSRange(location: 0, length: line.length)
+        let relativeChangedRange = NSRange(
+            location: max(0, changedRange.location - lineRange.location),
+            length: changedRange.length
+        )
+
+        if objectiveCVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
+            let statementEnd = line.range(of: ";").location
+            guard statementEnd != NSNotFound else { return true }
+            return ObjectiveCFileSymbolIndex
+                .declarationNameRanges(in: line, statementEnd: statementEnd)
+                .contains { rangesIntersect($0, relativeChangedRange) }
+        }
+
+        if objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
+            return ObjectiveCFileSymbolIndex
+                .declarationNameRanges(in: line, statementEnd: line.length)
+                .contains { rangesIntersect($0, relativeChangedRange) }
+        }
+
+        return structuralObjectiveCEditRegex.firstMatch(in: lineString, range: fullRange) != nil
+            || objectiveCSemanticIndexFunctionSignatureLineRegex.firstMatch(in: lineString, range: fullRange) != nil
+            || objectiveCSemanticIndexSplitFunctionNameLineRegex.firstMatch(in: lineString, range: fullRange) != nil
+    }
+
+    private static func objectiveCLocalStructuralRefreshRange(
+        for mutation: SyntaxHighlightMutation,
+        in source: NSString
+    ) -> NSRange? {
+        if mutation.replacement.rangeOfCharacter(from: .newlines) != nil {
+            return nil
+        }
+        if mutation.replacement.rangeOfCharacter(from: CharacterSet(charactersIn: "#@{}();")) != nil {
+            return nil
+        }
+
+        let replacementLength = mutation.replacement.utf16.count
+        let changedLocation = min(max(0, mutation.location), source.length)
+        let changedStart = max(0, changedLocation - (mutation.length > 0 ? 1 : 0))
+        let changedEnd = min(source.length, max(changedLocation + max(1, replacementLength), changedStart + 1))
+        let changedRange = NSRange(location: changedStart, length: changedEnd - changedStart)
+        let lineRange = source.lineRange(for: changedRange)
+        guard let scopeRange = ObjectiveCFileSymbolIndex.containingFunctionLikeScopeRange(
+            containing: changedRange.location,
+            in: source
+        ) else {
+            return nil
+        }
+
+        let line = source.substring(with: lineRange) as NSString
+        let lineString = line as String
+        let fullRange = NSRange(location: 0, length: line.length)
+        let relativeChangedRange = NSRange(
+            location: max(0, changedRange.location - lineRange.location),
+            length: changedRange.length
+        )
+
+        if objectiveCVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
+            let statementEnd = line.range(of: ";").location
+            guard statementEnd != NSNotFound else { return nil }
+            let changesDeclarationName = ObjectiveCFileSymbolIndex
+                .declarationNameRanges(in: line, statementEnd: statementEnd)
+                .contains { rangesIntersect($0, relativeChangedRange) }
+            return changesDeclarationName ? scopeRange : nil
+        }
+
+        if objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
+            let changesDeclarationName = ObjectiveCFileSymbolIndex
+                .declarationNameRanges(in: line, statementEnd: line.length)
+                .contains { rangesIntersect($0, relativeChangedRange) }
+            return changesDeclarationName ? scopeRange : nil
+        }
+
+        return nil
+    }
+
+    private static func appendObjectiveCSemanticIndexSignature(
+        from line: NSString,
+        lineOffset _: Int,
+        into hasher: inout Hasher
+    ) {
+        let lineString = line as String
         let nsLine = line as NSString
         let fullRange = NSRange(location: 0, length: nsLine.length)
-        return structuralObjectiveCEditRegex.firstMatch(in: line, range: fullRange) != nil
-            || objectiveCVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
-            || objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: line, range: fullRange) != nil
-            || objectiveCSemanticIndexFunctionSignatureLineRegex.firstMatch(in: line, range: fullRange) != nil
-            || objectiveCSemanticIndexSplitFunctionNameLineRegex.firstMatch(in: line, range: fullRange) != nil
+        let trimmed = lineString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if trimmed.hasPrefix("#") {
+            hasher.combine("preprocessor")
+            hasher.combine(trimmed)
+            return
+        }
+
+        if trimmed.hasPrefix("@property") {
+            hasher.combine("property")
+            if let nameRange = ObjectiveCFileSymbolIndex.propertyDeclaredNameRange(in: line) {
+                hasher.combine(line.substring(with: nameRange))
+                hasher.combine(nameRange.location)
+            } else {
+                hasher.combine(trimmed)
+            }
+            return
+        }
+
+        if objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
+            appendObjectiveCDeclarationNameSignature(
+                kind: "for-variable",
+                line: line,
+                statementEnd: line.length,
+                into: &hasher
+            )
+            return
+        }
+
+        if objectiveCVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
+            let statementEnd = line.range(of: ";").location
+            guard statementEnd != NSNotFound else { return }
+            appendObjectiveCDeclarationNameSignature(
+                kind: "variable",
+                line: line,
+                statementEnd: statementEnd,
+                into: &hasher
+            )
+            return
+        }
+
+        guard structuralObjectiveCEditRegex.firstMatch(in: lineString, range: fullRange) != nil
+            || objectiveCSemanticIndexFunctionSignatureLineRegex.firstMatch(in: lineString, range: fullRange) != nil
+            || objectiveCSemanticIndexSplitFunctionNameLineRegex.firstMatch(in: lineString, range: fullRange) != nil else {
+            return
+        }
+
+        hasher.combine("structural")
+        let identifiers = ObjectiveCFileSymbolIndex.identifierRegex.matches(in: lineString, range: fullRange)
+        if identifiers.isEmpty {
+            hasher.combine(trimmed)
+            return
+        }
+        for match in identifiers {
+            let name = line.substring(with: match.range)
+            guard !ObjectiveCFileSymbolIndex.typedefIgnoredIdentifiers.contains(name) else { continue }
+            hasher.combine(name)
+        }
+    }
+
+    private static func appendObjectiveCDeclarationNameSignature(
+        kind: String,
+        line: NSString,
+        statementEnd: Int,
+        into hasher: inout Hasher
+    ) {
+        let ranges = ObjectiveCFileSymbolIndex.declarationNameRanges(in: line, statementEnd: statementEnd)
+        guard !ranges.isEmpty else { return }
+        hasher.combine(kind)
+        for range in ranges {
+            let name = line.substring(with: range)
+            guard !ObjectiveCFileSymbolIndex.typedefIgnoredIdentifiers.contains(name),
+                  name != "const",
+                  name != "static" else {
+                continue
+            }
+            hasher.combine(name)
+        }
     }
 
     private static func objectiveCTextContainsVariableDeclarationLine(_ text: NSString) -> Bool {
@@ -1650,7 +1978,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             baseTokensForIndex: baseTokensForIndex,
             outputBaseTokens: outputBaseTokens,
             preservedOverlayTokens: preservedOverlayTokens,
-            nonCodeRanges: nonCodeRanges(from: baseTokensForIndex, sourceLength: source.length),
+            nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex(
+                tokens: baseTokensForIndex,
+                sourceLength: source.length
+            ),
             tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source)
         )
     }
@@ -2139,6 +2470,7 @@ private struct ObjectiveCFileSymbolIndex {
     init?(
         source: NSString,
         tokenIndex: ObjectiveCTokenIndex,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex,
         rootNode: Node? = nil,
         allowsCancellation: Bool = false
     ) {
@@ -2162,7 +2494,10 @@ private struct ObjectiveCFileSymbolIndex {
 
         var localTypes = treeFacts.localTypes
         var localFunctions = treeFacts.localFunctions
-        let localMacros = Self.scanDefinedMacroNames(source: source).union(treeFacts.localMacros)
+        let localMacros = Self.scanDefinedMacroNames(
+            source: source,
+            nonCodeRangeIndex: nonCodeRangeIndex
+        ).union(treeFacts.localMacros)
         var fileScopeVariables = treeFacts.fileScopeVariables
         var ivars = treeFacts.ivars
         var typeDeclarations = treeFacts.typeDeclarations
@@ -2173,18 +2508,25 @@ private struct ObjectiveCFileSymbolIndex {
         let zeroArgumentMethodNameRanges = rootNode == nil ? Self.zeroArgumentMethodNameRanges(in: source) : []
         var localProperties = treeFacts.localProperties
         localProperties.formUnion(propertyDeclarations.map(\.name))
-        let scannedLocalTypes = Self.scanLocalTypes(source: source)
+        let scannedLocalTypes = Self.scanLocalTypes(source: source, nonCodeRangeIndex: nonCodeRangeIndex)
         localTypes.formUnion(scannedLocalTypes.names)
         typeDeclarations.append(contentsOf: scannedLocalTypes.declarations)
-        let scannedFileScopeVariables = Self.scanFileScopeVariableDeclarations(source: source)
+        let scannedFileScopeVariables = Self.scanFileScopeVariableDeclarations(
+            source: source,
+            nonCodeRangeIndex: nonCodeRangeIndex
+        )
         fileScopeVariables.formUnion(scannedFileScopeVariables.map(\.name))
         fileScopeVariableDeclarations.append(contentsOf: scannedFileScopeVariables)
-        let scannedIvars = Self.scanImplementationIvarDeclarations(source: source)
+        let scannedIvars = Self.scanImplementationIvarDeclarations(
+            source: source,
+            nonCodeRangeIndex: nonCodeRangeIndex
+        )
         ivars.formUnion(scannedIvars.map(\.name))
         ivarDeclarations.append(contentsOf: scannedIvars)
         let shadowedVariableRangeKeys = Self.scanVariableShadowRanges(
             source: source,
-            shadowedNames: fileScopeVariables.union(ivars)
+            shadowedNames: fileScopeVariables.union(ivars),
+            nonCodeRangeIndex: nonCodeRangeIndex
         )
 
         if rootNode == nil {
@@ -2276,6 +2618,98 @@ private struct ObjectiveCFileSymbolIndex {
         self.selfChainMemberNameRangeKeys = selfChainMemberNameRangeKeys
     }
 
+    private init(
+        localTypes: Set<String>,
+        localFunctions: Set<String>,
+        localProperties: Set<String>,
+        localMacros: Set<String>,
+        fileScopeVariables: Set<String>,
+        ivars: Set<String>,
+        allowsHeaderBackedSelfMembers: Bool,
+        typeDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>,
+        propertyDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>,
+        fileScopeVariableDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>,
+        ivarDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>,
+        shadowedVariableRangeKeys: Set<ObjectiveCRangeKey>,
+        selfMemberNameRangeKeys: Set<ObjectiveCRangeKey>,
+        selfChainMemberNameRangeKeys: Set<ObjectiveCRangeKey>
+    ) {
+        self.localTypes = localTypes
+        self.localFunctions = localFunctions
+        self.localProperties = localProperties
+        self.localMacros = localMacros
+        self.fileScopeVariables = fileScopeVariables
+        self.ivars = ivars
+        self.allowsHeaderBackedSelfMembers = allowsHeaderBackedSelfMembers
+        self.typeDeclarationNameRangeKeys = typeDeclarationNameRangeKeys
+        self.propertyDeclarationNameRangeKeys = propertyDeclarationNameRangeKeys
+        self.fileScopeVariableDeclarationNameRangeKeys = fileScopeVariableDeclarationNameRangeKeys
+        self.ivarDeclarationNameRangeKeys = ivarDeclarationNameRangeKeys
+        self.shadowedVariableRangeKeys = shadowedVariableRangeKeys
+        self.selfMemberNameRangeKeys = selfMemberNameRangeKeys
+        self.selfChainMemberNameRangeKeys = selfChainMemberNameRangeKeys
+    }
+
+    func shifted(
+        by mutation: SyntaxHighlightMutation,
+        sourceUTF16Length nextSourceUTF16Length: Int
+    ) -> ObjectiveCFileSymbolIndex? {
+        guard let typeDeclarationNameRangeKeys = Self.shiftedRangeKeys(
+            typeDeclarationNameRangeKeys,
+            by: mutation,
+            sourceUTF16Length: nextSourceUTF16Length
+        ),
+              let propertyDeclarationNameRangeKeys = Self.shiftedRangeKeys(
+                propertyDeclarationNameRangeKeys,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
+              ),
+              let fileScopeVariableDeclarationNameRangeKeys = Self.shiftedRangeKeys(
+                fileScopeVariableDeclarationNameRangeKeys,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
+              ),
+              let ivarDeclarationNameRangeKeys = Self.shiftedRangeKeys(
+                ivarDeclarationNameRangeKeys,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
+              ),
+              let shadowedVariableRangeKeys = Self.shiftedRangeKeys(
+                shadowedVariableRangeKeys,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
+              ),
+              let selfMemberNameRangeKeys = Self.shiftedRangeKeys(
+                selfMemberNameRangeKeys,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
+              ),
+              let selfChainMemberNameRangeKeys = Self.shiftedRangeKeys(
+                selfChainMemberNameRangeKeys,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
+              ) else {
+            return nil
+        }
+
+        return ObjectiveCFileSymbolIndex(
+            localTypes: localTypes,
+            localFunctions: localFunctions,
+            localProperties: localProperties,
+            localMacros: localMacros,
+            fileScopeVariables: fileScopeVariables,
+            ivars: ivars,
+            allowsHeaderBackedSelfMembers: allowsHeaderBackedSelfMembers,
+            typeDeclarationNameRangeKeys: typeDeclarationNameRangeKeys,
+            propertyDeclarationNameRangeKeys: propertyDeclarationNameRangeKeys,
+            fileScopeVariableDeclarationNameRangeKeys: fileScopeVariableDeclarationNameRangeKeys,
+            ivarDeclarationNameRangeKeys: ivarDeclarationNameRangeKeys,
+            shadowedVariableRangeKeys: shadowedVariableRangeKeys,
+            selfMemberNameRangeKeys: selfMemberNameRangeKeys,
+            selfChainMemberNameRangeKeys: selfChainMemberNameRangeKeys
+        )
+    }
+
     func containsTypeDeclarationNameRange(_ range: NSRange) -> Bool {
         typeDeclarationNameRangeKeys.contains(ObjectiveCRangeKey(range))
     }
@@ -2322,6 +2756,64 @@ private struct ObjectiveCFileSymbolIndex {
             localProperties: localProperties,
             allowsHeaderBackedMembers: allowsHeaderBackedSelfMembers
         )
+    }
+
+    static func containingFunctionLikeScopeRange(containing location: Int, in source: NSString) -> NSRange? {
+        functionLikeScopes(in: source)
+            .first { scope in
+                scope.location <= location && location < scope.upperBound
+            }
+            .map { scope in
+                NSRange(location: scope.location, length: scope.upperBound - scope.location)
+            }
+    }
+
+    private static func shiftedRangeKeys(
+        _ keys: Set<ObjectiveCRangeKey>,
+        by mutation: SyntaxHighlightMutation,
+        sourceUTF16Length nextSourceUTF16Length: Int
+    ) -> Set<ObjectiveCRangeKey>? {
+        var shifted = Set<ObjectiveCRangeKey>()
+        shifted.reserveCapacity(keys.count)
+        for key in keys {
+            let range = NSRange(location: key.location, length: key.length)
+            guard let shiftedRange = shiftedRange(
+                range,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
+            ) else {
+                return nil
+            }
+            shifted.insert(ObjectiveCRangeKey(shiftedRange))
+        }
+        return shifted
+    }
+
+    private static func shiftedRange(
+        _ range: NSRange,
+        by mutation: SyntaxHighlightMutation,
+        sourceUTF16Length nextSourceUTF16Length: Int
+    ) -> NSRange? {
+        let replacementLength = mutation.replacement.utf16.count
+        let replacedRange = NSRange(location: mutation.location, length: mutation.length)
+        let oldUpperBound = mutation.location + mutation.length
+        let delta = replacementLength - mutation.length
+
+        if range.upperBound <= mutation.location {
+            return range
+        }
+        if range.location >= oldUpperBound {
+            let shiftedLocation = range.location + delta
+            guard shiftedLocation >= 0,
+                  shiftedLocation + range.length <= nextSourceUTF16Length else {
+                return nil
+            }
+            return NSRange(location: shiftedLocation, length: range.length)
+        }
+        if SyntaxEditorRangeUtilities.intersection(of: range, and: replacedRange).length > 0 {
+            return nil
+        }
+        return range
     }
 
     private static func hasQuotedHeaderImport(in source: NSString) -> Bool {
@@ -2694,7 +3186,10 @@ private struct ObjectiveCFileSymbolIndex {
         inner.location >= outer.location && inner.upperBound <= outer.upperBound
     }
 
-    private static func scanLocalTypes(source: NSString) -> (names: Set<String>, declarations: [(name: String, range: NSRange)]) {
+    private static func scanLocalTypes(
+        source: NSString,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex
+    ) -> (names: Set<String>, declarations: [(name: String, range: NSRange)]) {
         let string = source as String
         let fullRange = NSRange(location: 0, length: source.length)
         var names = Set<String>()
@@ -2704,7 +3199,8 @@ private struct ObjectiveCFileSymbolIndex {
             for match in regex.matches(in: string, range: fullRange) {
                 guard match.numberOfRanges > 1 else { continue }
                 let range = match.range(at: 1)
-                guard range.location != NSNotFound else { continue }
+                guard range.location != NSNotFound,
+                      !nonCodeRangeIndex.intersects(range) else { continue }
                 let name = source.substring(with: range)
                 if isIdentifier(name) {
                     names.insert(name)
@@ -2715,6 +3211,7 @@ private struct ObjectiveCFileSymbolIndex {
 
         for match in typedefRegex.matches(in: string, range: fullRange) {
             let range = match.range
+            guard !nonCodeRangeIndex.intersects(range) else { continue }
             let declaration = source.substring(with: range) as NSString
             if let name = typedefDeclaredName(in: declaration) {
                 let relativeRange = declaration.range(of: name, options: [.backwards])
@@ -2732,13 +3229,17 @@ private struct ObjectiveCFileSymbolIndex {
         return (names, declarations)
     }
 
-    private static func scanDefinedMacroNames(source: NSString) -> Set<String> {
+    private static func scanDefinedMacroNames(
+        source: NSString,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex
+    ) -> Set<String> {
         let string = source as String
         let fullRange = NSRange(location: 0, length: source.length)
         var names = Set<String>()
         for match in definedMacroNameRegex.matches(in: string, range: fullRange) {
             let range = match.range(at: 1)
-            guard range.location != NSNotFound else {
+            guard range.location != NSNotFound,
+                  !nonCodeRangeIndex.intersects(range) else {
                 continue
             }
             names.insert(source.substring(with: range))
@@ -2746,7 +3247,10 @@ private struct ObjectiveCFileSymbolIndex {
         return names
     }
 
-    private static func scanFileScopeVariableDeclarations(source: NSString) -> [(name: String, range: NSRange)] {
+    private static func scanFileScopeVariableDeclarations(
+        source: NSString,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex
+    ) -> [(name: String, range: NSRange)] {
         var declarations: [(name: String, range: NSRange)] = []
         var location = 0
         var braceDepth = 0
@@ -2785,15 +3289,20 @@ private struct ObjectiveCFileSymbolIndex {
                 continue
             }
             for relativeRange in declarationNameRanges(in: line, statementEnd: statementEnd) {
+                let absoluteRange = NSRange(
+                    location: lineRange.location + relativeRange.location,
+                    length: relativeRange.length
+                )
                 let name = line.substring(with: relativeRange)
                 guard !typedefIgnoredIdentifiers.contains(name),
                       name != "const",
-                      name != "static" else {
+                      name != "static",
+                      !nonCodeRangeIndex.intersects(absoluteRange) else {
                     continue
                 }
                 declarations.append((
                     name: name,
-                    range: NSRange(location: lineRange.location + relativeRange.location, length: relativeRange.length)
+                    range: absoluteRange
                 ))
             }
         }
@@ -2811,7 +3320,7 @@ private struct ObjectiveCFileSymbolIndex {
         return line.length
     }
 
-    private static func declarationNameRanges(in declaration: NSString, statementEnd: Int) -> [NSRange] {
+    static func declarationNameRanges(in declaration: NSString, statementEnd: Int) -> [NSRange] {
         let upperBound = min(max(0, statementEnd), declaration.length)
         var ranges: [NSRange] = []
         var segmentStart = 0
@@ -2952,7 +3461,8 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static func scanVariableShadowRanges(
         source: NSString,
-        shadowedNames: Set<String>
+        shadowedNames: Set<String>,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex
     ) -> Set<ObjectiveCRangeKey> {
         guard !shadowedNames.isEmpty else {
             return []
@@ -2965,6 +3475,7 @@ private struct ObjectiveCFileSymbolIndex {
                 in: NSRange(location: scope.location, length: scope.bodyOpenLocation - scope.location),
                 source: source,
                 shadowedNames: shadowedNames,
+                nonCodeRangeIndex: nonCodeRangeIndex,
                 into: &parameterShadowStarts
             )
             var shadowScopes = parameterShadowStarts.compactMap { name, start -> (name: String, range: NSRange)? in
@@ -2975,12 +3486,13 @@ private struct ObjectiveCFileSymbolIndex {
                 in: scope,
                 source: source,
                 shadowedNames: shadowedNames,
+                nonCodeRangeIndex: nonCodeRangeIndex,
                 into: &shadowScopes
             )
 
             for shadowScope in shadowScopes {
                 for range in identifierRanges(named: shadowScope.name, in: shadowScope.range, source: source) {
-                    guard !isInsideCommentOrLiteral(range, in: source) else { continue }
+                    guard !nonCodeRangeIndex.intersects(range) else { continue }
                     ranges.insert(ObjectiveCRangeKey(range))
                 }
             }
@@ -3087,6 +3599,7 @@ private struct ObjectiveCFileSymbolIndex {
         in headerRange: NSRange,
         source: NSString,
         shadowedNames: Set<String>,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex,
         into shadowStarts: inout [String: Int]
     ) {
         guard headerRange.length > 0 else { return }
@@ -3100,6 +3613,11 @@ private struct ObjectiveCFileSymbolIndex {
                 continue
             }
             let absoluteLocation = headerRange.location + match.range.location
+            guard !nonCodeRangeIndex.intersects(
+                NSRange(location: absoluteLocation, length: match.range.length)
+            ) else {
+                continue
+            }
             shadowStarts[name] = min(shadowStarts[name] ?? absoluteLocation, absoluteLocation)
         }
     }
@@ -3108,6 +3626,7 @@ private struct ObjectiveCFileSymbolIndex {
         in scope: (location: Int, bodyOpenLocation: Int, upperBound: Int),
         source: NSString,
         shadowedNames: Set<String>,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex,
         into shadowScopes: inout [(name: String, range: NSRange)]
     ) {
         let bodyStart = min(source.length, scope.bodyOpenLocation + 1)
@@ -3133,7 +3652,9 @@ private struct ObjectiveCFileSymbolIndex {
             }
             for nameRange in declarationNameRanges(in: line, statementEnd: statementEnd) {
                 let absoluteLocation = absoluteLineRange.location + nameRange.location
-                guard !isInsideCommentOrLiteral(NSRange(location: absoluteLocation, length: nameRange.length), in: source) else {
+                guard !nonCodeRangeIndex.intersects(
+                    NSRange(location: absoluteLocation, length: nameRange.length)
+                ) else {
                     continue
                 }
                 let name = line.substring(with: nameRange)
@@ -3151,13 +3672,18 @@ private struct ObjectiveCFileSymbolIndex {
             range: NSRange(location: 0, length: body.length)
         ) {
             let matchRange = NSRange(location: bodyRange.location + match.range.location, length: match.range.length)
-            let upperBound = forLoopShadowUpperBound(matchRange: matchRange, source: source, scopeUpperBound: scope.upperBound)
+            let upperBound = forLoopShadowUpperBound(
+                matchRange: matchRange,
+                source: source,
+                nonCodeRangeIndex: nonCodeRangeIndex,
+                scopeUpperBound: scope.upperBound
+            )
             for nameRange in forLoopDeclarationNameRanges(
                 matchRange: matchRange,
                 source: source
             ) {
                 let absoluteLocation = nameRange.location
-                guard !isInsideCommentOrLiteral(nameRange, in: source) else {
+                guard !nonCodeRangeIndex.intersects(nameRange) else {
                     continue
                 }
                 let name = source.substring(with: nameRange)
@@ -3189,6 +3715,7 @@ private struct ObjectiveCFileSymbolIndex {
     private static func forLoopShadowUpperBound(
         matchRange: NSRange,
         source: NSString,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex,
         scopeUpperBound: Int
     ) -> Int {
         guard let openParen = nextLocation(ofAny: ["("], after: matchRange.location, in: source),
@@ -3199,7 +3726,7 @@ private struct ObjectiveCFileSymbolIndex {
         var cursor = closeParen + 1
         let upperBound = min(scopeUpperBound, source.length)
         while cursor < upperBound {
-            if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: source) {
+            if let nextCursor = nonCodeRangeIndex.upperBoundOfRange(containing: cursor) {
                 cursor = min(nextCursor, upperBound)
                 continue
             }
@@ -3557,7 +4084,10 @@ private struct ObjectiveCFileSymbolIndex {
         return text.length
     }
 
-    private static func scanImplementationIvarDeclarations(source: NSString) -> [(name: String, range: NSRange)] {
+    private static func scanImplementationIvarDeclarations(
+        source: NSString,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex
+    ) -> [(name: String, range: NSRange)] {
         var declarations: [(name: String, range: NSRange)] = []
         var location = 0
         var awaitingIvarBlock = false
@@ -3578,6 +4108,7 @@ private struct ObjectiveCFileSymbolIndex {
                 appendImplementationIvarDeclarations(
                     in: line.substring(with: NSRange(location: 0, length: ivarSegmentLength)) as NSString,
                     lineOffset: lineRange.location,
+                    nonCodeRangeIndex: nonCodeRangeIndex,
                     to: &declarations
                 )
                 if closeBraceRange != nil {
@@ -3595,6 +4126,7 @@ private struct ObjectiveCFileSymbolIndex {
                     appendImplementationIvarDeclarations(
                         in: line.substring(with: NSRange(location: segmentStart, length: segmentUpperBound - segmentStart)) as NSString,
                         lineOffset: lineRange.location + segmentStart,
+                        nonCodeRangeIndex: nonCodeRangeIndex,
                         to: &declarations
                     )
                     isInIvarBlock = closeBraceRange == nil
@@ -3615,6 +4147,7 @@ private struct ObjectiveCFileSymbolIndex {
                 appendImplementationIvarDeclarations(
                     in: line.substring(with: NSRange(location: segmentStart, length: segmentUpperBound - segmentStart)) as NSString,
                     lineOffset: lineRange.location + segmentStart,
+                    nonCodeRangeIndex: nonCodeRangeIndex,
                     to: &declarations
                 )
                 isInIvarBlock = closeBraceRange == nil
@@ -3655,6 +4188,7 @@ private struct ObjectiveCFileSymbolIndex {
     private static func appendImplementationIvarDeclarations(
         in segment: NSString,
         lineOffset: Int,
+        nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex,
         to declarations: inout [(name: String, range: NSRange)]
     ) {
         var statementStart = 0
@@ -3671,13 +4205,17 @@ private struct ObjectiveCFileSymbolIndex {
             )
             let statement = segment.substring(with: statementRange) as NSString
             for relativeRange in implementationIvarNameRanges(in: statement) {
+                let absoluteRange = NSRange(
+                    location: lineOffset + statementStart + relativeRange.location,
+                    length: relativeRange.length
+                )
+                guard !nonCodeRangeIndex.intersects(absoluteRange) else {
+                    continue
+                }
                 let name = statement.substring(with: relativeRange)
                 declarations.append((
                     name: name,
-                    range: NSRange(
-                        location: lineOffset + statementStart + relativeRange.location,
-                        length: relativeRange.length
-                    )
+                    range: absoluteRange
                 ))
             }
             statementStart = semicolonRange.upperBound
@@ -3794,7 +4332,7 @@ private struct ObjectiveCFileSymbolIndex {
         return declarations
     }
 
-    private static func propertyDeclaredNameRange(in declaration: NSString) -> NSRange? {
+    static func propertyDeclaredNameRange(in declaration: NSString) -> NSRange? {
         let string = declaration as String
         if let match = blockPropertyNameRegex.firstMatch(
             in: string,
@@ -4306,11 +4844,11 @@ private struct ObjectiveCFileSymbolIndex {
         pattern: #"\(\s*\^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)"#
     )
 
-    private static let identifierRegex = try! NSRegularExpression(
+    static let identifierRegex = try! NSRegularExpression(
         pattern: #"[A-Za-z_][A-Za-z0-9_]*"#
     )
 
-    private static let typedefIgnoredIdentifiers: Set<String> = [
+    static let typedefIgnoredIdentifiers: Set<String> = [
         "NS_ENUM", "NS_OPTIONS", "typedef", "struct", "union", "enum",
         "const", "unsigned", "signed", "short", "long", "int", "char",
         "void", "id", "BOOL", "NSInteger", "NSUInteger", "NSString",

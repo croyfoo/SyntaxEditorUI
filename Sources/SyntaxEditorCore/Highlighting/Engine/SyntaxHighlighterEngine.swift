@@ -667,7 +667,8 @@ private final class SyntaxHighlightSession {
             mergedHighlight.tokens,
             source: nextLayeredSource,
             rootNode: semanticRootNodeSnapshot(),
-            refreshRange: semanticOverlayRefreshRange
+            refreshRange: semanticOverlayRefreshRange,
+            mutation: layeredMutation
         )
         guard !semanticResult.isCancelled, !Task.isCancelled else {
             return cancelledUpdateResultAfterInvalidatingIncrementalState(revision: revision)
@@ -1061,7 +1062,8 @@ private extension SyntaxHighlightSession {
         _ tokens: [SyntaxHighlightToken],
         source: String,
         rootNode: Node? = nil,
-        refreshRange: NSRange? = nil
+        refreshRange: NSRange? = nil,
+        mutation: SyntaxHighlightMutation? = nil
     ) -> SemanticClassificationResult {
         switch language {
         case .swift:
@@ -1083,6 +1085,7 @@ private extension SyntaxHighlightSession {
                 source: source,
                 rootNode: rootNode,
                 refreshRange: refreshRange,
+                mutation: mutation,
                 state: &objectiveCSemanticState
             )
             return SemanticClassificationResult(

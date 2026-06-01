@@ -128,6 +128,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
                 self?.handleIncrementalMatchRangesChange(changedRanges: changedRanges)
             }
         }
+        configureSyntaxRenderingAttributesValidator()
     }
 
     @available(*, unavailable)
@@ -959,6 +960,38 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         }
     }
 
+    func invalidateSyntaxRenderingAttributes(for ranges: [NSRange]) {
+        guard !ranges.isEmpty else { return }
+
+        var invalidatedRanges: [NSRange] = []
+        invalidatedRanges.reserveCapacity(ranges.count)
+        for range in ranges {
+            let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
+            guard clamped.length > 0,
+                  let textRange = textRange(forUTF16Range: clamped)
+            else {
+                continue
+            }
+            textLayoutManager.invalidateRenderingAttributes(for: textRange)
+            invalidatedRanges.append(clamped)
+        }
+
+        guard !invalidatedRanges.isEmpty else { return }
+
+        layoutVisibleViewportIfNeeded()
+        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            let fragmentRange = textRange(for: fragmentView.layoutFragment)
+            guard !TextLayoutGeometry.ranges(invalidatedRanges, intersecting: fragmentRange).isEmpty else {
+                continue
+            }
+            validateSyntaxRenderingAttributes(
+                in: fragmentView.layoutFragment,
+                using: textLayoutManager
+            )
+            fragmentView.needsDisplay = true
+        }
+    }
+
     func setNeedsDisplayForVisibleTextFragments() {
         layoutVisibleViewportIfNeeded()
         for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
@@ -1055,6 +1088,46 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         configureFindHighlights(for: fragmentView)
         configureSelectionHighlights(for: fragmentView)
         configureBracketHighlights(for: fragmentView)
+    }
+
+    private func configureSyntaxRenderingAttributesValidator() {
+        textLayoutManager.renderingAttributesValidator = { [weak self] textLayoutManager, textLayoutFragment in
+            MainActor.assumeIsolated {
+                self?.validateSyntaxRenderingAttributes(
+                    in: textLayoutFragment,
+                    using: textLayoutManager
+                )
+            }
+        }
+    }
+
+    private func validateSyntaxRenderingAttributes(
+        in textLayoutFragment: NSTextLayoutFragment,
+        using textLayoutManager: NSTextLayoutManager
+    ) {
+        let fragmentRange = textRange(for: textLayoutFragment)
+        guard fragmentRange.length > 0,
+              let fragmentTextRange = textRange(forUTF16Range: fragmentRange)
+        else {
+            return
+        }
+
+        if let baseForeground = typingAttributes[.foregroundColor] as? NSColor {
+            textLayoutManager.addRenderingAttribute(
+                .foregroundColor,
+                value: baseForeground,
+                for: fragmentTextRange
+            )
+        }
+        textSystem.styleStore.forEachColorRun(in: fragmentRange) { [self] colorRun in
+            guard let textRange = textRange(forUTF16Range: colorRun.range) else { return }
+            textLayoutManager.addRenderingAttribute(
+                .foregroundColor,
+                value: colorRun.color,
+                for: textRange
+            )
+        }
+        syntaxRenderingAttributeApplicationCountForTesting += 1
     }
 
     func textViewportLayoutControllerDidLayout(_ textViewportLayoutController: NSTextViewportLayoutController) {
@@ -1816,8 +1889,10 @@ final class SyntaxEditorTextContentView: NSView {
 }
 
 final class SyntaxEditorTextLayoutFragment: NSTextLayoutFragment {
+    private(set) var lineFragmentDrawCountForTesting = 0
+
     override func draw(at point: CGPoint, in context: CGContext) {
-        draw(at: point, in: context, dirtyRect: nil)
+        super.draw(at: point, in: context)
     }
 
     func draw(at point: CGPoint, in context: CGContext, dirtyRect: CGRect?) {
@@ -1829,6 +1904,7 @@ final class SyntaxEditorTextLayoutFragment: NSTextLayoutFragment {
                 continue
             }
 
+            lineFragmentDrawCountForTesting += 1
             lineFragment.draw(at: lineFrame.origin, in: context)
         }
         context.restoreGState()
