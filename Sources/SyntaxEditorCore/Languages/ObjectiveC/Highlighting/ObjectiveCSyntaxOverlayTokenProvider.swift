@@ -341,7 +341,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         }
         let previousIndex = state?.index
         let requiresSemanticIndexRebuild = mutation.map {
-            objectiveCMutationRequiresSemanticIndexRebuild($0, in: nsSource)
+            objectiveCMutationRequiresSemanticIndexRebuild(
+                $0,
+                in: nsSource,
+                previousIndex: previousIndex
+            )
         } ?? false
         let shouldCheckStructuralFingerprint = mutation.map {
             requiresSemanticIndexRebuild
@@ -951,8 +955,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static func objectiveCMutationRequiresSemanticIndexRebuild(
         _ mutation: SyntaxHighlightMutation,
-        in source: NSString
+        in source: NSString,
+        previousIndex: ObjectiveCSemanticIndex?
     ) -> Bool {
+        if previousIndex?.fileSymbols.mutationTouchesSelfMemberAccessOperator(mutation) == true {
+            return true
+        }
+
         let replacementLength = mutation.replacement.utf16.count
         let changedLocation = min(max(0, mutation.location), source.length)
         let changedStart = max(0, changedLocation - (mutation.length > 0 ? 1 : 0))
@@ -2913,37 +2922,37 @@ private struct ObjectiveCFileSymbolIndex {
         by mutation: SyntaxHighlightMutation,
         sourceUTF16Length nextSourceUTF16Length: Int
     ) -> ObjectiveCFileSymbolIndex? {
-        guard let typeDeclarationNameRangeKeys = Self.shiftedRangeKeys(
+        guard let shiftedTypeDeclarationNameRangeKeys = Self.shiftedRangeKeys(
             typeDeclarationNameRangeKeys,
             by: mutation,
             sourceUTF16Length: nextSourceUTF16Length
         ),
-              let propertyDeclarationNameRangeKeys = Self.shiftedRangeKeys(
+              let shiftedPropertyDeclarationNameRangeKeys = Self.shiftedRangeKeys(
                 propertyDeclarationNameRangeKeys,
                 by: mutation,
                 sourceUTF16Length: nextSourceUTF16Length
               ),
-              let fileScopeVariableDeclarationNameRangeKeys = Self.shiftedRangeKeys(
+              let shiftedFileScopeVariableDeclarationNameRangeKeys = Self.shiftedRangeKeys(
                 fileScopeVariableDeclarationNameRangeKeys,
                 by: mutation,
                 sourceUTF16Length: nextSourceUTF16Length
               ),
-              let ivarDeclarationNameRangeKeys = Self.shiftedRangeKeys(
+              let shiftedIvarDeclarationNameRangeKeys = Self.shiftedRangeKeys(
                 ivarDeclarationNameRangeKeys,
                 by: mutation,
                 sourceUTF16Length: nextSourceUTF16Length
               ),
-              let shadowedVariableRangeKeys = Self.shiftedRangeKeys(
+              let shiftedShadowedVariableRangeKeys = Self.shiftedRangeKeys(
                 shadowedVariableRangeKeys,
                 by: mutation,
                 sourceUTF16Length: nextSourceUTF16Length
               ),
-              let selfMemberNameRangeKeys = Self.shiftedRangeKeys(
+              let shiftedSelfMemberNameRangeKeys = Self.shiftedRangeKeys(
                 selfMemberNameRangeKeys,
                 by: mutation,
                 sourceUTF16Length: nextSourceUTF16Length
               ),
-              let selfChainMemberNameRangeKeys = Self.shiftedRangeKeys(
+              let shiftedSelfChainMemberNameRangeKeys = Self.shiftedRangeKeys(
                 selfChainMemberNameRangeKeys,
                 by: mutation,
                 sourceUTF16Length: nextSourceUTF16Length
@@ -2959,13 +2968,13 @@ private struct ObjectiveCFileSymbolIndex {
             fileScopeVariables: fileScopeVariables,
             ivars: ivars,
             allowsHeaderBackedSelfMembers: allowsHeaderBackedSelfMembers,
-            typeDeclarationNameRangeKeys: typeDeclarationNameRangeKeys,
-            propertyDeclarationNameRangeKeys: propertyDeclarationNameRangeKeys,
-            fileScopeVariableDeclarationNameRangeKeys: fileScopeVariableDeclarationNameRangeKeys,
-            ivarDeclarationNameRangeKeys: ivarDeclarationNameRangeKeys,
-            shadowedVariableRangeKeys: shadowedVariableRangeKeys,
-            selfMemberNameRangeKeys: selfMemberNameRangeKeys,
-            selfChainMemberNameRangeKeys: selfChainMemberNameRangeKeys
+            typeDeclarationNameRangeKeys: shiftedTypeDeclarationNameRangeKeys,
+            propertyDeclarationNameRangeKeys: shiftedPropertyDeclarationNameRangeKeys,
+            fileScopeVariableDeclarationNameRangeKeys: shiftedFileScopeVariableDeclarationNameRangeKeys,
+            ivarDeclarationNameRangeKeys: shiftedIvarDeclarationNameRangeKeys,
+            shadowedVariableRangeKeys: shiftedShadowedVariableRangeKeys,
+            selfMemberNameRangeKeys: shiftedSelfMemberNameRangeKeys,
+            selfChainMemberNameRangeKeys: shiftedSelfChainMemberNameRangeKeys
         )
     }
 
@@ -3009,6 +3018,18 @@ private struct ObjectiveCFileSymbolIndex {
         selfChainMemberNameRangeKeys.contains(ObjectiveCRangeKey(range))
     }
 
+    func mutationTouchesSelfMemberAccessOperator(_ mutation: SyntaxHighlightMutation) -> Bool {
+        guard mutation.length > 0 else {
+            return false
+        }
+        let replacedRange = NSRange(location: mutation.location, length: mutation.length)
+        return selfMemberNameRangeKeys.contains(where: {
+            Self.replacedRangeCanTouchMemberOperator(replacedRange, before: NSRange(location: $0.location, length: $0.length))
+        }) || selfChainMemberNameRangeKeys.contains(where: {
+            Self.replacedRangeCanTouchMemberOperator(replacedRange, before: NSRange(location: $0.location, length: $0.length))
+        })
+    }
+
     func shouldTrackSelfMemberName(_ name: String) -> Bool {
         ObjectiveCSyntaxOverlayTokenProvider.shouldTrackSelfMember(
             name,
@@ -3046,6 +3067,14 @@ private struct ObjectiveCFileSymbolIndex {
             shifted.insert(ObjectiveCRangeKey(shiftedRange))
         }
         return shifted
+    }
+
+    private static func replacedRangeCanTouchMemberOperator(_ replacedRange: NSRange, before fieldRange: NSRange) -> Bool {
+        guard replacedRange.location < fieldRange.location,
+              replacedRange.upperBound <= fieldRange.location else {
+            return false
+        }
+        return fieldRange.location - replacedRange.upperBound <= 2
     }
 
     private static func shiftedRange(
