@@ -1894,6 +1894,7 @@ extension SyntaxEditorUITests {
         markedText.addAttribute(.underlineColor, value: markedUnderline, range: markedTextRange)
         markedText.addAttribute(.foregroundColor, value: markedForeground, range: markedTextRange)
         editorView.textView.setSelectedRange(insertionRange)
+        layoutMacEditorView(editorView)
 
         editorView.textView.setMarkedText(
             markedText,
@@ -1920,8 +1921,6 @@ extension SyntaxEditorUITests {
             markedForeground
         ))
 
-        layoutMacEditorView(editorView)
-        editorView.textView.invalidateSyntaxRenderingAttributes(for: [installedRange])
         let installedTextRange = try #require(editorView.textView.textRange(forUTF16Range: installedRange))
         var renderingForeground: NSColor?
         editorView.textView.textLayoutManager.enumerateRenderingAttributes(

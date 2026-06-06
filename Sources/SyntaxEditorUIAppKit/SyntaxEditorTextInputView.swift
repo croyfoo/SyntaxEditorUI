@@ -694,6 +694,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         guard isEditable else { return }
         let attributedReplacement = markedTextAttributedReplacement(from: string)
         let replacement = attributedReplacement.string
+        let previousMarkedRange = markedTextRangeStorage
         let range = markedTextRangeStorage ?? effectiveReplacementRange(replacementRange)
         let markedLength = replacement.utf16.count
         let didReplace = replaceText(
@@ -705,14 +706,18 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             )
         )
         guard didReplace else { return }
-        markedTextRangeStorage = replacement.isEmpty ? nil : NSRange(location: range.location, length: markedLength)
+        let markedRange = replacement.isEmpty ? nil : NSRange(location: range.location, length: markedLength)
+        markedTextRangeStorage = markedRange
         markedTextAttributedStringStorage = replacement.isEmpty ? nil : attributedReplacement
         applyMarkedTextAttributes()
+        invalidateSyntaxRenderingAttributesForMarkedTextChange(from: previousMarkedRange, to: markedRange)
     }
 
     func unmarkText() {
+        let previousMarkedRange = markedTextRangeStorage
         markedTextRangeStorage = nil
         markedTextAttributedStringStorage = nil
+        invalidateSyntaxRenderingAttributesForMarkedTextChange(from: previousMarkedRange, to: nil)
         updateSelectionRendering()
         needsDisplay = true
     }
@@ -766,6 +771,21 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
                 }
             }
         }
+    }
+
+    private func invalidateSyntaxRenderingAttributesForMarkedTextChange(
+        from previousRange: NSRange?,
+        to currentRange: NSRange?
+    ) {
+        let ranges = [previousRange, currentRange].compactMap { range -> NSRange? in
+            guard let range,
+                  range.location != NSNotFound,
+                  range.length > 0 else {
+                return nil
+            }
+            return range
+        }
+        invalidateSyntaxRenderingAttributes(for: ranges)
     }
 
     func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
