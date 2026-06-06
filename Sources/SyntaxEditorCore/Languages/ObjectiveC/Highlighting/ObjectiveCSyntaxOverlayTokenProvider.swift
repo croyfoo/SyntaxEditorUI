@@ -1132,7 +1132,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 location: expressionStart,
                 length: operatorRange.location - expressionStart
             )
-            guard rangesIntersect(expressionRange, relativeChangedRange),
+            guard (rangesIntersect(expressionRange, relativeChangedRange)
+                   || rangesIntersect(operatorRange, relativeChangedRange)),
                   memberFieldIdentifierRange(after: operatorRange.upperBound, in: line) != nil
             else {
                 cursor = operatorRange.upperBound
