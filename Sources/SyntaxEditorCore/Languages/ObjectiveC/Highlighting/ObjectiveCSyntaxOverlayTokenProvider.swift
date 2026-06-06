@@ -1057,6 +1057,51 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return range
     }
 
+    private static func objectiveCMutationMovesPreviousStructuralSignatureIntoNonCode(
+        _ mutation: SyntaxHighlightMutation,
+        in source: NSString,
+        previousIndex: ObjectiveCSemanticIndex?
+    ) -> Bool {
+        guard let previousIndex,
+              !previousIndex.structuralEditRanges.isEmpty,
+              mutation.replacement.rangeOfCharacter(from: .newlines) == nil else {
+            return false
+        }
+
+        let replacementLength = mutation.replacement.utf16.count
+        let oldUpperBound = mutation.location + mutation.length
+        let delta = replacementLength - mutation.length
+        for range in previousIndex.structuralEditRanges {
+            guard range.location >= oldUpperBound else { continue }
+
+            let shiftedLocation = range.location + delta
+            guard shiftedLocation >= 0,
+                  shiftedLocation <= source.length else {
+                continue
+            }
+
+            let lineRange = source.lineRange(for: NSRange(location: shiftedLocation, length: 0))
+            guard lineRange.location <= mutation.location,
+                  mutation.location <= shiftedLocation,
+                  shiftedLocation <= lineRange.upperBound else {
+                continue
+            }
+
+            let prefixRange = NSRange(
+                location: lineRange.location,
+                length: shiftedLocation - lineRange.location
+            )
+            if objectiveCTextCanStartCommentOrLiteral(source.substring(with: prefixRange)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func objectiveCTextCanStartCommentOrLiteral(_ text: String) -> Bool {
+        text.contains("//") || text.contains("/*") || text.contains("\"")
+    }
+
     private static func objectiveCLineCharacterIsWhitespace(_ text: String) -> Bool {
         text.unicodeScalars.allSatisfy {
             CharacterSet.whitespacesAndNewlines.contains($0)
@@ -1103,6 +1148,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             return true
         }
         if objectiveCMutationReplacesPreviousStructuralSignatureText(mutation, previousIndex: previousIndex) {
+            return true
+        }
+        if objectiveCMutationMovesPreviousStructuralSignatureIntoNonCode(
+            mutation,
+            in: source,
+            previousIndex: previousIndex
+        ) {
             return true
         }
 
