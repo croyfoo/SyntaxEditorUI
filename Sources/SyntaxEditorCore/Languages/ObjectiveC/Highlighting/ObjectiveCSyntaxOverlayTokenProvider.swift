@@ -334,8 +334,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
         let previousIndex = state?.index
+        let requiresSemanticIndexRebuild = mutation.map {
+            objectiveCMutationRequiresSemanticIndexRebuild($0, in: nsSource)
+        } ?? false
         let shouldCheckStructuralFingerprint = mutation.map {
-            objectiveCMutationCanChangeSemanticSignature($0, in: nsSource, previousIndex: previousIndex)
+            requiresSemanticIndexRebuild
+                || objectiveCMutationCanChangeSemanticSignature($0, in: nsSource, previousIndex: previousIndex)
         } ?? true
         let structuralSignature = if let previousIndex, !shouldCheckStructuralFingerprint {
             ObjectiveCSemanticIndexSignature(
@@ -363,6 +367,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
         let shouldRebuildIndex = proposedTargetRange == nil
             || previousIndex == nil
+            || requiresSemanticIndexRebuild
             || structuralFingerprintChanged
             || (previousIndex?.sourceUTF16Length != nsSource.length && mutation == nil)
         let shiftedPreviousIndex = mutation.flatMap { mutation in
@@ -938,6 +943,27 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return ranges
     }
 
+    private static func objectiveCMutationRequiresSemanticIndexRebuild(
+        _ mutation: SyntaxHighlightMutation,
+        in source: NSString
+    ) -> Bool {
+        let replacementLength = mutation.replacement.utf16.count
+        let changedLocation = min(max(0, mutation.location), source.length)
+        let changedStart = max(0, changedLocation - (mutation.length > 0 ? 1 : 0))
+        let changedEnd = min(source.length, max(changedLocation + max(1, replacementLength), changedStart + 1))
+        let changedRange = NSRange(location: changedStart, length: changedEnd - changedStart)
+        let lineRange = source.lineRange(for: changedRange)
+        let line = source.substring(with: lineRange) as NSString
+        let relativeChangedRange = NSRange(
+            location: max(0, changedRange.location - lineRange.location),
+            length: changedRange.length
+        )
+        return objectiveCMutationCanChangeMemberAccessReceiver(
+            line: line,
+            relativeChangedRange: relativeChangedRange
+        )
+    }
+
     private static func objectiveCMutationCanChangeSemanticSignature(
         _ mutation: SyntaxHighlightMutation,
         in source: NSString,
@@ -1037,6 +1063,82 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         }
 
         return nil
+    }
+
+    private static func objectiveCMutationCanChangeMemberAccessReceiver(
+        line: NSString,
+        relativeChangedRange: NSRange
+    ) -> Bool {
+        guard line.range(of: ".").location != NSNotFound
+            || line.range(of: "->").location != NSNotFound
+        else {
+            return false
+        }
+
+        var cursor = 0
+        while cursor < line.length {
+            if let nextCursor = locationAfterSkippedCommentOrLiteral(startingAt: cursor, in: line) {
+                cursor = nextCursor
+                continue
+            }
+
+            let operatorRange: NSRange
+            let character = line.substring(with: NSRange(location: cursor, length: 1))
+            if character == "." {
+                operatorRange = NSRange(location: cursor, length: 1)
+            } else if character == "-",
+                      cursor + 1 < line.length,
+                      line.substring(with: NSRange(location: cursor + 1, length: 1)) == ">" {
+                operatorRange = NSRange(location: cursor, length: 2)
+            } else {
+                cursor += 1
+                continue
+            }
+
+            let expressionStart = expressionBoundaryBefore(location: operatorRange.location, in: line)
+            guard expressionStart < operatorRange.location else {
+                cursor = operatorRange.upperBound
+                continue
+            }
+            let expressionRange = NSRange(
+                location: expressionStart,
+                length: operatorRange.location - expressionStart
+            )
+            guard rangesIntersect(expressionRange, relativeChangedRange),
+                  memberFieldIdentifierRange(after: operatorRange.upperBound, in: line) != nil
+            else {
+                cursor = operatorRange.upperBound
+                continue
+            }
+            return true
+        }
+
+        return false
+    }
+
+    private static func memberFieldIdentifierRange(after location: Int, in line: NSString) -> NSRange? {
+        var cursor = location
+        while cursor < line.length {
+            let character = line.substring(with: NSRange(location: cursor, length: 1)).first
+            guard character?.isWhitespace == true else { break }
+            cursor += 1
+        }
+        guard cursor < line.length,
+              let firstCharacter = line.substring(with: NSRange(location: cursor, length: 1)).first,
+              firstCharacter == "_" || firstCharacter.isLetter else {
+            return nil
+        }
+
+        let start = cursor
+        cursor += 1
+        while cursor < line.length {
+            guard let character = line.substring(with: NSRange(location: cursor, length: 1)).first,
+                  isObjectiveCIdentifierCharacter(character) else {
+                break
+            }
+            cursor += 1
+        }
+        return NSRange(location: start, length: cursor - start)
     }
 
     private static func appendObjectiveCSemanticIndexSignature(
