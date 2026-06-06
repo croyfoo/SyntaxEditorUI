@@ -10077,6 +10077,43 @@ struct SyntaxHighlighterEngineTests {
         ).contains(.identifierVariable) == false)
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after spaced self member operator deletion")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterSpacedSelfMemberOperatorDeletion() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.   name.length;
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(of: "self.   name.length", with: "self   name.length")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "name",
+            inOccurrenceOf: "return self   name.length;"
+        ).contains(.identifierVariable) == false)
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after self member operator insertion")
     func highlighterRebuildsObjectiveCSemanticIndexAfterSelfMemberOperatorInsertion() async throws {
         let source = """

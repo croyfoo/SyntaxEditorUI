@@ -1787,6 +1787,19 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func memberAccessExpressionPrefix(before range: NSRange, in source: NSString) -> String? {
+        guard let operatorRange = memberAccessOperatorRange(before: range, in: source) else {
+            return nil
+        }
+
+        let start = expressionBoundaryBefore(location: operatorRange.location, in: source)
+        guard start < operatorRange.location else {
+            return nil
+        }
+        return source.substring(with: NSRange(location: start, length: operatorRange.location - start))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    fileprivate static func memberAccessOperatorRange(before range: NSRange, in source: NSString) -> NSRange? {
         guard range.location > 0 else {
             return nil
         }
@@ -1814,12 +1827,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             return nil
         }
 
-        let start = expressionBoundaryBefore(location: operatorStart, in: source)
-        guard start < operatorStart else {
-            return nil
-        }
-        return source.substring(with: NSRange(location: start, length: operatorStart - start))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return NSRange(location: operatorStart, length: range.location - operatorStart)
     }
 
     private static func expressionBoundaryBefore(location: Int, in source: NSString) -> Int {
@@ -2897,6 +2905,7 @@ private struct ObjectiveCFileSymbolIndex {
     private let shadowedVariableRangeKeys: Set<ObjectiveCRangeKey>
     private let selfMemberNameRangeKeys: Set<ObjectiveCRangeKey>
     private let selfChainMemberNameRangeKeys: Set<ObjectiveCRangeKey>
+    private let selfMemberAccessOperatorRangeKeys: Set<ObjectiveCRangeKey>
 
     init?(
         source: NSString,
@@ -3047,6 +3056,10 @@ private struct ObjectiveCFileSymbolIndex {
         self.shadowedVariableRangeKeys = shadowedVariableRangeKeys
         self.selfMemberNameRangeKeys = selfMemberNameRangeKeys
         self.selfChainMemberNameRangeKeys = selfChainMemberNameRangeKeys
+        self.selfMemberAccessOperatorRangeKeys = Self.memberAccessOperatorRangeKeys(
+            before: selfMemberNameRangeKeys.union(selfChainMemberNameRangeKeys),
+            in: source
+        )
     }
 
     private init(
@@ -3063,7 +3076,8 @@ private struct ObjectiveCFileSymbolIndex {
         ivarDeclarationNameRangeKeys: Set<ObjectiveCRangeKey>,
         shadowedVariableRangeKeys: Set<ObjectiveCRangeKey>,
         selfMemberNameRangeKeys: Set<ObjectiveCRangeKey>,
-        selfChainMemberNameRangeKeys: Set<ObjectiveCRangeKey>
+        selfChainMemberNameRangeKeys: Set<ObjectiveCRangeKey>,
+        selfMemberAccessOperatorRangeKeys: Set<ObjectiveCRangeKey>
     ) {
         self.localTypes = localTypes
         self.localFunctions = localFunctions
@@ -3079,6 +3093,7 @@ private struct ObjectiveCFileSymbolIndex {
         self.shadowedVariableRangeKeys = shadowedVariableRangeKeys
         self.selfMemberNameRangeKeys = selfMemberNameRangeKeys
         self.selfChainMemberNameRangeKeys = selfChainMemberNameRangeKeys
+        self.selfMemberAccessOperatorRangeKeys = selfMemberAccessOperatorRangeKeys
     }
 
     func shifted(
@@ -3119,6 +3134,11 @@ private struct ObjectiveCFileSymbolIndex {
                 selfChainMemberNameRangeKeys,
                 by: mutation,
                 sourceUTF16Length: nextSourceUTF16Length
+              ),
+              let shiftedSelfMemberAccessOperatorRangeKeys = Self.shiftedRangeKeys(
+                selfMemberAccessOperatorRangeKeys,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
               ) else {
             return nil
         }
@@ -3137,7 +3157,8 @@ private struct ObjectiveCFileSymbolIndex {
             ivarDeclarationNameRangeKeys: shiftedIvarDeclarationNameRangeKeys,
             shadowedVariableRangeKeys: shiftedShadowedVariableRangeKeys,
             selfMemberNameRangeKeys: shiftedSelfMemberNameRangeKeys,
-            selfChainMemberNameRangeKeys: shiftedSelfChainMemberNameRangeKeys
+            selfChainMemberNameRangeKeys: shiftedSelfChainMemberNameRangeKeys,
+            selfMemberAccessOperatorRangeKeys: shiftedSelfMemberAccessOperatorRangeKeys
         )
     }
 
@@ -3186,10 +3207,11 @@ private struct ObjectiveCFileSymbolIndex {
             return false
         }
         let replacedRange = NSRange(location: mutation.location, length: mutation.length)
-        return selfMemberNameRangeKeys.contains(where: {
-            Self.replacedRangeCanTouchMemberOperator(replacedRange, before: NSRange(location: $0.location, length: $0.length))
-        }) || selfChainMemberNameRangeKeys.contains(where: {
-            Self.replacedRangeCanTouchMemberOperator(replacedRange, before: NSRange(location: $0.location, length: $0.length))
+        return selfMemberAccessOperatorRangeKeys.contains(where: {
+            SyntaxEditorRangeUtilities.intersection(
+                of: replacedRange,
+                and: NSRange(location: $0.location, length: $0.length)
+            ).length > 0
         })
     }
 
@@ -3232,12 +3254,23 @@ private struct ObjectiveCFileSymbolIndex {
         return shifted
     }
 
-    private static func replacedRangeCanTouchMemberOperator(_ replacedRange: NSRange, before fieldRange: NSRange) -> Bool {
-        guard replacedRange.location < fieldRange.location,
-              replacedRange.upperBound <= fieldRange.location else {
-            return false
+    private static func memberAccessOperatorRangeKeys(
+        before fieldRangeKeys: Set<ObjectiveCRangeKey>,
+        in source: NSString
+    ) -> Set<ObjectiveCRangeKey> {
+        var operatorRangeKeys = Set<ObjectiveCRangeKey>()
+        operatorRangeKeys.reserveCapacity(fieldRangeKeys.count)
+        for key in fieldRangeKeys {
+            let range = NSRange(location: key.location, length: key.length)
+            guard let operatorRange = ObjectiveCSyntaxOverlayTokenProvider.memberAccessOperatorRange(
+                before: range,
+                in: source
+            ) else {
+                continue
+            }
+            operatorRangeKeys.insert(ObjectiveCRangeKey(operatorRange))
         }
-        return fieldRange.location - replacedRange.upperBound <= 2
+        return operatorRangeKeys
     }
 
     private static func shiftedRange(
