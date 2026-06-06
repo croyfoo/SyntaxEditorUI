@@ -972,14 +972,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         if objectiveCVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
             let statementEnd = line.range(of: ";").location
             guard statementEnd != NSNotFound else { return true }
-            return ObjectiveCFileSymbolIndex
-                .declarationNameRanges(in: line, statementEnd: statementEnd)
+            return objectiveCDeclarationSignatureRanges(in: line, statementEnd: statementEnd)
                 .contains { rangesIntersect($0, relativeChangedRange) }
         }
 
         if objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
-            return ObjectiveCFileSymbolIndex
-                .declarationNameRanges(in: line, statementEnd: line.length)
+            return objectiveCDeclarationSignatureRanges(in: line, statementEnd: line.length)
                 .contains { rangesIntersect($0, relativeChangedRange) }
         }
 
@@ -1027,15 +1025,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         if objectiveCVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
             let statementEnd = line.range(of: ";").location
             guard statementEnd != NSNotFound else { return nil }
-            let changesDeclarationName = ObjectiveCFileSymbolIndex
-                .declarationNameRanges(in: line, statementEnd: statementEnd)
+            let changesDeclarationName = objectiveCDeclarationSignatureRanges(in: line, statementEnd: statementEnd)
                 .contains { rangesIntersect($0, relativeChangedRange) }
             return changesDeclarationName ? scopeRange : nil
         }
 
         if objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
-            let changesDeclarationName = ObjectiveCFileSymbolIndex
-                .declarationNameRanges(in: line, statementEnd: line.length)
+            let changesDeclarationName = objectiveCDeclarationSignatureRanges(in: line, statementEnd: line.length)
                 .contains { rangesIntersect($0, relativeChangedRange) }
             return changesDeclarationName ? scopeRange : nil
         }
@@ -1122,6 +1118,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let ranges = ObjectiveCFileSymbolIndex.declarationNameRanges(in: line, statementEnd: statementEnd)
         guard !ranges.isEmpty else { return }
         hasher.combine(kind)
+        hasher.combine(objectiveCDeclarationShapeSignature(in: line, nameRanges: ranges, statementEnd: statementEnd))
         for range in ranges {
             let name = line.substring(with: range)
             guard !ObjectiveCFileSymbolIndex.typedefIgnoredIdentifiers.contains(name),
@@ -1131,6 +1128,29 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             }
             hasher.combine(name)
         }
+    }
+
+    private static func objectiveCDeclarationSignatureRanges(in line: NSString, statementEnd: Int) -> [NSRange] {
+        let nameRanges = ObjectiveCFileSymbolIndex.declarationNameRanges(in: line, statementEnd: statementEnd)
+        guard let firstNameRange = nameRanges.min(by: { $0.location < $1.location }) else { return [] }
+        let shapeRange = NSRange(location: 0, length: max(0, min(firstNameRange.location, statementEnd)))
+        if shapeRange.length > 0 {
+            return [shapeRange] + nameRanges
+        }
+        return nameRanges
+    }
+
+    private static func objectiveCDeclarationShapeSignature(
+        in line: NSString,
+        nameRanges: [NSRange],
+        statementEnd: Int
+    ) -> String {
+        guard let firstNameRange = nameRanges.min(by: { $0.location < $1.location }) else { return "" }
+        let shapeLength = max(0, min(firstNameRange.location, statementEnd))
+        guard shapeLength > 0 else { return "" }
+        return line.substring(with: NSRange(location: 0, length: shapeLength))
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func objectiveCTextContainsVariableDeclarationLine(_ text: NSString) -> Bool {

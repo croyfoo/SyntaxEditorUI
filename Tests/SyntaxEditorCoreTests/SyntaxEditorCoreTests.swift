@@ -10513,6 +10513,42 @@ struct SyntaxHighlighterEngineTests {
         ).contains(.identifierVariableSystem) == false)
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after variable qualifier changes")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterVariableQualifierChanges() async throws {
+        let source = """
+        static NSString *Token;
+
+        void run(void)
+        {
+            NSLog(@"%@", Token);
+        }
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "static NSString *Token;",
+            with: "extern NSString *Token;"
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "Token",
+            inOccurrenceOf: "NSLog(@\"%@\", Token)"
+        ).contains(.identifierVariableSystem) == false)
+    }
+
     @Test("SyntaxHighlighterEngine keeps Objective-C local shadows plain")
     func highlighterKeepsObjectiveCLocalShadowsPlain() async throws {
         let source = """
