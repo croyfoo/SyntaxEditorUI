@@ -1097,6 +1097,14 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
             let expressionStart = expressionBoundaryBefore(location: operatorRange.location, in: line)
             guard expressionStart < operatorRange.location else {
+                let operatorContextRange = NSRange(
+                    location: max(0, operatorRange.location - 1),
+                    length: min(line.length, operatorRange.upperBound + 1) - max(0, operatorRange.location - 1)
+                )
+                if rangesIntersect(operatorContextRange, relativeChangedRange),
+                   memberFieldIdentifierRange(after: operatorRange.upperBound, in: line) != nil {
+                    return true
+                }
                 cursor = operatorRange.upperBound
                 continue
             }
