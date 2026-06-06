@@ -1856,7 +1856,7 @@ extension SyntaxEditorUITests {
 
     @Test("SyntaxEditorView preserves macOS attributed marked text attributes")
     @MainActor
-    func syntaxEditorViewMacPreservesAttributedMarkedTextAttributes() async {
+    func syntaxEditorViewMacPreservesAttributedMarkedTextAttributes() async throws {
         let source = "let value = "
         let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(testContext: model)
@@ -1898,6 +1898,23 @@ extension SyntaxEditorUITests {
             macEditorPermanentForegroundColor(editorView, at: installedRange.location),
             markedForeground
         ))
+
+        layoutMacEditorView(editorView)
+        editorView.textView.invalidateSyntaxRenderingAttributes(for: [installedRange])
+        let installedTextRange = try #require(editorView.textView.textRange(forUTF16Range: installedRange))
+        var renderingForeground: NSColor?
+        editorView.textView.textLayoutManager.enumerateRenderingAttributes(
+            from: installedTextRange.location,
+            reverse: false
+        ) { _, attributes, range in
+            let utf16Range = editorView.textView.utf16Range(for: range)
+            guard NSIntersectionRange(utf16Range, installedRange).length > 0 else {
+                return true
+            }
+            renderingForeground = attributes[.foregroundColor] as? NSColor
+            return false
+        }
+        #expect(renderingForeground == nil)
     }
 
     @Test("SyntaxEditorView preserves macOS highlights for observed document edits")

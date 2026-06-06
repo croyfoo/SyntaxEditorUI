@@ -1132,28 +1132,56 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
 
         let baseForeground = typingAttributes[.foregroundColor] as? NSColor
         for targetRange in targetRanges {
-            guard let targetTextRange = textRange(forUTF16Range: targetRange) else { continue }
-            syntaxRenderingAttributeUTF16LengthForTesting += targetRange.length
+            let displayRanges = syntaxRenderingAttributeDisplayRanges(for: targetRange)
+            for displayRange in displayRanges {
+                guard let targetTextRange = textRange(forUTF16Range: displayRange) else { continue }
+                syntaxRenderingAttributeUTF16LengthForTesting += displayRange.length
 
-            if let baseForeground {
-                textLayoutManager.addRenderingAttribute(
-                    .foregroundColor,
-                    value: baseForeground,
-                    for: targetTextRange
-                )
-            }
+                if let baseForeground {
+                    textLayoutManager.addRenderingAttribute(
+                        .foregroundColor,
+                        value: baseForeground,
+                        for: targetTextRange
+                    )
+                }
 
-            textSystem.styleStore.forEachColorRun(in: targetRange) { [self] colorRun in
-                guard let textRange = textRange(forUTF16Range: colorRun.range) else { return }
-                syntaxRenderingAttributeColorRunCountForTesting += 1
-                textLayoutManager.addRenderingAttribute(
-                    .foregroundColor,
-                    value: colorRun.color,
-                    for: textRange
-                )
+                textSystem.styleStore.forEachColorRun(in: displayRange) { [self] colorRun in
+                    guard let textRange = textRange(forUTF16Range: colorRun.range) else { return }
+                    syntaxRenderingAttributeColorRunCountForTesting += 1
+                    textLayoutManager.addRenderingAttribute(
+                        .foregroundColor,
+                        value: colorRun.color,
+                        for: textRange
+                    )
+                }
             }
         }
         syntaxRenderingAttributeApplicationCountForTesting += 1
+    }
+
+    private func syntaxRenderingAttributeDisplayRanges(for targetRange: NSRange) -> [NSRange] {
+        guard let markedRange = markedTextRangeStorage else {
+            return [targetRange]
+        }
+        let markedIntersection = NSIntersectionRange(targetRange, markedRange)
+        guard markedIntersection.length > 0 else {
+            return [targetRange]
+        }
+
+        var ranges: [NSRange] = []
+        if targetRange.location < markedIntersection.location {
+            ranges.append(NSRange(
+                location: targetRange.location,
+                length: markedIntersection.location - targetRange.location
+            ))
+        }
+        if markedIntersection.upperBound < targetRange.upperBound {
+            ranges.append(NSRange(
+                location: markedIntersection.upperBound,
+                length: targetRange.upperBound - markedIntersection.upperBound
+            ))
+        }
+        return ranges
     }
 
     private func syntaxRenderingAttributeTargetRanges(
