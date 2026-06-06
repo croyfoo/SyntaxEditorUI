@@ -1094,12 +1094,40 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             if objectiveCTextCanStartCommentOrLiteral(source.substring(with: prefixRange)) {
                 return true
             }
+            if objectiveCMutationPrefixesLineSignatureWithNonWhitespace(
+                mutation,
+                lineRange: lineRange,
+                shiftedSignatureLocation: shiftedLocation,
+                in: source
+            ) {
+                return true
+            }
         }
         return false
     }
 
     private static func objectiveCTextCanStartCommentOrLiteral(_ text: String) -> Bool {
         text.contains("//") || text.contains("/*") || text.contains("\"")
+    }
+
+    private static func objectiveCMutationPrefixesLineSignatureWithNonWhitespace(
+        _ mutation: SyntaxHighlightMutation,
+        lineRange: NSRange,
+        shiftedSignatureLocation: Int,
+        in source: NSString
+    ) -> Bool {
+        guard mutation.location < shiftedSignatureLocation,
+              mutation.replacement.rangeOfCharacter(from: CharacterSet.whitespacesAndNewlines.inverted) != nil else {
+            return false
+        }
+        let prefixBeforeMutationRange = NSRange(
+            location: lineRange.location,
+            length: max(0, mutation.location - lineRange.location)
+        )
+        guard prefixBeforeMutationRange.upperBound <= source.length else {
+            return false
+        }
+        return objectiveCLineCharacterIsWhitespace(source.substring(with: prefixBeforeMutationRange))
     }
 
     private static func objectiveCLineCharacterIsWhitespace(_ text: String) -> Bool {

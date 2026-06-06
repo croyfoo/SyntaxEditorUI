@@ -10487,6 +10487,43 @@ struct SyntaxHighlighterEngineTests {
         }
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after declaration prefix punctuation")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterDeclarationPrefixPunctuation() async throws {
+        let source = """
+        static NSString *Token;
+
+        NSString *readValue(void)
+        {
+            return Token;
+        }
+        """
+        let updatedSource = "/\(source)"
+        let mutation = SyntaxHighlightMutation(
+            location: 0,
+            length: 0,
+            replacement: "/"
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "Token",
+            inOccurrenceOf: "return Token"
+        ).contains(.identifierVariable) == false)
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after ivar declaration rename")
     func highlighterRebuildsObjectiveCSemanticIndexAfterIvarDeclarationRename() async throws {
         let source = """
