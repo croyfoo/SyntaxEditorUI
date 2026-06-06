@@ -11,6 +11,11 @@ struct ObjectiveCSemanticOverlayState: SyntaxOverlayState {
 
 typealias ObjectiveCSemanticOverlayResult = SyntaxOverlayResult
 
+private struct ObjectiveCSemanticIndexSignature {
+    let fingerprint: Int
+    let structuralEditRanges: [NSRange]
+}
+
 private struct ObjectiveCOverlayPreparation {
     let baseTokensForIndex: [SyntaxHighlightToken]
     let outputBaseTokens: [SyntaxHighlightToken]
@@ -23,6 +28,7 @@ private struct ObjectiveCSemanticIndex {
     let fileSymbols: ObjectiveCFileSymbolIndex
     let sourceUTF16Length: Int
     let structuralFingerprint: Int
+    let structuralEditRanges: [NSRange]
 
     func shifted(
         by mutation: SyntaxHighlightMutation,
@@ -31,14 +37,67 @@ private struct ObjectiveCSemanticIndex {
         guard let shiftedSymbols = fileSymbols.shifted(
             by: mutation,
             sourceUTF16Length: nextSourceUTF16Length
-        ) else {
+        ),
+              let shiftedStructuralEditRanges = Self.shiftedRanges(
+                structuralEditRanges,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
+              ) else {
             return nil
         }
         return ObjectiveCSemanticIndex(
             fileSymbols: shiftedSymbols,
             sourceUTF16Length: nextSourceUTF16Length,
-            structuralFingerprint: structuralFingerprint
+            structuralFingerprint: structuralFingerprint,
+            structuralEditRanges: shiftedStructuralEditRanges
         )
+    }
+
+    private static func shiftedRanges(
+        _ ranges: [NSRange],
+        by mutation: SyntaxHighlightMutation,
+        sourceUTF16Length nextSourceUTF16Length: Int
+    ) -> [NSRange]? {
+        var shiftedRanges: [NSRange] = []
+        shiftedRanges.reserveCapacity(ranges.count)
+        for range in ranges {
+            guard let shiftedRange = shiftedRange(
+                range,
+                by: mutation,
+                sourceUTF16Length: nextSourceUTF16Length
+            ) else {
+                return nil
+            }
+            shiftedRanges.append(shiftedRange)
+        }
+        return shiftedRanges
+    }
+
+    private static func shiftedRange(
+        _ range: NSRange,
+        by mutation: SyntaxHighlightMutation,
+        sourceUTF16Length nextSourceUTF16Length: Int
+    ) -> NSRange? {
+        let replacementLength = mutation.replacement.utf16.count
+        let replacedRange = NSRange(location: mutation.location, length: mutation.length)
+        let oldUpperBound = mutation.location + mutation.length
+        let delta = replacementLength - mutation.length
+
+        if range.upperBound <= mutation.location {
+            return range
+        }
+        if range.location >= oldUpperBound {
+            let shiftedLocation = range.location + delta
+            guard shiftedLocation >= 0,
+                  shiftedLocation + range.length <= nextSourceUTF16Length else {
+                return nil
+            }
+            return NSRange(location: shiftedLocation, length: range.length)
+        }
+        if SyntaxEditorRangeUtilities.intersection(of: range, and: replacedRange).length > 0 {
+            return nil
+        }
+        return range
     }
 }
 
@@ -218,6 +277,8 @@ private struct ObjectiveCTokenIndex {
 }
 
 enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
+    private static let objectiveCSemanticStructuralCharacters = CharacterSet(charactersIn: "#@{}();")
+
     static func mergingOverlayTokens(
         tokens: [SyntaxHighlightToken],
         source: String,
@@ -274,20 +335,23 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         }
         let previousIndex = state?.index
         let shouldCheckStructuralFingerprint = mutation.map {
-            objectiveCMutationCanChangeSemanticSignature($0, in: nsSource)
+            objectiveCMutationCanChangeSemanticSignature($0, in: nsSource, previousIndex: previousIndex)
         } ?? true
-        let structuralFingerprint = if let previousIndex, !shouldCheckStructuralFingerprint {
-            previousIndex.structuralFingerprint
+        let structuralSignature = if let previousIndex, !shouldCheckStructuralFingerprint {
+            ObjectiveCSemanticIndexSignature(
+                fingerprint: previousIndex.structuralFingerprint,
+                structuralEditRanges: previousIndex.structuralEditRanges
+            )
         } else {
-            semanticIndexFingerprint(in: nsSource)
+            semanticIndexSignature(in: nsSource)
         }
         let structuralFingerprintChanged = shouldCheckStructuralFingerprint
-            ? (previousIndex.map { $0.structuralFingerprint != structuralFingerprint } ?? true)
+            ? (previousIndex.map { $0.structuralFingerprint != structuralSignature.fingerprint } ?? true)
             : false
         let localStructuralTargetRange = if structuralFingerprintChanged,
                                             let mutation,
                                             previousIndex != nil {
-            objectiveCLocalStructuralRefreshRange(for: mutation, in: nsSource)
+            objectiveCLocalStructuralRefreshRange(for: mutation, in: nsSource, previousIndex: previousIndex)
         } else {
             nil as NSRange?
         }
@@ -325,7 +389,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             semanticIndex = ObjectiveCSemanticIndex(
                 fileSymbols: rebuiltIndex,
                 sourceUTF16Length: nsSource.length,
-                structuralFingerprint: structuralFingerprint
+                structuralFingerprint: structuralSignature.fingerprint,
+                structuralEditRanges: structuralSignature.structuralEditRanges
             )
         } else if let shiftedIndex = shiftedPreviousIndex {
             semanticIndex = shiftedIndex
@@ -804,36 +869,89 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             || objectiveCTextContainsVariableDeclarationLine(nsText)
     }
 
-    private static func semanticIndexFingerprint(in source: NSString) -> Int {
+    private static func objectiveCMutationReplacesPreviousStructuralSignatureText(
+        _ mutation: SyntaxHighlightMutation,
+        previousIndex: ObjectiveCSemanticIndex?
+    ) -> Bool {
+        guard mutation.length > 0,
+              let previousIndex else {
+            return false
+        }
+
+        return rangeIntersectsSortedRanges(
+            NSRange(location: mutation.location, length: mutation.length),
+            previousIndex.structuralEditRanges
+        )
+    }
+
+    private static func semanticIndexSignature(in source: NSString) -> ObjectiveCSemanticIndexSignature {
         var hasher = Hasher()
+        var structuralEditRanges: [NSRange] = []
 
         var location = 0
         while location < source.length {
             let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
             let line = source.substring(with: lineRange) as NSString
-            appendObjectiveCSemanticIndexSignature(
+            let contributesToSignature = appendObjectiveCSemanticIndexSignature(
                 from: line,
                 lineOffset: lineRange.location,
                 into: &hasher
             )
+            if contributesToSignature {
+                structuralEditRanges.append(
+                    contentsOf: objectiveCSemanticStructuralEditRanges(
+                        in: line,
+                        lineOffset: lineRange.location
+                    )
+                )
+            }
             let nextLocation = lineRange.upperBound
             guard nextLocation > location else { break }
             location = nextLocation
         }
 
-        return hasher.finalize()
+        return ObjectiveCSemanticIndexSignature(
+            fingerprint: hasher.finalize(),
+            structuralEditRanges: structuralEditRanges
+        )
+    }
+
+    private static func objectiveCSemanticStructuralEditRanges(
+        in line: NSString,
+        lineOffset: Int
+    ) -> [NSRange] {
+        var ranges: [NSRange] = []
+        var cursor = 0
+        while cursor < line.length {
+            let searchRange = NSRange(location: cursor, length: line.length - cursor)
+            let structuralRange = line.rangeOfCharacter(
+                from: objectiveCSemanticStructuralCharacters,
+                options: [],
+                range: searchRange
+            )
+            guard structuralRange.location != NSNotFound else {
+                break
+            }
+            ranges.append(NSRange(location: lineOffset + structuralRange.location, length: structuralRange.length))
+            cursor = structuralRange.upperBound
+        }
+        return ranges
     }
 
     private static func objectiveCMutationCanChangeSemanticSignature(
         _ mutation: SyntaxHighlightMutation,
-        in source: NSString
+        in source: NSString,
+        previousIndex: ObjectiveCSemanticIndex?
     ) -> Bool {
         if mutation.replacement.rangeOfCharacter(from: .newlines) != nil {
             return true
         }
         if mutation.replacement.rangeOfCharacter(
-            from: CharacterSet(charactersIn: "#@{}();")
+            from: objectiveCSemanticStructuralCharacters
         ) != nil {
+            return true
+        }
+        if objectiveCMutationReplacesPreviousStructuralSignatureText(mutation, previousIndex: previousIndex) {
             return true
         }
 
@@ -872,12 +990,16 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static func objectiveCLocalStructuralRefreshRange(
         for mutation: SyntaxHighlightMutation,
-        in source: NSString
+        in source: NSString,
+        previousIndex: ObjectiveCSemanticIndex?
     ) -> NSRange? {
         if mutation.replacement.rangeOfCharacter(from: .newlines) != nil {
             return nil
         }
-        if mutation.replacement.rangeOfCharacter(from: CharacterSet(charactersIn: "#@{}();")) != nil {
+        if mutation.replacement.rangeOfCharacter(from: objectiveCSemanticStructuralCharacters) != nil {
+            return nil
+        }
+        if objectiveCMutationReplacesPreviousStructuralSignatureText(mutation, previousIndex: previousIndex) {
             return nil
         }
 
@@ -925,17 +1047,17 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         from line: NSString,
         lineOffset _: Int,
         into hasher: inout Hasher
-    ) {
+    ) -> Bool {
         let lineString = line as String
         let nsLine = line as NSString
         let fullRange = NSRange(location: 0, length: nsLine.length)
         let trimmed = lineString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return false }
 
         if trimmed.hasPrefix("#") {
             hasher.combine("preprocessor")
             hasher.combine(trimmed)
-            return
+            return true
         }
 
         if trimmed.hasPrefix("@property") {
@@ -946,7 +1068,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             } else {
                 hasher.combine(trimmed)
             }
-            return
+            return true
         }
 
         if objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
@@ -956,38 +1078,39 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 statementEnd: line.length,
                 into: &hasher
             )
-            return
+            return true
         }
 
         if objectiveCVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
             let statementEnd = line.range(of: ";").location
-            guard statementEnd != NSNotFound else { return }
+            guard statementEnd != NSNotFound else { return false }
             appendObjectiveCDeclarationNameSignature(
                 kind: "variable",
                 line: line,
                 statementEnd: statementEnd,
                 into: &hasher
             )
-            return
+            return true
         }
 
         guard structuralObjectiveCEditRegex.firstMatch(in: lineString, range: fullRange) != nil
             || objectiveCSemanticIndexFunctionSignatureLineRegex.firstMatch(in: lineString, range: fullRange) != nil
             || objectiveCSemanticIndexSplitFunctionNameLineRegex.firstMatch(in: lineString, range: fullRange) != nil else {
-            return
+            return false
         }
 
         hasher.combine("structural")
         let identifiers = ObjectiveCFileSymbolIndex.identifierRegex.matches(in: lineString, range: fullRange)
         if identifiers.isEmpty {
             hasher.combine(trimmed)
-            return
+            return true
         }
         for match in identifiers {
             let name = line.substring(with: match.range)
             guard !ObjectiveCFileSymbolIndex.typedefIgnoredIdentifiers.contains(name) else { continue }
             hasher.combine(name)
         }
+        return true
     }
 
     private static func appendObjectiveCDeclarationNameSignature(
