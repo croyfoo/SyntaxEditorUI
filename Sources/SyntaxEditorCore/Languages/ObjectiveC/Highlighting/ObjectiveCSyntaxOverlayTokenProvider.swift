@@ -347,8 +347,18 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 previousIndex: previousIndex
             )
         } ?? false
+        let shiftedPreviousIndex = mutation.flatMap { mutation in
+            previousIndex?.shifted(
+                by: mutation,
+                sourceUTF16Length: nsSource.length
+            )
+        }
+        let cannotShiftPreviousIndex = mutation != nil
+            && previousIndex != nil
+            && shiftedPreviousIndex == nil
         let shouldCheckStructuralFingerprint = mutation.map {
             requiresSemanticIndexRebuild
+                || cannotShiftPreviousIndex
                 || objectiveCMutationCanChangeSemanticSignature($0, in: nsSource, previousIndex: previousIndex)
         } ?? true
         let structuralSignature = if let previousIndex, !shouldCheckStructuralFingerprint {
@@ -379,15 +389,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             || previousIndex == nil
             || requiresSemanticIndexRebuild
             || structuralFingerprintChanged
+            || cannotShiftPreviousIndex
             || (previousIndex?.sourceUTF16Length != nsSource.length && mutation == nil)
-        let shiftedPreviousIndex = mutation.flatMap { mutation in
-            previousIndex?.shifted(
-                by: mutation,
-                sourceUTF16Length: nsSource.length
-            )
-        }
         let semanticIndex: ObjectiveCSemanticIndex
-        if shouldRebuildIndex || (mutation != nil && shiftedPreviousIndex == nil) {
+        if shouldRebuildIndex {
             guard let rebuiltIndex = ObjectiveCFileSymbolIndex(
                 source: nsSource,
                 tokenIndex: preparation.tokenIndex,

@@ -2056,7 +2056,7 @@ public final class SyntaxEditorView: NSScrollView {
         refreshStartUTF16 _: Int
     ) {
         guard let mutation else {
-            suspendSyntaxHighlightMaterialization()
+            clearSyntaxHighlightRendering()
             return
         }
         let invalidatedRange = pendingTextMutationReplacementRange(in: source, mutation: mutation)

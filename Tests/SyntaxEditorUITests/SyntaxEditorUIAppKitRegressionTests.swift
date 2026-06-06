@@ -1786,8 +1786,24 @@ extension SyntaxEditorUITests {
     func syntaxEditorViewMacMultiRangeReplacementSyncsFinalText() async {
         let source = "abcde"
         let expectedSource = "aXcYe"
+        let completeGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorPhasedTestHighlighter(
+            fastTokens: [],
+            completeTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 1),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            completeGate: completeGate
+        )
         let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
-        let editorView = SyntaxEditorView(testContext: model)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await completeGate.waitUntilSuspended()
+        await completeGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(editorView.syntaxColorRunCountForTesting == 1)
 
         let didAccept = editorView.textView.shouldReplaceCharacters(
             inRanges: [
@@ -1798,11 +1814,16 @@ extension SyntaxEditorUITests {
         )
         #expect(didAccept)
 
+        let suspensionCount = await completeGate.currentSuspensionCount()
         editorView.textView.string = expectedSource
-        await editorView.waitForPendingHighlightForTesting()
+        await completeGate.waitUntilSuspended(after: suspensionCount)
 
         #expect(editorView.textView.string == expectedSource)
         #expect(model.model.text == expectedSource)
+        #expect(editorView.syntaxColorRunCountForTesting == 0)
+
+        await completeGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
     }
 
     @Test("SyntaxEditorView keeps macOS marked range unchanged when marked text is handled as command input")

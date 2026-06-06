@@ -10609,6 +10609,61 @@ struct SyntaxHighlighterEngineTests {
         ).contains(.preprocessor) == false)
     }
 
+    @Test("SyntaxHighlighterEngine recomputes Objective-C structural ranges after failed index shifts")
+    func highlighterRecomputesObjectiveCStructuralRangesAfterFailedIndexShifts() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length;
+        }
+        @end
+
+        #define ReferenceLog(format, ...) NSLog(format, ##__VA_ARGS__)
+
+        void run(void)
+        {
+            ReferenceLog(@"value");
+        }
+        """
+        let insertedSource = source.replacingOccurrences(of: "self.name.length", with: "self.nxame.length")
+        let finalSource = insertedSource.replacingOccurrences(
+            of: "#define ReferenceLog",
+            with: "define ReferenceLog"
+        )
+        let insertionMutation = try #require(TextMutation.diff(from: source, to: insertedSource))
+        let macroMutation = try #require(TextMutation.diff(from: insertedSource, to: finalSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: insertedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(insertionMutation)
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: insertedSource,
+            source: finalSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(macroMutation)
+        )
+        let full = await fullEngine.reset(source: finalSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: finalSource,
+            text: "ReferenceLog",
+            inOccurrenceOf: "ReferenceLog(@\"value\")"
+        ).contains(.preprocessor) == false)
+    }
+
     @Test("SyntaxHighlighterEngine keeps Objective-C local statics out of file-scope overlays")
     func highlighterKeepsObjectiveCLocalStaticsOutOfFileScopeOverlays() async throws {
         let source = """
