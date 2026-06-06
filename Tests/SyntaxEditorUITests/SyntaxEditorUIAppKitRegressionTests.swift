@@ -1208,6 +1208,19 @@ extension SyntaxEditorUITests {
         #expect(scrolledFragmentRange.length > source.utf16.count / 2)
         #expect(scrolledTargetLength < scrolledFragmentRange.length / 4)
 
+        let scrolledDirtyRect = editorView.textView.visibleRect
+            .offsetBy(dx: -scrolledFragmentView.frame.minX, dy: -scrolledFragmentView.frame.minY)
+            .intersection(scrolledFragmentView.bounds)
+        editorView.textView.resetSyntaxRenderingAttributeCountersForTesting()
+        macEditorDrawFragment(
+            scrolledFragmentView,
+            dirtyRect: scrolledDirtyRect,
+            backgroundColor: theme.background
+        )
+        #expect(editorView.textView.syntaxRenderingAttributeUTF16LengthForTesting > 0)
+        #expect(editorView.textView.syntaxRenderingAttributeUTF16LengthForTesting < source.utf16.count / 4)
+        #expect(editorView.textView.syntaxRenderingAttributeColorRunCountForTesting < tokens.count / 4)
+
         editorView.textView.resetSyntaxRenderingAttributeCountersForTesting()
         editorView.textView.invalidateSyntaxRenderingAttributes(
             for: [NSRange(location: 0, length: source.utf16.count)]
