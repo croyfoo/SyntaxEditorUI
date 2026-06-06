@@ -293,16 +293,34 @@ actor ManualSyntaxHighlightGate {
         let continuation: CheckedContinuation<Void, Never>
     }
 
+    struct ResumeWaiter {
+        let id: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
     var suspensionCount = 0
     var suspensionWaiters: [SuspensionWaiter] = []
-    var resumeContinuations: [CheckedContinuation<Void, Never>] = []
+    var nextResumeWaiterID = 0
+    var resumeContinuations: [ResumeWaiter] = []
 
     func suspend() async {
         suspensionCount += 1
         resumeReadySuspensionWaiters()
 
-        await withCheckedContinuation { continuation in
-            resumeContinuations.append(continuation)
+        let waiterID = nextResumeWaiterID
+        nextResumeWaiterID += 1
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume()
+                    return
+                }
+                resumeContinuations.append(ResumeWaiter(id: waiterID, continuation: continuation))
+            }
+        } onCancel: {
+            Task {
+                await self.cancelResumeContinuation(id: waiterID)
+            }
         }
     }
 
@@ -326,17 +344,25 @@ actor ManualSyntaxHighlightGate {
 
     func resumeOne() {
         guard !resumeContinuations.isEmpty else { return }
-        let continuation = resumeContinuations.removeFirst()
-        continuation.resume()
+        let waiter = resumeContinuations.removeFirst()
+        waiter.continuation.resume()
     }
 
     func resumeAll() {
-        let continuations = resumeContinuations
+        let waiters = resumeContinuations
         resumeContinuations.removeAll()
 
-        for continuation in continuations {
-            continuation.resume()
+        for waiter in waiters {
+            waiter.continuation.resume()
         }
+    }
+
+    func cancelResumeContinuation(id: Int) {
+        guard let index = resumeContinuations.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let waiter = resumeContinuations.remove(at: index)
+        waiter.continuation.resume()
     }
 
     func resumeReadySuspensionWaiters() {
@@ -1161,6 +1187,110 @@ func macEditorTextStorageBackgroundColor(_ editorView: SyntaxEditorView, at loca
 func macEditorVisibleFragmentViews(_ editorView: SyntaxEditorView) -> [SyntaxEditorTextLayoutFragmentView] {
     editorView.textView.layoutVisibleViewport()
     return editorView.textView.textContentView.subviews.compactMap { $0 as? SyntaxEditorTextLayoutFragmentView }
+}
+
+@MainActor
+func macEditorRenderedFragmentContainsDominantColor(
+    _ fragmentView: SyntaxEditorTextLayoutFragmentView,
+    targetColor: NSColor,
+    backgroundColor: NSColor,
+    minimumPixelCount: Int = 8
+) -> Bool {
+    let bounds = fragmentView.bounds
+    guard bounds.width > 0, bounds.height > 0 else {
+        return false
+    }
+
+    let renderSize = NSSize(
+        width: min(ceil(bounds.width), 600),
+        height: min(ceil(bounds.height), 200)
+    )
+    guard renderSize.width > 0, renderSize.height > 0 else {
+        return false
+    }
+
+    let image = NSImage(size: renderSize)
+    image.lockFocus()
+    backgroundColor.setFill()
+    NSRect(origin: .zero, size: renderSize).fill()
+    fragmentView.draw(NSRect(origin: .zero, size: renderSize))
+    image.unlockFocus()
+
+    guard let tiffRepresentation = image.tiffRepresentation,
+          let bitmap = NSBitmapImageRep(data: tiffRepresentation)
+    else {
+        return false
+    }
+
+    var matchingPixels = 0
+    for y in 0..<bitmap.pixelsHigh {
+        for x in 0..<bitmap.pixelsWide {
+            guard let color = bitmap.colorAt(x: x, y: y),
+                  syntaxEditorUITestRenderedColor(color, matchesDominantTarget: targetColor)
+            else {
+                continue
+            }
+
+            matchingPixels += 1
+            if matchingPixels >= minimumPixelCount {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+@MainActor
+func macEditorDrawFragment(
+    _ fragmentView: SyntaxEditorTextLayoutFragmentView,
+    dirtyRect: NSRect,
+    backgroundColor: NSColor
+) {
+    let renderSize = NSSize(
+        width: max(1, ceil(fragmentView.bounds.width)),
+        height: max(1, ceil(fragmentView.bounds.height))
+    )
+    let image = NSImage(size: renderSize)
+    image.lockFocus()
+    backgroundColor.setFill()
+    NSRect(origin: .zero, size: renderSize).fill()
+    fragmentView.draw(dirtyRect)
+    image.unlockFocus()
+}
+
+private func syntaxEditorUITestRenderedColor(
+    _ color: NSColor,
+    matchesDominantTarget targetColor: NSColor
+) -> Bool {
+    guard let color = color.usingColorSpace(.deviceRGB),
+          color.alphaComponent > 0.05,
+          let targetColor = targetColor.usingColorSpace(.deviceRGB)
+    else {
+        return false
+    }
+
+    let components = [
+        color.redComponent,
+        color.greenComponent,
+        color.blueComponent,
+    ]
+    let targetComponents = [
+        targetColor.redComponent,
+        targetColor.greenComponent,
+        targetColor.blueComponent,
+    ]
+    guard let dominantIndex = targetComponents.indices.max(by: {
+        targetComponents[$0] < targetComponents[$1]
+    }) else {
+        return false
+    }
+
+    let dominant = components[dominantIndex]
+    let strongestOther = components.enumerated()
+        .filter { $0.offset != dominantIndex }
+        .map(\.element)
+        .max() ?? 0
+    return dominant > 0.22 && dominant > strongestOther * 1.8
 }
 
 func makeMacCommandKeyEvent(

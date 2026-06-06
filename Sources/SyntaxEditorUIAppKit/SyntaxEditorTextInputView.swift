@@ -64,6 +64,8 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     var bracketHighlightColor: NSColor?
     var fragmentDisplayInvalidationCount = 0
     var syntaxRenderingAttributeApplicationCountForTesting = 0
+    var syntaxRenderingAttributeUTF16LengthForTesting = 0
+    var syntaxRenderingAttributeColorRunCountForTesting = 0
     var lineMetrics = DocumentLineMetrics(tabWidth: 4)
     private var viewportPreparationExpansion: CGFloat {
         min(max(64, bounds.height * 0.25), 240)
@@ -91,6 +93,18 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
 
         let minY = max(0, min(prepared.minY, visible.minY))
         let maxY = max(prepared.maxY, visible.maxY)
+        return CGRect(
+            x: 0,
+            y: minY,
+            width: max(bounds.width, visible.width),
+            height: max(visible.height, maxY - minY)
+        )
+    }
+    private var syntaxRenderingViewportBounds: CGRect {
+        let visible = visibleViewportBounds
+        let expansion = viewportPreparationExpansion
+        let minY = max(0, visible.minY - expansion)
+        let maxY = visible.maxY + expansion
         return CGRect(
             x: 0,
             y: minY,
@@ -128,6 +142,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
                 self?.handleIncrementalMatchRangesChange(changedRanges: changedRanges)
             }
         }
+        configureSyntaxRenderingAttributesValidator()
     }
 
     @available(*, unavailable)
@@ -679,6 +694,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         guard isEditable else { return }
         let attributedReplacement = markedTextAttributedReplacement(from: string)
         let replacement = attributedReplacement.string
+        let previousMarkedRange = markedTextRangeStorage
         let range = markedTextRangeStorage ?? effectiveReplacementRange(replacementRange)
         let markedLength = replacement.utf16.count
         let didReplace = replaceText(
@@ -690,14 +706,18 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             )
         )
         guard didReplace else { return }
-        markedTextRangeStorage = replacement.isEmpty ? nil : NSRange(location: range.location, length: markedLength)
+        let markedRange = replacement.isEmpty ? nil : NSRange(location: range.location, length: markedLength)
+        markedTextRangeStorage = markedRange
         markedTextAttributedStringStorage = replacement.isEmpty ? nil : attributedReplacement
         applyMarkedTextAttributes()
+        invalidateSyntaxRenderingAttributesForMarkedTextChange(from: previousMarkedRange, to: markedRange)
     }
 
     func unmarkText() {
+        let previousMarkedRange = markedTextRangeStorage
         markedTextRangeStorage = nil
         markedTextAttributedStringStorage = nil
+        invalidateSyntaxRenderingAttributesForMarkedTextChange(from: previousMarkedRange, to: nil)
         updateSelectionRendering()
         needsDisplay = true
     }
@@ -751,6 +771,21 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
                 }
             }
         }
+    }
+
+    private func invalidateSyntaxRenderingAttributesForMarkedTextChange(
+        from previousRange: NSRange?,
+        to currentRange: NSRange?
+    ) {
+        let ranges = [previousRange, currentRange].compactMap { range -> NSRange? in
+            guard let range,
+                  range.location != NSNotFound,
+                  range.length > 0 else {
+                return nil
+            }
+            return range
+        }
+        invalidateSyntaxRenderingAttributes(for: ranges)
     }
 
     func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
@@ -959,6 +994,38 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         }
     }
 
+    func invalidateSyntaxRenderingAttributes(for ranges: [NSRange]) {
+        guard !ranges.isEmpty else { return }
+
+        var invalidatedRanges: [NSRange] = []
+        invalidatedRanges.reserveCapacity(ranges.count)
+        for range in ranges {
+            let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: storage.length)
+            guard clamped.length > 0,
+                  let textRange = textRange(forUTF16Range: clamped)
+            else {
+                continue
+            }
+            textLayoutManager.invalidateRenderingAttributes(for: textRange)
+            invalidatedRanges.append(clamped)
+        }
+
+        guard !invalidatedRanges.isEmpty else { return }
+
+        layoutVisibleViewportIfNeeded()
+        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            let fragmentRange = textRange(for: fragmentView.layoutFragment)
+            guard !TextLayoutGeometry.ranges(invalidatedRanges, intersecting: fragmentRange).isEmpty else {
+                continue
+            }
+            validateSyntaxRenderingAttributes(
+                in: fragmentView.layoutFragment,
+                using: textLayoutManager
+            )
+            fragmentView.needsDisplay = true
+        }
+    }
+
     func setNeedsDisplayForVisibleTextFragments() {
         layoutVisibleViewportIfNeeded()
         for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
@@ -1055,6 +1122,205 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         configureFindHighlights(for: fragmentView)
         configureSelectionHighlights(for: fragmentView)
         configureBracketHighlights(for: fragmentView)
+    }
+
+    private func configureSyntaxRenderingAttributesValidator() {
+        textLayoutManager.renderingAttributesValidator = { [weak self] textLayoutManager, textLayoutFragment in
+            MainActor.assumeIsolated {
+                self?.validateSyntaxRenderingAttributes(
+                    in: textLayoutFragment,
+                    using: textLayoutManager
+                )
+            }
+        }
+    }
+
+    private func validateSyntaxRenderingAttributes(
+        in textLayoutFragment: NSTextLayoutFragment,
+        using textLayoutManager: NSTextLayoutManager,
+        targetBounds: CGRect? = nil
+    ) {
+        let fragmentRange = textRange(for: textLayoutFragment)
+        guard fragmentRange.length > 0 else { return }
+
+        let targetRanges = syntaxRenderingAttributeTargetRanges(
+            in: textLayoutFragment,
+            fragmentRange: fragmentRange,
+            targetBounds: targetBounds
+        )
+        guard !targetRanges.isEmpty else { return }
+
+        let baseForeground = typingAttributes[.foregroundColor] as? NSColor
+        for targetRange in targetRanges {
+            let displayRanges = syntaxRenderingAttributeDisplayRanges(for: targetRange)
+            for displayRange in displayRanges {
+                guard let targetTextRange = textRange(forUTF16Range: displayRange) else { continue }
+                syntaxRenderingAttributeUTF16LengthForTesting += displayRange.length
+
+                if let baseForeground {
+                    textLayoutManager.addRenderingAttribute(
+                        .foregroundColor,
+                        value: baseForeground,
+                        for: targetTextRange
+                    )
+                }
+
+                textSystem.styleStore.forEachColorRun(in: displayRange) { [self] colorRun in
+                    guard let textRange = textRange(forUTF16Range: colorRun.range) else { return }
+                    syntaxRenderingAttributeColorRunCountForTesting += 1
+                    textLayoutManager.addRenderingAttribute(
+                        .foregroundColor,
+                        value: colorRun.color,
+                        for: textRange
+                    )
+                }
+            }
+        }
+        syntaxRenderingAttributeApplicationCountForTesting += 1
+    }
+
+    private func syntaxRenderingAttributeDisplayRanges(for targetRange: NSRange) -> [NSRange] {
+        guard let markedRange = markedTextRangeStorage else {
+            return [targetRange]
+        }
+        let markedIntersection = NSIntersectionRange(targetRange, markedRange)
+        guard markedIntersection.length > 0 else {
+            return [targetRange]
+        }
+
+        var ranges: [NSRange] = []
+        if targetRange.location < markedIntersection.location {
+            ranges.append(NSRange(
+                location: targetRange.location,
+                length: markedIntersection.location - targetRange.location
+            ))
+        }
+        if markedIntersection.upperBound < targetRange.upperBound {
+            ranges.append(NSRange(
+                location: markedIntersection.upperBound,
+                length: targetRange.upperBound - markedIntersection.upperBound
+            ))
+        }
+        return ranges
+    }
+
+    private func syntaxRenderingAttributeTargetRanges(
+        in textLayoutFragment: NSTextLayoutFragment,
+        fragmentRange: NSRange,
+        targetBounds: CGRect? = nil
+    ) -> [NSRange] {
+        let lineFragments = textLayoutFragment.textLineFragments
+        guard !lineFragments.isEmpty else {
+            return fallbackSyntaxRenderingAttributeTargetRanges(for: fragmentRange)
+        }
+
+        let viewportBounds = targetBounds ?? syntaxRenderingViewportBounds
+        let fragmentStart = utf16Offset(for: textLayoutFragment.rangeInElement.location)
+        let fragmentOrigin = textLayoutFragment.layoutFragmentFrame.origin
+        var ranges: [NSRange] = []
+        ranges.reserveCapacity(min(lineFragments.count, 64))
+
+        for lineFragment in lineFragments {
+            let lineFrame = lineFragment.typographicBounds.offsetBy(
+                dx: fragmentOrigin.x,
+                dy: fragmentOrigin.y
+            )
+            guard lineFrame.insetBy(dx: 0, dy: -2).intersects(viewportBounds) else {
+                continue
+            }
+
+            let absoluteRange = NSRange(
+                location: fragmentStart + lineFragment.characterRange.location,
+                length: lineFragment.characterRange.length
+            )
+            let clampedRange = SyntaxEditorRangeUtilities.clampedRange(
+                absoluteRange,
+                utf16Length: storage.length
+            )
+            let targetRange = NSIntersectionRange(clampedRange, fragmentRange)
+            guard targetRange.length > 0 else { continue }
+            ranges.append(targetRange)
+        }
+
+        return Self.mergedSyntaxRenderingAttributeRanges(ranges)
+    }
+
+    private func fallbackSyntaxRenderingAttributeTargetRanges(for fragmentRange: NSRange) -> [NSRange] {
+        if let viewportRange = viewportCharacterRange() {
+            let targetRange = NSIntersectionRange(fragmentRange, viewportRange)
+            if targetRange.length > 0 {
+                return [targetRange]
+            }
+        }
+
+        return [fragmentRange]
+    }
+
+    private static func mergedSyntaxRenderingAttributeRanges(_ ranges: [NSRange]) -> [NSRange] {
+        guard !ranges.isEmpty else { return [] }
+
+        let sortedRanges = ranges.sorted {
+            if $0.location == $1.location {
+                return $0.upperBound < $1.upperBound
+            }
+            return $0.location < $1.location
+        }
+
+        var mergedRanges: [NSRange] = []
+        mergedRanges.reserveCapacity(sortedRanges.count)
+        for range in sortedRanges {
+            guard range.length > 0 else { continue }
+            guard let lastRange = mergedRanges.last else {
+                mergedRanges.append(range)
+                continue
+            }
+
+            if range.location <= lastRange.upperBound {
+                let mergedUpperBound = max(lastRange.upperBound, range.upperBound)
+                mergedRanges[mergedRanges.count - 1] = NSRange(
+                    location: lastRange.location,
+                    length: mergedUpperBound - lastRange.location
+                )
+            } else {
+                mergedRanges.append(range)
+            }
+        }
+        return mergedRanges
+    }
+
+    func validateSyntaxRenderingAttributesForDisplay(
+        in textLayoutFragment: NSTextLayoutFragment,
+        dirtyRectInFragment: CGRect
+    ) {
+        guard !dirtyRectInFragment.isEmpty else { return }
+
+        let fragmentOrigin = textLayoutFragment.layoutFragmentFrame.origin
+        let dirtyBounds = dirtyRectInFragment.offsetBy(dx: fragmentOrigin.x, dy: fragmentOrigin.y)
+        let targetBounds = dirtyBounds.intersection(syntaxRenderingViewportBounds)
+        guard !targetBounds.isNull, !targetBounds.isEmpty else { return }
+
+        validateSyntaxRenderingAttributes(
+            in: textLayoutFragment,
+            using: textLayoutManager,
+            targetBounds: targetBounds
+        )
+    }
+
+    func resetSyntaxRenderingAttributeCountersForTesting() {
+        syntaxRenderingAttributeApplicationCountForTesting = 0
+        syntaxRenderingAttributeUTF16LengthForTesting = 0
+        syntaxRenderingAttributeColorRunCountForTesting = 0
+    }
+
+    func syntaxRenderingAttributeTargetRangesForTesting(
+        in textLayoutFragment: NSTextLayoutFragment
+    ) -> [NSRange] {
+        let fragmentRange = textRange(for: textLayoutFragment)
+        guard fragmentRange.length > 0 else { return [] }
+        return syntaxRenderingAttributeTargetRanges(
+            in: textLayoutFragment,
+            fragmentRange: fragmentRange
+        )
     }
 
     func textViewportLayoutControllerDidLayout(_ textViewportLayoutController: NSTextViewportLayoutController) {
@@ -1816,8 +2082,10 @@ final class SyntaxEditorTextContentView: NSView {
 }
 
 final class SyntaxEditorTextLayoutFragment: NSTextLayoutFragment {
+    private(set) var lineFragmentDrawCountForTesting = 0
+
     override func draw(at point: CGPoint, in context: CGContext) {
-        draw(at: point, in: context, dirtyRect: nil)
+        super.draw(at: point, in: context)
     }
 
     func draw(at point: CGPoint, in context: CGContext, dirtyRect: CGRect?) {
@@ -1829,6 +2097,7 @@ final class SyntaxEditorTextLayoutFragment: NSTextLayoutFragment {
                 continue
             }
 
+            lineFragmentDrawCountForTesting += 1
             lineFragment.draw(at: lineFrame.origin, in: context)
         }
         context.restoreGState()
@@ -1899,6 +2168,10 @@ final class SyntaxEditorTextLayoutFragmentView: NSView {
             }
         }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        textInputView?.validateSyntaxRenderingAttributesForDisplay(
+            in: layoutFragment,
+            dirtyRectInFragment: dirtyRect
+        )
         if let syntaxLayoutFragment = layoutFragment as? SyntaxEditorTextLayoutFragment {
             syntaxLayoutFragment.draw(at: .zero, in: context, dirtyRect: dirtyRect)
         } else {

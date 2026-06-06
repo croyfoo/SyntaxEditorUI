@@ -129,7 +129,7 @@ package enum TextEditingTransaction {
     package static func applyIncrementally(
         _ operations: HighlightStyleOperations,
         to textContentStorage: NSTextContentStorage,
-        maximumOperationsPerTransaction: Int = 64,
+        maximumOperationsPerTransaction: Int = 2048,
         shouldContinue: @MainActor () -> Bool = { true }
     ) async -> Bool {
         guard !operations.isEmpty else { return true }
