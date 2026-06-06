@@ -20,6 +20,19 @@ private struct SyntaxHighlightStyle {
     let font: UIFont?
 }
 
+private struct AppliedHighlightPhaseRecord: Equatable {
+    let revision: Int
+    let phase: SyntaxHighlightPhase
+}
+
+private struct AppliedHighlightPhaseWaiter {
+    let id: Int
+    let revision: Int
+    let phase: SyntaxHighlightPhase
+    let continuation: CheckedContinuation<Bool, Never>
+    let timeoutTask: Task<Void, Never>
+}
+
 private struct SyntaxHighlightAttributeResolver {
     let colorTheme: SyntaxEditorColorTheme
     let defaultLanguage: SyntaxLanguage
@@ -121,6 +134,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var lastHighlightSource: String?
     var lastHighlightRevision: Int?
     var lastHighlightLanguage: SyntaxLanguage?
+    private var appliedHighlightPhaseRecordsForTesting: [AppliedHighlightPhaseRecord] = []
+    private var appliedHighlightPhaseWaitersForTesting: [AppliedHighlightPhaseWaiter] = []
+    private var nextAppliedHighlightPhaseWaiterID = 0
     var isApplyingModel = false
     var isApplyingHighlight = false
     var isApplyingUndoRedo = false
@@ -371,6 +387,34 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     internal func waitForPendingHighlightForTesting() async {
         await highlightTask?.value
+    }
+
+    internal func waitForAppliedHighlightPhaseForTesting(
+        _ phase: SyntaxHighlightPhase,
+        timeoutNanoseconds: UInt64 = 1_000_000_000
+    ) async -> Bool {
+        let expectedRevision = model.revision
+        guard !hasAppliedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
+            return true
+        }
+
+        let waiterID = nextAppliedHighlightPhaseWaiterID
+        nextAppliedHighlightPhaseWaiterID += 1
+        return await withCheckedContinuation { continuation in
+            let timeoutTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                self?.resumeAppliedHighlightPhaseWaiterForTesting(id: waiterID, result: false)
+            }
+            appliedHighlightPhaseWaitersForTesting.append(
+                AppliedHighlightPhaseWaiter(
+                    id: waiterID,
+                    revision: expectedRevision,
+                    phase: phase,
+                    continuation: continuation,
+                    timeoutTask: timeoutTask
+                )
+            )
+        }
     }
 
     internal func setApplyingHighlightForTesting(_ isApplying: Bool) {
@@ -1626,6 +1670,71 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         window?.endEditing(true)
     }
 
+    private func resetAppliedHighlightPhaseTrackingForTesting() {
+        appliedHighlightPhaseRecordsForTesting.removeAll()
+        resumeAppliedHighlightPhaseWaitersForTesting(result: false)
+    }
+
+    private func hasAppliedHighlightPhaseForTesting(
+        _ phase: SyntaxHighlightPhase,
+        revision: Int
+    ) -> Bool {
+        appliedHighlightPhaseRecordsForTesting.contains {
+            $0.revision == revision && $0.phase == phase
+        }
+    }
+
+    private func recordAppliedHighlightPhaseForTesting(
+        _ phase: SyntaxHighlightPhase,
+        revision: Int
+    ) {
+        appliedHighlightPhaseRecordsForTesting.append(
+            AppliedHighlightPhaseRecord(revision: revision, phase: phase)
+        )
+        if appliedHighlightPhaseRecordsForTesting.count > 16 {
+            appliedHighlightPhaseRecordsForTesting.removeFirst(
+                appliedHighlightPhaseRecordsForTesting.count - 16
+            )
+        }
+
+        resumeAppliedHighlightPhaseWaitersForTesting(
+            revision: revision,
+            phase: phase,
+            result: true
+        )
+    }
+
+    private func resumeAppliedHighlightPhaseWaiterForTesting(id: Int, result: Bool) {
+        guard let waiterIndex = appliedHighlightPhaseWaitersForTesting.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let waiter = appliedHighlightPhaseWaitersForTesting.remove(at: waiterIndex)
+        waiter.timeoutTask.cancel()
+        waiter.continuation.resume(returning: result)
+    }
+
+    private func resumeAppliedHighlightPhaseWaitersForTesting(
+        revision: Int? = nil,
+        phase: SyntaxHighlightPhase? = nil,
+        result: Bool
+    ) {
+        var matchedWaiters: [AppliedHighlightPhaseWaiter] = []
+        appliedHighlightPhaseWaitersForTesting.removeAll { waiter in
+            guard revision == nil || waiter.revision == revision,
+                  phase == nil || waiter.phase == phase
+            else {
+                return false
+            }
+            matchedWaiters.append(waiter)
+            return true
+        }
+
+        for waiter in matchedWaiters {
+            waiter.timeoutTask.cancel()
+            waiter.continuation.resume(returning: result)
+        }
+    }
+
     func scheduleHighlight(
         source: String,
         language: SyntaxLanguage,
@@ -1636,6 +1745,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let expectedSource = source
 
         highlightTask?.cancel()
+        resetAppliedHighlightPhaseTrackingForTesting()
         prepareSyntaxHighlightRenderingForPendingHighlight(
             mutation: mutation,
             source: source,
@@ -1690,6 +1800,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             mutation: mutation
         )
         guard didApplyHighlight else { return }
+        recordAppliedHighlightPhaseForTesting(result.phase, revision: result.revision)
         guard result.phase == .complete else { return }
         lastHighlightTokens = result.tokens
         lastHighlightSource = result.source
@@ -1736,6 +1847,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func clearHighlightCache() {
         highlightTask?.cancel()
         highlightTask = nil
+        resetAppliedHighlightPhaseTrackingForTesting()
         lastHighlightTokens = []
         lastHighlightSource = nil
         lastHighlightRevision = nil
