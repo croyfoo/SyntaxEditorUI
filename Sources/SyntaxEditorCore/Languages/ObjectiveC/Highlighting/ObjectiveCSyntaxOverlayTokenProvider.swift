@@ -86,6 +86,12 @@ private struct ObjectiveCSemanticIndex {
         if range.upperBound <= mutation.location {
             return range
         }
+        if mutation.length == 0,
+           replacementLength > 0,
+           range.location < mutation.location,
+           mutation.location < range.upperBound {
+            return nil
+        }
         if range.location >= oldUpperBound {
             let shiftedLocation = range.location + delta
             guard shiftedLocation >= 0,

@@ -10040,6 +10040,51 @@ struct SyntaxHighlighterEngineTests {
         ).contains(.identifierVariable) == false)
     }
 
+    @Test("SyntaxHighlighterEngine invalidates Objective-C semantic ranges after interior insertions")
+    func highlighterInvalidatesObjectiveCSemanticRangesAfterInteriorInsertions() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length;
+        }
+        @end
+        """
+        let insertedSource = source.replacingOccurrences(of: "self.name.length", with: "self.nxame.length")
+        let finalSource = insertedSource.replacingOccurrences(of: "self.nxame.length", with: "self.nxam.length")
+        let insertionMutation = try #require(TextMutation.diff(from: source, to: insertedSource))
+        let deletionMutation = try #require(TextMutation.diff(from: insertedSource, to: finalSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: insertedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(insertionMutation)
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: insertedSource,
+            source: finalSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(deletionMutation)
+        )
+        let full = await fullEngine.reset(source: finalSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: finalSource,
+            text: "nxam",
+            inOccurrenceOf: "return self.nxam.length;"
+        ).contains(.identifierVariable) == false)
+    }
+
     @Test("SyntaxHighlighterEngine strips stale Objective-C property declaration overlays after syntax edits")
     func highlighterStripsStaleObjectiveCPropertyDeclarationOverlaysAfterSyntaxEdits() async throws {
         let source = """
