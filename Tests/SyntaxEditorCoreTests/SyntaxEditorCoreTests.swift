@@ -10341,6 +10341,49 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens == full.tokens)
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after property keyword edits")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterPropertyKeywordEdits() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSString *)value
+        {
+            return self.name;
+        }
+        @end
+        """
+        let keywordRange = (source as NSString).range(of: "@property")
+        let mutationRange = NSRange(location: keywordRange.location + 1, length: 1)
+        let updatedSource = (source as NSString).replacingCharacters(in: mutationRange, with: "x")
+        let mutation = SyntaxHighlightMutation(
+            location: mutationRange.location,
+            length: mutationRange.length,
+            replacement: "x"
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "name",
+            inOccurrenceOf: "self.name"
+        ).contains(.identifierVariable) == false)
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after file-scope variable rename")
     func highlighterRebuildsObjectiveCSemanticIndexAfterFileScopeVariableRename() async throws {
         let source = """
@@ -11519,6 +11562,48 @@ struct SyntaxHighlighterEngineTests {
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
             mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        let systemType = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSString *value"
+        )
+        #expect(systemType.styleKeys.first == "editor.syntax.identifier.type.system")
+    }
+
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after type keyword edits")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterTypeKeywordEdits() async throws {
+        let source = """
+        @interface NSString : NSObject
+        @end
+
+        void run(void) {
+            NSString *value = nil;
+        }
+        """
+        let keywordRange = (source as NSString).range(of: "@interface")
+        let mutationRange = NSRange(location: keywordRange.location + 1, length: 1)
+        let updatedSource = (source as NSString).replacingCharacters(in: mutationRange, with: "x")
+        let mutation = SyntaxHighlightMutation(
+            location: mutationRange.location,
+            length: mutationRange.length,
+            replacement: "x"
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 

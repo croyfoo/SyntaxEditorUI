@@ -940,6 +940,73 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         in line: NSString,
         lineOffset: Int
     ) -> [NSRange] {
+        let lineString = line as String
+        let fullRange = NSRange(location: 0, length: line.length)
+        let structuralCharacterRanges = objectiveCSemanticStructuralCharacterRanges(
+            in: line,
+            lineOffset: lineOffset
+        )
+
+        guard let trimmedRange = objectiveCTrimmedRange(in: line) else {
+            return structuralCharacterRanges
+        }
+
+        let trimmed = line.substring(with: trimmedRange)
+        if trimmed.hasPrefix("#") {
+            return [NSRange(location: lineOffset + trimmedRange.location, length: trimmedRange.length)]
+        }
+
+        if trimmed.hasPrefix("@property") {
+            var ranges = structuralCharacterRanges
+            if let keywordRange = objectiveCKeywordRange("@property", in: line) {
+                ranges.append(NSRange(location: lineOffset + keywordRange.location, length: keywordRange.length))
+            }
+            if let nameRange = ObjectiveCFileSymbolIndex.propertyDeclaredNameRange(in: line) {
+                ranges.append(NSRange(location: lineOffset + nameRange.location, length: nameRange.length))
+            } else {
+                return [NSRange(location: lineOffset + trimmedRange.location, length: trimmedRange.length)]
+            }
+            return sortedObjectiveCSemanticStructuralRanges(ranges)
+        }
+
+        if objectiveCForLoopVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
+            return sortedObjectiveCSemanticStructuralRanges(
+                objectiveCDeclarationSignatureRanges(in: line, statementEnd: line.length)
+                    .map { NSRange(location: lineOffset + $0.location, length: $0.length) }
+            )
+        }
+
+        if objectiveCVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
+            let statementEnd = line.range(of: ";").location
+            guard statementEnd != NSNotFound else {
+                return [NSRange(location: lineOffset + trimmedRange.location, length: trimmedRange.length)]
+            }
+            return sortedObjectiveCSemanticStructuralRanges(
+                objectiveCDeclarationSignatureRanges(in: line, statementEnd: statementEnd)
+                    .map { NSRange(location: lineOffset + $0.location, length: $0.length) }
+            )
+        }
+
+        guard structuralObjectiveCEditRegex.firstMatch(in: lineString, range: fullRange) != nil
+            || objectiveCSemanticIndexFunctionSignatureLineRegex.firstMatch(in: lineString, range: fullRange) != nil
+            || objectiveCSemanticIndexSplitFunctionNameLineRegex.firstMatch(in: lineString, range: fullRange) != nil else {
+            return structuralCharacterRanges
+        }
+
+        var ranges = structuralCharacterRanges
+        for match in ObjectiveCFileSymbolIndex.identifierRegex.matches(in: lineString, range: fullRange) {
+            ranges.append(NSRange(location: lineOffset + match.range.location, length: match.range.length))
+        }
+        if ranges.isEmpty {
+            ranges.append(NSRange(location: lineOffset + trimmedRange.location, length: trimmedRange.length))
+        }
+        return sortedObjectiveCSemanticStructuralRanges(ranges)
+    }
+
+    private static func objectiveCSemanticStructuralCharacterRanges(
+        in line: NSString,
+        lineOffset: Int
+    ) -> [NSRange] {
         var ranges: [NSRange] = []
         var cursor = 0
         while cursor < line.length {
@@ -956,6 +1023,44 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             cursor = structuralRange.upperBound
         }
         return ranges
+    }
+
+    private static func sortedObjectiveCSemanticStructuralRanges(_ ranges: [NSRange]) -> [NSRange] {
+        ranges
+            .filter { $0.length > 0 }
+            .sorted {
+                if $0.location != $1.location {
+                    return $0.location < $1.location
+                }
+                return $0.length < $1.length
+            }
+    }
+
+    private static func objectiveCTrimmedRange(in line: NSString) -> NSRange? {
+        var lower = 0
+        var upper = line.length
+        while lower < upper,
+              objectiveCLineCharacterIsWhitespace(line.substring(with: NSRange(location: lower, length: 1))) {
+            lower += 1
+        }
+        while upper > lower,
+              objectiveCLineCharacterIsWhitespace(line.substring(with: NSRange(location: upper - 1, length: 1))) {
+            upper -= 1
+        }
+        guard lower < upper else { return nil }
+        return NSRange(location: lower, length: upper - lower)
+    }
+
+    private static func objectiveCKeywordRange(_ keyword: String, in line: NSString) -> NSRange? {
+        let range = line.range(of: keyword)
+        guard range.location != NSNotFound else { return nil }
+        return range
+    }
+
+    private static func objectiveCLineCharacterIsWhitespace(_ text: String) -> Bool {
+        text.unicodeScalars.allSatisfy {
+            CharacterSet.whitespacesAndNewlines.contains($0)
+        }
     }
 
     private static func objectiveCMutationRequiresSemanticIndexRebuild(
