@@ -20,12 +20,12 @@ private struct SyntaxHighlightStyle {
     let font: UIFont
 }
 
-private struct AppliedHighlightPhaseRecord: Equatable {
+private struct HighlightPhaseRecord: Equatable {
     let revision: Int
     let phase: SyntaxHighlightPhase
 }
 
-private struct AppliedHighlightPhaseWaiter {
+private struct HighlightPhaseWaiter {
     let id: Int
     let revision: Int
     let phase: SyntaxHighlightPhase
@@ -123,9 +123,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var lastHighlightSource: String?
     var lastHighlightRevision: Int?
     var lastHighlightLanguage: SyntaxLanguage?
-    private var appliedHighlightPhaseRecordsForTesting: [AppliedHighlightPhaseRecord] = []
-    private var appliedHighlightPhaseWaitersForTesting: [AppliedHighlightPhaseWaiter] = []
-    private var nextAppliedHighlightPhaseWaiterID = 0
+    private var materializedHighlightPhase: SyntaxHighlightPhase?
+    private var materializedHighlightRevision: Int?
+    private var materializedHighlightLanguage: SyntaxLanguage?
+    private var appliedHighlightPhaseRecordsForTesting: [HighlightPhaseRecord] = []
+    private var appliedHighlightPhaseWaitersForTesting: [HighlightPhaseWaiter] = []
+    private var skippedHighlightPhaseRecordsForTesting: [HighlightPhaseRecord] = []
+    private var skippedHighlightPhaseWaitersForTesting: [HighlightPhaseWaiter] = []
+    private var nextHighlightPhaseWaiterID = 0
     var isApplyingModel = false
     var isApplyingHighlight = false
     var isApplyingUndoRedo = false
@@ -399,15 +404,43 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return true
         }
 
-        let waiterID = nextAppliedHighlightPhaseWaiterID
-        nextAppliedHighlightPhaseWaiterID += 1
+        let waiterID = nextHighlightPhaseWaiterID
+        nextHighlightPhaseWaiterID += 1
         return await withCheckedContinuation { continuation in
             let timeoutTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: timeoutNanoseconds)
                 self?.resumeAppliedHighlightPhaseWaiterForTesting(id: waiterID, result: false)
             }
             appliedHighlightPhaseWaitersForTesting.append(
-                AppliedHighlightPhaseWaiter(
+                HighlightPhaseWaiter(
+                    id: waiterID,
+                    revision: expectedRevision,
+                    phase: phase,
+                    continuation: continuation,
+                    timeoutTask: timeoutTask
+                )
+            )
+        }
+    }
+
+    internal func waitForSkippedHighlightPhaseForTesting(
+        _ phase: SyntaxHighlightPhase,
+        timeoutNanoseconds: UInt64 = 1_000_000_000
+    ) async -> Bool {
+        let expectedRevision = model.revision
+        guard !hasSkippedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
+            return true
+        }
+
+        let waiterID = nextHighlightPhaseWaiterID
+        nextHighlightPhaseWaiterID += 1
+        return await withCheckedContinuation { continuation in
+            let timeoutTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                self?.resumeSkippedHighlightPhaseWaiterForTesting(id: waiterID, result: false)
+            }
+            skippedHighlightPhaseWaitersForTesting.append(
+                HighlightPhaseWaiter(
                     id: waiterID,
                     revision: expectedRevision,
                     phase: phase,
@@ -1720,7 +1753,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     private func resetAppliedHighlightPhaseTrackingForTesting() {
         appliedHighlightPhaseRecordsForTesting.removeAll()
+        skippedHighlightPhaseRecordsForTesting.removeAll()
         resumeAppliedHighlightPhaseWaitersForTesting(result: false)
+        resumeSkippedHighlightPhaseWaitersForTesting(result: false)
     }
 
     private func hasAppliedHighlightPhaseForTesting(
@@ -1737,7 +1772,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         revision: Int
     ) {
         appliedHighlightPhaseRecordsForTesting.append(
-            AppliedHighlightPhaseRecord(revision: revision, phase: phase)
+            HighlightPhaseRecord(revision: revision, phase: phase)
         )
         if appliedHighlightPhaseRecordsForTesting.count > 16 {
             appliedHighlightPhaseRecordsForTesting.removeFirst(
@@ -1746,6 +1781,35 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         resumeAppliedHighlightPhaseWaitersForTesting(
+            revision: revision,
+            phase: phase,
+            result: true
+        )
+    }
+
+    private func hasSkippedHighlightPhaseForTesting(
+        _ phase: SyntaxHighlightPhase,
+        revision: Int
+    ) -> Bool {
+        skippedHighlightPhaseRecordsForTesting.contains {
+            $0.revision == revision && $0.phase == phase
+        }
+    }
+
+    private func recordSkippedHighlightPhaseForTesting(
+        _ phase: SyntaxHighlightPhase,
+        revision: Int
+    ) {
+        skippedHighlightPhaseRecordsForTesting.append(
+            HighlightPhaseRecord(revision: revision, phase: phase)
+        )
+        if skippedHighlightPhaseRecordsForTesting.count > 16 {
+            skippedHighlightPhaseRecordsForTesting.removeFirst(
+                skippedHighlightPhaseRecordsForTesting.count - 16
+            )
+        }
+
+        resumeSkippedHighlightPhaseWaitersForTesting(
             revision: revision,
             phase: phase,
             result: true
@@ -1766,8 +1830,40 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         phase: SyntaxHighlightPhase? = nil,
         result: Bool
     ) {
-        var matchedWaiters: [AppliedHighlightPhaseWaiter] = []
+        var matchedWaiters: [HighlightPhaseWaiter] = []
         appliedHighlightPhaseWaitersForTesting.removeAll { waiter in
+            guard revision == nil || waiter.revision == revision,
+                  phase == nil || waiter.phase == phase
+            else {
+                return false
+            }
+            matchedWaiters.append(waiter)
+            return true
+        }
+
+        for waiter in matchedWaiters {
+            waiter.timeoutTask.cancel()
+            waiter.continuation.resume(returning: result)
+        }
+    }
+
+    private func resumeSkippedHighlightPhaseWaiterForTesting(id: Int, result: Bool) {
+        guard let waiterIndex = skippedHighlightPhaseWaitersForTesting.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        let waiter = skippedHighlightPhaseWaitersForTesting.remove(at: waiterIndex)
+        waiter.timeoutTask.cancel()
+        waiter.continuation.resume(returning: result)
+    }
+
+    private func resumeSkippedHighlightPhaseWaitersForTesting(
+        revision: Int? = nil,
+        phase: SyntaxHighlightPhase? = nil,
+        result: Bool
+    ) {
+        var matchedWaiters: [HighlightPhaseWaiter] = []
+        skippedHighlightPhaseWaitersForTesting.removeAll { waiter in
             guard revision == nil || waiter.revision == revision,
                   phase == nil || waiter.phase == phase
             else {
@@ -1835,6 +1931,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     ) async {
         guard !Task.isCancelled else { return }
         guard model.revision == result.revision else { return }
+        guard shouldMaterializeHighlightResult(result, mutation: mutation) else {
+            recordSkippedHighlightPhaseForTesting(result.phase, revision: result.revision)
+            return
+        }
         let refreshRange = highlightApplicationRefreshRange(
             for: result,
             mutation: mutation
@@ -1848,12 +1948,48 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             mutation: mutation
         )
         guard didApplyHighlight else { return }
+        recordMaterializedHighlight(
+            phase: result.phase,
+            revision: result.revision,
+            language: result.language
+        )
         recordAppliedHighlightPhaseForTesting(result.phase, revision: result.revision)
         guard result.phase == .complete else { return }
         lastHighlightTokens = result.tokens
         lastHighlightSource = result.source
         lastHighlightRevision = result.revision
         lastHighlightLanguage = result.language
+    }
+
+    private func shouldMaterializeHighlightResult(
+        _ result: SyntaxHighlightResult,
+        mutation: SyntaxHighlightMutation?
+    ) -> Bool {
+        guard mutation != nil,
+              result.phase == .syntacticFastPass
+        else {
+            return true
+        }
+
+        return !hasMaterializedCompletedHighlightToAvoidDowngrade(for: result)
+    }
+
+    private func hasMaterializedCompletedHighlightToAvoidDowngrade(for result: SyntaxHighlightResult) -> Bool {
+        guard let lastHighlightRevision else {
+            return false
+        }
+
+        return materializedHighlightPhase == .complete
+            && materializedHighlightRevision == lastHighlightRevision
+            && lastHighlightRevision < result.revision
+            && materializedHighlightLanguage == result.language
+            && lastHighlightLanguage == result.language
+            && highlightStyleStore.hasMaterializedRuns
+    }
+
+    private func canApplyIncrementalHighlightRefreshRange(for result: SyntaxHighlightResult) -> Bool {
+        hasMaterializedCompletedHighlightToAvoidDowngrade(for: result)
+            && lastHighlightRevision == result.revision - 1
     }
 
     func highlightApplicationRefreshRange(
@@ -1864,9 +2000,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return result.refreshRange
         }
 
-        guard lastHighlightRevision == result.revision - 1,
-              lastHighlightLanguage == result.language
-        else {
+        guard canApplyIncrementalHighlightRefreshRange(for: result) else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
 
@@ -1900,7 +2034,24 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         lastHighlightSource = nil
         lastHighlightRevision = nil
         lastHighlightLanguage = nil
+        clearMaterializedHighlightState()
         resetSyntaxHighlightRenderingState(textLength: storage.length)
+    }
+
+    private func recordMaterializedHighlight(
+        phase: SyntaxHighlightPhase,
+        revision: Int,
+        language: SyntaxLanguage
+    ) {
+        materializedHighlightPhase = phase
+        materializedHighlightRevision = revision
+        materializedHighlightLanguage = language
+    }
+
+    private func clearMaterializedHighlightState() {
+        materializedHighlightPhase = nil
+        materializedHighlightRevision = nil
+        materializedHighlightLanguage = nil
     }
 
     static func highlightMutation(_ change: SyntaxEditorTextChange) -> SyntaxHighlightMutation? {
@@ -1955,6 +2106,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         updateTypingAttributes()
         applyMatchingBracketHighlight(force: true)
         setNeedsDisplayForVisibleTextFragments()
+        recordMaterializedHighlight(
+            phase: .complete,
+            revision: expectedRevision,
+            language: model.language
+        )
     }
 
     private func applyHighlightFromScheduledTask(
@@ -2251,11 +2407,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             baseFont: base[.font] as? UIFont
         )
         TextEditingTransaction.apply(operations, to: textContentStorage)
+        clearMaterializedHighlightState()
         setNeedsDisplayForVisibleTextFragments()
     }
 
     private func resetSyntaxHighlightRenderingState(textLength: Int) {
         highlightStyleStore.reset(textLength: textLength)
+        clearMaterializedHighlightState()
     }
 
     private func pendingTextMutationReplacementRange(

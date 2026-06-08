@@ -105,6 +105,10 @@ package final class HighlightStyleStore {
         fontRuns
     }
 
+    package var hasMaterializedRuns: Bool {
+        !colorRuns.isEmpty || !fontRuns.isEmpty
+    }
+
     package func colorRuns(in range: NSRange) -> [HighlightColorRun] {
         Self.clippedColorRuns(colorRuns, to: range)
     }
