@@ -8482,6 +8482,14 @@ struct SyntaxHighlighterEngineTests {
             _ = try effectiveSemanticSnapshot(
                 in: tokens,
                 source: source,
+                text: "ReferenceName",
+                syntaxID: .declarationType,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSString *ReferenceName;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
                 text: "NSDictionary",
                 syntaxID: .identifierTypeSystem,
                 language: .objectiveC,
@@ -8492,6 +8500,14 @@ struct SyntaxHighlighterEngineTests {
                 source: source,
                 text: "NSString",
                 syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSDictionary<NSString *, NSString *> *ReferenceMap;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "ReferenceMap",
+                syntaxID: .declarationType,
                 language: .objectiveC,
                 inOccurrenceOf: "typedef NSDictionary<NSString *, NSString *> *ReferenceMap;"
             )
