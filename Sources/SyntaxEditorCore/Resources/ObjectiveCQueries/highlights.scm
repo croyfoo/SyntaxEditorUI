@@ -357,6 +357,11 @@
   (type_name
     (type_identifier) @editor.syntax.objectivec.identifier.type.system))
 
+(argument_list
+  (type_identifier) @editor.syntax.objectivec.identifier.type.system
+  .
+  "<")
+
 (declaration
   type: (type_identifier) @editor.syntax.objectivec.identifier.type.system
   declarator: (_)

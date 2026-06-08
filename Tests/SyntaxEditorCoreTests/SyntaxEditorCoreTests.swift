@@ -8546,6 +8546,37 @@ struct SyntaxHighlighterEngineTests {
         }
     }
 
+    @Test("SyntaxHighlighterEngine preserves Objective-C parameterized macro argument type highlights")
+    func highlighterPreservesObjectiveCParameterizedMacroArgumentTypes() async throws {
+        let source = """
+            #define REFERENCE_TYPE_MACRO(type) type
+
+            static void ReferenceMacroArgument(void)
+            {
+                REFERENCE_TYPE_MACRO(NSArray<NSString *>);
+            }
+            """
+
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSArray",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "REFERENCE_TYPE_MACRO(NSArray<NSString *>)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "REFERENCE_TYPE_MACRO(NSArray<NSString *>)"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine highlights Objective-C structures")
     func highlighterSupportsObjectiveC() async throws {
         let engine = sharedSyntaxHighlighterEngine
