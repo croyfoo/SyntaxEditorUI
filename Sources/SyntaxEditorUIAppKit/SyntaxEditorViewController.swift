@@ -1432,12 +1432,13 @@ public final class SyntaxEditorView: NSScrollView {
             return true
         }
 
-        return !hasCompletedHighlightForPreviousRevision(of: result)
+        return !hasCompletedHighlightToPreserve(for: result)
     }
 
-    private func hasCompletedHighlightForPreviousRevision(of result: SyntaxHighlightResult) -> Bool {
+    private func hasCompletedHighlightToPreserve(for result: SyntaxHighlightResult) -> Bool {
         lastHighlightRevision == result.revision - 1
             && lastHighlightLanguage == result.language
+            && !lastHighlightTokens.isEmpty
     }
 
     private func highlightApplicationRefreshRange(
@@ -1448,7 +1449,7 @@ public final class SyntaxEditorView: NSScrollView {
             return result.refreshRange
         }
 
-        guard hasCompletedHighlightForPreviousRevision(of: result) else {
+        guard hasCompletedHighlightToPreserve(for: result) else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
 

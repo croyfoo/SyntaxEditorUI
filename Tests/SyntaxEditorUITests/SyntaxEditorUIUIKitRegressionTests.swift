@@ -1598,6 +1598,49 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView applies iOS incremental fast pass after empty complete highlight")
+    @MainActor
+    func syntaxEditorViewIOSAppliesIncrementalFastPassAfterEmptyCompleteHighlight() async {
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let completeGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorPhasedTestHighlighter(
+            fastTokens: [],
+            updateFastTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 1),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            completeTokens: [],
+            completeGate: completeGate
+        )
+        let model = SyntaxEditorTestContext(
+            text: "",
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await completeGate.waitUntilSuspended()
+        await completeGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+
+        editorView.selectedRange = NSRange(location: 0, length: 0)
+        editorView.insertText("l")
+
+        #expect(await syntaxEditorWaitForColor(
+            { iOSEditorForegroundColor(editorView, at: 0) },
+            equals: theme.keyword
+        ))
+        #expect(editorView.text == "l")
+
+        await completeGate.resumeAll()
+        await editorView.waitForPendingHighlightForTesting()
+    }
+
     @Test("SyntaxEditorView preserves iOS semantic highlight during incremental fast pass")
     @MainActor
     func syntaxEditorViewIOSPreservesSemanticHighlightDuringIncrementalFastPass() async {

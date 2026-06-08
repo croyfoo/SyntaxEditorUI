@@ -843,6 +843,49 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView applies macOS incremental fast pass after empty complete highlight")
+    @MainActor
+    func syntaxEditorViewMacAppliesIncrementalFastPassAfterEmptyCompleteHighlight() async {
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let completeGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorPhasedTestHighlighter(
+            fastTokens: [],
+            updateFastTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 1),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            completeTokens: [],
+            completeGate: completeGate
+        )
+        let model = SyntaxEditorTestContext(
+            text: "",
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await completeGate.waitUntilSuspended()
+        await completeGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        editorView.textView.insertText("l", replacementRange: NSRange(location: 0, length: 0))
+
+        #expect(await syntaxEditorWaitForColor(
+            { macEditorForegroundColor(editorView, at: 0) },
+            equals: theme.keyword
+        ))
+        #expect(editorView.textView.string == "l")
+
+        await completeGate.resumeAll()
+        await editorView.waitForPendingHighlightForTesting()
+    }
+
     @Test("SyntaxEditorView preserves macOS semantic highlight during incremental fast pass")
     @MainActor
     func syntaxEditorViewMacPreservesSemanticHighlightDuringIncrementalFastPass() async {
