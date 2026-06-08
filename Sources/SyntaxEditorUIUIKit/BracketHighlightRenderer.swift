@@ -83,7 +83,7 @@ extension SyntaxEditorView {
         let color = rects.isEmpty
             ? nil
             : UIColor
-                .syntaxEditorAlpha(resolvedColorTheme().bracketBackground, alpha: 0.24)
+                .syntaxEditorAlpha(resolvedTheme().bracketBackground, alpha: 0.24)
                 .resolvedColor(with: traitCollection)
                 .cgColor
 

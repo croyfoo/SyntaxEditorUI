@@ -11,7 +11,7 @@ public struct SyntaxEditorUITestContext {
         language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .default,
+        theme: SyntaxEditorTheme = .default,
         drawsBackground: Bool = true,
         fontSizeDelta: Int = 0
     ) {
@@ -20,7 +20,7 @@ public struct SyntaxEditorUITestContext {
             language: language,
             isEditable: isEditable,
             lineWrappingEnabled: lineWrappingEnabled,
-            colorTheme: colorTheme,
+            theme: theme,
             drawsBackground: drawsBackground,
             fontSizeDelta: fontSizeDelta
         )

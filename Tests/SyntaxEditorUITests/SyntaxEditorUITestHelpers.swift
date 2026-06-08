@@ -116,7 +116,7 @@ struct SyntaxEditorTestContext {
         language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .default,
+        theme: SyntaxEditorTheme = .default,
         drawsBackground: Bool = true,
         fontSizeDelta: Int = 0
     ) {
@@ -125,7 +125,7 @@ struct SyntaxEditorTestContext {
             language: language,
             isEditable: isEditable,
             lineWrappingEnabled: lineWrappingEnabled,
-            colorTheme: colorTheme,
+            theme: theme,
             drawsBackground: drawsBackground,
             fontSizeDelta: fontSizeDelta
         )
@@ -200,7 +200,7 @@ func syntaxEditorUITestColor(hex: UInt32) -> SyntaxEditorColor {
 #endif
 }
 
-func syntaxEditorUITestColorTheme(
+func syntaxEditorUITestTheme(
     baseForeground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x101112),
     bracketBackground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x202122),
     comment: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x303132),
@@ -212,9 +212,10 @@ func syntaxEditorUITestColorTheme(
     constant: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x909192),
     variable: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xA0A1A2),
     punctuation: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xB0B1B2),
+    font: SyntaxEditorFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 12, weight: .regular),
     background: SyntaxEditorColor = .clear
-) -> SyntaxEditorColorTheme {
-    SyntaxEditorColorTheme(
+) -> SyntaxEditorTheme {
+    SyntaxEditorTheme(
         baseForeground: baseForeground,
         bracketBackground: bracketBackground,
         comment: comment,
@@ -226,6 +227,7 @@ func syntaxEditorUITestColorTheme(
         constant: constant,
         variable: variable,
         punctuation: punctuation,
+        font: font,
         background: background
     )
 }
@@ -728,7 +730,7 @@ func syntaxEditorDenseHighlightCaptureName(at index: Int) -> String {
 }
 
 func syntaxEditorDenseHighlightColor(
-    in theme: SyntaxEditorColorTheme,
+    in theme: SyntaxEditorTheme,
     at index: Int
 ) -> SyntaxEditorColor {
     switch index % 3 {

@@ -31,7 +31,7 @@ public final class SyntaxEditorModel {
 
     public var isEditable: Bool
     public var lineWrappingEnabled: Bool
-    public var colorTheme: SyntaxEditorColorTheme
+    public var theme: SyntaxEditorTheme
     public var drawsBackground: Bool
     public var fontSizeDelta: Int
     public private(set) var revision: Int
@@ -43,7 +43,7 @@ public final class SyntaxEditorModel {
         selectedRange: NSRange = NSRange(location: 0, length: 0),
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .default,
+        theme: SyntaxEditorTheme = .default,
         drawsBackground: Bool = true,
         fontSizeDelta: Int = 0
     ) {
@@ -55,7 +55,7 @@ public final class SyntaxEditorModel {
         )
         self.isEditable = isEditable
         self.lineWrappingEnabled = lineWrappingEnabled
-        self.colorTheme = colorTheme
+        self.theme = theme
         self.drawsBackground = drawsBackground
         self.fontSizeDelta = fontSizeDelta
         self.revision = 0
@@ -113,7 +113,7 @@ public final class SyntaxEditorModel {
     }
 
     private var fontSizeCommandBasePointSize: CGFloat {
-        colorTheme.resolved(for: language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
+        theme.resolved(for: language).base.font.size
     }
 
     @discardableResult

@@ -1,8 +1,8 @@
-// Generated built-in editor color themes. Do not edit by hand.
+// Generated built-in editor themes. Do not edit by hand.
 
-enum BuiltInEditorColorThemeDefinitions {
-    static let all: [String: BuiltInEditorColorThemeDefinition] = [
-        "bare": BuiltInEditorColorThemeDefinition(
+enum BuiltInEditorThemeDefinitions {
+    static let all: [String: BuiltInEditorThemeDefinition] = [
+        "bare": BuiltInEditorThemeDefinition(
             id: "bare",
             displayName: "Bare",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 255.0, blue: 255.0, alpha: 1.0),
@@ -121,7 +121,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "basic": BuiltInEditorColorThemeDefinition(
+        "basic": BuiltInEditorThemeDefinition(
             id: "basic",
             displayName: "Basic",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 255.0, blue: 255.0, alpha: 1.0),
@@ -240,7 +240,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "civic": BuiltInEditorColorThemeDefinition(
+        "civic": BuiltInEditorThemeDefinition(
             id: "civic",
             displayName: "Civic",
             backgroundColor: SyntaxEditorColorComponents(red: 31.000095, green: 31.99995, blue: 40.99992, alpha: 1.0),
@@ -359,7 +359,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "classicDark": BuiltInEditorColorThemeDefinition(
+        "classicDark": BuiltInEditorThemeDefinition(
             id: "classicDark",
             displayName: "Classic (Dark)",
             backgroundColor: SyntaxEditorColorComponents(red: 30.738465, green: 31.32522, blue: 36.03456, alpha: 1.0),
@@ -478,7 +478,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "classicLight": BuiltInEditorColorThemeDefinition(
+        "classicLight": BuiltInEditorThemeDefinition(
             id: "classicLight",
             displayName: "Classic (Light)",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 255.0, blue: 255.0, alpha: 1.0),
@@ -597,7 +597,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "defaultLight": BuiltInEditorColorThemeDefinition(
+        "defaultLight": BuiltInEditorThemeDefinition(
             id: "defaultLight",
             displayName: "Default (Light)",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 255.0, blue: 255.0, alpha: 1.0),
@@ -716,7 +716,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "defaultDark": BuiltInEditorColorThemeDefinition(
+        "defaultDark": BuiltInEditorThemeDefinition(
             id: "defaultDark",
             displayName: "Default (Dark)",
             backgroundColor: SyntaxEditorColorComponents(red: 30.738465, green: 31.32522, blue: 36.03456, alpha: 1.0),
@@ -835,7 +835,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "dusk": BuiltInEditorColorThemeDefinition(
+        "dusk": BuiltInEditorThemeDefinition(
             id: "dusk",
             displayName: "Dusk",
             backgroundColor: SyntaxEditorColorComponents(red: 30.09, green: 31.875, blue: 40.035, alpha: 1.0),
@@ -954,7 +954,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "highContrastDark": BuiltInEditorColorThemeDefinition(
+        "highContrastDark": BuiltInEditorThemeDefinition(
             id: "highContrastDark",
             displayName: "High Contrast (Dark)",
             backgroundColor: SyntaxEditorColorComponents(red: 23.511153, green: 23.389671, blue: 27.053205, alpha: 1.0),
@@ -1073,7 +1073,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "highContrastLight": BuiltInEditorColorThemeDefinition(
+        "highContrastLight": BuiltInEditorThemeDefinition(
             id: "highContrastLight",
             displayName: "High Contrast (Light)",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 255.0, blue: 255.0, alpha: 1.0),
@@ -1192,7 +1192,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "lowKey": BuiltInEditorColorThemeDefinition(
+        "lowKey": BuiltInEditorThemeDefinition(
             id: "lowKey",
             displayName: "Low Key",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 255.0, blue: 255.0, alpha: 1.0),
@@ -1311,7 +1311,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "midnight": BuiltInEditorColorThemeDefinition(
+        "midnight": BuiltInEditorThemeDefinition(
             id: "midnight",
             displayName: "Midnight",
             backgroundColor: SyntaxEditorColorComponents(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0),
@@ -1430,7 +1430,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "presentationDark": BuiltInEditorColorThemeDefinition(
+        "presentationDark": BuiltInEditorThemeDefinition(
             id: "presentationDark",
             displayName: "Presentation (Dark)",
             backgroundColor: SyntaxEditorColorComponents(red: 24.154314, green: 24.154314, blue: 28.05, alpha: 1.0),
@@ -1549,7 +1549,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "presentationLight": BuiltInEditorColorThemeDefinition(
+        "presentationLight": BuiltInEditorThemeDefinition(
             id: "presentationLight",
             displayName: "Presentation (Light)",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 255.0, blue: 255.0, alpha: 1.0),
@@ -1668,7 +1668,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "presentationLargeDark": BuiltInEditorColorThemeDefinition(
+        "presentationLargeDark": BuiltInEditorThemeDefinition(
             id: "presentationLargeDark",
             displayName: "Presentation Large (Dark)",
             backgroundColor: SyntaxEditorColorComponents(red: 23.999988, green: 23.999988, blue: 28.00002, alpha: 1.0),
@@ -1787,7 +1787,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "presentationLargeLight": BuiltInEditorColorThemeDefinition(
+        "presentationLargeLight": BuiltInEditorThemeDefinition(
             id: "presentationLargeLight",
             displayName: "Presentation Large (Light)",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 255.0, blue: 255.0, alpha: 1.0),
@@ -1906,7 +1906,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "printing": BuiltInEditorColorThemeDefinition(
+        "printing": BuiltInEditorThemeDefinition(
             id: "printing",
             displayName: "Printing",
             backgroundColor: SyntaxEditorColorComponents(red: 254.98878, green: 254.98878, blue: 254.98878, alpha: 1.0),
@@ -2025,7 +2025,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "spartan": BuiltInEditorColorThemeDefinition(
+        "spartan": BuiltInEditorThemeDefinition(
             id: "spartan",
             displayName: "Spartan",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 255.0, blue: 255.0, alpha: 1.0),
@@ -2144,7 +2144,7 @@ enum BuiltInEditorColorThemeDefinitions {
                 ),
             ]
         ),
-        "sunset": BuiltInEditorColorThemeDefinition(
+        "sunset": BuiltInEditorThemeDefinition(
             id: "sunset",
             displayName: "Sunset",
             backgroundColor: SyntaxEditorColorComponents(red: 255.0, green: 251.94, blue: 228.99, alpha: 1.0),

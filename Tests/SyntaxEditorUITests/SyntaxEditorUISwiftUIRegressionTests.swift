@@ -199,11 +199,11 @@ extension SyntaxEditorUITests {
     @Test("SyntaxEditorView does not reuse cached highlights after document rebind")
     @MainActor
     func syntaxEditorViewDoesNotReuseCachedHighlightsAfterDocumentRebind() async {
-        let initialTheme = syntaxEditorUITestColorTheme(
+        let initialTheme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
-        let updatedTheme = syntaxEditorUITestColorTheme(
+        let updatedTheme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x654321),
             keyword: syntaxEditorUITestColor(hex: 0x876543)
         )
@@ -220,7 +220,7 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(
             text: "let old = 1",
             language: SyntaxLanguage.swift,
-            colorTheme: initialTheme
+            theme: initialTheme
         )
         let replacementDocument = SyntaxEditorModel(text: "abc new = 1", language: .swift)
 
@@ -239,7 +239,7 @@ extension SyntaxEditorUITests {
 
         let previousSuspensionCount = await resetGate.currentSuspensionCount()
         editorView.update(model: replacementDocument)
-        replacementDocument.colorTheme = updatedTheme
+        replacementDocument.theme = updatedTheme
         editorView.synchronizeDocumentForTesting()
 
         let didSuspendReplacementHighlight = await resetGate.waitUntilSuspended(after: previousSuspensionCount)
@@ -268,7 +268,7 @@ extension SyntaxEditorUITests {
 
         let previousSuspensionCount = await resetGate.currentSuspensionCount()
         editorView.update(model: replacementDocument)
-        replacementDocument.colorTheme = updatedTheme
+        replacementDocument.theme = updatedTheme
         editorView.synchronizeDocumentForTesting()
 
         let didSuspendReplacementHighlight = await resetGate.waitUntilSuspended(after: previousSuspensionCount)

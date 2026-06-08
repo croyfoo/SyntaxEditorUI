@@ -20,8 +20,8 @@ private func syntaxEditorTestColor(hex: UInt32) -> SyntaxEditorColor {
 #endif
 }
 
-private func customColorTheme() -> SyntaxEditorColorTheme {
-    SyntaxEditorColorTheme(
+private func customTheme() -> SyntaxEditorTheme {
+    SyntaxEditorTheme(
         baseForeground: syntaxEditorTestColor(hex: 0x101112),
         bracketBackground: syntaxEditorTestColor(hex: 0x202122),
         comment: syntaxEditorTestColor(hex: 0x303132),
@@ -32,7 +32,8 @@ private func customColorTheme() -> SyntaxEditorColorTheme {
         type: syntaxEditorTestColor(hex: 0x808182),
         constant: syntaxEditorTestColor(hex: 0x909192),
         variable: syntaxEditorTestColor(hex: 0xA0A1A2),
-        punctuation: syntaxEditorTestColor(hex: 0xB0B1B2)
+        punctuation: syntaxEditorTestColor(hex: 0xB0B1B2),
+        font: SyntaxEditorFont.monospacedSystemFont(ofSize: 12, weight: .regular)
     )
 }
 
@@ -108,24 +109,24 @@ private func syntaxEditorComponents(
 
 @Suite("SyntaxEditorCorePlatform")
 struct SyntaxEditorCorePlatformTests {
-    @Test("SyntaxEditorModel stores custom color themes")
+    @Test("SyntaxEditorModel stores custom themes")
     @MainActor
-    func syntaxEditorModelCustomColorTheme() {
-        let theme = customColorTheme()
+    func syntaxEditorModelCustomTheme() {
+        let theme = customTheme()
         let model = SyntaxEditorModel(
             language: SyntaxLanguage.swift,
-            colorTheme: theme
+            theme: theme
         )
 
-        #expect(model.colorTheme == theme)
+        #expect(model.theme == theme)
 
-        model.colorTheme = .default
-        #expect(model.colorTheme == .default)
+        model.theme = .default
+        #expect(model.theme == .default)
     }
 
     @Test("SyntaxEditorHighlightTheme resolves built-in colors on the current platform")
     func syntaxEditorHighlightThemeResolvesBuiltInColors() {
-        let theme = SyntaxEditorColorTheme.default
+        let theme = SyntaxEditorTheme.default
 
         #expect(syntaxEditorColor(theme.keyword, matchesLight: 0x9B2393, dark: 0xFC5FA3))
         #expect(syntaxEditorColor(theme.string, matchesLight: 0xC41A16, dark: 0xFC6A5D))
@@ -134,25 +135,23 @@ struct SyntaxEditorCorePlatformTests {
 
     @Test("SyntaxEditorHighlightTheme resolves platform font sizes")
     func syntaxEditorHighlightThemeResolvesPlatformFontSizes() throws {
-        let theme = SyntaxEditorColorTheme.presentationLarge
+        let theme = SyntaxEditorTheme.presentationLarge
         let resolved = theme.resolved(for: .swift, appearance: .light)
-        let baseFont = try #require(resolved.base.font)
-        let keywordFont = try #require(resolved.keyword.font)
+        let baseFont = resolved.base.font
+        let keywordFont = resolved.keyword.font
 
 #if canImport(UIKit)
         #expect(abs(baseFont.size - 30) < 0.01)
         #expect(abs(keywordFont.size - 30) < 0.01)
-        #expect(abs(SyntaxEditorFontSize.defaultEditorPointSize - 16) < 0.01)
 #elseif canImport(AppKit)
         #expect(abs(baseFont.size - 28) < 0.01)
         #expect(abs(keywordFont.size - 28) < 0.01)
-        #expect(abs(SyntaxEditorFontSize.defaultEditorPointSize - 13) < 0.01)
 #endif
     }
 
-    @Test("SyntaxEditorHighlightTheme uses custom color themes")
+    @Test("SyntaxEditorHighlightTheme uses custom themes")
     func syntaxEditorHighlightThemeCustomTheme() {
-        let theme = customColorTheme()
+        let theme = customTheme()
 
         #expect(SyntaxEditorHighlightTheme.color(for: .keyword, in: theme) == theme.keyword)
         #expect(SyntaxEditorHighlightTheme.color(for: .string, in: theme) == theme.string)
@@ -160,21 +159,12 @@ struct SyntaxEditorCorePlatformTests {
         #expect(SyntaxEditorHighlightTheme.color(for: .plain, in: theme) == nil)
     }
 
-    @Test("SyntaxEditorFontDescriptor preserves fallback family when family is absent")
-    func syntaxEditorFontDescriptorPreservesFallbackFamily() {
+    @Test("SyntaxEditorFontDescriptor resolves system monospaced font when family is absent")
+    func syntaxEditorFontDescriptorResolvesSystemMonospacedFontWhenFamilyIsAbsent() {
         let descriptor = SyntaxEditorFontDescriptor(family: nil, size: 13, weight: .bold)
 
-#if canImport(UIKit)
-        let fallback = UIFont(name: "Courier", size: 18)
-            ?? UIFont.monospacedSystemFont(ofSize: 18, weight: .regular)
-        let font = descriptor.platformFont(fallback: fallback)
-#elseif canImport(AppKit)
-        let fallback = NSFont(name: "Courier", size: 18)
-            ?? NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
-        let font = descriptor.platformFont(fallback: fallback)
-#endif
+        let font = descriptor.platformFont()
 
-        #expect(font.familyName == fallback.familyName)
         #expect(abs(font.pointSize - 13) < 0.01)
     }
 
@@ -182,21 +172,10 @@ struct SyntaxEditorCorePlatformTests {
     func syntaxEditorFontDescriptorAppliesFontSizeDeltaWithClamp() {
         let descriptor = SyntaxEditorFontDescriptor(family: nil, size: 13, weight: .regular)
 
-#if canImport(UIKit)
-        let fallback = UIFont(name: "Courier", size: 18)
-            ?? UIFont.monospacedSystemFont(ofSize: 18, weight: .regular)
-        let increasedFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: 4)
-        let minimumFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: -20)
-        let maximumFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: 100)
-#elseif canImport(AppKit)
-        let fallback = NSFont(name: "Courier", size: 18)
-            ?? NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
-        let increasedFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: 4)
-        let minimumFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: -20)
-        let maximumFont = descriptor.platformFont(fallback: fallback, fontSizeDelta: 100)
-#endif
+        let increasedFont = descriptor.platformFont(fontSizeDelta: 4)
+        let minimumFont = descriptor.platformFont(fontSizeDelta: -20)
+        let maximumFont = descriptor.platformFont(fontSizeDelta: 100)
 
-        #expect(increasedFont.familyName == fallback.familyName)
         #expect(abs(increasedFont.pointSize - 17) < 0.01)
         #expect(abs(minimumFont.pointSize - 4) < 0.01)
         #expect(abs(maximumFont.pointSize - 64) < 0.01)

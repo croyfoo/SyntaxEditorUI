@@ -88,7 +88,7 @@ final class MiniSplitViewController: UISplitViewController {
                 }
                 lineWrappingAction.state = lineWrappingEnabled ? .on : .off
 
-                let themeActions = SyntaxEditorColorTheme.Preset.allCases.map { preset in
+                let themeActions = SyntaxEditorTheme.Preset.allCases.map { preset in
                     let action = UIAction(title: preset.displayName) { [weak self] _ in
                         self?.model.selectedThemePreset = preset
                     }
