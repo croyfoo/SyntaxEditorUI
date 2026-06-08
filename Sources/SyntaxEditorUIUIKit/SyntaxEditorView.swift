@@ -386,8 +386,29 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         applyObservedSelection(model.selectedRange)
     }
 
-    internal func waitForPendingHighlightForTesting() async {
-        await highlightTask?.value
+    @discardableResult
+    internal func waitForPendingHighlightForTesting(
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async -> Bool {
+        guard let highlightTask else { return true }
+
+        return await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                await highlightTask.value
+                return true
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                return false
+            }
+
+            let didComplete = await group.next() ?? false
+            if !didComplete {
+                highlightTask.cancel()
+            }
+            group.cancelAll()
+            return didComplete
+        }
     }
 
     internal func waitForAppliedHighlightPhaseForTesting(
