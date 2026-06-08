@@ -8356,6 +8356,92 @@ struct SyntaxHighlighterEngineTests {
         })
     }
 
+    @Test("SyntaxHighlighterEngine keeps incomplete Objective-C body identifiers plain")
+    func highlighterKeepsIncompleteObjectiveCBodyIdentifiersPlain() async throws {
+        let incompleteIdentifier = "sepufepuaepufeofeoueoufeouseoufeou"
+        let sources = [
+            """
+            @interface ReferenceBufferProvider : NSObject
+            @property (nonatomic, copy) NSString *text;
+            - (void)setText:(NSString *)text;
+            @end
+
+            @implementation ReferenceBufferProvider
+            - (NSUInteger)length
+            {
+                \(incompleteIdentifier)
+                return self.text.length;
+            }
+            @end
+            """,
+            """
+            @interface ReferenceBufferProvider : NSObject
+            @property (nonatomic, copy) NSString *text;
+            - (void)setText:(NSString *)text;
+            @end
+
+            @implementation ReferenceBufferProvider
+            - (NSUInteger)length
+            {
+                \(incompleteIdentifier);
+                return self.text.length;
+            }
+            @end
+            """
+        ]
+
+        for source in sources {
+            let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: incompleteIdentifier,
+                syntaxID: .plain,
+                language: .objectiveC,
+                inOccurrenceOf: incompleteIdentifier
+            )
+            #expect(syntaxIDs(
+                in: tokens,
+                source: source,
+                text: incompleteIdentifier,
+                inOccurrenceOf: incompleteIdentifier
+            ).contains(.identifierTypeSystem) == false)
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSUInteger",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "- (NSUInteger)length"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "@property (nonatomic, copy) NSString *text;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "- (void)setText:(NSString *)text;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSObject",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "@interface ReferenceBufferProvider : NSObject"
+            )
+        }
+    }
+
     @Test("SyntaxHighlighterEngine highlights Objective-C structures")
     func highlighterSupportsObjectiveC() async throws {
         let engine = sharedSyntaxHighlighterEngine

@@ -127,7 +127,7 @@
 
 (field_identifier) @editor.syntax.objectivec.plain
 (statement_identifier) @editor.syntax.objectivec.plain
-(type_identifier) @editor.syntax.objectivec.identifier.type.system
+(type_identifier) @editor.syntax.objectivec.plain
 (primitive_type) @editor.syntax.objectivec.keyword
 (sized_type_specifier) @editor.syntax.objectivec.keyword
 (storage_class_specifier) @editor.syntax.objectivec.keyword
@@ -339,6 +339,89 @@
   (#eq? @editor.syntax.objectivec.preprocessor "testassert"))
 
 ; Types
+
+(method_type
+  (type_name
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(method_type
+  (type_name
+    (generic_specifier
+      (type_identifier) @editor.syntax.objectivec.identifier.type.system)))
+
+(method_type
+  (parameterized_arguments
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(method_type
+  (parameterized_arguments
+    (type_name
+      (type_identifier) @editor.syntax.objectivec.identifier.type.system)))
+
+(declaration
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system
+  declarator: (_)
+  ";" @editor.syntax.objectivec.plain
+  (#eq? @editor.syntax.objectivec.plain ";"))
+
+(declaration
+  type: (generic_specifier
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+  declarator: (_)
+  ";" @editor.syntax.objectivec.plain
+  (#eq? @editor.syntax.objectivec.plain ";"))
+
+(function_definition
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(parameter_declaration
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(parameter_declaration
+  type: (generic_specifier
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(field_declaration
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(field_declaration
+  type: (generic_specifier
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(type_descriptor
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(type_descriptor
+  type: (generic_specifier
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(property_declaration
+  (struct_declaration
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(property_declaration
+  (struct_declaration
+    (generic_specifier
+      (type_identifier) @editor.syntax.objectivec.identifier.type.system)))
+
+(property_declaration
+  (atomic_declaration
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(struct_specifier
+  name: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(enum_specifier
+  name: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(enum_specifier
+  underlying_type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(enum_specifier
+  base: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(union_specifier
+  name: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
 (class_declaration (identifier) @editor.syntax.objectivec.identifier.type)
 
