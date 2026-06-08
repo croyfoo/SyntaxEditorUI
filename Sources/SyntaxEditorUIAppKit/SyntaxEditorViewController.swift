@@ -1426,7 +1426,18 @@ public final class SyntaxEditorView: NSScrollView {
         _ result: SyntaxHighlightResult,
         mutation: SyntaxHighlightMutation?
     ) -> Bool {
-        !(mutation != nil && result.phase == .syntacticFastPass)
+        guard mutation != nil,
+              result.phase == .syntacticFastPass
+        else {
+            return true
+        }
+
+        return !hasCompletedHighlightForPreviousRevision(of: result)
+    }
+
+    private func hasCompletedHighlightForPreviousRevision(of result: SyntaxHighlightResult) -> Bool {
+        lastHighlightRevision == result.revision - 1
+            && lastHighlightLanguage == result.language
     }
 
     private func highlightApplicationRefreshRange(
@@ -1437,9 +1448,7 @@ public final class SyntaxEditorView: NSScrollView {
             return result.refreshRange
         }
 
-        guard lastHighlightRevision == result.revision - 1,
-              lastHighlightLanguage == result.language
-        else {
+        guard hasCompletedHighlightForPreviousRevision(of: result) else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
 

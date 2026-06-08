@@ -507,6 +507,7 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
 
 actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
     let fastTokens: [SyntaxHighlightToken]
+    let updateFastTokens: [SyntaxHighlightToken]?
     let completeTokens: [SyntaxHighlightToken]
     let completeGate: ManualSyntaxHighlightGate?
     var resetCount = 0
@@ -514,10 +515,12 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
 
     init(
         fastTokens: [SyntaxHighlightToken],
+        updateFastTokens: [SyntaxHighlightToken]? = nil,
         completeTokens: [SyntaxHighlightToken],
         completeGate: ManualSyntaxHighlightGate? = nil
     ) {
         self.fastTokens = fastTokens
+        self.updateFastTokens = updateFastTokens
         self.completeTokens = completeTokens
         self.completeGate = completeGate
     }
@@ -579,7 +582,7 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
     ) async -> AsyncStream<SyntaxHighlightResult> {
         updateCount += 1
         return Self.phases(
-            fastTokens: fastTokens,
+            fastTokens: updateFastTokens ?? fastTokens,
             completeTokens: completeTokens,
             completeGate: completeGate,
             source: source,
