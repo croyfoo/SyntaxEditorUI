@@ -1894,6 +1894,7 @@ extension SyntaxEditorUITests {
 
         let suspensionCount = await completeGate.currentSuspensionCount()
         editorView.textView.string = expectedSource
+        #expect(editorView.syntaxColorRunCountForTesting == 0)
         await completeGate.waitUntilSuspended(after: suspensionCount)
 
         #expect(editorView.textView.string == expectedSource)

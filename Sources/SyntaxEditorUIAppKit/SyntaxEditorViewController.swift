@@ -45,6 +45,11 @@ private struct PendingHighlightApplication {
     let recordsCache: Bool
 }
 
+private enum PendingHighlightEdit {
+    case incremental(SyntaxHighlightMutation)
+    case fullReset
+}
+
 private struct SyntaxHighlightAttributeKey: Hashable {
     let syntaxID: EditorSourceSyntaxID
     let language: SyntaxLanguage
@@ -188,7 +193,7 @@ public final class SyntaxEditorView: NSScrollView {
     private var lastAppliedLanguageIdentifier: String?
     private var pendingEditStartUTF16: Int?
     private var pendingUndoSelection: NSRange?
-    private var pendingHighlightMutation: SyntaxHighlightMutation?
+    private var pendingHighlightEdit: PendingHighlightEdit?
     private var pendingHighlightApplication: PendingHighlightApplication?
     var matchedBracketRanges: [NSRange] = []
     private var visibleTextDisplayInvalidationCount = 0
@@ -445,48 +450,60 @@ public final class SyntaxEditorView: NSScrollView {
 
     private func textDidChange() {
         guard !isApplyingModel else {
-            pendingEditStartUTF16 = nil
-            pendingUndoSelection = nil
-            pendingHighlightMutation = nil
+            clearPendingTextChangeState()
             return
         }
 
         let previousText = model.text
         let nextText = textView.string
         if isApplyingHighlight, nextText == previousText {
-            pendingEditStartUTF16 = nil
-            pendingUndoSelection = nil
-            pendingHighlightMutation = nil
+            clearPendingTextChangeState()
             return
         }
 
-        let mutation = pendingHighlightMutation ??
-            TextMutation.diff(from: previousText, to: nextText).map(SyntaxHighlightMutation.init)
         let change: SyntaxEditorTextChange?
-        if let mutation {
+        let mutation: SyntaxHighlightMutation?
+        switch pendingHighlightEdit {
+        case let .incremental(pendingMutation):
+            mutation = pendingMutation
             change = model.commitEdits(
                 [
                     SyntaxEditorTextEdit(
-                        range: NSRange(location: mutation.location, length: mutation.length),
-                        replacement: mutation.replacement
+                        range: NSRange(location: pendingMutation.location, length: pendingMutation.length),
+                        replacement: pendingMutation.replacement
                     ),
                 ],
                 selectedRange: textView.selectedRange()
             )
-        } else {
+        case .fullReset:
+            mutation = nil
             change = model.replaceText(nextText, selectedRange: textView.selectedRange())
+        case .none:
+            mutation = TextMutation.diff(from: previousText, to: nextText).map(SyntaxHighlightMutation.init)
+            if let mutation {
+                change = model.commitEdits(
+                    [
+                        SyntaxEditorTextEdit(
+                            range: NSRange(location: mutation.location, length: mutation.length),
+                            replacement: mutation.replacement
+                        ),
+                    ],
+                    selectedRange: textView.selectedRange()
+                )
+            } else {
+                change = model.replaceText(nextText, selectedRange: textView.selectedRange())
+            }
         }
         guard let change else {
             model.selectedRange = textView.selectedRange()
+            clearPendingTextChangeState()
             return
         }
         lastAppliedDocumentRevision = change.revision
 
         let editStartUTF16 = pendingEditStartUTF16 ?? textView.selectedRange().location
         let previousSelection = pendingUndoSelection
-        pendingEditStartUTF16 = nil
-        pendingUndoSelection = nil
-        pendingHighlightMutation = nil
+        clearPendingTextChangeState()
         let refreshStartUTF16 = SyntaxEditorRangeUtilities.lineStartUTF16Offset(
             in: nextText,
             around: editStartUTF16
@@ -515,6 +532,12 @@ public final class SyntaxEditorView: NSScrollView {
         )
     }
 
+    private func clearPendingTextChangeState() {
+        pendingEditStartUTF16 = nil
+        pendingUndoSelection = nil
+        pendingHighlightEdit = nil
+    }
+
     public func textViewDidChangeSelection(_ notification: Notification) {
         textSelectionDidChange()
     }
@@ -534,28 +557,28 @@ public final class SyntaxEditorView: NSScrollView {
         guard let affectedCharRange = affectedRanges.first else { return true }
         let usesSingleReplacement = affectedRanges.count == 1 && replacementStrings.count == 1
         guard !isApplyingModel else {
-            pendingUndoSelection = nil
+            clearPendingTextChangeState()
             return true
         }
 
         guard model.isEditable else {
-            pendingEditStartUTF16 = nil
-            pendingUndoSelection = nil
-            pendingHighlightMutation = nil
+            clearPendingTextChangeState()
             return false
         }
 
         pendingEditStartUTF16 = affectedCharRange.location
         pendingUndoSelection = affectedCharRange
         guard usesSingleReplacement, let replacementString = replacementStrings.first else {
-            pendingHighlightMutation = nil
+            pendingHighlightEdit = .fullReset
             return true
         }
 
-        pendingHighlightMutation = SyntaxHighlightMutation(
-            location: affectedCharRange.location,
-            length: affectedCharRange.length,
-            replacement: replacementString
+        pendingHighlightEdit = .incremental(
+            SyntaxHighlightMutation(
+                location: affectedCharRange.location,
+                length: affectedCharRange.length,
+                replacement: replacementString
+            )
         )
 
         let source = textView.string
@@ -932,8 +955,7 @@ public final class SyntaxEditorView: NSScrollView {
             model.selectedRange = textView.selectedRange()
         }
 
-        pendingEditStartUTF16 = nil
-        pendingHighlightMutation = nil
+        clearPendingTextChangeState()
 
         if let undoState {
             registerUndoAction(restore: undoState.restore, counterpart: undoState.counterpart)
