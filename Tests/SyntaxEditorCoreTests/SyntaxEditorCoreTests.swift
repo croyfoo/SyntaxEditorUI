@@ -8633,6 +8633,7 @@ struct SyntaxHighlighterEngineTests {
         */
 
         typedef void (^ReferenceCompletion)(id object, NSError **error);
+        typedef int (*ReferenceCallback)(int value);
 
         static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
         {
@@ -8808,6 +8809,7 @@ struct SyntaxHighlighterEngineTests {
         )
         let dictionaryStringRange = nsSource.range(of: "@\"objc\"")
         let blockTypedefDeclarationRange = nsSource.range(of: "typedef void (^ReferenceCompletion)")
+        let functionPointerTypedefDeclarationRange = nsSource.range(of: "typedef int (*ReferenceCallback)")
         let typedefRange = nsSource.range(of: "typedef", options: [], range: blockTypedefDeclarationRange)
         let idRange = nsSource.range(of: "id object")
         let selectorRange = nsSource.range(of: "SEL")
@@ -9793,6 +9795,21 @@ struct SyntaxHighlighterEngineTests {
             text: "ReferenceCompletion",
             inOccurrenceOf: "typedef void (^ReferenceCompletion)"
         ).contains(.identifierType))
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceCallback",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef int (*ReferenceCallback)"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceCallback",
+            inOccurrenceOf: "typedef int (*ReferenceCallback)"
+        ).contains(.identifierType))
+        #expect(functionPointerTypedefDeclarationRange.location != NSNotFound)
         #expect(tokens.contains {
             tokenIntersects($0, range: idRange, syntaxID: .keyword, language: .objectiveC)
         })
