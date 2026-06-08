@@ -8634,6 +8634,8 @@ struct SyntaxHighlighterEngineTests {
 
         typedef void (^ReferenceCompletion)(id object, NSError **error);
         typedef int (*ReferenceCallback)(int value);
+        typedef int *ReferencePointerArray[10];
+        typedef void (^ReferenceBlockArray[10])(void);
 
         static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
         {
@@ -9810,6 +9812,34 @@ struct SyntaxHighlighterEngineTests {
             inOccurrenceOf: "typedef int (*ReferenceCallback)"
         ).contains(.identifierType))
         #expect(functionPointerTypedefDeclarationRange.location != NSNotFound)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferencePointerArray",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef int *ReferencePointerArray[10];"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferencePointerArray",
+            inOccurrenceOf: "typedef int *ReferencePointerArray[10];"
+        ).contains(.identifierType))
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceBlockArray",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef void (^ReferenceBlockArray[10])(void);"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceBlockArray",
+            inOccurrenceOf: "typedef void (^ReferenceBlockArray[10])(void);"
+        ).contains(.identifierType))
         #expect(tokens.contains {
             tokenIntersects($0, range: idRange, syntaxID: .keyword, language: .objectiveC)
         })
