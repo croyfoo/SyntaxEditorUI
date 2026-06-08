@@ -1437,10 +1437,10 @@ public final class SyntaxEditorView: NSScrollView {
             return true
         }
 
-        return !hasMaterializedCompletedHighlightToPreserve(for: result)
+        return !hasMaterializedCompletedHighlightToAvoidDowngrade(for: result)
     }
 
-    private func hasMaterializedCompletedHighlightToPreserve(for result: SyntaxHighlightResult) -> Bool {
+    private func hasMaterializedCompletedHighlightToAvoidDowngrade(for result: SyntaxHighlightResult) -> Bool {
         guard let lastHighlightRevision else {
             return false
         }
@@ -1453,6 +1453,11 @@ public final class SyntaxEditorView: NSScrollView {
             && textSystem.styleStore.hasMaterializedRuns
     }
 
+    private func canApplyIncrementalHighlightRefreshRange(for result: SyntaxHighlightResult) -> Bool {
+        hasMaterializedCompletedHighlightToAvoidDowngrade(for: result)
+            && lastHighlightRevision == result.revision - 1
+    }
+
     private func highlightApplicationRefreshRange(
         for result: SyntaxHighlightResult,
         mutation: SyntaxHighlightMutation?
@@ -1461,7 +1466,7 @@ public final class SyntaxEditorView: NSScrollView {
             return result.refreshRange
         }
 
-        guard hasMaterializedCompletedHighlightToPreserve(for: result) else {
+        guard canApplyIncrementalHighlightRefreshRange(for: result) else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
 

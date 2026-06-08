@@ -1731,13 +1731,13 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.string))
 
         let firstSuspensionCount = await completeGate.currentSuspensionCount()
-        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.selectedRange = NSRange(location: 0, length: 0)
         editorView.insertText("x")
 
         await completeGate.waitUntilSuspended(after: firstSuspensionCount)
         #expect(await editorView.waitForSkippedHighlightPhaseForTesting(.syntacticFastPass))
-        #expect(editorView.text == "\(source)x")
-        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.string))
+        #expect(editorView.text == "x\(source)")
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 1), theme.string))
 
         let secondSuspensionCount = await completeGate.currentSuspensionCount()
         editorView.selectedRange = NSRange(location: editorView.text.utf16.count, length: 0)
@@ -1745,8 +1745,8 @@ extension SyntaxEditorUITests {
 
         await completeGate.waitUntilSuspended(after: secondSuspensionCount)
         #expect(await editorView.waitForSkippedHighlightPhaseForTesting(.syntacticFastPass))
-        #expect(editorView.text == "\(source)xy")
-        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.string))
+        #expect(editorView.text == "x\(source)y")
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 1), theme.string))
 
         await completeGate.resumeAll()
         await editorView.waitForPendingHighlightForTesting()
