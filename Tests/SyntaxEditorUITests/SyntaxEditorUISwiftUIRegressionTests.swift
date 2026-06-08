@@ -199,11 +199,11 @@ extension SyntaxEditorUITests {
     @Test("SyntaxEditorView does not reuse cached highlights after document rebind")
     @MainActor
     func syntaxEditorViewDoesNotReuseCachedHighlightsAfterDocumentRebind() async {
-        let initialTheme = syntaxEditorUITestColorTheme(
+        let initialTheme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
-        let updatedTheme = syntaxEditorUITestColorTheme(
+        let updatedTheme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x654321),
             keyword: syntaxEditorUITestColor(hex: 0x876543)
         )
@@ -220,43 +220,67 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(
             text: "let old = 1",
             language: SyntaxLanguage.swift,
-            colorTheme: initialTheme
+            theme: initialTheme
         )
         let replacementDocument = SyntaxEditorModel(text: "abc new = 1", language: .swift)
 
 #if canImport(UIKit)
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
-        await resetGate.waitUntilSuspended()
-        await resetGate.resumeOne()
-        await editorView.waitForPendingHighlightForTesting()
+        let didSuspendInitialHighlight = await resetGate.waitUntilSuspended()
+        #expect(didSuspendInitialHighlight)
+        guard didSuspendInitialHighlight else { return }
+        let didResumeInitialHighlight = await resetGate.resumeOne()
+        #expect(didResumeInitialHighlight)
+        guard didResumeInitialHighlight else { return }
+        let didApplyInitialHighlight = await editorView.waitForPendingHighlightForTesting()
+        #expect(didApplyInitialHighlight)
+        guard didApplyInitialHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
 
         let previousSuspensionCount = await resetGate.currentSuspensionCount()
         editorView.update(model: replacementDocument)
-        replacementDocument.colorTheme = updatedTheme
+        replacementDocument.theme = updatedTheme
         editorView.synchronizeDocumentForTesting()
 
-        await resetGate.waitUntilSuspended(after: previousSuspensionCount)
+        let didSuspendReplacementHighlight = await resetGate.waitUntilSuspended(after: previousSuspensionCount)
+        #expect(didSuspendReplacementHighlight)
+        guard didSuspendReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.baseForeground))
-        await resetGate.resumeOne()
-        await editorView.waitForPendingHighlightForTesting()
+        let didResumeReplacementHighlight = await resetGate.resumeOne()
+        #expect(didResumeReplacementHighlight)
+        guard didResumeReplacementHighlight else { return }
+        let didApplyReplacementHighlight = await editorView.waitForPendingHighlightForTesting()
+        #expect(didApplyReplacementHighlight)
+        guard didApplyReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
 #elseif canImport(AppKit)
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
-        await resetGate.waitUntilSuspended()
-        await resetGate.resumeOne()
-        await editorView.waitForPendingHighlightForTesting()
+        let didSuspendInitialHighlight = await resetGate.waitUntilSuspended()
+        #expect(didSuspendInitialHighlight)
+        guard didSuspendInitialHighlight else { return }
+        let didResumeInitialHighlight = await resetGate.resumeOne()
+        #expect(didResumeInitialHighlight)
+        guard didResumeInitialHighlight else { return }
+        let didApplyInitialHighlight = await editorView.waitForPendingHighlightForTesting()
+        #expect(didApplyInitialHighlight)
+        guard didApplyInitialHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
 
         let previousSuspensionCount = await resetGate.currentSuspensionCount()
         editorView.update(model: replacementDocument)
-        replacementDocument.colorTheme = updatedTheme
+        replacementDocument.theme = updatedTheme
         editorView.synchronizeDocumentForTesting()
 
-        await resetGate.waitUntilSuspended(after: previousSuspensionCount)
+        let didSuspendReplacementHighlight = await resetGate.waitUntilSuspended(after: previousSuspensionCount)
+        #expect(didSuspendReplacementHighlight)
+        guard didSuspendReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.baseForeground))
-        await resetGate.resumeOne()
-        await editorView.waitForPendingHighlightForTesting()
+        let didResumeReplacementHighlight = await resetGate.resumeOne()
+        #expect(didResumeReplacementHighlight)
+        guard didResumeReplacementHighlight else { return }
+        let didApplyReplacementHighlight = await editorView.waitForPendingHighlightForTesting()
+        #expect(didApplyReplacementHighlight)
+        guard didApplyReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
 #endif
     }

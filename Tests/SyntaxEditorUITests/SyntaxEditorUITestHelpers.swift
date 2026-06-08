@@ -116,7 +116,7 @@ struct SyntaxEditorTestContext {
         language: SyntaxLanguage = .javascript,
         isEditable: Bool = true,
         lineWrappingEnabled: Bool = false,
-        colorTheme: SyntaxEditorColorTheme = .default,
+        theme: SyntaxEditorTheme = .default,
         drawsBackground: Bool = true,
         fontSizeDelta: Int = 0
     ) {
@@ -125,7 +125,7 @@ struct SyntaxEditorTestContext {
             language: language,
             isEditable: isEditable,
             lineWrappingEnabled: lineWrappingEnabled,
-            colorTheme: colorTheme,
+            theme: theme,
             drawsBackground: drawsBackground,
             fontSizeDelta: fontSizeDelta
         )
@@ -200,7 +200,7 @@ func syntaxEditorUITestColor(hex: UInt32) -> SyntaxEditorColor {
 #endif
 }
 
-func syntaxEditorUITestColorTheme(
+func syntaxEditorUITestTheme(
     baseForeground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x101112),
     bracketBackground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x202122),
     comment: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x303132),
@@ -212,9 +212,10 @@ func syntaxEditorUITestColorTheme(
     constant: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x909192),
     variable: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xA0A1A2),
     punctuation: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xB0B1B2),
+    font: SyntaxEditorFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 12, weight: .regular),
     background: SyntaxEditorColor = .clear
-) -> SyntaxEditorColorTheme {
-    SyntaxEditorColorTheme(
+) -> SyntaxEditorTheme {
+    SyntaxEditorTheme(
         baseForeground: baseForeground,
         bracketBackground: bracketBackground,
         comment: comment,
@@ -226,6 +227,7 @@ func syntaxEditorUITestColorTheme(
         constant: constant,
         variable: variable,
         punctuation: punctuation,
+        font: font,
         background: background
     )
 }
@@ -289,8 +291,10 @@ func syntaxEditorWaitForColor(
 
 actor ManualSyntaxHighlightGate {
     struct SuspensionWaiter {
+        let id: Int
         let minimumCount: Int
-        let continuation: CheckedContinuation<Void, Never>
+        let continuation: CheckedContinuation<Bool, Never>
+        let timeoutTask: Task<Void, Never>
     }
 
     struct ResumeWaiter {
@@ -299,6 +303,7 @@ actor ManualSyntaxHighlightGate {
     }
 
     var suspensionCount = 0
+    var nextSuspensionWaiterID = 0
     var suspensionWaiters: [SuspensionWaiter] = []
     var nextResumeWaiterID = 0
     var resumeContinuations: [ResumeWaiter] = []
@@ -328,24 +333,61 @@ actor ManualSyntaxHighlightGate {
         suspensionCount
     }
 
-    func waitUntilSuspended(_ minimumCount: Int = 1) async {
-        guard suspensionCount < minimumCount else { return }
+    @discardableResult
+    func waitUntilSuspended(
+        _ minimumCount: Int = 1,
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async -> Bool {
+        guard suspensionCount < minimumCount else { return true }
 
-        await withCheckedContinuation { continuation in
-            suspensionWaiters.append(
-                SuspensionWaiter(minimumCount: minimumCount, continuation: continuation)
-            )
+        let waiterID = nextSuspensionWaiterID
+        nextSuspensionWaiterID += 1
+
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: false)
+                    return
+                }
+
+                let timeoutTask = Task {
+                    try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    self.resumeSuspensionWaiter(id: waiterID, result: false)
+                }
+
+                suspensionWaiters.append(
+                    SuspensionWaiter(
+                        id: waiterID,
+                        minimumCount: minimumCount,
+                        continuation: continuation,
+                        timeoutTask: timeoutTask
+                    )
+                )
+            }
+        } onCancel: {
+            Task {
+                await self.resumeSuspensionWaiter(id: waiterID, result: false)
+            }
         }
     }
 
-    func waitUntilSuspended(after previousCount: Int) async {
-        await waitUntilSuspended(previousCount + 1)
+    @discardableResult
+    func waitUntilSuspended(
+        after previousCount: Int,
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async -> Bool {
+        await waitUntilSuspended(
+            previousCount + 1,
+            timeoutNanoseconds: timeoutNanoseconds
+        )
     }
 
-    func resumeOne() {
-        guard !resumeContinuations.isEmpty else { return }
+    @discardableResult
+    func resumeOne() -> Bool {
+        guard !resumeContinuations.isEmpty else { return false }
         let waiter = resumeContinuations.removeFirst()
         waiter.continuation.resume()
+        return true
     }
 
     func resumeAll() {
@@ -357,27 +399,37 @@ actor ManualSyntaxHighlightGate {
         }
     }
 
+    func resumeSuspensionWaiter(id: Int, result: Bool) {
+        guard let index = suspensionWaiters.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let waiter = suspensionWaiters.remove(at: index)
+        waiter.timeoutTask.cancel()
+        waiter.continuation.resume(returning: result)
+    }
+
+    func resumeReadySuspensionWaiters() {
+        var readyWaiters: [SuspensionWaiter] = []
+        suspensionWaiters.removeAll { waiter in
+            guard suspensionCount >= waiter.minimumCount else {
+                return false
+            }
+            readyWaiters.append(waiter)
+            return true
+        }
+
+        for waiter in readyWaiters {
+            waiter.timeoutTask.cancel()
+            waiter.continuation.resume(returning: true)
+        }
+    }
+
     func cancelResumeContinuation(id: Int) {
         guard let index = resumeContinuations.firstIndex(where: { $0.id == id }) else {
             return
         }
         let waiter = resumeContinuations.remove(at: index)
         waiter.continuation.resume()
-    }
-
-    func resumeReadySuspensionWaiters() {
-        var readyContinuations: [CheckedContinuation<Void, Never>] = []
-        suspensionWaiters.removeAll { waiter in
-            guard suspensionCount >= waiter.minimumCount else {
-                return false
-            }
-            readyContinuations.append(waiter.continuation)
-            return true
-        }
-
-        for continuation in readyContinuations {
-            continuation.resume()
-        }
     }
 }
 
@@ -678,7 +730,7 @@ func syntaxEditorDenseHighlightCaptureName(at index: Int) -> String {
 }
 
 func syntaxEditorDenseHighlightColor(
-    in theme: SyntaxEditorColorTheme,
+    in theme: SyntaxEditorTheme,
     at index: Int
 ) -> SyntaxEditorColor {
     switch index % 3 {

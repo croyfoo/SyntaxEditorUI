@@ -414,7 +414,7 @@ struct SyntaxEditorCoreTests {
         #expect(model.language.identifier == SyntaxLanguage.json.identifier)
         #expect(model.isEditable == true)
         #expect(model.lineWrappingEnabled == false)
-        #expect(model.colorTheme == .default)
+        #expect(model.theme == .default)
         #expect(model.drawsBackground == true)
         #expect(model.fontSizeDelta == 0)
 
@@ -432,7 +432,7 @@ struct SyntaxEditorCoreTests {
         #expect(model.language.identifier == SyntaxLanguage.css.identifier)
         #expect(model.isEditable == false)
         #expect(model.lineWrappingEnabled == true)
-        #expect(model.colorTheme == .default)
+        #expect(model.theme == .default)
         #expect(model.drawsBackground == false)
         #expect(model.fontSizeDelta == 1)
 
@@ -453,8 +453,8 @@ struct SyntaxEditorCoreTests {
     @Test("SyntaxEditorModel font size commands clamp at rendered bounds")
     @MainActor
     func syntaxEditorModelFontSizeCommandsClampAtRenderedBounds() {
-        let model = SyntaxEditorModel(colorTheme: .presentationLarge)
-        let basePointSize = model.colorTheme.resolved(for: model.language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
+        let model = SyntaxEditorModel(theme: .presentationLarge)
+        let basePointSize = model.theme.resolved(for: model.language).base.font.size
         let minimumDelta = Int(ceil(SyntaxEditorFontSize.minimum - basePointSize))
         let maximumDelta = Int(floor(SyntaxEditorFontSize.maximum - basePointSize))
 
@@ -484,8 +484,8 @@ struct SyntaxEditorCoreTests {
     @Test("SyntaxEditorModel font size commands recover from explicit overshoot")
     @MainActor
     func syntaxEditorModelFontSizeCommandsRecoverFromExplicitOvershoot() {
-        let model = SyntaxEditorModel(colorTheme: .presentationLarge, fontSizeDelta: 100)
-        let basePointSize = model.colorTheme.resolved(for: model.language).base.font?.size ?? SyntaxEditorFontSize.defaultEditorPointSize
+        let model = SyntaxEditorModel(theme: .presentationLarge, fontSizeDelta: 100)
+        let basePointSize = model.theme.resolved(for: model.language).base.font.size
         let minimumDelta = Int(ceil(SyntaxEditorFontSize.minimum - basePointSize))
         let maximumDelta = Int(floor(SyntaxEditorFontSize.maximum - basePointSize))
 
@@ -518,9 +518,9 @@ struct SyntaxEditorCoreTests {
 
     @Test("SyntaxEditorHighlightTheme maps representative captures to theme slots")
     func syntaxEditorHighlightThemeMapping() {
-        let theme = SyntaxEditorColorTheme.default
+        let theme = SyntaxEditorTheme.default
         let resolved = theme.resolved(for: .swift, appearance: .light)
-        let custom = SyntaxEditorColorTheme(
+        let custom = SyntaxEditorTheme(
             baseForeground: .syntaxEditorColor(.init(red: 1, green: 1, blue: 1, alpha: 1)),
             bracketBackground: .syntaxEditorColor(.init(red: 0, green: 0, blue: 0, alpha: 1)),
             comment: .syntaxEditorColor(.init(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)),
@@ -531,7 +531,8 @@ struct SyntaxEditorCoreTests {
             type: .syntaxEditorColor(.init(red: 0.6, green: 0.6, blue: 0.6, alpha: 1)),
             constant: .syntaxEditorColor(.init(red: 0.7, green: 0.7, blue: 0.7, alpha: 1)),
             variable: .syntaxEditorColor(.init(red: 0.8, green: 0.8, blue: 0.8, alpha: 1)),
-            punctuation: .syntaxEditorColor(.init(red: 0.9, green: 0.9, blue: 0.9, alpha: 1))
+            punctuation: .syntaxEditorColor(.init(red: 0.9, green: 0.9, blue: 0.9, alpha: 1)),
+            font: SyntaxEditorFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         )
         let customResolved = custom.resolved(for: .swift, appearance: .light)
 
@@ -552,7 +553,7 @@ struct SyntaxEditorCoreTests {
 
     @Test("SyntaxEditorHighlightTheme resolves language-specific built-in styles")
     func syntaxEditorHighlightThemeLanguageSpecificStyles() {
-        let theme = SyntaxEditorColorTheme.default
+        let theme = SyntaxEditorTheme.default
         let swiftStyle = SyntaxEditorHighlightTheme.style(
             for: .plain,
             in: theme,
@@ -707,15 +708,15 @@ struct SyntaxEditorCoreTests {
 
     @Test("SyntaxEditorHighlightTheme resolves built-in fonts")
     func syntaxEditorHighlightThemeFonts() {
-        let theme = SyntaxEditorColorTheme.default
+        let theme = SyntaxEditorTheme.default
         let lightComment = SyntaxEditorHighlightTheme.style(
             for: "comment.doc",
             in: theme,
             language: .swift,
             appearance: .light
         )
-        #expect(lightComment?.font?.family == "HelveticaNeue")
-        #expect(lightComment?.font?.size == 12)
+        #expect(lightComment?.font.family == "HelveticaNeue")
+        #expect(lightComment?.font.size == 12)
 
         let darkKeyword = SyntaxEditorHighlightTheme.style(
             for: "keyword.control",
@@ -723,7 +724,7 @@ struct SyntaxEditorCoreTests {
             language: .swift,
             appearance: .dark
         )
-        #expect(darkKeyword?.font?.weight == .bold)
+        #expect(darkKeyword?.font.weight == .bold)
     }
 
     @Test("SyntaxEditorRangeUtilities clamps and intersects UTF-16 ranges")
@@ -6556,7 +6557,7 @@ struct SyntaxHighlighterEngineTests {
         let engine = sharedSyntaxHighlighterEngine
         let source = try referenceSampleText(named: "Reference.css")
         let tokens = await engine.render(source: source, language: SyntaxLanguage.css)
-        let theme = SyntaxEditorColorTheme.default.resolved(for: .css, appearance: .dark)
+        let theme = SyntaxEditorTheme.default.resolved(for: .css, appearance: .dark)
 
         let selectorDeclarationCases: [(text: String, containingText: String)] = [
             ("body", "body {"),
@@ -7712,7 +7713,7 @@ struct SyntaxHighlighterEngineTests {
                 && $0.language == .html
                 && nsSource.substring(with: $0.range) == "\"ready\""
         })
-        let theme = SyntaxEditorColorTheme.default.resolved(for: .html, appearance: .dark)
+        let theme = SyntaxEditorTheme.default.resolved(for: .html, appearance: .dark)
         #expect(bracket.resolvedStyle.foreground == theme.keyword.foreground)
         #expect(embeddedCSSProperty.resolvedStyle.foreground == theme.keyword.foreground)
         #expect(embeddedCSSColor.resolvedStyle.foreground == theme.number.foreground)

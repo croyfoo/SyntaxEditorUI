@@ -25,9 +25,9 @@ final class MiniEditorSession {
         MiniPreviewPreset.preset(for: selectedPresetID) ?? .javascript
     }
 
-    var selectedThemePreset: SyntaxEditorColorTheme.Preset {
-        get { editorModel.colorTheme.preset ?? .default }
-        set { editorModel.colorTheme = .preset(newValue) }
+    var selectedThemePreset: SyntaxEditorTheme.Preset {
+        get { editorModel.theme.preset ?? .default }
+        set { editorModel.theme = .preset(newValue) }
     }
 
     func selectPreset(_ presetID: MiniPreviewPreset.ID) {

@@ -30,7 +30,7 @@ extension SyntaxEditorView {
         matchedBracketRanges = newRanges
         textView.updateBracketHighlights(
             ranges: newRanges,
-            color: NSColor.syntaxEditorAlpha(resolvedColorTheme().bracketBackground, alpha: 0.24)
+            color: NSColor.syntaxEditorAlpha(resolvedTheme().bracketBackground, alpha: 0.24)
         )
         textView.setNeedsDisplayForTextRanges(previousRanges + newRanges)
     }

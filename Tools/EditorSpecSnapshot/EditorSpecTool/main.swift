@@ -1634,7 +1634,7 @@ private enum EditorSpecTool {
         fallbackLanguage: SyntaxLanguage,
         appearance: SyntaxEditorThemeAppearance
     ) -> RenderedColorRecord {
-        let theme = SyntaxEditorColorTheme.default
+        let theme = SyntaxEditorTheme.default
         let resolvedTheme = theme.resolved(for: fallbackLanguage, appearance: appearance)
         let color = SyntaxEditorHighlightTheme.color(
             for: syntaxID,

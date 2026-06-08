@@ -17,7 +17,7 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
   - matching bracket highlight
 - Keyboard shortcuts for common editor actions.
 - iOS accessory controls for undo, redo, and keyboard dismissal.
-- Programmatic control over text, language, editability, line wrapping, color theme, font size, and background drawing.
+- Programmatic control over text, language, editability, line wrapping, theme, font size, and background drawing.
 
 ## Shortcuts
 
@@ -127,6 +127,14 @@ GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `
 `Mini` is a lightweight manual verification app for iOS/macOS. It is not a public product and does not own package regression tests.
 
 ## Migration
+
+### v0.12.0
+
+These notes apply when upgrading from `v0.11.x` or earlier to `v0.12.0`.
+
+- `SyntaxEditorColorTheme` has been renamed to `SyntaxEditorTheme`.
+- `SyntaxEditorModel.colorTheme` and the `colorTheme:` initializer argument have been renamed to `theme` and `theme:`.
+- Custom `SyntaxEditorTheme` values must include a `font`. Themes now own editor font size; the editor no longer falls back to a package-level default point size.
 
 ### v0.11.0
 

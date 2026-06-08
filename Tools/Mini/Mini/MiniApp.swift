@@ -289,7 +289,7 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     private func bindEditorModel() {
         editorObservations.observe(model.editorModel) { [weak self] _, editorModel in
             self?.updateLineWrappingItem(lineWrappingEnabled: editorModel.lineWrappingEnabled)
-            self?.updateThemeItem(selectedThemePreset: editorModel.colorTheme.preset ?? .default)
+            self?.updateThemeItem(selectedThemePreset: editorModel.theme.preset ?? .default)
         }
     }
 
@@ -306,7 +306,7 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
         )
     }
 
-    private func updateThemeItem(selectedThemePreset: SyntaxEditorColorTheme.Preset? = nil) {
+    private func updateThemeItem(selectedThemePreset: SyntaxEditorTheme.Preset? = nil) {
         let selectedRawValue = (selectedThemePreset ?? model.selectedThemePreset).rawValue
         for item in themePopUpButton?.itemArray ?? [] where item.representedObject as? String == selectedRawValue {
             themePopUpButton?.select(item)
@@ -320,7 +320,7 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
 
     @objc private func selectThemePreset(_ sender: NSPopUpButton) {
         guard let rawValue = sender.selectedItem?.representedObject as? String,
-              let preset = SyntaxEditorColorTheme.Preset(rawValue: rawValue)
+              let preset = SyntaxEditorTheme.Preset(rawValue: rawValue)
         else {
             return
         }
@@ -353,7 +353,7 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
             let button = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 178, height: 28), pullsDown: false)
             button.target = self
             button.action = #selector(selectThemePreset(_:))
-            for preset in SyntaxEditorColorTheme.Preset.allCases {
+            for preset in SyntaxEditorTheme.Preset.allCases {
                 button.addItem(withTitle: preset.displayName)
                 button.lastItem?.representedObject = preset.rawValue
             }
