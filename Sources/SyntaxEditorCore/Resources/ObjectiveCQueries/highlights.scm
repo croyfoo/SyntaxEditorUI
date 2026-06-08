@@ -366,6 +366,9 @@
 (function_definition
   type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
+(for_statement
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
 (type_definition
   type: (type_identifier) @editor.syntax.objectivec.identifier.type.system
   declarator: (_))

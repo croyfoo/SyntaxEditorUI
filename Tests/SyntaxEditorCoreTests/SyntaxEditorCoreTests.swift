@@ -8374,6 +8374,13 @@ struct SyntaxHighlighterEngineTests {
                 return @encode(NSString *);
             }
 
+            static void ReferenceEnumerate(NSArray<NSString *> *items)
+            {
+                for (NSString *item in items) {
+                    NSLog(@"%@", item);
+                }
+            }
+
             @interface ReferenceBufferProvider : NSObject <NSCopying>
             @property (nonatomic, copy) NSString *text;
             - (void)setText:(NSString *)text;
@@ -8399,6 +8406,13 @@ struct SyntaxHighlighterEngineTests {
             static const char *ReferenceEncodedType(void)
             {
                 return @encode(NSString *);
+            }
+
+            static void ReferenceEnumerate(NSArray<NSString *> *items)
+            {
+                for (NSString *item in items) {
+                    NSLog(@"%@", item);
+                }
             }
 
             @interface ReferenceBufferProvider : NSObject <NSCopying>
@@ -8504,6 +8518,14 @@ struct SyntaxHighlighterEngineTests {
                 syntaxID: .identifierTypeSystem,
                 language: .objectiveC,
                 inOccurrenceOf: "@encode(NSString *)"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "for (NSString *item in items)"
             )
             _ = try effectiveSemanticSnapshot(
                 in: tokens,
