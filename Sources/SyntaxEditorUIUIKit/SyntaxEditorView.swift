@@ -134,6 +134,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var matchedBracketRanges: [NSRange] = []
     var lastAppliedLineWrappingEnabled: Bool
     var lastAppliedTheme: SyntaxEditorTheme
+    var lastAppliedThemeAppearance: SyntaxEditorThemeAppearance?
     var lastAppliedFontSizeDelta: Int
     var isApplyingEditorOwnedScroll = false
     var isIgnoringTextInteractionHorizontalOffsetPreservation = false
@@ -317,6 +318,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         self.highlighter = highlighter
         self.lastAppliedLineWrappingEnabled = model.lineWrappingEnabled
         self.lastAppliedTheme = model.theme
+        self.lastAppliedThemeAppearance = nil
         self.lastAppliedFontSizeDelta = model.fontSizeDelta
         self.lastAppliedDocumentRevision = model.revision
         self.lastAppliedLanguageIdentifier = model.language.syntaxHighlightCacheKey
@@ -787,10 +789,25 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func refreshForColorAppearanceChange() {
+        let previousAppearance = lastAppliedThemeAppearance ?? currentThemeAppearance
+        let nextAppearance = currentThemeAppearance
+        let theme = lastAppliedTheme
+        let baseFontChanged = !resolvedBaseFont(
+            for: theme.resolved(for: model.language, appearance: previousAppearance),
+            fontSizeDelta: lastAppliedFontSizeDelta
+        ).isEqual(resolvedBaseFont(
+            for: theme.resolved(for: model.language, appearance: nextAppearance),
+            fontSizeDelta: lastAppliedFontSizeDelta
+        ))
+        lastAppliedThemeAppearance = nextAppearance
+
         updateEditorBackgroundColor()
         invalidateHorizontalMeasurement()
-        applyBaseForegroundColorChange(from: lastAppliedTheme, to: lastAppliedTheme)
+        applyBaseForegroundColorChange(from: theme, to: theme)
         updateTypingAttributes()
+        if baseFontChanged {
+            applyResolvedFontsToExistingText()
+        }
         reapplyCachedHighlight()
         updateFindHighlightFragmentViews()
         updateBracketHighlightFragmentViews()
@@ -1046,6 +1063,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let previousTheme = lastAppliedTheme
         let themeChanged = previousTheme != theme
         let fontSizeDeltaChanged = lastAppliedFontSizeDelta != fontSizeDelta
+        let appearance = currentThemeAppearance
+        let previousBaseFont = resolvedBaseFont(
+            for: previousTheme.resolved(for: language, appearance: appearance),
+            fontSizeDelta: lastAppliedFontSizeDelta
+        )
+        let nextBaseFont = resolvedBaseFont(
+            for: theme.resolved(for: language, appearance: appearance),
+            fontSizeDelta: fontSizeDelta
+        )
+        let baseFontChanged = !previousBaseFont.isEqual(nextBaseFont)
         if themeChanged || fontSizeDeltaChanged {
             invalidateHorizontalMeasurement()
         }
@@ -1053,6 +1080,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             applyBaseForegroundColorChange(from: previousTheme, to: theme)
         }
         lastAppliedTheme = theme
+        lastAppliedThemeAppearance = appearance
         lastAppliedFontSizeDelta = fontSizeDelta
         updateEditorBackgroundColor(drawsBackground: drawsBackground)
 
@@ -1068,8 +1096,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         lastAppliedLanguageIdentifier = language.syntaxHighlightCacheKey
 
         updateTypingAttributes()
-        if fontSizeDeltaChanged {
-            applyBaseAttributesToExistingText()
+        if baseFontChanged {
+            applyResolvedFontsToExistingText()
         }
         if languageChanged && schedulesHighlight {
             scheduleHighlight(
@@ -1097,15 +1125,36 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         syncTextLayoutSelection()
     }
 
-    func applyBaseAttributesToExistingText() {
+    func applyResolvedFontsToExistingText() {
         let fullRange = NSRange(location: 0, length: storage.length)
-        guard fullRange.length > 0 else { return }
+        guard fullRange.length > 0,
+              let baseFont = baseAttributes()[.font] as? UIFont
+        else { return }
 
-        var attributes = storageBaseAttributes()
-        attributes.removeValue(forKey: .foregroundColor)
-        TextEditingTransaction.perform(on: textContentStorage) { storage in
-            storage.addAttributes(attributes, range: fullRange)
+        var updates: [(range: NSRange, font: UIFont)] = []
+        let source = text
+        if lastHighlightRevision == model.revision,
+           lastHighlightLanguage == model.language,
+           lastHighlightSource == source {
+            var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes())
+            let runSet = syntaxHighlightRunSet(
+                for: lastHighlightTokens,
+                renderRange: fullRange,
+                textLength: storage.length,
+                resolver: &resolver
+            )
+            for run in runSet.fontRuns {
+                updates.append((run.range, run.font))
+            }
         }
+
+        TextEditingTransaction.perform(on: textContentStorage) { storage in
+            storage.addAttribute(.font, value: baseFont, range: fullRange)
+            for update in updates {
+                storage.addAttribute(.font, value: update.font, range: update.range)
+            }
+        }
+        invalidateTextLayout()
     }
 
     func applyBaseForegroundColorChange(
@@ -2328,8 +2377,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func resolvedBaseFont(for theme: SyntaxEditorResolvedTheme? = nil) -> UIFont {
+        resolvedBaseFont(for: theme, fontSizeDelta: model.fontSizeDelta)
+    }
+
+    func resolvedBaseFont(
+        for theme: SyntaxEditorResolvedTheme? = nil,
+        fontSizeDelta: Int
+    ) -> UIFont {
         let theme = theme ?? resolvedTheme()
-        return theme.base.font.platformFont(fontSizeDelta: model.fontSizeDelta)
+        return theme.base.font.platformFont(fontSizeDelta: fontSizeDelta)
     }
 
     func baseParagraphStyle() -> NSParagraphStyle {

@@ -1228,6 +1228,38 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
 
+    @Test("SyntaxEditorView applies built-in iOS theme fonts after theme changes")
+    @MainActor
+    func syntaxEditorViewIOSAppliesBuiltInThemeFontsAfterThemeChanges() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            theme: .default
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
+
+        model.model.theme = .presentationLarge
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(await highlighter.callCount() == initialCallCount)
+        let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
+        let plainFont = try #require(iOSEditorFont(editorView, at: 4))
+        #expect(abs(highlightedFont.pointSize - 30) < 0.01)
+        #expect(abs(plainFont.pointSize - 30) < 0.01)
+    }
+
     @Test("SyntaxEditorView reapplies long iOS tokens when refreshing inside their range")
     @MainActor
     func syntaxEditorViewIOSRefreshesInteriorOfLongTokens() async {

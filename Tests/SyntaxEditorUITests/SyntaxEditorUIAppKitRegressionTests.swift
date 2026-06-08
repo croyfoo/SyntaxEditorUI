@@ -529,6 +529,126 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
 
+    @Test("SyntaxEditorView applies built-in macOS theme fonts after theme changes")
+    @MainActor
+    func syntaxEditorViewMacAppliesBuiltInThemeFontsAfterThemeChanges() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            theme: .default
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
+
+        model.model.theme = .presentationLarge
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(await highlighter.callCount() == initialCallCount)
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let plainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(highlightedFont.pointSize - 28) < 0.01)
+        #expect(abs(plainFont.pointSize - 28) < 0.01)
+    }
+
+    @Test("SyntaxEditorView applies macOS theme fonts while selection delays highlight")
+    @MainActor
+    func syntaxEditorViewMacThemeFontUpdatesSelectedTextBeforeDelayedHighlight() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            theme: .default
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 3))
+        model.model.theme = .presentationLarge
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(editorView.textView.selectedRange() == NSRange(location: 0, length: 3))
+        #expect(await highlighter.callCount() == initialCallCount)
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let plainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(abs(highlightedFont.pointSize - 28) < 0.01)
+        #expect(abs(plainFont.pointSize - 28) < 0.01)
+
+        editorView.textView.setSelectedRange(NSRange(location: 3, length: 0))
+        editorView.textViewDidChangeSelection(
+            Notification(name: NSTextView.didChangeSelectionNotification, object: editorView.textView)
+        )
+
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorForegroundColor(editorView, at: 0),
+                SyntaxEditorTheme.presentationLarge.keyword
+            )
+        )
+    }
+
+    @Test("SyntaxEditorView applies macOS token fonts while selection delays theme highlight")
+    @MainActor
+    func syntaxEditorViewMacThemeTokenFontUpdatesSelectedTextBeforeDelayedHighlight() async throws {
+        let source = "let value = 1"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: "",
+            language: SyntaxLanguage.swift,
+            theme: .default
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        editorView.appearance = NSAppearance(named: .aqua)
+        editorView.viewDidChangeEffectiveAppearance()
+        model.model.replaceText(source)
+        editorView.synchronizeDocumentForTesting()
+        await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
+        let initialHighlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let initialPlainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(!syntaxEditorUITestFontsEqual(initialHighlightedFont, initialPlainFont))
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 3))
+        model.model.theme = .civic
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(editorView.textView.selectedRange() == NSRange(location: 0, length: 3))
+        #expect(await highlighter.callCount() == initialCallCount)
+        let highlightedFont = try #require(macEditorFont(editorView, at: 0))
+        let plainFont = try #require(macEditorFont(editorView, at: 4))
+        #expect(syntaxEditorUITestFontsEqual(plainFont, initialPlainFont))
+        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, initialHighlightedFont))
+        #expect(!syntaxEditorUITestFontsEqual(highlightedFont, plainFont))
+    }
+
     @Test("SyntaxEditorView applies macOS font size delta while selection delays highlight")
     @MainActor
     func syntaxEditorViewMacFontSizeDeltaUpdatesSelectedTextBeforeDelayedHighlight() async throws {
@@ -1816,6 +1936,7 @@ extension SyntaxEditorUITests {
 
         let suspensionCount = await completeGate.currentSuspensionCount()
         editorView.textView.string = expectedSource
+        #expect(editorView.syntaxColorRunCountForTesting == 0)
         await completeGate.waitUntilSuspended(after: suspensionCount)
 
         #expect(editorView.textView.string == expectedSource)
