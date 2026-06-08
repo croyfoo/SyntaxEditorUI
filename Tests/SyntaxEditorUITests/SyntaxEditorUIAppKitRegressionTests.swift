@@ -788,7 +788,7 @@ extension SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewMacAppliesIncrementalFastPassBeforeAnyCompleteHighlight() async {
         let source = "let value = 1"
-        let theme = syntaxEditorUITestColorTheme(
+        let theme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             string: syntaxEditorUITestColor(hex: 0xABCDEF),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
@@ -818,7 +818,7 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(
             text: source,
             language: SyntaxLanguage.swift,
-            colorTheme: theme
+            theme: theme
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
@@ -846,7 +846,7 @@ extension SyntaxEditorUITests {
     @Test("SyntaxEditorView applies macOS incremental fast pass after empty complete highlight")
     @MainActor
     func syntaxEditorViewMacAppliesIncrementalFastPassAfterEmptyCompleteHighlight() async {
-        let theme = syntaxEditorUITestColorTheme(
+        let theme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
@@ -865,7 +865,7 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(
             text: "",
             language: SyntaxLanguage.swift,
-            colorTheme: theme
+            theme: theme
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
@@ -890,7 +890,7 @@ extension SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewMacPreservesSemanticHighlightDuringIncrementalFastPass() async {
         let source = "let value = 1"
-        let theme = syntaxEditorUITestColorTheme(
+        let theme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             string: syntaxEditorUITestColor(hex: 0xABCDEF),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
@@ -914,7 +914,7 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(
             text: source,
             language: SyntaxLanguage.swift,
-            colorTheme: theme
+            theme: theme
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
@@ -927,7 +927,7 @@ extension SyntaxEditorUITests {
         editorView.textView.setSelectedRange(insertionRange)
         editorView.textView.insertText("x", replacementRange: insertionRange)
 
-        let skippedFastPass = await editorView.waitForSkippedHighlightPhaseForTesting(.syntacticFastPass)
+        let skippedFastPass = await editorView.waitForSkippedHighlightPhaseForTesting(SyntaxHighlightPhase.syntacticFastPass)
         #expect(skippedFastPass)
         #expect(editorView.textView.string == "\(source)x")
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.string))
@@ -943,7 +943,7 @@ extension SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewMacPreservesSemanticHighlightAcrossRapidIncrementalFastPasses() async {
         let source = "let value = 1"
-        let theme = syntaxEditorUITestColorTheme(
+        let theme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             string: syntaxEditorUITestColor(hex: 0xABCDEF),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
@@ -967,7 +967,7 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(
             text: source,
             language: SyntaxLanguage.swift,
-            colorTheme: theme
+            theme: theme
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
@@ -982,7 +982,7 @@ extension SyntaxEditorUITests {
         editorView.textView.insertText("x", replacementRange: firstInsertionRange)
 
         await completeGate.waitUntilSuspended(after: firstSuspensionCount)
-        #expect(await editorView.waitForSkippedHighlightPhaseForTesting(.syntacticFastPass))
+        #expect(await editorView.waitForSkippedHighlightPhaseForTesting(SyntaxHighlightPhase.syntacticFastPass))
         #expect(editorView.textView.string == "x\(source)")
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 1), theme.string))
 
@@ -992,7 +992,7 @@ extension SyntaxEditorUITests {
         editorView.textView.insertText("y", replacementRange: secondInsertionRange)
 
         await completeGate.waitUntilSuspended(after: secondSuspensionCount)
-        #expect(await editorView.waitForSkippedHighlightPhaseForTesting(.syntacticFastPass))
+        #expect(await editorView.waitForSkippedHighlightPhaseForTesting(SyntaxHighlightPhase.syntacticFastPass))
         #expect(editorView.textView.string == "x\(source)y")
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 1), theme.string))
 
