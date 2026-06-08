@@ -132,6 +132,24 @@ struct SyntaxEditorCorePlatformTests {
         #expect(syntaxEditorColor(theme.bracketBackground, matchesLight: 0xF5E890, dark: 0x665C2B))
     }
 
+    @Test("SyntaxEditorHighlightTheme resolves platform font sizes")
+    func syntaxEditorHighlightThemeResolvesPlatformFontSizes() throws {
+        let theme = SyntaxEditorColorTheme.presentationLarge
+        let resolved = theme.resolved(for: .swift, appearance: .light)
+        let baseFont = try #require(resolved.base.font)
+        let keywordFont = try #require(resolved.keyword.font)
+
+#if canImport(UIKit)
+        #expect(abs(baseFont.size - 30) < 0.01)
+        #expect(abs(keywordFont.size - 30) < 0.01)
+        #expect(abs(SyntaxEditorFontSize.defaultEditorPointSize - 16) < 0.01)
+#elseif canImport(AppKit)
+        #expect(abs(baseFont.size - 28) < 0.01)
+        #expect(abs(keywordFont.size - 28) < 0.01)
+        #expect(abs(SyntaxEditorFontSize.defaultEditorPointSize - 13) < 0.01)
+#endif
+    }
+
     @Test("SyntaxEditorHighlightTheme uses custom color themes")
     func syntaxEditorHighlightThemeCustomTheme() {
         let theme = customColorTheme()

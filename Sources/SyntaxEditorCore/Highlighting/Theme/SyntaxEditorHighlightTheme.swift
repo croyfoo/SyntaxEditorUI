@@ -208,7 +208,7 @@ public struct SyntaxEditorColorTheme: Identifiable, Hashable {
         for language: SyntaxLanguage?,
         appearance: SyntaxEditorThemeAppearance? = nil
     ) -> SyntaxEditorResolvedColorTheme {
-        switch storage {
+        let theme = switch storage {
         case let .custom(theme):
             theme
         case let .preset(preset):
@@ -218,6 +218,7 @@ public struct SyntaxEditorColorTheme: Identifiable, Hashable {
                 appearance: appearance
             )
         }
+        return theme.applyingPlatformFontSizeAdjustment()
     }
 
     package func style(
@@ -225,7 +226,7 @@ public struct SyntaxEditorColorTheme: Identifiable, Hashable {
         language: SyntaxLanguage?,
         appearance: SyntaxEditorThemeAppearance? = nil
     ) -> SyntaxEditorResolvedTextStyle? {
-        switch storage {
+        let style = switch storage {
         case let .custom(theme):
             theme.style(for: syntaxID)
         case let .preset(preset):
@@ -236,6 +237,7 @@ public struct SyntaxEditorColorTheme: Identifiable, Hashable {
                 appearance: appearance
             )
         }
+        return style?.applyingPlatformFontSizeAdjustment()
     }
 
     private enum Storage {
@@ -260,6 +262,13 @@ package struct SyntaxEditorResolvedTextStyle {
         self.foreground = foreground
         self.font = font
     }
+
+    package func applyingPlatformFontSizeAdjustment() -> SyntaxEditorResolvedTextStyle {
+        SyntaxEditorResolvedTextStyle(
+            foreground: foreground,
+            font: font?.applyingPointSizeAdjustment(SyntaxEditorFontSize.platformThemePointSizeAdjustment)
+        )
+    }
 }
 
 package struct SyntaxEditorResolvedColorTheme {
@@ -277,6 +286,23 @@ package struct SyntaxEditorResolvedColorTheme {
     package let punctuation: SyntaxEditorResolvedTextStyle
 
     package var baseForeground: SyntaxEditorColor { base.foreground }
+
+    package func applyingPlatformFontSizeAdjustment() -> SyntaxEditorResolvedColorTheme {
+        SyntaxEditorResolvedColorTheme(
+            background: background,
+            bracketBackground: bracketBackground,
+            base: base.applyingPlatformFontSizeAdjustment(),
+            comment: comment.applyingPlatformFontSizeAdjustment(),
+            string: string.applyingPlatformFontSizeAdjustment(),
+            keyword: keyword.applyingPlatformFontSizeAdjustment(),
+            number: number.applyingPlatformFontSizeAdjustment(),
+            function: function.applyingPlatformFontSizeAdjustment(),
+            type: type.applyingPlatformFontSizeAdjustment(),
+            constant: constant.applyingPlatformFontSizeAdjustment(),
+            variable: variable.applyingPlatformFontSizeAdjustment(),
+            punctuation: punctuation.applyingPlatformFontSizeAdjustment()
+        )
+    }
 
     package func style(for syntaxID: EditorSourceSyntaxID) -> SyntaxEditorResolvedTextStyle? {
         switch EditorSourceSyntaxCategory.category(for: syntaxID) {
@@ -305,6 +331,11 @@ package struct SyntaxEditorFontDescriptor: Hashable, Sendable {
         self.weight = weight
     }
 
+    package func applyingPointSizeAdjustment(_ adjustment: CGFloat) -> SyntaxEditorFontDescriptor {
+        guard adjustment != 0 else { return self }
+        return SyntaxEditorFontDescriptor(family: family, size: size + adjustment, weight: weight)
+    }
+
 #if canImport(UIKit)
     package func platformFont(fallback: UIFont, fontSizeDelta: Int = 0) -> UIFont {
         let pointSize = SyntaxEditorFontSize.pointSize(size, applying: fontSizeDelta)
@@ -331,10 +362,13 @@ package enum SyntaxEditorFontSize {
     package static let minimum: CGFloat = 4
     package static let maximum: CGFloat = 64
     #if os(macOS)
-    package static let defaultEditorPointSize: CGFloat = 13
+    package static let platformThemePointSizeAdjustment: CGFloat = 0
+    private static let baseDefaultEditorPointSize: CGFloat = 13
     #else
-    package static let defaultEditorPointSize: CGFloat = 14
+    package static let platformThemePointSizeAdjustment: CGFloat = 2
+    private static let baseDefaultEditorPointSize: CGFloat = 14
     #endif
+    package static let defaultEditorPointSize = baseDefaultEditorPointSize + platformThemePointSizeAdjustment
 
     package static func pointSize(_ basePointSize: CGFloat, applying delta: Int) -> CGFloat {
         min(max(basePointSize + CGFloat(delta), minimum), maximum)

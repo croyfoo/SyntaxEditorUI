@@ -1378,6 +1378,43 @@ extension SyntaxEditorUITests {
         #expect(abs(minimumPlainFont.pointSize - 4) < 0.01)
     }
 
+    @Test("SyntaxEditorView keeps iOS font size commands aligned with rendered bounds")
+    @MainActor
+    func syntaxEditorViewIOSKeepsFontSizeCommandsAlignedWithRenderedBounds() throws {
+        let model = SyntaxEditorTestContext(
+            text: "let value = 1",
+            language: SyntaxLanguage.swift,
+            colorTheme: .presentationLarge
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+
+        for _ in 0..<100 {
+            model.model.decreaseFontSize()
+        }
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(model.model.fontSizeDelta == -26)
+        let minimumFont = try #require(iOSEditorFont(editorView, at: 0))
+        #expect(abs(minimumFont.pointSize - 4) < 0.01)
+
+        model.model.fontSizeDelta = -100
+        model.model.increaseFontSize()
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(model.model.fontSizeDelta == -25)
+        let increasedFont = try #require(iOSEditorFont(editorView, at: 0))
+        #expect(abs(increasedFont.pointSize - 5) < 0.01)
+
+        for _ in 0..<100 {
+            model.model.increaseFontSize()
+        }
+        editorView.synchronizeDocumentForTesting()
+
+        #expect(model.model.fontSizeDelta == 34)
+        let maximumFont = try #require(iOSEditorFont(editorView, at: 0))
+        #expect(abs(maximumFont.pointSize - 64) < 0.01)
+    }
+
     @Test("SyntaxEditorView applies iOS base attributes before delayed highlight")
     @MainActor
     func syntaxEditorViewIOSAppliesBaseAttributesBeforeDelayedHighlight() async throws {
