@@ -340,9 +340,8 @@
 
 ; Types
 
-(method_type
-  (type_name
-    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+(type_name
+  (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
 (generic_specifier
   (type_identifier) @editor.syntax.objectivec.identifier.type.system)
@@ -351,14 +350,12 @@
   (type_name
     (type_identifier) @editor.syntax.objectivec.identifier.type.system))
 
-(method_type
-  (parameterized_arguments
-    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+(parameterized_arguments
+  (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
-(method_type
-  (parameterized_arguments
-    (type_name
-      (type_identifier) @editor.syntax.objectivec.identifier.type.system)))
+(parameterized_arguments
+  (type_name
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
 
 (declaration
   type: (type_identifier) @editor.syntax.objectivec.identifier.type.system

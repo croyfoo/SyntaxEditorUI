@@ -8369,7 +8369,12 @@ struct SyntaxHighlighterEngineTests {
                 return nil;
             }
 
-            @interface ReferenceBufferProvider : NSObject
+            static const char *ReferenceEncodedType(void)
+            {
+                return @encode(NSString *);
+            }
+
+            @interface ReferenceBufferProvider : NSObject <NSCopying>
             @property (nonatomic, copy) NSString *text;
             - (void)setText:(NSString *)text;
             @end
@@ -8391,7 +8396,12 @@ struct SyntaxHighlighterEngineTests {
                 return nil;
             }
 
-            @interface ReferenceBufferProvider : NSObject
+            static const char *ReferenceEncodedType(void)
+            {
+                return @encode(NSString *);
+            }
+
+            @interface ReferenceBufferProvider : NSObject <NSCopying>
             @property (nonatomic, copy) NSString *text;
             - (void)setText:(NSString *)text;
             @end
@@ -8490,10 +8500,26 @@ struct SyntaxHighlighterEngineTests {
             _ = try effectiveSemanticSnapshot(
                 in: tokens,
                 source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "@encode(NSString *)"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
                 text: "NSObject",
                 syntaxID: .identifierTypeSystem,
                 language: .objectiveC,
-                inOccurrenceOf: "@interface ReferenceBufferProvider : NSObject"
+                inOccurrenceOf: "@interface ReferenceBufferProvider : NSObject <NSCopying>"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSCopying",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "@interface ReferenceBufferProvider : NSObject <NSCopying>"
             )
         }
     }
