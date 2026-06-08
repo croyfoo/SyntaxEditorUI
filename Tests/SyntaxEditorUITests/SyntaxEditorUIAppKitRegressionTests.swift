@@ -784,6 +784,59 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), updatedTheme.string))
     }
 
+    @Test("SyntaxEditorView preserves macOS semantic highlight during incremental fast pass")
+    @MainActor
+    func syntaxEditorViewMacPreservesSemanticHighlightDuringIncrementalFastPass() async {
+        let source = "let value = 1"
+        let theme = syntaxEditorUITestColorTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0xABCDEF),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let completeGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorPhasedTestHighlighter(
+            fastTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            completeTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.string"
+                ),
+            ],
+            completeGate: completeGate
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            colorTheme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await completeGate.waitUntilSuspended()
+        await completeGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.string))
+
+        let insertionRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.textView.setSelectedRange(insertionRange)
+        editorView.textView.insertText("x", replacementRange: insertionRange)
+
+        let skippedFastPass = await editorView.waitForSkippedHighlightPhaseForTesting(.syntacticFastPass)
+        #expect(skippedFastPass)
+        #expect(editorView.textView.string == "\(source)x")
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.string))
+
+        await completeGate.resumeAll()
+        if skippedFastPass {
+            await editorView.waitForPendingHighlightForTesting()
+            #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.string))
+        }
+    }
+
     @Test("SyntaxEditorView resets macOS highlight state without repainting old text before document replacement")
     @MainActor
     func syntaxEditorViewMacResetsHighlightStateWithoutRepaintingOldTextBeforeDocumentReplacement() async {
