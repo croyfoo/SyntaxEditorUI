@@ -198,6 +198,7 @@ public final class SyntaxEditorView: NSScrollView {
     private var isApplyingLineWrappingConfiguration = false
     private var isScrollViewConfigured = false
     private var lastAppliedColorTheme: SyntaxEditorColorTheme?
+    private var lastAppliedThemeAppearance: SyntaxEditorThemeAppearance?
     private var lastAppliedFontSizeDelta: Int
     private var lastAppliedDocumentRevision = 0
     private let modelObservations = ObservationScope()
@@ -388,9 +389,24 @@ public final class SyntaxEditorView: NSScrollView {
 
     public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        let previousAppearance = lastAppliedThemeAppearance ?? currentThemeAppearance
+        let nextAppearance = currentThemeAppearance
+        let colorTheme = lastAppliedColorTheme ?? model.colorTheme
+        let baseFontChanged = !resolvedBaseFont(
+            for: colorTheme.resolved(for: model.language, appearance: previousAppearance),
+            fontSizeDelta: lastAppliedFontSizeDelta
+        ).isEqual(resolvedBaseFont(
+            for: colorTheme.resolved(for: model.language, appearance: nextAppearance),
+            fontSizeDelta: lastAppliedFontSizeDelta
+        ))
+        lastAppliedThemeAppearance = nextAppearance
+
         updateEditorBackgroundColor()
         applyBaseForegroundColorChange(from: lastAppliedColorTheme, to: lastAppliedColorTheme ?? model.colorTheme)
         updateTextViewFontAndTypingAttributes()
+        if baseFontChanged {
+            applyResolvedFontsToExistingText()
+        }
         reapplyCachedHighlight()
         applyMatchingBracketHighlight(force: true)
     }
@@ -812,13 +828,24 @@ public final class SyntaxEditorView: NSScrollView {
         let previousColorTheme = lastAppliedColorTheme
         let colorThemeChanged = previousColorTheme.map { $0 != colorTheme } ?? true
         let fontSizeDeltaChanged = lastAppliedFontSizeDelta != fontSizeDelta
+        let appearance = currentThemeAppearance
+        let previousBaseFont = resolvedBaseFont(
+            for: (previousColorTheme ?? colorTheme).resolved(for: language, appearance: appearance),
+            fontSizeDelta: lastAppliedFontSizeDelta
+        )
+        let nextBaseFont = resolvedBaseFont(
+            for: colorTheme.resolved(for: language, appearance: appearance),
+            fontSizeDelta: fontSizeDelta
+        )
+        let baseFontChanged = !previousBaseFont.isEqual(nextBaseFont)
         if colorThemeChanged {
             applyBaseForegroundColorChange(from: previousColorTheme, to: colorTheme)
         }
         lastAppliedColorTheme = colorTheme
+        lastAppliedThemeAppearance = appearance
         lastAppliedFontSizeDelta = fontSizeDelta
         updateTextViewFontAndTypingAttributes()
-        if fontSizeDeltaChanged {
+        if baseFontChanged {
             applyResolvedFontsToExistingText()
         }
         updateEditorBackgroundColor(drawsBackground: drawsBackground)
@@ -1332,6 +1359,7 @@ public final class SyntaxEditorView: NSScrollView {
             }
         }
         clearMaterializedSyntaxHighlightRendering()
+        textView.invalidateTextLayout()
         invalidateVisibleTextDisplay()
     }
 
@@ -1809,6 +1837,13 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func resolvedBaseFont(for theme: SyntaxEditorResolvedColorTheme? = nil) -> NSFont {
+        resolvedBaseFont(for: theme, fontSizeDelta: model.fontSizeDelta)
+    }
+
+    private func resolvedBaseFont(
+        for theme: SyntaxEditorResolvedColorTheme? = nil,
+        fontSizeDelta: Int
+    ) -> NSFont {
         let fallbackFont = NSFont.monospacedSystemFont(
             ofSize: SyntaxEditorFontSize.defaultEditorPointSize,
             weight: .regular
@@ -1816,8 +1851,8 @@ public final class SyntaxEditorView: NSScrollView {
         let theme = theme ?? resolvedColorTheme()
         return theme.base.font?.platformFont(
             fallback: fallbackFont,
-            fontSizeDelta: model.fontSizeDelta
-        ) ?? fallbackFont.syntaxEditorFontSizeAdjusted(by: model.fontSizeDelta)
+            fontSizeDelta: fontSizeDelta
+        ) ?? fallbackFont.syntaxEditorFontSizeAdjusted(by: fontSizeDelta)
     }
 
     private var currentThemeAppearance: SyntaxEditorThemeAppearance {
