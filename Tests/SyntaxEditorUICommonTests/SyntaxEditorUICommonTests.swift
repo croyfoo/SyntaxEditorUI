@@ -492,6 +492,33 @@ struct SyntaxEditorUICommonTests {
     }
 }
 
+struct SyntaxEditorTaskWaiterTests {
+    @Test("Task waiter keeps timeout authoritative when timeout cancels waited task")
+    func keepsTimeoutAuthoritativeWhenTimeoutCancelsWaitedTask() async {
+        let taskFinished = DispatchSemaphore(value: 0)
+        let task = Task {
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+            taskFinished.signal()
+        }
+        defer {
+            task.cancel()
+        }
+
+        let didComplete = await syntaxEditorWaitForTaskCompletionForTesting(
+            task,
+            timeoutNanoseconds: 1
+        ) {
+            task.cancel()
+            taskFinished.wait()
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+
+        #expect(!didComplete)
+    }
+}
+
 private var baseForeground: SyntaxEditorColor {
 #if canImport(UIKit)
     .label

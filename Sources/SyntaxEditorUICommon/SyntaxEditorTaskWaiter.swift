@@ -7,7 +7,7 @@ package func syntaxEditorWaitForTaskCompletionForTesting(
         let state = SyntaxEditorTaskWaiterState(continuation: continuation)
         let completionTask = Task {
             await task.value
-            await state.resume(returning: true)
+            _ = await state.resume(returning: true)
         }
         let timeoutTask = Task {
             do {
@@ -15,8 +15,10 @@ package func syntaxEditorWaitForTaskCompletionForTesting(
             } catch {
                 return
             }
-            onTimeout()
-            await state.resume(returning: false)
+            let didResume = await state.resume(returning: false)
+            if didResume {
+                onTimeout()
+            }
         }
 
         Task {
@@ -51,12 +53,13 @@ private actor SyntaxEditorTaskWaiterState {
         self.timeoutTask = timeoutTask
     }
 
-    func resume(returning result: Bool) {
-        guard let continuation else { return }
+    func resume(returning result: Bool) -> Bool {
+        guard let continuation else { return false }
 
         self.continuation = nil
         completionTask?.cancel()
         timeoutTask?.cancel()
         continuation.resume(returning: result)
+        return true
     }
 }
