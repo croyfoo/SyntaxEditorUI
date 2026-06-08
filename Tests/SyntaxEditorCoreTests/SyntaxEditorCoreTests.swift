@@ -8593,6 +8593,26 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine preserves Objective-C C-style method parameter type highlights")
+    func highlighterPreservesObjectiveCCStyleMethodParameterTypes() async throws {
+        let source = """
+            @interface ReferenceBufferProvider : NSObject
+            - (void)consumeObject:(id)object, NSString *name;
+            @end
+            """
+
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "- (void)consumeObject:(id)object, NSString *name;"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine highlights Objective-C structures")
     func highlighterSupportsObjectiveC() async throws {
         let engine = sharedSyntaxHighlighterEngine

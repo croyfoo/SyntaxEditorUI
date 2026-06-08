@@ -396,6 +396,9 @@
 (parameter_declaration
   type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
+(method_parameter
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
 (field_declaration
   type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
