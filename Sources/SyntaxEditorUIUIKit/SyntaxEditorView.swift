@@ -122,6 +122,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     let nonEditableTextInteraction = UITextInteraction(for: .nonEditable)
     var findCoordinator: SyntaxEditorFindCoordinator?
     static let estimatedTabColumnWidth = 4
+    private static let platformFontSizeAdjustment = 2
     static let defaultEditorFont = UIFont.monospacedSystemFont(
         ofSize: SyntaxEditorFontSize.defaultEditorPointSize,
         weight: .regular
@@ -1969,7 +1970,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             defaultLanguage: model.language,
             appearance: currentThemeAppearance,
             baseFont: (baseAttributes[.font] as? UIFont) ?? resolvedBaseFont(),
-            fontSizeDelta: model.fontSizeDelta,
+            fontSizeDelta: effectiveFontSizeDelta,
             resolveColor: { [weak self] color in
                 self?.resolvedSyntaxColor(color) ?? color
             }
@@ -2333,8 +2334,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let theme = theme ?? resolvedColorTheme()
         return theme.base.font?.platformFont(
             fallback: Self.defaultEditorFont,
-            fontSizeDelta: model.fontSizeDelta
-        ) ?? Self.defaultEditorFont.syntaxEditorFontSizeAdjusted(by: model.fontSizeDelta)
+            fontSizeDelta: effectiveFontSizeDelta
+        ) ?? Self.defaultEditorFont.syntaxEditorFontSizeAdjusted(by: effectiveFontSizeDelta)
+    }
+
+    private var effectiveFontSizeDelta: Int {
+        model.fontSizeDelta + Self.platformFontSizeAdjustment
     }
 
     func baseParagraphStyle() -> NSParagraphStyle {

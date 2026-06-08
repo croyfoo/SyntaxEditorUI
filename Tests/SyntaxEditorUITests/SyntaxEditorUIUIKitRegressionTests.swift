@@ -1312,7 +1312,7 @@ extension SyntaxEditorUITests {
         let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
         let plainFont = try #require(iOSEditorFont(editorView, at: 4))
         #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
-        #expect(abs(plainFont.pointSize - 28) < 0.01)
+        #expect(abs(plainFont.pointSize - 30) < 0.01)
     }
 
     @Test("SyntaxEditorView applies iOS font size delta to built-in theme fonts")
@@ -1340,7 +1340,7 @@ extension SyntaxEditorUITests {
         let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
         let plainFont = try #require(iOSEditorFont(editorView, at: 4))
         #expect(abs(highlightedFont.pointSize - plainFont.pointSize) < 0.01)
-        #expect(abs(plainFont.pointSize - 31) < 0.01)
+        #expect(abs(plainFont.pointSize - 33) < 0.01)
     }
 
     @Test("SyntaxEditorView clamps iOS font size delta")
