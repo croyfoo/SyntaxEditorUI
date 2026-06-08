@@ -392,22 +392,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     ) async -> Bool {
         guard let highlightTask else { return true }
 
-        return await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                await highlightTask.value
-                return true
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                return false
-            }
-
-            let didComplete = await group.next() ?? false
-            if !didComplete {
-                highlightTask.cancel()
-            }
-            group.cancelAll()
-            return didComplete
+        return await syntaxEditorWaitForTaskCompletionForTesting(
+            highlightTask,
+            timeoutNanoseconds: timeoutNanoseconds
+        ) {
+            highlightTask.cancel()
         }
     }
 
