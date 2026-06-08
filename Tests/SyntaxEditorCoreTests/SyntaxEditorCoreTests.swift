@@ -11563,11 +11563,15 @@ struct SyntaxHighlighterEngineTests {
     @Test("SyntaxHighlighterEngine handles inline Objective-C implementation ivar blocks")
     func highlighterHandlesInlineObjectiveCImplementationIvarBlocks() async throws {
         let source = """
-        @implementation Sample { BOOL _flag; }
+        @implementation Sample { BOOL _flag; NSString *_name; }
         - (BOOL)value
         {
             BOOL temporary;
             return _flag;
+        }
+        - (NSString *)name
+        {
+            return _name;
         }
         - (BOOL)other
         {
@@ -11584,6 +11588,22 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "return _flag;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSString *_name;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "_name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return _name;"
         )
         #expect(syntaxIDs(
             in: tokens,

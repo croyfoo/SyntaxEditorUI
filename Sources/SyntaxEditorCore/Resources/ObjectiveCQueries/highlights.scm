@@ -426,6 +426,10 @@
   (struct_declaration
     (type_identifier) @editor.syntax.objectivec.identifier.type.system))
 
+(instance_variable
+  (struct_declaration
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
 (property_declaration
   (atomic_declaration
     (type_identifier) @editor.syntax.objectivec.identifier.type.system))
