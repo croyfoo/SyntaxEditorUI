@@ -8361,6 +8361,14 @@ struct SyntaxHighlighterEngineTests {
         let incompleteIdentifier = "sepufepuaepufeofeoueoufeouseoufeou"
         let sources = [
             """
+            typedef NSString *ReferenceName;
+            typedef NSDictionary<NSString *, NSString *> *ReferenceMap;
+
+            static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
+            {
+                return nil;
+            }
+
             @interface ReferenceBufferProvider : NSObject
             @property (nonatomic, copy) NSString *text;
             - (void)setText:(NSString *)text;
@@ -8375,6 +8383,14 @@ struct SyntaxHighlighterEngineTests {
             @end
             """,
             """
+            typedef NSString *ReferenceName;
+            typedef NSDictionary<NSString *, NSString *> *ReferenceMap;
+
+            static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
+            {
+                return nil;
+            }
+
             @interface ReferenceBufferProvider : NSObject
             @property (nonatomic, copy) NSString *text;
             - (void)setText:(NSString *)text;
@@ -8430,6 +8446,46 @@ struct SyntaxHighlighterEngineTests {
                 syntaxID: .identifierTypeSystem,
                 language: .objectiveC,
                 inOccurrenceOf: "- (void)setText:(NSString *)text;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSString *ReferenceName;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSDictionary",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSDictionary<NSString *, NSString *> *ReferenceMap;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSDictionary<NSString *, NSString *> *ReferenceMap;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSDictionary",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases"
             )
             _ = try effectiveSemanticSnapshot(
                 in: tokens,

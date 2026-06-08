@@ -344,10 +344,12 @@
   (type_name
     (type_identifier) @editor.syntax.objectivec.identifier.type.system))
 
-(method_type
+(generic_specifier
+  (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(generic_specifier
   (type_name
-    (generic_specifier
-      (type_identifier) @editor.syntax.objectivec.identifier.type.system)))
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
 
 (method_type
   (parameterized_arguments
@@ -364,45 +366,25 @@
   ";" @editor.syntax.objectivec.plain
   (#eq? @editor.syntax.objectivec.plain ";"))
 
-(declaration
-  type: (generic_specifier
-    (type_identifier) @editor.syntax.objectivec.identifier.type.system)
-  declarator: (_)
-  ";" @editor.syntax.objectivec.plain
-  (#eq? @editor.syntax.objectivec.plain ";"))
-
 (function_definition
   type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
-(parameter_declaration
-  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+(type_definition
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system
+  declarator: (_))
 
 (parameter_declaration
-  type: (generic_specifier
-    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
 (field_declaration
   type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
-(field_declaration
-  type: (generic_specifier
-    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
-
 (type_descriptor
   type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
-(type_descriptor
-  type: (generic_specifier
-    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
-
 (property_declaration
   (struct_declaration
     (type_identifier) @editor.syntax.objectivec.identifier.type.system))
-
-(property_declaration
-  (struct_declaration
-    (generic_specifier
-      (type_identifier) @editor.syntax.objectivec.identifier.type.system)))
 
 (property_declaration
   (atomic_declaration
