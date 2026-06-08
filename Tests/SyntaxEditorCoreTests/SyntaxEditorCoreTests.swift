@@ -9759,6 +9759,20 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.contains {
             tokenIntersects($0, range: typedefRange, syntaxID: .keyword, language: .objectiveC)
         })
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceCompletion",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef void (^ReferenceCompletion)"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceCompletion",
+            inOccurrenceOf: "typedef void (^ReferenceCompletion)"
+        ).contains(.identifierType))
         #expect(tokens.contains {
             tokenIntersects($0, range: idRange, syntaxID: .keyword, language: .objectiveC)
         })

@@ -385,6 +385,10 @@
       declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)
     (function_declarator
       declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)
+    (function_declarator
+      declarator: (parenthesized_declarator
+        (block_pointer_declarator
+          declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)))
     (array_declarator
       declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)
   ])
