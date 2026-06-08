@@ -8636,6 +8636,8 @@ struct SyntaxHighlighterEngineTests {
         typedef int (*ReferenceCallback)(int value);
         typedef int *ReferencePointerArray[10];
         typedef void (^ReferenceBlockArray[10])(void);
+        typedef int (ReferenceParenthesizedInt);
+        typedef int (ReferenceParenthesizedArray[10]);
 
         static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
         {
@@ -9839,6 +9841,34 @@ struct SyntaxHighlighterEngineTests {
             source: source,
             text: "ReferenceBlockArray",
             inOccurrenceOf: "typedef void (^ReferenceBlockArray[10])(void);"
+        ).contains(.identifierType))
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceParenthesizedInt",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef int (ReferenceParenthesizedInt);"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceParenthesizedInt",
+            inOccurrenceOf: "typedef int (ReferenceParenthesizedInt);"
+        ).contains(.identifierType))
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceParenthesizedArray",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef int (ReferenceParenthesizedArray[10]);"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceParenthesizedArray",
+            inOccurrenceOf: "typedef int (ReferenceParenthesizedArray[10]);"
         ).contains(.identifierType))
         #expect(tokens.contains {
             tokenIntersects($0, range: idRange, syntaxID: .keyword, language: .objectiveC)

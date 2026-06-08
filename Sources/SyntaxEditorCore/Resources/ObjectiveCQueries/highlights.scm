@@ -381,6 +381,11 @@
 (type_definition
   declarator: [
     (type_identifier) @editor.syntax.objectivec.identifier.type
+    (parenthesized_declarator
+      (type_identifier) @editor.syntax.objectivec.identifier.type)
+    (parenthesized_declarator
+      (array_declarator
+        declarator: (type_identifier) @editor.syntax.objectivec.identifier.type))
     (pointer_declarator
       declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)
     (pointer_declarator
