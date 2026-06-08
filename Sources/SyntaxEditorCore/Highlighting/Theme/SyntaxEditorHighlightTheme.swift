@@ -210,7 +210,7 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
         for language: SyntaxLanguage?,
         appearance: SyntaxEditorThemeAppearance? = nil
     ) -> SyntaxEditorResolvedTheme {
-        let theme = switch storage {
+        switch storage {
         case let .custom(theme):
             theme
         case let .preset(preset):
@@ -218,9 +218,8 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
                 for: preset,
                 language: language,
                 appearance: appearance
-            )
+            ).applyingPlatformFontSizeAdjustment()
         }
-        return theme.applyingPlatformFontSizeAdjustment()
     }
 
     package func style(
@@ -228,7 +227,7 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
         language: SyntaxLanguage?,
         appearance: SyntaxEditorThemeAppearance? = nil
     ) -> SyntaxEditorResolvedTextStyle? {
-        let style = switch storage {
+        switch storage {
         case let .custom(theme):
             theme.style(for: syntaxID)
         case let .preset(preset):
@@ -237,9 +236,8 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
                 preset: preset,
                 language: language,
                 appearance: appearance
-            )
+            )?.applyingPlatformFontSizeAdjustment()
         }
-        return style?.applyingPlatformFontSizeAdjustment()
     }
 
     private enum Storage {

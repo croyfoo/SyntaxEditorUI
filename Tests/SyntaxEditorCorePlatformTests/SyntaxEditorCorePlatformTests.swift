@@ -149,6 +149,17 @@ struct SyntaxEditorCorePlatformTests {
 #endif
     }
 
+    @Test("SyntaxEditorHighlightTheme preserves custom font sizes")
+    func syntaxEditorHighlightThemePreservesCustomFontSizes() throws {
+        let theme = customTheme()
+        let resolved = theme.resolved(for: .swift, appearance: .light)
+        let keywordStyle = try #require(theme.style(for: .keyword, language: .swift, appearance: .light))
+
+        #expect(abs(resolved.base.font.size - 12) < 0.01)
+        #expect(abs(resolved.keyword.font.size - 12) < 0.01)
+        #expect(abs(keywordStyle.font.size - 12) < 0.01)
+    }
+
     @Test("SyntaxEditorHighlightTheme uses custom themes")
     func syntaxEditorHighlightThemeCustomTheme() {
         let theme = customTheme()
