@@ -43,6 +43,7 @@ private struct PendingHighlightApplication {
     let refreshRange: NSRange
     let mutation: SyntaxHighlightMutation?
     let recordsCache: Bool
+    let phase: SyntaxHighlightPhase
 }
 
 private enum PendingHighlightEdit {
@@ -196,6 +197,9 @@ public final class SyntaxEditorView: NSScrollView {
     private var lastHighlightSource: String?
     private var lastHighlightRevision: Int?
     private var lastHighlightLanguage: SyntaxLanguage?
+    private var materializedHighlightPhase: SyntaxHighlightPhase?
+    private var materializedHighlightRevision: Int?
+    private var materializedHighlightLanguage: SyntaxLanguage?
     private var isApplyingModel = false
     private var isApplyingHighlight = false
     private var lastAppliedLanguageIdentifier: String?
@@ -1418,7 +1422,8 @@ public final class SyntaxEditorView: NSScrollView {
             language: result.language,
             refreshRange: refreshRange,
             mutation: mutation,
-            recordsCache: result.phase == .complete
+            recordsCache: result.phase == .complete,
+            phase: result.phase
         )
     }
 
@@ -1432,13 +1437,20 @@ public final class SyntaxEditorView: NSScrollView {
             return true
         }
 
-        return !hasCompletedHighlightToPreserve(for: result)
+        return !hasMaterializedCompletedHighlightToPreserve(for: result)
     }
 
-    private func hasCompletedHighlightToPreserve(for result: SyntaxHighlightResult) -> Bool {
-        lastHighlightRevision == result.revision - 1
+    private func hasMaterializedCompletedHighlightToPreserve(for result: SyntaxHighlightResult) -> Bool {
+        guard let lastHighlightRevision else {
+            return false
+        }
+
+        return materializedHighlightPhase == .complete
+            && materializedHighlightRevision == lastHighlightRevision
+            && lastHighlightRevision < result.revision
+            && materializedHighlightLanguage == result.language
             && lastHighlightLanguage == result.language
-            && !lastHighlightTokens.isEmpty
+            && textSystem.styleStore.hasMaterializedRuns
     }
 
     private func highlightApplicationRefreshRange(
@@ -1449,7 +1461,7 @@ public final class SyntaxEditorView: NSScrollView {
             return result.refreshRange
         }
 
-        guard hasCompletedHighlightToPreserve(for: result) else {
+        guard hasMaterializedCompletedHighlightToPreserve(for: result) else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
 
@@ -1484,6 +1496,7 @@ public final class SyntaxEditorView: NSScrollView {
         lastHighlightSource = nil
         lastHighlightRevision = nil
         lastHighlightLanguage = nil
+        clearMaterializedHighlightState()
         pendingHighlightApplication = nil
         resetSkippedHighlightPhaseTrackingForTesting()
         resetSyntaxHighlightRenderingState(textLength: textStorage.length)
@@ -1656,6 +1669,7 @@ public final class SyntaxEditorView: NSScrollView {
         refreshRange: NSRange,
         mutation: SyntaxHighlightMutation?,
         recordsCache: Bool = true,
+        phase: SyntaxHighlightPhase = .complete,
         forceOperations: Bool = false
     ) -> Bool {
         guard model.revision == expectedRevision else { return false }
@@ -1672,7 +1686,8 @@ public final class SyntaxEditorView: NSScrollView {
             language: expectedLanguage,
             refreshRange: refreshRange,
             mutation: mutation,
-            recordsCache: recordsCache
+            recordsCache: recordsCache,
+            phase: phase
         )
         guard textView.selectedRange().length == 0 else {
             pendingHighlightApplication = pendingApplication
@@ -1694,6 +1709,11 @@ public final class SyntaxEditorView: NSScrollView {
                 )
             }
             applyMatchingBracketHighlight(force: true)
+            recordMaterializedHighlight(
+                phase: phase,
+                revision: expectedRevision,
+                language: expectedLanguage
+            )
             return true
         }
         let base = baseAttributes()
@@ -1721,6 +1741,11 @@ public final class SyntaxEditorView: NSScrollView {
                 language: expectedLanguage
             )
         }
+        recordMaterializedHighlight(
+            phase: phase,
+            revision: expectedRevision,
+            language: expectedLanguage
+        )
         return true
     }
 
@@ -1732,7 +1757,8 @@ public final class SyntaxEditorView: NSScrollView {
         language expectedLanguage: SyntaxLanguage,
         refreshRange: NSRange,
         mutation: SyntaxHighlightMutation?,
-        recordsCache: Bool = true
+        recordsCache: Bool = true,
+        phase: SyntaxHighlightPhase = .complete
     ) async -> Bool {
         guard model.revision == expectedRevision else { return false }
         guard model.language == expectedLanguage,
@@ -1748,7 +1774,8 @@ public final class SyntaxEditorView: NSScrollView {
             language: expectedLanguage,
             refreshRange: refreshRange,
             mutation: mutation,
-            recordsCache: recordsCache
+            recordsCache: recordsCache,
+            phase: phase
         )
         guard textView.selectedRange().length == 0 else {
             pendingHighlightApplication = pendingApplication
@@ -1770,6 +1797,11 @@ public final class SyntaxEditorView: NSScrollView {
                 )
             }
             applyMatchingBracketHighlight(force: true)
+            recordMaterializedHighlight(
+                phase: phase,
+                revision: expectedRevision,
+                language: expectedLanguage
+            )
             return true
         }
         let base = baseAttributes()
@@ -1798,6 +1830,11 @@ public final class SyntaxEditorView: NSScrollView {
                 language: expectedLanguage
             )
         }
+        recordMaterializedHighlight(
+            phase: phase,
+            revision: expectedRevision,
+            language: expectedLanguage
+        )
         return true
     }
 
@@ -2086,6 +2123,22 @@ public final class SyntaxEditorView: NSScrollView {
         lastHighlightLanguage = language
     }
 
+    private func recordMaterializedHighlight(
+        phase: SyntaxHighlightPhase,
+        revision: Int,
+        language: SyntaxLanguage
+    ) {
+        materializedHighlightPhase = phase
+        materializedHighlightRevision = revision
+        materializedHighlightLanguage = language
+    }
+
+    private func clearMaterializedHighlightState() {
+        materializedHighlightPhase = nil
+        materializedHighlightRevision = nil
+        materializedHighlightLanguage = nil
+    }
+
     private func applyPendingHighlightIfSelectionAllows() {
         guard textView.selectedRange().length == 0,
               let pendingHighlightApplication
@@ -2101,7 +2154,8 @@ public final class SyntaxEditorView: NSScrollView {
             language: pendingHighlightApplication.language,
             refreshRange: pendingHighlightApplication.refreshRange,
             mutation: pendingHighlightApplication.mutation,
-            recordsCache: pendingHighlightApplication.recordsCache
+            recordsCache: pendingHighlightApplication.recordsCache,
+            phase: pendingHighlightApplication.phase
         )
     }
 
@@ -2352,11 +2406,13 @@ public final class SyntaxEditorView: NSScrollView {
             applySyntaxHighlightStyleOperations(operations)
             invalidateSyntaxRenderingAttributes(for: NSRange(location: 0, length: textStorage.length))
         }
+        clearMaterializedHighlightState()
         invalidateVisibleTextDisplay()
     }
 
     private func resetSyntaxHighlightRenderingState(textLength: Int) {
         textSystem.styleStore.reset(textLength: textLength)
+        clearMaterializedHighlightState()
     }
 
     private func prepareSyntaxHighlightRenderingForPendingTextChange(

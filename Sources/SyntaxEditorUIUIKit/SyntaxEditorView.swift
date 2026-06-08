@@ -123,6 +123,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var lastHighlightSource: String?
     var lastHighlightRevision: Int?
     var lastHighlightLanguage: SyntaxLanguage?
+    private var materializedHighlightPhase: SyntaxHighlightPhase?
+    private var materializedHighlightRevision: Int?
+    private var materializedHighlightLanguage: SyntaxLanguage?
     private var appliedHighlightPhaseRecordsForTesting: [HighlightPhaseRecord] = []
     private var appliedHighlightPhaseWaitersForTesting: [HighlightPhaseWaiter] = []
     private var skippedHighlightPhaseRecordsForTesting: [HighlightPhaseRecord] = []
@@ -1945,6 +1948,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             mutation: mutation
         )
         guard didApplyHighlight else { return }
+        recordMaterializedHighlight(
+            phase: result.phase,
+            revision: result.revision,
+            language: result.language
+        )
         recordAppliedHighlightPhaseForTesting(result.phase, revision: result.revision)
         guard result.phase == .complete else { return }
         lastHighlightTokens = result.tokens
@@ -1963,13 +1971,20 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return true
         }
 
-        return !hasCompletedHighlightToPreserve(for: result)
+        return !hasMaterializedCompletedHighlightToPreserve(for: result)
     }
 
-    private func hasCompletedHighlightToPreserve(for result: SyntaxHighlightResult) -> Bool {
-        lastHighlightRevision == result.revision - 1
+    private func hasMaterializedCompletedHighlightToPreserve(for result: SyntaxHighlightResult) -> Bool {
+        guard let lastHighlightRevision else {
+            return false
+        }
+
+        return materializedHighlightPhase == .complete
+            && materializedHighlightRevision == lastHighlightRevision
+            && lastHighlightRevision < result.revision
+            && materializedHighlightLanguage == result.language
             && lastHighlightLanguage == result.language
-            && !lastHighlightTokens.isEmpty
+            && highlightStyleStore.hasMaterializedRuns
     }
 
     func highlightApplicationRefreshRange(
@@ -1980,7 +1995,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return result.refreshRange
         }
 
-        guard hasCompletedHighlightToPreserve(for: result) else {
+        guard hasMaterializedCompletedHighlightToPreserve(for: result) else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
 
@@ -2014,7 +2029,24 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         lastHighlightSource = nil
         lastHighlightRevision = nil
         lastHighlightLanguage = nil
+        clearMaterializedHighlightState()
         resetSyntaxHighlightRenderingState(textLength: storage.length)
+    }
+
+    private func recordMaterializedHighlight(
+        phase: SyntaxHighlightPhase,
+        revision: Int,
+        language: SyntaxLanguage
+    ) {
+        materializedHighlightPhase = phase
+        materializedHighlightRevision = revision
+        materializedHighlightLanguage = language
+    }
+
+    private func clearMaterializedHighlightState() {
+        materializedHighlightPhase = nil
+        materializedHighlightRevision = nil
+        materializedHighlightLanguage = nil
     }
 
     static func highlightMutation(_ change: SyntaxEditorTextChange) -> SyntaxHighlightMutation? {
@@ -2069,6 +2101,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         updateTypingAttributes()
         applyMatchingBracketHighlight(force: true)
         setNeedsDisplayForVisibleTextFragments()
+        recordMaterializedHighlight(
+            phase: .complete,
+            revision: expectedRevision,
+            language: model.language
+        )
     }
 
     private func applyHighlightFromScheduledTask(
@@ -2365,11 +2402,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             baseFont: base[.font] as? UIFont
         )
         TextEditingTransaction.apply(operations, to: textContentStorage)
+        clearMaterializedHighlightState()
         setNeedsDisplayForVisibleTextFragments()
     }
 
     private func resetSyntaxHighlightRenderingState(textLength: Int) {
         highlightStyleStore.reset(textLength: textLength)
+        clearMaterializedHighlightState()
     }
 
     private func pendingTextMutationReplacementRange(
