@@ -24,7 +24,7 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-toml", exact: "0.7.0"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-xml", exact: "0.7.0"),
         .package(url: "https://github.com/lynnswap/tree-sitter-swift", exact: "0.1.0"),
-        .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.11.0"),
+        .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.11.1"),
     ],
     targets: [
         .target(
