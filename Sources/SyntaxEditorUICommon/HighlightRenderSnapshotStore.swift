@@ -424,6 +424,7 @@ package final class HighlightRenderSnapshotStore {
         resolver().forEachFontRun(in: range, body)
     }
 
+    @discardableResult
     package func commitSnapshot(
         runSet: HighlightRunSet,
         range refreshedRange: NSRange,
@@ -433,8 +434,12 @@ package final class HighlightRenderSnapshotStore {
         baseForeground: SyntaxEditorColor,
         baseFont: SyntaxEditorFont?,
         suppressionRanges nextSuppressionRanges: [NSRange] = []
-    ) {
+    ) -> [NSRange] {
         let nextTextLength = max(0, nextTextLength)
+        let clearedDirtyRanges = HighlightRunUtilities.normalizedRanges(
+            pendingEditMap.visibleDirtyRanges,
+            textLength: nextTextLength
+        )
         let clampedRefreshRange = SyntaxEditorRangeUtilities.clampedRange(
             refreshedRange,
             utf16Length: nextTextLength
@@ -480,6 +485,7 @@ package final class HighlightRenderSnapshotStore {
         currentSuppressionRanges = normalizedSuppressionRanges
         pendingEditMap.clear()
         generation += 1
+        return clearedDirtyRanges
     }
 
     package func recordPendingEdit(

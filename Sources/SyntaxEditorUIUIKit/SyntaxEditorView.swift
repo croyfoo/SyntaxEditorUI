@@ -2450,7 +2450,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             textLength: textLength,
             resolver: &resolver
         )
-        highlightStyleStore.commitSnapshot(
+        let invalidatedDirtyRanges = highlightStyleStore.commitSnapshot(
             runSet: runSet,
             range: fullRange,
             revision: revision,
@@ -2460,8 +2460,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             baseFont: baseAttributes[.font] as? UIFont,
             suppressionRanges: foregroundSuppressionRanges(textLength: textLength)
         )
-        invalidateSyntaxRenderingAttributes(for: [targetRange])
-        setNeedsDisplayForTextRanges([targetRange])
+        let invalidatedRanges = [targetRange] + invalidatedDirtyRanges
+        invalidateSyntaxRenderingAttributes(for: invalidatedRanges)
+        setNeedsDisplayForTextRanges(invalidatedRanges)
     }
 
     private func foregroundSuppressionRanges(textLength: Int) -> [NSRange] {

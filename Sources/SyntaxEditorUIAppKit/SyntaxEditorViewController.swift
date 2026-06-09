@@ -1970,7 +1970,7 @@ public final class SyntaxEditorView: NSScrollView {
             resolver: &resolver,
             baseFont: baseAttributes[.font] as? NSFont
         )
-        textSystem.styleStore.commitSnapshot(
+        let invalidatedDirtyRanges = textSystem.styleStore.commitSnapshot(
             runSet: runSet,
             range: fullRange,
             revision: revision,
@@ -1980,7 +1980,7 @@ public final class SyntaxEditorView: NSScrollView {
             baseFont: baseAttributes[.font] as? NSFont,
             suppressionRanges: foregroundSuppressionRanges(textLength: textLength)
         )
-        invalidateSyntaxRenderingAttributes(for: targetRange)
+        invalidateSyntaxRenderingAttributes(for: [targetRange] + invalidatedDirtyRanges)
     }
 
     private func installSyntaxHighlightRenderingIncrementally(
@@ -2003,7 +2003,7 @@ public final class SyntaxEditorView: NSScrollView {
             baseFont: baseAttributes[.font] as? NSFont
         )
         guard !Task.isCancelled, model.revision == expectedRevision else { return false }
-        textSystem.styleStore.commitSnapshot(
+        let invalidatedDirtyRanges = textSystem.styleStore.commitSnapshot(
             runSet: runSet,
             range: fullRange,
             revision: expectedRevision,
@@ -2013,12 +2013,16 @@ public final class SyntaxEditorView: NSScrollView {
             baseFont: baseAttributes[.font] as? NSFont,
             suppressionRanges: foregroundSuppressionRanges(textLength: textLength)
         )
-        invalidateSyntaxRenderingAttributes(for: targetRange)
+        invalidateSyntaxRenderingAttributes(for: [targetRange] + invalidatedDirtyRanges)
         return true
     }
 
     private func invalidateSyntaxRenderingAttributes(for range: NSRange) {
-        textView.invalidateSyntaxRenderingAttributes(for: [range])
+        invalidateSyntaxRenderingAttributes(for: [range])
+    }
+
+    private func invalidateSyntaxRenderingAttributes(for ranges: [NSRange]) {
+        textView.invalidateSyntaxRenderingAttributes(for: ranges)
     }
 
     private func foregroundSuppressionRanges(textLength: Int) -> [NSRange] {

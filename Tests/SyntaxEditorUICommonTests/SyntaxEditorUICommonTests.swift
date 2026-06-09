@@ -383,7 +383,7 @@ struct SyntaxEditorUICommonTests {
         )
         #expect(store.hasPendingEditsForTesting)
 
-        store.commitSnapshot(
+        let invalidatedDirtyRanges = store.commitSnapshot(
             runSet: HighlightRunSet(
                 colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 12), color: blueColor)],
                 fontRuns: []
@@ -396,6 +396,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
 
+        #expect(invalidatedDirtyRanges == [NSRange(location: 5, length: 2)])
         #expect(!store.hasPendingEditsForTesting)
         #expect(store.foregroundColor(at: 5)?.isEqual(blueColor) == true)
     }
