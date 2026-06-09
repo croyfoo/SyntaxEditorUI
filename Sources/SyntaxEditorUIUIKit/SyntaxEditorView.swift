@@ -1255,6 +1255,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         TextEditingTransaction.perform(on: textContentStorage) { storage in
             storage.addAttribute(.font, value: baseFont, range: fullRange)
         }
+        var didRecomputeSyntaxFontRuns = false
         if lastHighlightRevision == model.revision,
            lastHighlightLanguage == model.language,
            lastHighlightSource == source,
@@ -1277,6 +1278,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 suppressionRanges: foregroundSuppressionRanges(textLength: storage.length)
             )
             invalidateSyntaxRenderingAttributes(for: [fullRange])
+            didRecomputeSyntaxFontRuns = true
+        }
+        if !didRecomputeSyntaxFontRuns {
+            let invalidatedFontRuns = highlightStyleStore.updateBaseFont(
+                baseFont,
+                textLength: storage.length,
+                clearsFontRuns: true
+            )
+            invalidateSyntaxRenderingAttributes(for: invalidatedFontRuns)
         }
         invalidateTextLayout()
     }

@@ -410,6 +410,47 @@ package final class HighlightRenderSnapshotStore {
         }
     }
 
+    @discardableResult
+    package func updateBaseFont(
+        _ font: SyntaxEditorFont?,
+        textLength nextTextLength: Int? = nil,
+        clearsFontRuns: Bool = false
+    ) -> [NSRange] {
+        let nextTextLength = nextTextLength.map { max(0, $0) } ?? currentTextLength
+        let baseChanged: Bool
+        switch (snapshot.baseFont, font) {
+        case (.none, .none):
+            baseChanged = false
+        case let (.some(lhs), .some(rhs)):
+            baseChanged = !lhs.isEqual(rhs)
+        default:
+            baseChanged = true
+        }
+
+        let invalidatedFontRanges = clearsFontRuns
+            ? HighlightRunUtilities.normalizedRanges(snapshot.fontRuns.map(\.range), textLength: nextTextLength)
+            : []
+        let nextFontRuns = clearsFontRuns ? [] : snapshot.fontRuns
+        let textLengthChanged = currentTextLength != nextTextLength
+        currentTextLength = nextTextLength
+        guard baseChanged || textLengthChanged || nextFontRuns.count != snapshot.fontRuns.count else {
+            return invalidatedFontRanges
+        }
+
+        snapshot = HighlightRenderSnapshot(
+            revision: snapshot.revision,
+            language: snapshot.language,
+            textLength: nextTextLength,
+            baseForeground: snapshot.baseForeground,
+            baseFont: font,
+            colorRuns: snapshot.colorRuns,
+            fontRuns: nextFontRuns,
+            suppressionRanges: snapshot.suppressionRanges
+        )
+        generation += 1
+        return invalidatedFontRanges
+    }
+
     package func forEachColorRun(
         in range: NSRange,
         _ body: (HighlightColorRun) -> Void

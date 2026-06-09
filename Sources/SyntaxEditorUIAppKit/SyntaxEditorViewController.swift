@@ -1624,6 +1624,7 @@ public final class SyntaxEditorView: NSScrollView {
             textStorage.addAttribute(.font, value: baseFont, range: textRange)
         }
 
+        var didRecomputeSyntaxFontRuns = false
         if lastHighlightRevision == model.revision,
            lastHighlightLanguage == model.language,
            lastHighlightSource == textView.string,
@@ -1646,6 +1647,15 @@ public final class SyntaxEditorView: NSScrollView {
                 baseFont: baseFont,
                 suppressionRanges: foregroundSuppressionRanges(textLength: textStorage.length)
             )
+            didRecomputeSyntaxFontRuns = true
+        }
+        if !didRecomputeSyntaxFontRuns {
+            let invalidatedFontRuns = textSystem.styleStore.updateBaseFont(
+                baseFont,
+                textLength: textStorage.length,
+                clearsFontRuns: true
+            )
+            invalidateSyntaxRenderingAttributes(for: invalidatedFontRuns)
         }
 
         clearMaterializedSyntaxHighlightRendering()

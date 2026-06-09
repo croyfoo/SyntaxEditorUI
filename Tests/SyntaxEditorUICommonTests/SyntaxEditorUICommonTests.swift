@@ -401,6 +401,42 @@ struct SyntaxEditorUICommonTests {
         #expect(store.foregroundColor(at: 5)?.isEqual(blueColor) == true)
     }
 
+    @Test("Highlight render snapshot clears stale font runs without dropping color runs")
+    func highlightRenderSnapshotClearsStaleFontRunsWithoutDroppingColorRuns() {
+        #if canImport(UIKit)
+        let baseFont = UIFont.systemFont(ofSize: 13)
+        let syntaxFont = UIFont.boldSystemFont(ofSize: 13)
+        let nextBaseFont = UIFont.systemFont(ofSize: 17)
+        #elseif canImport(AppKit)
+        let baseFont = NSFont.systemFont(ofSize: 13)
+        let syntaxFont = NSFont.boldSystemFont(ofSize: 13)
+        let nextBaseFont = NSFont.systemFont(ofSize: 17)
+        #endif
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 5), color: redColor)],
+                fontRuns: [HighlightFontRun(range: NSRange(location: 0, length: 5), font: syntaxFont)]
+            ),
+            range: NSRange(location: 0, length: 5),
+            revision: 1,
+            language: .swift,
+            textLength: 5,
+            baseForeground: baseForeground,
+            baseFont: baseFont
+        )
+
+        let invalidatedRanges = store.updateBaseFont(
+            nextBaseFont,
+            textLength: 5,
+            clearsFontRuns: true
+        )
+
+        #expect(invalidatedRanges == [NSRange(location: 0, length: 5)])
+        #expect(store.foregroundColor(at: 0)?.isEqual(redColor) == true)
+        #expect(store.font(at: 0) == nil)
+    }
+
     @Test("Highlight render snapshot resets logical state")
     func highlightRenderSnapshotResetsLogicalState() {
         let store = HighlightRenderSnapshotStore()
