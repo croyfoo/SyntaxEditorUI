@@ -20,6 +20,14 @@ private struct SyntaxHighlightStyle {
     let font: UIFont
 }
 
+private struct ScheduledHighlightRequest {
+    let id: Int
+    let model: SyntaxEditorModel
+    let language: SyntaxLanguage
+    let revision: Int
+    let mutation: SyntaxHighlightMutation?
+}
+
 private struct HighlightPhaseRecord: Equatable {
     let revision: Int
     let phase: SyntaxHighlightPhase
@@ -119,6 +127,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     let highlighter: any SyntaxHighlighting
     let commandEngine = EditorCommandEngine()
     var highlightTask: Task<Void, Never>?
+    private var scheduledHighlightRequest: ScheduledHighlightRequest?
+    private var nextScheduledHighlightRequestID = 0
     var lastHighlightTokens: [SyntaxHighlightToken] = []
     var lastHighlightSource: String?
     var lastHighlightRevision: Int?
@@ -356,8 +366,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         commandEngine.invalidateTransientState()
         clearHighlightCache()
         model = nextModel
+        synchronizeReboundModel()
         refreshKeyboardAccessoryState()
-        startModelObservation()
+        startModelObservation(schedulesInitialHighlight: false, skipsInitialModelDelivery: true)
     }
 
     public override var undoManager: UndoManager? {
@@ -965,7 +976,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         typingAttributes = storageBaseAttributes()
     }
 
-    func startModelObservation(schedulesInitialHighlight: Bool = true) {
+    func startModelObservation(
+        schedulesInitialHighlight: Bool = true,
+        skipsInitialModelDelivery: Bool = false
+    ) {
         modelConfigurationDeliveryForTesting = modelObservations.observe(model, tracking: { model in
             _ = model.language
             _ = model.isEditable
@@ -993,12 +1007,28 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             _ = model.selectedRange
         }) { [weak self] event, model in
             guard let self else { return }
+            guard !(skipsInitialModelDelivery && event.kind == .initial) else { return }
             self.applyObservedModelChange(
                 forceTextUpdate: event.kind == .initial,
                 observedRevision: model.revision
             )
             self.applyObservedSelection(model.selectedRange)
         }
+    }
+
+    private func synchronizeReboundModel() {
+        applyObservedConfiguration(
+            language: model.language,
+            isEditable: model.isEditable,
+            lineWrappingEnabled: model.lineWrappingEnabled,
+            theme: model.theme,
+            drawsBackground: model.drawsBackground,
+            fontSizeDelta: model.fontSizeDelta,
+            forceLanguageRefresh: true,
+            schedulesHighlight: false
+        )
+        applyObservedModelChange(forceTextUpdate: true, observedRevision: model.revision)
+        applyObservedSelection(model.selectedRange)
     }
 
     func applyObservedModelChange(forceTextUpdate: Bool = false, observedRevision: Int? = nil) {
@@ -1889,6 +1919,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let expectedSource = source
 
         highlightTask?.cancel()
+        let requestID = nextScheduledHighlightRequestID
+        nextScheduledHighlightRequestID += 1
+        scheduledHighlightRequest = ScheduledHighlightRequest(
+            id: requestID,
+            model: model,
+            language: language,
+            revision: revision,
+            mutation: mutation
+        )
         resetAppliedHighlightPhaseTrackingForTesting()
         prepareSyntaxHighlightRenderingForPendingHighlight(
             mutation: mutation,
@@ -1897,7 +1936,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         )
 
         let highlighter = self.highlighter
-        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation] in
+        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation, requestID] in
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.clearScheduledHighlightRequestIfCurrent(id: requestID)
+                }
+            }
             await Task.yield()
             guard !Task.isCancelled else {
                 return
@@ -1923,6 +1967,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 await self?.applyHighlightResultFromScheduledTask(result, mutation: mutation)
             }
         }
+    }
+
+    private func clearScheduledHighlightRequestIfCurrent(id: Int) {
+        guard scheduledHighlightRequest?.id == id else { return }
+        scheduledHighlightRequest = nil
     }
 
     private func applyHighlightResultFromScheduledTask(
@@ -2008,6 +2057,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func reapplyCachedHighlight() {
+        if hasScheduledFullResetHighlight(language: model.language, revision: model.revision) {
+            return
+        }
         let source = text
         guard lastHighlightRevision == model.revision,
               lastHighlightLanguage == model.language,
@@ -2026,9 +2078,24 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         )
     }
 
+    private func hasScheduledFullResetHighlight(
+        language: SyntaxLanguage,
+        revision: Int
+    ) -> Bool {
+        guard let scheduledHighlightRequest,
+              scheduledHighlightRequest.mutation == nil
+        else {
+            return false
+        }
+        return scheduledHighlightRequest.model === model
+            && scheduledHighlightRequest.language == language
+            && scheduledHighlightRequest.revision == revision
+    }
+
     func clearHighlightCache() {
         highlightTask?.cancel()
         highlightTask = nil
+        scheduledHighlightRequest = nil
         resetAppliedHighlightPhaseTrackingForTesting()
         lastHighlightTokens = []
         lastHighlightSource = nil

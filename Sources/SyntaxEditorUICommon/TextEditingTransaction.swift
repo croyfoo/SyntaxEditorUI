@@ -12,10 +12,17 @@ import AppKit
 package enum TextEditingTransaction {
     private struct AttributeRollbackRun {
         let range: NSRange
-        let attributedString: NSAttributedString
+        let foregroundColor: Any?
+        let font: Any?
+    }
+
+    private struct AttributeRollbackChecksum {
+        let range: NSRange
+        let value: UInt64
     }
 
     private struct AttributeRollbackSnapshot {
+        let checksums: [AttributeRollbackChecksum]
         let runs: [AttributeRollbackRun]
     }
 
@@ -91,10 +98,46 @@ package enum TextEditingTransaction {
         for operations: HighlightStyleOperations,
         in textStorage: NSTextStorage
     ) -> AttributeRollbackSnapshot {
-        let runs = rollbackRanges(for: operations, textLength: textStorage.length).map { range in
-            AttributeRollbackRun(range: range, attributedString: textStorage.attributedSubstring(from: range))
+        let rollbackRanges = rollbackRanges(for: operations, textLength: textStorage.length)
+        let string = textStorage.string as NSString
+        let checksums = rollbackRanges.map { range in
+            AttributeRollbackChecksum(
+                range: range,
+                value: utf16Checksum(in: range, string: string)
+            )
         }
-        return AttributeRollbackSnapshot(runs: runs)
+        var runs: [AttributeRollbackRun] = []
+        for range in rollbackRanges {
+            var location = range.location
+            while location < range.upperBound {
+                var effectiveRange = NSRange(location: location, length: 1)
+                let attributes = unsafe textStorage.attributes(at: location, effectiveRange: &effectiveRange)
+                let rollbackRange = NSIntersectionRange(effectiveRange, range)
+                guard rollbackRange.length > 0 else {
+                    location += 1
+                    continue
+                }
+                runs.append(AttributeRollbackRun(
+                    range: rollbackRange,
+                    foregroundColor: attributes[.foregroundColor],
+                    font: attributes[.font]
+                ))
+                location = rollbackRange.upperBound
+            }
+        }
+        return AttributeRollbackSnapshot(checksums: checksums, runs: runs)
+    }
+
+    private static func utf16Checksum(in range: NSRange, string: NSString) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        let end = range.location + range.length
+        var location = range.location
+        while location < end {
+            hash ^= UInt64(string.character(at: location))
+            hash &*= 1_099_511_628_211
+            location += 1
+        }
+        return hash
     }
 
     private static func apply(
@@ -116,12 +159,28 @@ package enum TextEditingTransaction {
 
         perform(on: textContentStorage) { textStorage in
             let textLength = textStorage.length
+            let string = textStorage.string as NSString
+            for checksum in snapshot.checksums {
+                let range = SyntaxEditorRangeUtilities.clampedRange(checksum.range, utf16Length: textLength)
+                guard range.length == checksum.range.length,
+                      utf16Checksum(in: range, string: string) == checksum.value
+                else {
+                    return
+                }
+            }
             for run in snapshot.runs {
                 let range = SyntaxEditorRangeUtilities.clampedRange(run.range, utf16Length: textLength)
-                guard range.length == run.attributedString.length else { continue }
-                let currentString = (textStorage.string as NSString).substring(with: range)
-                guard currentString == run.attributedString.string else { continue }
-                textStorage.replaceCharacters(in: range, with: run.attributedString)
+                guard range.length == run.range.length else { continue }
+                if let foregroundColor = run.foregroundColor {
+                    textStorage.addAttribute(.foregroundColor, value: foregroundColor, range: range)
+                } else {
+                    textStorage.removeAttribute(.foregroundColor, range: range)
+                }
+                if let font = run.font {
+                    textStorage.addAttribute(.font, value: font, range: range)
+                } else {
+                    textStorage.removeAttribute(.font, range: range)
+                }
             }
         }
     }

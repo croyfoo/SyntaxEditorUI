@@ -1174,6 +1174,15 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
                         for: textRange
                     )
                 }
+
+                textSystem.styleStore.forEachFontRun(in: displayRange) { [self] fontRun in
+                    guard let textRange = textRange(forUTF16Range: fontRun.range) else { return }
+                    textLayoutManager.addRenderingAttribute(
+                        .font,
+                        value: fontRun.font,
+                        for: textRange
+                    )
+                }
             }
         }
         syntaxRenderingAttributeApplicationCountForTesting += 1
@@ -2037,20 +2046,21 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         guard !bracketHighlightRanges.isEmpty,
               let bracketHighlightColor
         else {
-            fragmentView.bracketHighlightRects = []
-            fragmentView.bracketHighlightColor = nil
-            fragmentView.needsDisplay = true
+            fragmentView.setBracketHighlights(rects: [], color: nil)
             return
         }
 
         let fragmentRange = textRange(for: fragmentView.layoutFragment)
         let ranges = TextLayoutGeometry.ranges(bracketHighlightRanges, intersecting: fragmentRange)
-        let rects = ranges.map(rectForCharacterRange)
-        fragmentView.bracketHighlightRects = rects.map {
+        guard !ranges.isEmpty else {
+            fragmentView.setBracketHighlights(rects: [], color: nil)
+            return
+        }
+
+        let rects = ranges.map(rectForCharacterRange).map {
             $0.offsetBy(dx: -fragmentView.frame.minX, dy: -fragmentView.frame.minY)
         }
-        fragmentView.bracketHighlightColor = bracketHighlightColor
-        fragmentView.needsDisplay = true
+        fragmentView.setBracketHighlights(rects: rects, color: bracketHighlightColor)
     }
 
 }
@@ -2062,18 +2072,12 @@ final class SyntaxEditorTextContentView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
         clipsToBounds = true
-        layer?.backgroundColor = NSColor.clear.cgColor
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    override func makeBackingLayer() -> CALayer {
-        CATiledLayer()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -2153,15 +2157,26 @@ final class SyntaxEditorTextLayoutFragmentView: NSView {
         needsDisplay = true
     }
 
+    func setBracketHighlights(rects: [CGRect], color: NSColor?) {
+        guard bracketHighlightRects != rects
+            || !colorsEqual(bracketHighlightColor, color)
+        else {
+            return
+        }
+        bracketHighlightRects = rects
+        bracketHighlightColor = color
+        needsDisplay = true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         drawFindCandidateHighlights(in: dirtyRect)
-        if let selectionHighlightColor {
+        if let selectionHighlightColor, !selectionHighlightRects.isEmpty {
             selectionHighlightColor.setFill()
             for rect in selectionHighlightRects where rect.intersects(dirtyRect) {
                 rect.fill()
             }
         }
-        if let bracketHighlightColor {
+        if let bracketHighlightColor, !bracketHighlightRects.isEmpty {
             bracketHighlightColor.setFill()
             for rect in bracketHighlightRects where rect.intersects(dirtyRect) {
                 rect.fill()
@@ -2180,6 +2195,8 @@ final class SyntaxEditorTextLayoutFragmentView: NSView {
     }
 
     private func drawFindCandidateHighlights(in dirtyRect: NSRect) {
+        guard !findHighlightRects.isEmpty else { return }
+
         Self.findCandidateHighlightFillColor.setFill()
         Self.findCandidateHighlightStrokeColor.setStroke()
         for rect in findHighlightRects where rect.intersects(dirtyRect) {

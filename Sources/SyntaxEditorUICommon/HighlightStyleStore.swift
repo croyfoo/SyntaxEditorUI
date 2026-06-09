@@ -125,6 +125,18 @@ package final class HighlightStyleStore {
         return colorRuns[index].color
     }
 
+    package func font(at location: Int) -> SyntaxEditorFont? {
+        guard location >= 0, location < textLength else { return nil }
+        let range = NSRange(location: location, length: 1)
+        let index = Self.firstFontRunIndex(intersecting: range, in: fontRuns)
+        guard index < fontRuns.count,
+              NSIntersectionRange(fontRuns[index].range, range).length > 0
+        else {
+            return nil
+        }
+        return fontRuns[index].font
+    }
+
     package func effectiveForegroundColor(at location: Int) -> SyntaxEditorColor? {
         foregroundColor(at: location) ?? baseForeground
     }
@@ -163,6 +175,20 @@ package final class HighlightStyleStore {
         }
     }
 
+    package func forEachFontRun(
+        in range: NSRange,
+        _ body: (HighlightFontRun) -> Void
+    ) {
+        guard range.length > 0 else { return }
+        let startIndex = Self.firstFontRunIndex(intersecting: range, in: fontRuns)
+        for run in fontRuns[startIndex...] {
+            guard run.range.location < range.upperBound else { break }
+            let intersection = SyntaxEditorRangeUtilities.intersection(of: run.range, and: range)
+            guard intersection.length > 0 else { continue }
+            body(HighlightFontRun(range: intersection, font: run.font))
+        }
+    }
+
     package func replaceAll(
         with runSet: HighlightRunSet,
         textLength nextTextLength: Int,
@@ -191,7 +217,8 @@ package final class HighlightStyleStore {
         baseForeground: SyntaxEditorColor,
         baseFont: SyntaxEditorFont?,
         foregroundSuppressionRanges nextForegroundSuppressionRanges: [NSRange]? = nil,
-        forceOperations: Bool = false
+        forceOperations: Bool = false,
+        computesOperations: Bool = true
     ) -> HighlightStyleOperations {
         let transaction = prepareApply(
             runSet,
@@ -201,10 +228,31 @@ package final class HighlightStyleStore {
             baseForeground: baseForeground,
             baseFont: baseFont,
             foregroundSuppressionRanges: nextForegroundSuppressionRanges,
-            forceOperations: forceOperations
+            forceOperations: forceOperations,
+            computesOperations: computesOperations
         )
         commit(transaction)
         return transaction.operations
+    }
+
+    package func prepareFontApply(
+        _ fontRuns: [HighlightFontRun],
+        refreshedRange: NSRange,
+        textLength nextTextLength: Int,
+        baseForeground: SyntaxEditorColor,
+        baseFont: SyntaxEditorFont?,
+        computesOperations: Bool = true
+    ) -> HighlightStyleTransaction {
+        prepareApply(
+            HighlightRunSet(colorRuns: colorRuns, fontRuns: fontRuns),
+            refreshedRange: refreshedRange,
+            mutation: nil,
+            textLength: nextTextLength,
+            baseForeground: baseForeground,
+            baseFont: baseFont,
+            foregroundSuppressionRanges: nil,
+            computesOperations: computesOperations
+        )
     }
 
     package func prepareApply(
@@ -215,7 +263,8 @@ package final class HighlightStyleStore {
         baseForeground: SyntaxEditorColor,
         baseFont: SyntaxEditorFont?,
         foregroundSuppressionRanges nextForegroundSuppressionRanges: [NSRange]? = nil,
-        forceOperations: Bool = false
+        forceOperations: Bool = false,
+        computesOperations: Bool = true
     ) -> HighlightStyleTransaction {
         let nextTextLength = max(0, nextTextLength)
         var nextColorRuns = colorRuns
@@ -257,22 +306,29 @@ package final class HighlightStyleStore {
             ),
             to: clampedRefreshRange
         )
-        let previousColorRuns = Self.clippedColorRuns(nextColorRuns, to: clampedRefreshRange)
-        let previousFontRuns = Self.clippedFontRuns(nextFontRuns, to: clampedRefreshRange)
-        let colorOperations = Self.colorOperations(
-            from: previousColorRuns,
-            to: normalizedNextColorRuns,
-            refreshedRange: clampedRefreshRange,
-            previousBaseForeground: self.baseForeground,
-            baseForeground: baseForeground,
-            forceOperations: forceOperations
-        )
-        let fontOperations = Self.fontOperations(
-            from: previousFontRuns,
-            to: normalizedNextFontRuns,
-            baseFont: baseFont,
-            forceOperations: forceOperations
-        )
+        let colorOperations: [HighlightColorOperation]
+        let fontOperations: [HighlightFontOperation]
+        if computesOperations {
+            let previousColorRuns = Self.clippedColorRuns(nextColorRuns, to: clampedRefreshRange)
+            let previousFontRuns = Self.clippedFontRuns(nextFontRuns, to: clampedRefreshRange)
+            colorOperations = Self.colorOperations(
+                from: previousColorRuns,
+                to: normalizedNextColorRuns,
+                refreshedRange: clampedRefreshRange,
+                previousBaseForeground: self.baseForeground,
+                baseForeground: baseForeground,
+                forceOperations: forceOperations
+            )
+            fontOperations = Self.fontOperations(
+                from: previousFontRuns,
+                to: normalizedNextFontRuns,
+                baseFont: baseFont,
+                forceOperations: forceOperations
+            )
+        } else {
+            colorOperations = []
+            fontOperations = []
+        }
 
         Self.replaceColorRuns(&nextColorRuns, in: clampedRefreshRange, with: normalizedNextColorRuns)
         Self.replaceFontRuns(&nextFontRuns, in: clampedRefreshRange, with: normalizedNextFontRuns)
@@ -302,16 +358,24 @@ package final class HighlightStyleStore {
     package func clear(
         textLength nextTextLength: Int,
         baseForeground: SyntaxEditorColor,
-        baseFont: SyntaxEditorFont?
+        baseFont: SyntaxEditorFont?,
+        computesOperations: Bool = true
     ) -> HighlightStyleOperations {
-        let colorOperations = colorRuns.map { run in
-            HighlightColorOperation(range: run.range, color: baseForeground)
-        }
-        let fontOperations = baseFont.map { baseFont in
-            fontRuns.map { run in
-                HighlightFontOperation(range: run.range, font: baseFont)
+        let colorOperations: [HighlightColorOperation]
+        let fontOperations: [HighlightFontOperation]
+        if computesOperations {
+            colorOperations = colorRuns.map { run in
+                HighlightColorOperation(range: run.range, color: baseForeground)
             }
-        } ?? []
+            fontOperations = baseFont.map { baseFont in
+                fontRuns.map { run in
+                    HighlightFontOperation(range: run.range, font: baseFont)
+                }
+            } ?? []
+        } else {
+            colorOperations = []
+            fontOperations = []
+        }
 
         textLength = max(0, nextTextLength)
         self.baseForeground = baseForeground

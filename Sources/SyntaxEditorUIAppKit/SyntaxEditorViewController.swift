@@ -46,6 +46,14 @@ private struct PendingHighlightApplication {
     let phase: SyntaxHighlightPhase
 }
 
+private struct ScheduledHighlightRequest {
+    let id: Int
+    let model: SyntaxEditorModel
+    let language: SyntaxLanguage
+    let revision: Int
+    let mutation: SyntaxHighlightMutation?
+}
+
 private enum PendingHighlightEdit {
     case incremental(SyntaxHighlightMutation)
     case fullReset
@@ -193,6 +201,8 @@ public final class SyntaxEditorView: NSScrollView {
     private let highlighter: any SyntaxHighlighting
     private let commandEngine = EditorCommandEngine()
     private var highlightTask: Task<Void, Never>?
+    private var scheduledHighlightRequest: ScheduledHighlightRequest?
+    private var nextScheduledHighlightRequestID = 0
     private var lastHighlightTokens: [SyntaxHighlightToken] = []
     private var lastHighlightSource: String?
     private var lastHighlightRevision: Int?
@@ -319,7 +329,8 @@ public final class SyntaxEditorView: NSScrollView {
         commandEngine.invalidateTransientState()
         clearHighlightCache()
         model = nextModel
-        startModelObservation()
+        synchronizeReboundModel()
+        startModelObservation(schedulesInitialHighlight: false, skipsInitialModelDelivery: true)
     }
 
     internal func synchronizeDocumentForTesting() {
@@ -424,6 +435,15 @@ public final class SyntaxEditorView: NSScrollView {
             return nil
         }
         return textSystem.styleStore.foregroundColor(at: location)
+    }
+
+    internal func syntaxFontForTesting(at location: Int) -> NSFont? {
+        guard location >= 0,
+              location < textStorage.length
+        else {
+            return nil
+        }
+        return textSystem.styleStore.font(at: location)
     }
 
     internal func baseForegroundColorForTesting() -> NSColor? {
@@ -800,7 +820,10 @@ public final class SyntaxEditorView: NSScrollView {
         )
     }
 
-    private func startModelObservation(schedulesInitialHighlight: Bool = true) {
+    private func startModelObservation(
+        schedulesInitialHighlight: Bool = true,
+        skipsInitialModelDelivery: Bool = false
+    ) {
         modelConfigurationDeliveryForTesting = modelObservations.observe(model, tracking: { model in
             _ = model.language
             _ = model.isEditable
@@ -828,12 +851,28 @@ public final class SyntaxEditorView: NSScrollView {
             _ = model.selectedRange
         }) { [weak self] event, model in
             guard let self else { return }
+            guard !(skipsInitialModelDelivery && event.kind == .initial) else { return }
             self.applyObservedModelChange(
                 forceTextUpdate: event.kind == .initial,
                 observedRevision: model.revision
             )
             self.applyObservedSelection(model.selectedRange)
         }
+    }
+
+    private func synchronizeReboundModel() {
+        applyObservedConfiguration(
+            language: model.language,
+            isEditable: model.isEditable,
+            lineWrappingEnabled: model.lineWrappingEnabled,
+            theme: model.theme,
+            drawsBackground: model.drawsBackground,
+            fontSizeDelta: model.fontSizeDelta,
+            forceLanguageRefresh: true,
+            schedulesHighlight: false
+        )
+        applyObservedModelChange(forceTextUpdate: true, observedRevision: model.revision)
+        applyObservedSelection(model.selectedRange)
     }
 
     private func applyObservedModelChange(forceTextUpdate: Bool = false, observedRevision: Int? = nil) {
@@ -1369,11 +1408,25 @@ public final class SyntaxEditorView: NSScrollView {
         let expectedSource = source
 
         highlightTask?.cancel()
+        let requestID = nextScheduledHighlightRequestID
+        nextScheduledHighlightRequestID += 1
+        scheduledHighlightRequest = ScheduledHighlightRequest(
+            id: requestID,
+            model: model,
+            language: language,
+            revision: revision,
+            mutation: mutation
+        )
         pendingHighlightApplication = nil
         resetSkippedHighlightPhaseTrackingForTesting()
 
         let highlighter = self.highlighter
-        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation] in
+        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation, requestID] in
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.clearScheduledHighlightRequestIfCurrent(id: requestID)
+                }
+            }
             await Task.yield()
             guard !Task.isCancelled else {
                 return
@@ -1399,6 +1452,11 @@ public final class SyntaxEditorView: NSScrollView {
                 await self?.applyHighlightResultFromScheduledTask(result, mutation: mutation)
             }
         }
+    }
+
+    private func clearScheduledHighlightRequestIfCurrent(id: Int) {
+        guard scheduledHighlightRequest?.id == id else { return }
+        scheduledHighlightRequest = nil
     }
 
     private func applyHighlightResultFromScheduledTask(
@@ -1474,6 +1532,9 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func reapplyCachedHighlight() {
+        if hasScheduledFullResetHighlight(language: model.language, revision: model.revision) {
+            return
+        }
         let source = textView.string
         guard lastHighlightRevision == model.revision,
               lastHighlightLanguage == model.language,
@@ -1494,9 +1555,24 @@ public final class SyntaxEditorView: NSScrollView {
         )
     }
 
+    private func hasScheduledFullResetHighlight(
+        language: SyntaxLanguage,
+        revision: Int
+    ) -> Bool {
+        guard let scheduledHighlightRequest,
+              scheduledHighlightRequest.mutation == nil
+        else {
+            return false
+        }
+        return scheduledHighlightRequest.model === model
+            && scheduledHighlightRequest.language == language
+            && scheduledHighlightRequest.revision == revision
+    }
+
     private func clearHighlightCache() {
         highlightTask?.cancel()
         highlightTask = nil
+        scheduledHighlightRequest = nil
         lastHighlightTokens = []
         lastHighlightSource = nil
         lastHighlightRevision = nil
@@ -1535,18 +1611,22 @@ public final class SyntaxEditorView: NSScrollView {
 
     private func applyResolvedFontsToExistingText() {
         let textRange = NSRange(location: 0, length: textStorage.length)
+        let base = baseAttributes()
         guard textRange.length > 0,
-              let baseFont = baseAttributes()[.font] as? NSFont
+              let baseFont = base[.font] as? NSFont
         else {
             return
         }
 
-        var updates: [(range: NSRange, font: NSFont)] = []
-        let source = textView.string
+        TextEditingTransaction.perform(on: textSystem.textContentStorage) { textStorage in
+            textStorage.addAttribute(.font, value: baseFont, range: textRange)
+        }
+
         if lastHighlightRevision == model.revision,
            lastHighlightLanguage == model.language,
-           lastHighlightSource == source {
-            var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes())
+           lastHighlightSource == textView.string,
+           let baseForeground = base[.foregroundColor] as? NSColor {
+            var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: base)
             let runSet = syntaxHighlightRunSet(
                 for: lastHighlightTokens,
                 targetRange: textRange,
@@ -1554,18 +1634,19 @@ public final class SyntaxEditorView: NSScrollView {
                 resolver: &resolver,
                 baseFont: baseFont
             )
-            for run in runSet.fontRuns {
-                updates.append((run.range, run.font))
-            }
+            let transaction = textSystem.styleStore.prepareFontApply(
+                runSet.fontRuns,
+                refreshedRange: textRange,
+                textLength: textStorage.length,
+                baseForeground: baseForeground,
+                baseFont: baseFont,
+                computesOperations: false
+            )
+            textSystem.styleStore.commit(transaction)
         }
 
-        TextEditingTransaction.perform(on: textSystem.textContentStorage) { textStorage in
-            textStorage.addAttribute(.font, value: baseFont, range: textRange)
-            for update in updates {
-                textStorage.addAttribute(.font, value: update.font, range: update.range)
-            }
-        }
         clearMaterializedSyntaxHighlightRendering()
+        invalidateSyntaxRenderingAttributes(for: textRange)
         textView.invalidateTextLayout()
         invalidateVisibleTextDisplay()
     }
@@ -1886,9 +1967,6 @@ public final class SyntaxEditorView: NSScrollView {
         ) else {
             return
         }
-        applySyntaxHighlightStyleOperations(
-            transaction.operations
-        )
         textSystem.styleStore.commit(transaction)
         invalidateSyntaxRenderingAttributes(for: targetRange)
     }
@@ -1910,43 +1988,10 @@ public final class SyntaxEditorView: NSScrollView {
         ) else {
             return false
         }
-        let didApply = await applySyntaxHighlightStyleOperationsIncrementally(
-            transaction.operations,
-            shouldContinue: { model.revision == expectedRevision }
-        )
-        guard didApply else { return false }
+        guard !Task.isCancelled, model.revision == expectedRevision else { return false }
         textSystem.styleStore.commit(transaction)
         invalidateSyntaxRenderingAttributes(for: targetRange)
         return true
-    }
-
-    private func applySyntaxHighlightStyleOperations(
-        _ operations: HighlightStyleOperations
-    ) {
-        guard !operations.isEmpty else { return }
-
-        TextEditingTransaction.apply(
-            HighlightStyleOperations(colorOperations: [], fontOperations: operations.fontOperations),
-            to: textSystem.textContentStorage
-        )
-    }
-
-    private func applySyntaxHighlightStyleOperationsIncrementally(
-        _ operations: HighlightStyleOperations,
-        shouldContinue: @MainActor () -> Bool
-    ) async -> Bool {
-        guard !operations.isEmpty else { return true }
-
-        let fontOperations = HighlightStyleOperations(
-            colorOperations: [],
-            fontOperations: operations.fontOperations
-        )
-        let didApplyFonts = await TextEditingTransaction.applyIncrementally(
-            fontOperations,
-            to: textSystem.textContentStorage,
-            shouldContinue: shouldContinue
-        )
-        return didApplyFonts && !Task.isCancelled && shouldContinue()
     }
 
     private func invalidateSyntaxRenderingAttributes(for range: NSRange) {
@@ -1980,7 +2025,8 @@ public final class SyntaxEditorView: NSScrollView {
             baseForeground: baseForeground,
             baseFont: baseAttributes[.font] as? NSFont,
             foregroundSuppressionRanges: foregroundSuppressionRanges(textLength: textLength),
-            forceOperations: forceOperations
+            forceOperations: forceOperations,
+            computesOperations: false
         )
     }
 
@@ -2403,12 +2449,12 @@ public final class SyntaxEditorView: NSScrollView {
     private func clearSyntaxHighlightRendering() {
         let base = baseAttributes()
         if let baseForeground = base[.foregroundColor] as? NSColor {
-            let operations = textSystem.styleStore.clear(
+            _ = textSystem.styleStore.clear(
                 textLength: textStorage.length,
                 baseForeground: baseForeground,
-                baseFont: base[.font] as? NSFont
+                baseFont: base[.font] as? NSFont,
+                computesOperations: false
             )
-            applySyntaxHighlightStyleOperations(operations)
             invalidateSyntaxRenderingAttributes(for: NSRange(location: 0, length: textStorage.length))
         }
         clearMaterializedHighlightState()
@@ -2432,15 +2478,15 @@ public final class SyntaxEditorView: NSScrollView {
         let invalidatedRange = pendingTextMutationReplacementRange(in: source, mutation: mutation)
         let base = baseAttributes()
         if let baseForeground = base[.foregroundColor] as? NSColor {
-            let mutationOperations = textSystem.styleStore.apply(
+            _ = textSystem.styleStore.apply(
                 HighlightRunSet(colorRuns: [], fontRuns: []),
                 refreshedRange: invalidatedRange,
                 mutation: mutation,
                 textLength: source.utf16.count,
                 baseForeground: baseForeground,
-                baseFont: base[.font] as? NSFont
+                baseFont: base[.font] as? NSFont,
+                computesOperations: false
             )
-            applySyntaxHighlightStyleOperations(mutationOperations)
             invalidateSyntaxRenderingAttributes(for: invalidatedRange)
         }
         textView.setNeedsDisplayForTextRanges([invalidatedRange])

@@ -229,10 +229,8 @@ extension SyntaxEditorUITests {
         let didSuspendInitialHighlight = await resetGate.waitUntilSuspended()
         #expect(didSuspendInitialHighlight)
         guard didSuspendInitialHighlight else { return }
-        let didResumeInitialHighlight = await resetGate.resumeOne()
-        #expect(didResumeInitialHighlight)
-        guard didResumeInitialHighlight else { return }
-        let didApplyInitialHighlight = await editorView.waitForPendingHighlightForTesting()
+        await resetGate.resumeAll()
+        let didApplyInitialHighlight = await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxHighlightPhase.complete)
         #expect(didApplyInitialHighlight)
         guard didApplyInitialHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
@@ -246,10 +244,8 @@ extension SyntaxEditorUITests {
         #expect(didSuspendReplacementHighlight)
         guard didSuspendReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.baseForeground))
-        let didResumeReplacementHighlight = await resetGate.resumeOne()
-        #expect(didResumeReplacementHighlight)
-        guard didResumeReplacementHighlight else { return }
-        let didApplyReplacementHighlight = await editorView.waitForPendingHighlightForTesting()
+        await resetGate.resumeAll()
+        let didApplyReplacementHighlight = await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxHighlightPhase.complete)
         #expect(didApplyReplacementHighlight)
         guard didApplyReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))

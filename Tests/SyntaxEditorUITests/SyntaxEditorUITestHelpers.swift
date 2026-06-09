@@ -309,9 +309,6 @@ actor ManualSyntaxHighlightGate {
     var resumeContinuations: [ResumeWaiter] = []
 
     func suspend() async {
-        suspensionCount += 1
-        resumeReadySuspensionWaiters()
-
         let waiterID = nextResumeWaiterID
         nextResumeWaiterID += 1
         await withTaskCancellationHandler {
@@ -321,6 +318,8 @@ actor ManualSyntaxHighlightGate {
                     return
                 }
                 resumeContinuations.append(ResumeWaiter(id: waiterID, continuation: continuation))
+                suspensionCount += 1
+                resumeReadySuspensionWaiters()
             }
         } onCancel: {
             Task {
@@ -1165,6 +1164,10 @@ func macEditorFont(_ editorView: SyntaxEditorView, at location: Int) -> NSFont? 
           location < textStorage.length
     else {
         return nil
+    }
+
+    if let font = editorView.syntaxFontForTesting(at: location) {
+        return font
     }
 
     return textStorage.attribute(.font, at: location, effectiveRange: nil) as? NSFont

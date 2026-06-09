@@ -561,6 +561,40 @@ extension SyntaxEditorUITests {
         #expect(abs(plainFont.pointSize - 28) < 0.01)
     }
 
+    @Test("SyntaxEditorView keeps macOS syntax fonts out of TextKit storage")
+    @MainActor
+    func syntaxEditorViewMacSyntaxFontsUseRenderingAttributes() async throws {
+        let source = "/// doc"
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.comment.doc"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            theme: .civic
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        editorView.appearance = NSAppearance(named: .aqua)
+        editorView.viewDidChangeEffectiveAppearance()
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        let renderedFont = try #require(macEditorFont(editorView, at: 0))
+        let highlightedStorageFont = try #require(
+            editorView.textView.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        )
+        let plainStorageFont = try #require(
+            editorView.textView.textStorage?.attribute(.font, at: 4, effectiveRange: nil) as? NSFont
+        )
+        #expect(!syntaxEditorUITestFontsEqual(renderedFont, highlightedStorageFont))
+        #expect(syntaxEditorUITestFontsEqual(highlightedStorageFont, plainStorageFont))
+    }
+
     @Test("SyntaxEditorView applies macOS theme fonts while selection delays highlight")
     @MainActor
     func syntaxEditorViewMacThemeFontUpdatesSelectedTextBeforeDelayedHighlight() async throws {
@@ -1906,6 +1940,8 @@ extension SyntaxEditorUITests {
 
         #expect(editorView.drawsBackground)
         #expect(!editorView.textView.drawsBackground)
+        #expect(!editorView.textView.textContentView.wantsLayer)
+        #expect(!(editorView.textView.textContentView.layer is CATiledLayer))
         #expect(!type(of: editorView.textView).isCompatibleWithResponsiveScrolling)
     }
 
