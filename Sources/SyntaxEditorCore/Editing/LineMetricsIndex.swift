@@ -1,7 +1,7 @@
 import Foundation
 
 package final class LineMetricsIndex {
-    private var lineStartOffsets: [Int] = [0]
+    private let lineOffsets = LineOffsetTable()
     private var lineColumns: [Int] = [0]
     private var columnCounts: [Int: Int] = [:]
     private var maxColumnHeap: [Int] = []
@@ -9,9 +9,9 @@ package final class LineMetricsIndex {
     private let tabWidth: Int
 
     package private(set) var fullRebuildCount = 0
-    package var lineCount: Int { lineStartOffsets.count }
+    package var lineCount: Int { lineOffsets.lineCount }
     package var cachedMaxColumnEntryCountForTesting: Int { maxColumnHeap.count }
-    package var lineCountForTesting: Int { lineStartOffsets.count }
+    package var lineCountForTesting: Int { lineOffsets.lineCount }
 
     package init(source: String = "", tabWidth: Int) {
         self.tabWidth = max(1, tabWidth)
@@ -21,7 +21,7 @@ package final class LineMetricsIndex {
     package func reset(source: String) {
         fullRebuildCount += 1
         let metrics = Self.metrics(in: source, baseOffset: 0, tabWidth: tabWidth)
-        lineStartOffsets = metrics.starts
+        lineOffsets.reset(source: source)
         lineColumns = metrics.columns
         rebuildColumnCountsAndHeap()
     }
@@ -53,17 +53,13 @@ package final class LineMetricsIndex {
         let startIndex = lineIndex(containingUTF16Offset: affected.range.location)
         let endIndex = oldLineEndIndex(for: affected.range, sourceUTF16Length: nsSource.length)
         removeColumnCounts(lineColumns[startIndex..<endIndex])
-        lineStartOffsets.replaceSubrange(startIndex..<endIndex, with: metrics.starts)
+        let replacementLineLengths = Self.lineLengths(
+            in: newSegment,
+            dropsTrailingEmptyLine: affected.range.upperBound < nsSource.length
+        )
+        lineOffsets.replaceLines(in: startIndex..<endIndex, with: replacementLineLengths)
         lineColumns.replaceSubrange(startIndex..<endIndex, with: metrics.columns)
         addColumnCounts(metrics.columns)
-
-        let delta = newSegment.utf16.count - affected.range.length
-        guard delta != 0 else { return }
-        let adjustmentStart = startIndex + metrics.starts.count
-        guard adjustmentStart < lineStartOffsets.count else { return }
-        for index in adjustmentStart..<lineStartOffsets.count {
-            lineStartOffsets[index] += delta
-        }
     }
 
     package func horizontalDocumentWidth(
@@ -105,28 +101,31 @@ private extension LineMetricsIndex {
     }
 
     func lineIndex(containingUTF16Offset offset: Int) -> Int {
-        var lower = 0
-        var upper = lineStartOffsets.count
-        while lower < upper {
-            let mid = (lower + upper) / 2
-            if lineStartOffsets[mid] <= offset {
-                lower = mid + 1
-            } else {
-                upper = mid
-            }
-        }
-        return max(0, lower - 1)
+        lineOffsets.lineIndex(containingUTF16Offset: offset)
     }
 
     func oldLineEndIndex(for range: NSRange, sourceUTF16Length: Int) -> Int {
-        guard !lineStartOffsets.isEmpty else { return 0 }
+        guard lineOffsets.lineCount > 0 else { return 0 }
         let upperBound = min(sourceUTF16Length, range.upperBound)
         let lookup = range.length == 0
             ? range.location
             : upperBound == sourceUTF16Length
                 ? upperBound
                 : max(range.location, upperBound - 1)
-        return min(lineStartOffsets.count, lineIndex(containingUTF16Offset: lookup) + 1)
+        return min(lineOffsets.lineCount, lineIndex(containingUTF16Offset: lookup) + 1)
+    }
+
+    static func lineLengths(
+        in source: String,
+        dropsTrailingEmptyLine: Bool
+    ) -> [Int] {
+        var lengths = LineOffsetTable.lineLengths(in: source)
+        if dropsTrailingEmptyLine,
+           endsWithLineBreak(source),
+           lengths.count > 1 {
+            lengths.removeLast()
+        }
+        return lengths
     }
 
     static func metrics(in source: String, baseOffset: Int, tabWidth: Int) -> (starts: [Int], columns: [Int]) {

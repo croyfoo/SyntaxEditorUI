@@ -92,11 +92,11 @@ package struct HighlightRenderSnapshot {
 
 package struct PendingHighlightEditMap {
     private struct Edit {
-        let location: Int
-        let length: Int
-        let replacementLength: Int
-        let previousTextLength: Int
-        let resultingTextLength: Int
+        var location: Int
+        var length: Int
+        var replacementLength: Int
+        var previousTextLength: Int
+        var resultingTextLength: Int
 
         var delta: Int {
             replacementLength - length
@@ -111,6 +111,10 @@ package struct PendingHighlightEditMap {
 
     package var isEmpty: Bool {
         edits.isEmpty
+    }
+
+    package var editCountForTesting: Int {
+        edits.count
     }
 
     package var visibleDirtyRanges: [NSRange] {
@@ -143,7 +147,7 @@ package struct PendingHighlightEditMap {
             dirtyRanges = HighlightRunUtilities.normalizedRanges(dirtyRanges, textLength: currentTextLength)
         }
 
-        edits.append(edit)
+        appendEdit(edit)
         self.currentTextLength = currentTextLength
     }
 
@@ -175,6 +179,26 @@ package struct PendingHighlightEditMap {
         }
         guard edit.resultingTextLength > 0 else { return nil }
         return NSRange(location: min(edit.location, edit.resultingTextLength - 1), length: 1)
+    }
+
+    private mutating func appendEdit(_ edit: Edit) {
+        guard var previous = edits.popLast() else {
+            edits.append(edit)
+            return
+        }
+
+        if previous.length == 0,
+           edit.length == 0,
+           edit.previousTextLength == previous.resultingTextLength,
+           edit.location == previous.location + previous.replacementLength {
+            previous.replacementLength += edit.replacementLength
+            previous.resultingTextLength = edit.resultingTextLength
+            edits.append(previous)
+            return
+        }
+
+        edits.append(previous)
+        edits.append(edit)
     }
 
     private static func currentRanges(forSnapshotRange range: NSRange, applying edit: Edit) -> [NSRange] {
@@ -470,6 +494,10 @@ package final class HighlightRenderSnapshotStore {
 
     package var pendingDirtyRangesForTesting: [NSRange] {
         pendingEditMap.visibleDirtyRanges
+    }
+
+    package var pendingEditCountForTesting: Int {
+        pendingEditMap.editCountForTesting
     }
 
     package var hasPendingEditsForTesting: Bool {

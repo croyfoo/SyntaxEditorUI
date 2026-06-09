@@ -907,6 +907,78 @@ struct SyntaxEditorCoreTests {
         #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == CGFloat(expected))
     }
 
+    @Test("HighlightLineTokenStore preserves later line tokens without suffix shifting")
+    func highlightLineTokenStorePreservesLaterLinesAcrossPrefixInsertion() {
+        let source = "first\nsecond\nthird"
+        let updatedSource = "prefix\n" + source
+        let mutation = SyntaxHighlightMutation(location: 0, length: 0, replacement: "prefix\n")
+        let lineIndex = SyntaxHighlightLineIndex()
+        lineIndex.reset(source: source)
+        let store = HighlightLineTokenStore()
+        let secondRange = (source as NSString).range(of: "second")
+        store.reset(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: secondRange,
+                    syntaxID: .plain,
+                    language: .swift,
+                    rawCaptureName: "editor.syntax.swift.plain"
+                ),
+            ],
+            lineIndex: lineIndex
+        )
+
+        store.applyEdit(mutation, previousSource: source, lineIndex: lineIndex)
+        lineIndex.apply(mutation: mutation, previousSource: source)
+
+        #expect(store.tokens(lineIndex: lineIndex).map(\.range) == [(updatedSource as NSString).range(of: "second")])
+    }
+
+    @Test("HighlightLineTokenStore materializes pushed prefix lines after replacement")
+    func highlightLineTokenStoreMaterializesPushedPrefixLines() {
+        let source = "first\nsecond\nthird"
+        let prefix = "prefix\n"
+        let updatedSource = prefix + source
+        let mutation = SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+        let lineIndex = SyntaxHighlightLineIndex()
+        lineIndex.reset(source: source)
+        let store = HighlightLineTokenStore()
+        store.reset(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: (source as NSString).range(of: "second"),
+                    syntaxID: .plain,
+                    language: .swift,
+                    rawCaptureName: "editor.syntax.swift.plain"
+                ),
+            ],
+            lineIndex: lineIndex
+        )
+
+        store.applyEdit(mutation, previousSource: source, lineIndex: lineIndex)
+        lineIndex.apply(mutation: mutation, previousSource: source)
+        let replacementRange = (updatedSource as NSString).lineRange(
+            for: NSRange(location: 0, length: prefix.utf16.count + 1)
+        )
+        store.replaceTokens(
+            in: replacementRange,
+            with: [
+                SyntaxHighlightToken(
+                    range: (updatedSource as NSString).range(of: "first"),
+                    syntaxID: .keyword,
+                    language: .swift,
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            lineIndex: lineIndex
+        )
+
+        #expect(store.tokens(lineIndex: lineIndex).map(\.range) == [
+            (updatedSource as NSString).range(of: "first"),
+            (updatedSource as NSString).range(of: "second"),
+        ])
+    }
+
     @Test("EditorCommandEngine auto-pairs opening braces")
     func editorCommandEngineAutoPair() {
         let engine = EditorCommandEngine()

@@ -185,296 +185,6 @@ package enum SyntaxHighlightInvalidation {
     }
 }
 
-package struct HighlightInvalidationScope: Equatable, Sendable {
-    package let parseRange: NSRange
-    package let materializeRange: NSRange
-    package let invalidateRange: NSRange
-
-    package init(parseRange: NSRange, materializeRange: NSRange, invalidateRange: NSRange) {
-        self.parseRange = parseRange
-        self.materializeRange = materializeRange
-        self.invalidateRange = invalidateRange
-    }
-}
-
-private enum HighlightFrontierResolver {
-    static func scope(
-        seedRange: NSRange,
-        mutation: SyntaxHighlightMutation,
-        existingTokens: [SyntaxHighlightToken],
-        previousSourceUTF16Length: Int,
-        nextSource: String,
-        language: SyntaxLanguage
-    ) -> HighlightInvalidationScope {
-        let sourceLength = nextSource.utf16.count
-        var scopeRange = lineEnvelopeRange(containing: seedRange, in: nextSource)
-        let oldSeedRange = oldRange(
-            correspondingTo: scopeRange,
-            mutation: mutation,
-            previousSourceUTF16Length: previousSourceUTF16Length,
-            nextSourceUTF16Length: sourceLength
-        )
-
-        for token in tokensIntersecting(oldSeedRange, in: existingTokens)
-            where tokenCanAffectFrontier(token, oldSeedRange: oldSeedRange, mutation: mutation) {
-            guard let adjustedRange = rangeForRefreshAfterApplyingMutation(
-                token.range,
-                mutation: mutation,
-                nextSourceUTF16Length: sourceLength
-            ) else {
-                continue
-            }
-            scopeRange = union(scopeRange, lineEnvelopeRange(containing: adjustedRange, in: nextSource))
-        }
-
-        if language == .objectiveC,
-           let preprocessorRange = objectiveCPreprocessorEnvelope(containing: scopeRange, in: nextSource) {
-            scopeRange = union(scopeRange, preprocessorRange)
-        }
-
-        scopeRange = SyntaxEditorRangeUtilities.clampedRange(scopeRange, utf16Length: sourceLength)
-        return HighlightInvalidationScope(
-            parseRange: scopeRange,
-            materializeRange: scopeRange,
-            invalidateRange: scopeRange
-        )
-    }
-}
-
-private extension HighlightFrontierResolver {
-    static func tokenCanAffectFrontier(
-        _ token: SyntaxHighlightToken,
-        oldSeedRange: NSRange,
-        mutation: SyntaxHighlightMutation
-    ) -> Bool {
-        guard token.range.length > 0 else { return false }
-        if SyntaxEditorRangeUtilities.intersection(of: token.range, and: oldSeedRange).length > 0 {
-            return tokenSpansMultipleLinesOrOwnsLexicalState(token)
-                || tokenContainsMutation(token.range, mutation: mutation)
-        }
-        return tokenContainsMutation(token.range, mutation: mutation)
-    }
-
-    static func tokenSpansMultipleLinesOrOwnsLexicalState(_ token: SyntaxHighlightToken) -> Bool {
-        switch token.syntaxID {
-        case .comment, .string, .character, .preprocessor:
-            return true
-        default:
-            return false
-        }
-    }
-
-    static func lineEnvelopeRange(containing range: NSRange, in source: String) -> NSRange {
-        let nsSource = source as NSString
-        guard nsSource.length > 0 else {
-            return NSRange(location: 0, length: 0)
-        }
-        let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: nsSource.length)
-        if clamped.length > 0 {
-            return nsSource.lineRange(for: clamped)
-        }
-        let location = min(clamped.location, nsSource.length - 1)
-        return nsSource.lineRange(for: NSRange(location: location, length: 0))
-    }
-
-    static func tokensIntersecting(
-        _ range: NSRange,
-        in tokens: [SyntaxHighlightToken]
-    ) -> [SyntaxHighlightToken] {
-        guard range.length > 0, !tokens.isEmpty else { return [] }
-        var startIndex = lowerBoundForTokenLocation(range.location, in: tokens)
-        while startIndex > 0, tokens[startIndex - 1].range.upperBound > range.location {
-            startIndex -= 1
-        }
-        var result: [SyntaxHighlightToken] = []
-        result.reserveCapacity(min(tokens.count - startIndex, 64))
-        for token in tokens[startIndex...] {
-            guard token.range.location < range.upperBound else { break }
-            guard SyntaxEditorRangeUtilities.intersection(of: token.range, and: range).length > 0 else {
-                continue
-            }
-            result.append(token)
-        }
-        return result
-    }
-
-    static func lowerBoundForTokenLocation(
-        _ location: Int,
-        in tokens: [SyntaxHighlightToken]
-    ) -> Int {
-        var lowerBound = 0
-        var upperBound = tokens.count
-        while lowerBound < upperBound {
-            let middle = lowerBound + (upperBound - lowerBound) / 2
-            if tokens[middle].range.location < location {
-                lowerBound = middle + 1
-            } else {
-                upperBound = middle
-            }
-        }
-        return lowerBound
-    }
-
-    static func objectiveCPreprocessorEnvelope(containing range: NSRange, in source: String) -> NSRange? {
-        let nsSource = source as NSString
-        let clamped = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: nsSource.length)
-        guard clamped.length > 0 else { return nil }
-
-        var lower = clamped.location
-        var upper = clamped.upperBound
-        var currentLine = nsSource.lineRange(for: NSRange(location: lower, length: 0))
-        while currentLine.location > 0 {
-            let previousLocation = max(0, currentLine.location - 1)
-            let previousLine = nsSource.lineRange(for: NSRange(location: previousLocation, length: 0))
-            guard lineContinuesPreprocessorDirective(previousLine, in: nsSource) else { break }
-            currentLine = previousLine
-            lower = currentLine.location
-        }
-
-        currentLine = nsSource.lineRange(for: NSRange(location: min(upper, max(0, nsSource.length - 1)), length: 0))
-        while lineContinuesPreprocessorDirective(currentLine, in: nsSource),
-              currentLine.upperBound < nsSource.length {
-            let nextLine = nsSource.lineRange(for: NSRange(location: currentLine.upperBound, length: 0))
-            guard nextLine.location > currentLine.location else { break }
-            currentLine = nextLine
-            upper = currentLine.upperBound
-        }
-
-        let envelope = NSRange(location: lower, length: max(0, min(upper, nsSource.length) - lower))
-        guard lineLooksLikePreprocessor(envelope, in: nsSource) else { return nil }
-        return envelope
-    }
-
-    static func lineContinuesPreprocessorDirective(_ lineRange: NSRange, in source: NSString) -> Bool {
-        guard lineRange.length > 0 else { return false }
-        var cursor = min(lineRange.upperBound, source.length) - 1
-        while cursor >= lineRange.location {
-            let character = source.character(at: cursor)
-            if character == 10 || character == 13 || character == 32 || character == 9 {
-                if cursor == 0 { break }
-                cursor -= 1
-                continue
-            }
-            return character == 92
-        }
-        return false
-    }
-
-    static func lineLooksLikePreprocessor(_ range: NSRange, in source: NSString) -> Bool {
-        var cursor = range.location
-        while cursor < range.upperBound {
-            let lineRange = source.lineRange(for: NSRange(location: cursor, length: 0))
-            var lineCursor = lineRange.location
-            while lineCursor < lineRange.upperBound {
-                let character = source.character(at: lineCursor)
-                if character == 32 || character == 9 || character == 10 || character == 13 {
-                    lineCursor += 1
-                    continue
-                }
-                if character == 35 {
-                    return true
-                }
-                break
-            }
-            let next = lineRange.upperBound
-            guard next > cursor else { break }
-            cursor = next
-        }
-        return false
-    }
-
-    static func oldRange(
-        correspondingTo newRange: NSRange,
-        mutation: SyntaxHighlightMutation,
-        previousSourceUTF16Length: Int,
-        nextSourceUTF16Length: Int
-    ) -> NSRange {
-        let lower = oldOffset(
-            forNewOffset: newRange.location,
-            mutation: mutation,
-            previousSourceUTF16Length: previousSourceUTF16Length,
-            nextSourceUTF16Length: nextSourceUTF16Length,
-            usesUpperBoundary: false
-        )
-        let upper = oldOffset(
-            forNewOffset: newRange.upperBound,
-            mutation: mutation,
-            previousSourceUTF16Length: previousSourceUTF16Length,
-            nextSourceUTF16Length: nextSourceUTF16Length,
-            usesUpperBoundary: true
-        )
-        return NSRange(location: lower, length: max(0, upper - lower))
-    }
-
-    static func oldOffset(
-        forNewOffset offset: Int,
-        mutation: SyntaxHighlightMutation,
-        previousSourceUTF16Length: Int,
-        nextSourceUTF16Length: Int,
-        usesUpperBoundary: Bool
-    ) -> Int {
-        let clampedOffset = min(max(0, offset), nextSourceUTF16Length)
-        let oldEnd = mutation.location + mutation.length
-        let newEnd = mutation.location + mutation.replacement.utf16.count
-        let delta = mutation.replacement.utf16.count - mutation.length
-
-        let oldOffset: Int
-        if clampedOffset <= mutation.location {
-            oldOffset = clampedOffset
-        } else if clampedOffset <= newEnd {
-            oldOffset = usesUpperBoundary ? oldEnd : mutation.location
-        } else {
-            oldOffset = clampedOffset - delta
-        }
-
-        return min(max(0, oldOffset), previousSourceUTF16Length)
-    }
-
-    static func rangeForRefreshAfterApplyingMutation(
-        _ range: NSRange,
-        mutation: SyntaxHighlightMutation,
-        nextSourceUTF16Length: Int
-    ) -> NSRange? {
-        let oldEnd = mutation.location + mutation.length
-        let newEnd = mutation.location + mutation.replacement.utf16.count
-        let delta = mutation.replacement.utf16.count - mutation.length
-
-        if range.upperBound <= mutation.location {
-            return SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: nextSourceUTF16Length)
-        }
-
-        if range.location >= oldEnd {
-            return SyntaxEditorRangeUtilities.clampedRange(
-                NSRange(location: range.location + delta, length: range.length),
-                utf16Length: nextSourceUTF16Length
-            )
-        }
-
-        let location = min(range.location, mutation.location)
-        let upper = range.upperBound > oldEnd
-            ? range.upperBound + delta
-            : newEnd
-        let clampedLocation = min(max(0, location), nextSourceUTF16Length)
-        let clampedUpper = min(max(clampedLocation, upper), nextSourceUTF16Length)
-        guard clampedUpper > clampedLocation else { return nil }
-        return NSRange(location: clampedLocation, length: clampedUpper - clampedLocation)
-    }
-
-    static func tokenContainsMutation(_ range: NSRange, mutation: SyntaxHighlightMutation) -> Bool {
-        let mutationUpperBound = mutation.location + mutation.length
-        if mutation.length == 0 {
-            return range.location <= mutation.location && mutation.location <= range.upperBound
-        }
-        return range.location <= mutation.location && mutationUpperBound <= range.upperBound
-    }
-
-    static func union(_ lhs: NSRange, _ rhs: NSRange) -> NSRange {
-        let lower = min(lhs.location, rhs.location)
-        let upper = max(lhs.upperBound, rhs.upperBound)
-        return NSRange(location: lower, length: upper - lower)
-    }
-}
-
 package protocol SyntaxHighlighting: Sendable {
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult
     func resetPhases(
@@ -786,8 +496,7 @@ private final class SyntaxHighlightSession {
     private var layeredSource = ""
     private var layer: LanguageLayer?
     private let lineIndex = SyntaxHighlightLineIndex()
-    private var tokens: [SyntaxHighlightToken] = []
-    private var tokenPrefixMaxUpperBounds: [Int] = []
+    private let tokenStore = HighlightLineTokenStore()
     private var swiftSemanticState: SwiftSemanticOverlayState?
     private var objectiveCSemanticState: ObjectiveCSemanticOverlayState?
 
@@ -797,7 +506,7 @@ private final class SyntaxHighlightSession {
     }
 
     func currentTokensForTesting() -> [SyntaxHighlightToken] {
-        tokens
+        tokenStore.tokens(lineIndex: lineIndex)
     }
 
     func reset(
@@ -813,8 +522,7 @@ private final class SyntaxHighlightSession {
 
         guard !layeredSource.isEmpty else {
             layer = nil
-            tokens = []
-            tokenPrefixMaxUpperBounds = []
+            tokenStore.clear(lineCount: lineIndex.lineCount)
             return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
         }
 
@@ -822,8 +530,7 @@ private final class SyntaxHighlightSession {
             let layer = try makeLayer()
             guard let fullEdit = Self.fullReplacementInputEdit(for: layeredSource) else {
                 self.layer = nil
-                tokens = []
-                tokenPrefixMaxUpperBounds = []
+                tokenStore.clear(lineCount: lineIndex.lineCount)
                 return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
             }
             _ = layer.didChangeContent(
@@ -849,8 +556,7 @@ private final class SyntaxHighlightSession {
                 self.layer = nil
                 swiftSemanticState = nil
                 objectiveCSemanticState = nil
-                tokens = []
-                tokenPrefixMaxUpperBounds = []
+                tokenStore.clear(lineCount: lineIndex.lineCount)
                 return SyntaxHighlightResult(
                     tokens: [],
                     source: source,
@@ -861,16 +567,14 @@ private final class SyntaxHighlightSession {
             }
             let classifiedTokens = semanticResult.tokens
 
-            tokens = classifiedTokens
-            tokenPrefixMaxUpperBounds = Self.prefixMaxUpperBounds(for: tokens)
+            tokenStore.reset(tokens: classifiedTokens, lineIndex: lineIndex)
         } catch {
             layer = nil
-            tokens = []
-            tokenPrefixMaxUpperBounds = []
+            tokenStore.clear(lineCount: lineIndex.lineCount)
         }
 
         return SyntaxHighlightResult(
-            tokens: tokens,
+            tokens: tokenStore.tokens(lineIndex: lineIndex),
             source: source,
             language: language,
             revision: revision,
@@ -910,18 +614,7 @@ private final class SyntaxHighlightSession {
         let layeredMutation: SyntaxHighlightMutation
         if setup.usesHTMLPreprocessing {
             guard let mutation = TextMutation.diff(from: layeredSource, to: nextLayeredSource) else {
-                source = nextSource
-                layeredSource = nextLayeredSource
-                return SyntaxHighlightResult(
-                    tokens: tokens,
-                    source: nextSource,
-                    language: language,
-                    revision: revision,
-                    refreshRange: refreshRange(
-                        in: nextSource,
-                        from: effectiveOriginalMutation.location
-                    )
-                )
+                return nil
             }
             layeredMutation = SyntaxHighlightMutation(mutation)
         } else {
@@ -962,13 +655,13 @@ private final class SyntaxHighlightSession {
             mutation: layeredMutation,
             sourceUTF16Length: nextSourceLength
         )
-        let invalidationScope = HighlightFrontierResolver.scope(
-            seedRange: queryRange,
+        let editMaterializationRange = Self.editMaterializationRange(
             mutation: layeredMutation,
-            existingTokens: tokens,
-            previousSourceUTF16Length: previousLayeredSource.utf16.count,
-            nextSource: nextLayeredSource,
-            language: language
+            sourceUTF16Length: nextSourceLength
+        )
+        let parseRange = Self.lineEnvelopeRange(
+            containing: Self.union(queryRange, editMaterializationRange),
+            source: nextLayeredSource
         )
         let semanticPartialRefreshRange = Self.mutationDeletesSemanticStructuralText(
             layeredMutation,
@@ -978,101 +671,123 @@ private final class SyntaxHighlightSession {
             ? nil
             : semanticPartialRefreshRange(
                 source: nextLayeredSource,
-                refreshRange: invalidationScope.parseRange,
+                refreshRange: parseRange,
                 mutation: layeredMutation
             )
-        let replacementHighlight = semanticPartialRefreshRange.flatMap {
-            guard Self.range($0, contains: invalidationScope.parseRange) else {
-                return nil
-            }
-            return Self.lexicallyAdjustedReplacementHighlight(
-                existingTokens: tokens,
-                refreshedRange: $0,
-                mutation: layeredMutation,
-                previousSource: previousLayeredSource,
-                nextSource: nextLayeredSource,
-                language: language
-            )
-        } ?? highlightTokensCoveringQueryRange(
-            invalidationScope.parseRange,
+        let replacementHighlight = highlightTokensCoveringQueryRange(
+            parseRange,
             source: nextLayeredSource
         )
         let replacementMergeRange = replacementHighlight.range
         let semanticOverlayRefreshRange = semanticPartialRefreshRange.map {
             Self.union($0, replacementMergeRange)
         }
-        let syntacticRefreshRange = Self.mergeHighlightTokens(
-            into: &tokens,
-            prefixMaxUpperBounds: &tokenPrefixMaxUpperBounds,
-            replacementTokens: replacementHighlight.tokens,
-            refreshedRange: replacementMergeRange,
-            mutation: layeredMutation,
-            previousSourceUTF16Length: previousLayeredSource.utf16.count,
-            nextSourceUTF16Length: nextSourceLength
+        let semanticComparisonRange = semanticOverlayRefreshRange ?? replacementMergeRange
+        let previousSemanticComparisonTokens = tokenStore.tokens(
+            in: semanticComparisonRange,
+            lineIndex: lineIndex
         )
+
+        tokenStore.applyEdit(
+            layeredMutation,
+            previousSource: previousLayeredSource,
+            lineIndex: lineIndex
+        )
+        lineIndex.apply(mutation: layeredMutation, previousSource: previousLayeredSource)
+        tokenStore.replaceTokens(
+            in: replacementMergeRange,
+            with: replacementHighlight.tokens,
+            lineIndex: lineIndex,
+            quality: .accurate
+        )
+
+        let syntacticRefreshRange = replacementMergeRange
+        let syntacticResultTokens = tokenStore.tokens(in: syntacticRefreshRange, lineIndex: lineIndex)
         emitSyntacticFastPassIfNeeded(
-            tokens: tokens,
+            tokens: syntacticResultTokens,
             source: nextSource,
             revision: revision,
             refreshRange: syntacticRefreshRange,
             tokenPayload: .replacement,
             emitFastPass: emitFastPass
         )
-        let semanticResult = semanticClassifiedTokensIfNeeded(
-            tokens,
+        let semanticInputTokens = semanticOverlayRefreshRange.map {
+            tokenStore.tokens(in: $0, lineIndex: lineIndex)
+        } ?? tokenStore.tokens(lineIndex: lineIndex)
+        let semanticInputPrefixMaxUpperBounds = Self.prefixMaxUpperBounds(for: semanticInputTokens)
+        let previousSwiftSemanticState = swiftSemanticState
+        let previousObjectiveCSemanticState = objectiveCSemanticState
+        var semanticResult = semanticClassifiedTokensIfNeeded(
+            semanticInputTokens,
             source: nextLayeredSource,
             rootNode: semanticRootNodeSnapshot(),
             refreshRange: semanticOverlayRefreshRange,
             mutation: layeredMutation,
-            tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
+            tokenPrefixMaxUpperBounds: semanticInputPrefixMaxUpperBounds
         )
+        if semanticOverlayRefreshRange != nil,
+           semanticResult.refreshRangeOverride == nil,
+           !semanticResult.isCancelled,
+           !Task.isCancelled {
+            swiftSemanticState = previousSwiftSemanticState
+            objectiveCSemanticState = previousObjectiveCSemanticState
+            let fullSemanticInputTokens = tokenStore.tokens(lineIndex: lineIndex)
+            semanticResult = semanticClassifiedTokensIfNeeded(
+                fullSemanticInputTokens,
+                source: nextLayeredSource,
+                rootNode: semanticRootNodeSnapshot(),
+                refreshRange: nil,
+                mutation: layeredMutation,
+                tokenPrefixMaxUpperBounds: Self.prefixMaxUpperBounds(for: fullSemanticInputTokens)
+            )
+        }
         let classifiedTokens: [SyntaxHighlightToken]
-        let resultRefreshRange: NSRange
-        let updatesSemanticTokens: Bool
+        var resultRefreshRange: NSRange
         if semanticResult.isCancelled || Task.isCancelled {
-            classifiedTokens = tokens
+            classifiedTokens = syntacticResultTokens
             resultRefreshRange = syntacticRefreshRange
-            updatesSemanticTokens = false
         } else {
             classifiedTokens = semanticResult.tokens
             resultRefreshRange = semanticPartialRefreshRange.map {
                 SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
             } ?? semanticResult.refreshRangeOverride.map {
                 SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
-            } ?? semanticRefreshRange(
-                previousTokens: tokens,
-                classifiedTokens: classifiedTokens,
-                baseRefreshRange: syntacticRefreshRange,
-                sourceUTF16Length: nextSourceLength,
-                comparisonRange: semanticOverlayRefreshRange
+            } ?? {
+                let semanticDiffRefreshRange = semanticRefreshRange(
+                    previousTokens: previousSemanticComparisonTokens,
+                    classifiedTokens: classifiedTokens,
+                    baseRefreshRange: syntacticRefreshRange,
+                    sourceUTF16Length: nextSourceLength,
+                    comparisonRange: semanticOverlayRefreshRange
+                )
+                if semanticDiffRefreshRange.length >= nextSourceLength,
+                   syntacticRefreshRange.length < nextSourceLength {
+                    return syntacticRefreshRange
+                }
+                return semanticDiffRefreshRange
+            }()
+            let semanticMaterializationRange = semanticOverlayRefreshRange.map {
+                SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
+            } ?? resultRefreshRange
+            let classifiedCoverageRange = Self.highlightCoverageRange(
+                queryRange: semanticMaterializationRange,
+                replacementTokens: classifiedTokens,
+                sourceUTF16Length: nextSourceLength
             )
-            updatesSemanticTokens = true
+            let storePatchRange = Self.union(semanticMaterializationRange, classifiedCoverageRange)
+            tokenStore.replaceTokens(
+                in: storePatchRange,
+                with: classifiedTokens,
+                lineIndex: lineIndex,
+                quality: .accurate
+            )
         }
-        let semanticPrefixRebuildStart = updatesSemanticTokens && resultRefreshRange.length > 0
-            ? Self.firstTokenIndex(
-                intersecting: resultRefreshRange,
-                prefixMaxUpperBounds: tokenPrefixMaxUpperBounds
-            )
-            : nil
 
         source = nextSource
         layeredSource = nextLayeredSource
-        lineIndex.apply(mutation: layeredMutation, previousSource: previousLayeredSource)
-        tokens = classifiedTokens
-        if let semanticPrefixRebuildStart {
-            Self.rebuildPrefixMaxUpperBounds(
-                &tokenPrefixMaxUpperBounds,
-                for: tokens,
-                from: semanticPrefixRebuildStart
-            )
-        }
 
         return SyntaxHighlightResult(
-            tokens: resultTokens(
-                from: tokens,
-                refreshRange: resultRefreshRange,
-                tokenPayload: .replacement
-            ),
+            tokens: tokenStore.tokens(in: resultRefreshRange, lineIndex: lineIndex),
             source: nextSource,
             language: language,
             revision: revision,
@@ -1210,19 +925,9 @@ private extension SyntaxHighlightSession {
         NSRange(location: 0, length: source.utf16.count)
     }
 
-    func refreshRange(in source: String, from location: Int) -> NSRange {
-        let sourceLength = source.utf16.count
-        let clampedLocation = min(max(0, location), sourceLength)
-        let lineStart = SyntaxEditorRangeUtilities.lineStartUTF16Offset(
-            in: source,
-            around: clampedLocation
-        )
-        return NSRange(location: lineStart, length: sourceLength - lineStart)
-    }
-
     func cancelledUpdateResult(revision: Int) -> SyntaxHighlightResult {
         SyntaxHighlightResult(
-            tokens: tokens,
+            tokens: tokenStore.tokens(lineIndex: lineIndex),
             source: source,
             language: language,
             revision: revision,
@@ -1263,163 +968,6 @@ private extension SyntaxHighlightSession {
         return nsSource.lineRange(for: NSRange(location: location, length: 0))
     }
 
-    static func mergeHighlightTokens(
-        into existingTokens: inout [SyntaxHighlightToken],
-        prefixMaxUpperBounds: inout [Int],
-        replacementTokens: [SyntaxHighlightToken],
-        refreshedRange: NSRange,
-        mutation: SyntaxHighlightMutation,
-        previousSourceUTF16Length: Int,
-        nextSourceUTF16Length: Int
-    ) -> NSRange {
-        let oldRefreshRange = oldRange(
-            correspondingTo: refreshedRange,
-            mutation: mutation,
-            previousSourceUTF16Length: previousSourceUTF16Length,
-            nextSourceUTF16Length: nextSourceUTF16Length
-        )
-        var refreshRange = refreshedRange
-        if prefixMaxUpperBounds.count != existingTokens.count {
-            prefixMaxUpperBounds = Self.prefixMaxUpperBounds(for: existingTokens)
-        }
-        let removalLowerBound = firstTokenIndex(
-            intersecting: oldRefreshRange,
-            prefixMaxUpperBounds: prefixMaxUpperBounds
-        )
-        if removalLowerBound < existingTokens.count,
-           existingTokens[removalLowerBound].range.location < oldRefreshRange.location {
-            return mergeHighlightTokensByScanning(
-                into: &existingTokens,
-                prefixMaxUpperBounds: &prefixMaxUpperBounds,
-                replacementTokens: replacementTokens,
-                refreshedRange: refreshedRange,
-                oldRefreshRange: oldRefreshRange,
-                mutation: mutation,
-                previousSourceUTF16Length: previousSourceUTF16Length,
-                nextSourceUTF16Length: nextSourceUTF16Length
-            )
-        }
-        var removalUpperBound = removalLowerBound
-        while removalUpperBound < existingTokens.count,
-              existingTokens[removalUpperBound].range.location < oldRefreshRange.upperBound {
-            let token = existingTokens[removalUpperBound]
-            let oldRange = SyntaxEditorRangeUtilities.clampedRange(
-                token.range,
-                utf16Length: previousSourceUTF16Length
-            )
-            if SyntaxEditorRangeUtilities.intersection(of: oldRange, and: oldRefreshRange).length == 0 {
-                break
-            }
-            if let adjustedRange = rangeForRefreshAfterApplyingMutation(
-                oldRange,
-                mutation: mutation,
-                nextSourceUTF16Length: nextSourceUTF16Length
-            ) {
-                refreshRange = union(refreshRange, adjustedRange)
-            }
-            removalUpperBound += 1
-        }
-
-        var suffixWriteIndex = removalUpperBound
-        var suffixReadIndex = removalUpperBound
-        while suffixReadIndex < existingTokens.count {
-            let token = existingTokens[suffixReadIndex]
-            let oldRange = SyntaxEditorRangeUtilities.clampedRange(
-                token.range,
-                utf16Length: previousSourceUTF16Length
-            )
-            guard let adjustedRange = rangeAfterApplyingMutation(
-                oldRange,
-                mutation: mutation,
-                nextSourceUTF16Length: nextSourceUTF16Length
-            ) else {
-                suffixReadIndex += 1
-                continue
-            }
-            existingTokens[suffixWriteIndex] = SyntaxHighlightToken(
-                range: adjustedRange,
-                syntaxID: token.syntaxID,
-                language: token.language,
-                rawCaptureName: token.rawCaptureName,
-                isSemanticOverlay: token.isSemanticOverlay
-            )
-            suffixWriteIndex += 1
-            suffixReadIndex += 1
-        }
-
-        if suffixWriteIndex < existingTokens.count {
-            existingTokens.removeSubrange(suffixWriteIndex..<existingTokens.count)
-        }
-        existingTokens.replaceSubrange(
-            removalLowerBound..<removalUpperBound,
-            with: replacementTokens.sorted(by: SyntaxHighlightTokenOrdering.displayOrder)
-        )
-        rebuildPrefixMaxUpperBounds(
-            &prefixMaxUpperBounds,
-            for: existingTokens,
-            from: removalLowerBound
-        )
-        return refreshRange
-    }
-
-    static func mergeHighlightTokensByScanning(
-        into existingTokens: inout [SyntaxHighlightToken],
-        prefixMaxUpperBounds: inout [Int],
-        replacementTokens: [SyntaxHighlightToken],
-        refreshedRange: NSRange,
-        oldRefreshRange: NSRange,
-        mutation: SyntaxHighlightMutation,
-        previousSourceUTF16Length: Int,
-        nextSourceUTF16Length: Int
-    ) -> NSRange {
-        var refreshRange = refreshedRange
-        var before: [SyntaxHighlightToken] = []
-        var after: [SyntaxHighlightToken] = []
-        before.reserveCapacity(existingTokens.count)
-        after.reserveCapacity(existingTokens.count)
-
-        for token in existingTokens {
-            let oldRange = SyntaxEditorRangeUtilities.clampedRange(
-                token.range,
-                utf16Length: previousSourceUTF16Length
-            )
-            if SyntaxEditorRangeUtilities.intersection(of: oldRange, and: oldRefreshRange).length > 0 {
-                if let adjustedRange = rangeForRefreshAfterApplyingMutation(
-                    oldRange,
-                    mutation: mutation,
-                    nextSourceUTF16Length: nextSourceUTF16Length
-                ) {
-                    refreshRange = union(refreshRange, adjustedRange)
-                }
-                continue
-            }
-            guard let adjustedRange = rangeAfterApplyingMutation(
-                oldRange,
-                mutation: mutation,
-                nextSourceUTF16Length: nextSourceUTF16Length
-            ) else {
-                continue
-            }
-            let adjustedToken = SyntaxHighlightToken(
-                range: adjustedRange,
-                syntaxID: token.syntaxID,
-                language: token.language,
-                rawCaptureName: token.rawCaptureName,
-                isSemanticOverlay: token.isSemanticOverlay
-            )
-            if adjustedRange.location < refreshedRange.location {
-                before.append(adjustedToken)
-            } else {
-                after.append(adjustedToken)
-            }
-        }
-
-        existingTokens = (before + replacementTokens + after)
-            .sorted(by: SyntaxHighlightTokenOrdering.displayOrder)
-        prefixMaxUpperBounds = Self.prefixMaxUpperBounds(for: existingTokens)
-        return refreshRange
-    }
-
     static func prefixMaxUpperBounds(for tokens: [SyntaxHighlightToken]) -> [Int] {
         var maxUpperBound = 0
         var prefix: [Int] = []
@@ -1429,182 +977,6 @@ private extension SyntaxHighlightSession {
             prefix.append(maxUpperBound)
         }
         return prefix
-    }
-
-    static func rebuildPrefixMaxUpperBounds(
-        _ prefixMaxUpperBounds: inout [Int],
-        for tokens: [SyntaxHighlightToken],
-        from startIndex: Int
-    ) {
-        let startIndex = min(max(0, startIndex), tokens.count)
-        if prefixMaxUpperBounds.count != tokens.count {
-            let preservedCount = min(startIndex, prefixMaxUpperBounds.count, tokens.count)
-            prefixMaxUpperBounds = Array(prefixMaxUpperBounds.prefix(preservedCount))
-            if prefixMaxUpperBounds.count < tokens.count {
-                prefixMaxUpperBounds.append(
-                    contentsOf: repeatElement(0, count: tokens.count - prefixMaxUpperBounds.count)
-                )
-            }
-        }
-
-        var maxUpperBound = startIndex > 0 ? prefixMaxUpperBounds[startIndex - 1] : 0
-        guard startIndex < tokens.count else { return }
-        for index in startIndex..<tokens.count {
-            maxUpperBound = max(maxUpperBound, tokens[index].range.upperBound)
-            prefixMaxUpperBounds[index] = maxUpperBound
-        }
-    }
-
-    static func firstTokenIndex(
-        intersecting range: NSRange,
-        prefixMaxUpperBounds: [Int]
-    ) -> Int {
-        guard range.length > 0 else { return 0 }
-        var lowerBound = 0
-        var upperBound = prefixMaxUpperBounds.count
-        while lowerBound < upperBound {
-            let middle = lowerBound + (upperBound - lowerBound) / 2
-            if prefixMaxUpperBounds[middle] <= range.location {
-                lowerBound = middle + 1
-            } else {
-                upperBound = middle
-            }
-        }
-        return lowerBound
-    }
-
-    static func lexicallyAdjustedReplacementHighlight(
-        existingTokens: [SyntaxHighlightToken],
-        refreshedRange: NSRange,
-        mutation: SyntaxHighlightMutation,
-        previousSource: String,
-        nextSource: String,
-        language: SyntaxLanguage
-    ) -> (tokens: [SyntaxHighlightToken], range: NSRange)? {
-        guard language == .swift,
-              mutation.replacement.rangeOfCharacter(from: .newlines) == nil
-        else {
-            return nil
-        }
-
-        let previousNSString = previousSource as NSString
-        let nextNSString = nextSource as NSString
-        guard mutation.location >= 0,
-              mutation.location + mutation.length <= previousNSString.length,
-              mutation.location + mutation.replacement.utf16.count <= nextNSString.length
-        else {
-            return nil
-        }
-        if mutation.length > 0 {
-            let replacedText = previousNSString.substring(with: NSRange(location: mutation.location, length: mutation.length))
-            guard replacedText.rangeOfCharacter(from: .newlines) == nil else {
-                return nil
-            }
-        }
-
-        let oldRefreshRange = oldRange(
-            correspondingTo: refreshedRange,
-            mutation: mutation,
-            previousSourceUTF16Length: previousNSString.length,
-            nextSourceUTF16Length: nextNSString.length
-        )
-        guard oldRefreshRange.length > 0 else {
-            return nil
-        }
-
-        var affectedToken: SyntaxHighlightToken?
-        for token in existingTokens where isSwiftLexicalFastPathSyntaxID(token.syntaxID) {
-            guard token.language == .swift || token.language == nil,
-                  token.range.location >= 0,
-                  token.range.upperBound <= previousNSString.length,
-                  tokenContainsMutation(token.range, mutation: mutation)
-            else {
-                continue
-            }
-            guard affectedToken == nil else {
-                return nil
-            }
-            affectedToken = token
-        }
-        guard let affectedToken,
-              let affectedNewRange = lexicalRangeAfterApplyingMutation(
-                  affectedToken.range,
-                  mutation: mutation,
-                  nextSourceUTF16Length: nextNSString.length
-              ),
-              affectedNewRange.length > 0,
-              swiftLexicalToken(
-                  syntaxID: affectedToken.syntaxID,
-                  remainsStableFrom: affectedToken.range,
-                  in: previousNSString,
-                  to: affectedNewRange,
-                  in: nextNSString
-              )
-        else {
-            return nil
-        }
-
-        var replacementTokens: [SyntaxHighlightToken] = []
-        replacementTokens.reserveCapacity(32)
-
-        for token in existingTokens {
-            guard token.language == .swift || token.language == nil,
-                  !isSwiftSemanticOverlaySyntaxID(token.syntaxID),
-                  token.range.location >= 0,
-                  token.range.upperBound <= previousNSString.length,
-                  SyntaxEditorRangeUtilities.intersection(of: token.range, and: oldRefreshRange).length > 0
-            else {
-                continue
-            }
-
-            let adjustedRange: NSRange?
-            if token.range == affectedToken.range,
-               token.syntaxID == affectedToken.syntaxID,
-               token.rawCaptureName == affectedToken.rawCaptureName {
-                adjustedRange = affectedNewRange
-            } else if SyntaxEditorRangeUtilities.intersection(
-                of: token.range,
-                and: NSRange(location: mutation.location, length: mutation.length)
-            ).length > 0 {
-                return nil
-            } else {
-                adjustedRange = rangeAfterApplyingMutation(
-                    token.range,
-                    mutation: mutation,
-                    nextSourceUTF16Length: nextNSString.length
-                )
-            }
-
-            guard let adjustedRange,
-                  adjustedRange.length > 0,
-                  adjustedRange.location >= refreshedRange.location,
-                  adjustedRange.upperBound <= refreshedRange.upperBound
-            else {
-                return nil
-            }
-            replacementTokens.append(
-                SyntaxHighlightToken(
-                    range: adjustedRange,
-                    syntaxID: token.syntaxID,
-                    language: token.language,
-                    rawCaptureName: token.rawCaptureName,
-                    isSemanticOverlay: token.isSemanticOverlay
-                )
-            )
-        }
-
-        guard replacementTokens.contains(where: {
-            $0.range == affectedNewRange
-                && $0.syntaxID == affectedToken.syntaxID
-                && $0.rawCaptureName == affectedToken.rawCaptureName
-        }) else {
-            return nil
-        }
-
-        return (
-            replacementTokens.sorted(by: SyntaxHighlightTokenOrdering.displayOrder),
-            refreshedRange
-        )
     }
 
     func semanticClassifiedTokensIfNeeded(
@@ -1698,14 +1070,15 @@ private extension SyntaxHighlightSession {
         }
     }
 
-    static func semanticRefreshSeedRange(
+    static func editMaterializationRange(
         mutation: SyntaxHighlightMutation,
         sourceUTF16Length: Int
     ) -> NSRange {
         let replacementLength = mutation.replacement.utf16.count
         let location = min(max(0, mutation.location), sourceUTF16Length)
-        let upperBound = min(max(location, mutation.location + replacementLength), sourceUTF16Length)
-        return NSRange(location: location, length: upperBound - location)
+        let materializationLength = max(1, replacementLength + 1)
+        let upperBound = min(sourceUTF16Length, location + materializationLength)
+        return NSRange(location: location, length: max(0, upperBound - location))
     }
 
     static func mutationDeletesSemanticStructuralText(
@@ -1839,369 +1212,10 @@ private extension SyntaxHighlightSession {
         return lowerBound
     }
 
-    static func oldRange(
-        correspondingTo newRange: NSRange,
-        mutation: SyntaxHighlightMutation,
-        previousSourceUTF16Length: Int,
-        nextSourceUTF16Length: Int
-    ) -> NSRange {
-        let lower = oldOffset(
-            forNewOffset: newRange.location,
-            mutation: mutation,
-            previousSourceUTF16Length: previousSourceUTF16Length,
-            nextSourceUTF16Length: nextSourceUTF16Length,
-            usesUpperBoundary: false
-        )
-        let upper = oldOffset(
-            forNewOffset: newRange.upperBound,
-            mutation: mutation,
-            previousSourceUTF16Length: previousSourceUTF16Length,
-            nextSourceUTF16Length: nextSourceUTF16Length,
-            usesUpperBoundary: true
-        )
-        return NSRange(location: lower, length: max(0, upper - lower))
-    }
-
-    static func oldOffset(
-        forNewOffset offset: Int,
-        mutation: SyntaxHighlightMutation,
-        previousSourceUTF16Length: Int,
-        nextSourceUTF16Length: Int,
-        usesUpperBoundary: Bool
-    ) -> Int {
-        let clampedOffset = min(max(0, offset), nextSourceUTF16Length)
-        let oldEnd = mutation.location + mutation.length
-        let newEnd = mutation.location + mutation.replacement.utf16.count
-        let delta = mutation.replacement.utf16.count - mutation.length
-
-        let oldOffset: Int
-        if clampedOffset <= mutation.location {
-            oldOffset = clampedOffset
-        } else if clampedOffset <= newEnd {
-            oldOffset = usesUpperBoundary ? oldEnd : mutation.location
-        } else {
-            oldOffset = clampedOffset - delta
-        }
-
-        return min(max(0, oldOffset), previousSourceUTF16Length)
-    }
-
-    static func rangeAfterApplyingMutation(
-        _ range: NSRange,
-        mutation: SyntaxHighlightMutation,
-        nextSourceUTF16Length: Int
-    ) -> NSRange? {
-        let oldEnd = mutation.location + mutation.length
-        let delta = mutation.replacement.utf16.count - mutation.length
-
-        if range.upperBound <= mutation.location {
-            return range
-        }
-
-        if range.location >= oldEnd {
-            let location = range.location + delta
-            guard location >= 0, location + range.length <= nextSourceUTF16Length else {
-                return nil
-            }
-            return NSRange(location: location, length: range.length)
-        }
-
-        return nil
-    }
-
-    static func rangeForRefreshAfterApplyingMutation(
-        _ range: NSRange,
-        mutation: SyntaxHighlightMutation,
-        nextSourceUTF16Length: Int
-    ) -> NSRange? {
-        let oldEnd = mutation.location + mutation.length
-        let newEnd = mutation.location + mutation.replacement.utf16.count
-        let delta = mutation.replacement.utf16.count - mutation.length
-
-        if range.upperBound <= mutation.location {
-            return SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: nextSourceUTF16Length)
-        }
-
-        if range.location >= oldEnd {
-            return SyntaxEditorRangeUtilities.clampedRange(
-                NSRange(location: range.location + delta, length: range.length),
-                utf16Length: nextSourceUTF16Length
-            )
-        }
-
-        let location = min(range.location, mutation.location)
-        let upper = range.upperBound > oldEnd
-            ? range.upperBound + delta
-            : newEnd
-        let clampedLocation = min(max(0, location), nextSourceUTF16Length)
-        let clampedUpper = min(max(clampedLocation, upper), nextSourceUTF16Length)
-        guard clampedUpper > clampedLocation else { return nil }
-        return NSRange(location: clampedLocation, length: clampedUpper - clampedLocation)
-    }
-
-    static func tokenContainsMutation(_ range: NSRange, mutation: SyntaxHighlightMutation) -> Bool {
-        let mutationUpperBound = mutation.location + mutation.length
-        if mutation.length == 0 {
-            return range.location <= mutation.location && mutation.location <= range.upperBound
-        }
-        return range.location <= mutation.location && mutationUpperBound <= range.upperBound
-    }
-
-    static func lexicalRangeAfterApplyingMutation(
-        _ range: NSRange,
-        mutation: SyntaxHighlightMutation,
-        nextSourceUTF16Length: Int
-    ) -> NSRange? {
-        let replacementLength = mutation.replacement.utf16.count
-        if mutation.length == 0,
-           range.location <= mutation.location,
-           mutation.location <= range.upperBound {
-            let adjustedRange = NSRange(
-                location: range.location,
-                length: range.length + replacementLength
-            )
-            return SyntaxEditorRangeUtilities.clampedRange(
-                adjustedRange,
-                utf16Length: nextSourceUTF16Length
-            )
-        }
-        return rangeForRefreshAfterApplyingMutation(
-            range,
-            mutation: mutation,
-            nextSourceUTF16Length: nextSourceUTF16Length
-        )
-    }
-
-    static func isSwiftLexicalFastPathSyntaxID(_ syntaxID: EditorSourceSyntaxID) -> Bool {
-        syntaxID == .plain || syntaxID == .number
-    }
-
-    static func isSwiftSemanticOverlaySyntaxID(_ syntaxID: EditorSourceSyntaxID) -> Bool {
-        switch syntaxID {
-        case .identifierType,
-             .identifierTypeSystem,
-             .identifierClass,
-             .identifierClassSystem,
-             .identifierFunction,
-             .identifierFunctionSystem,
-             .identifierMacro,
-             .identifierMacroSystem,
-             .identifierConstant,
-             .identifierConstantSystem,
-             .identifierVariable,
-             .identifierVariableSystem:
-            true
-        default:
-            false
-        }
-    }
-
-    static func swiftLexicalToken(
-        syntaxID: EditorSourceSyntaxID,
-        remainsStableFrom oldRange: NSRange,
-        in previousSource: NSString,
-        to newRange: NSRange,
-        in nextSource: NSString
-    ) -> Bool {
-        guard oldRange.location >= 0,
-              oldRange.upperBound <= previousSource.length,
-              newRange.location >= 0,
-              newRange.upperBound <= nextSource.length
-        else {
-            return false
-        }
-
-        let oldText = previousSource.substring(with: oldRange)
-        let newText = nextSource.substring(with: newRange)
-        switch syntaxID {
-        case .plain:
-            return isSwiftPlainIdentifierStableForLexicalFastPath(oldText)
-                && isSwiftPlainIdentifierStableForLexicalFastPath(newText)
-        case .number:
-            return isSimpleDecimalNumber(oldText) && isSimpleDecimalNumber(newText)
-        default:
-            return false
-        }
-    }
-
-    static func isSwiftPlainIdentifierStableForLexicalFastPath(_ text: String) -> Bool {
-        isSimpleSwiftIdentifier(text) && !swiftKeywordLikePlainIdentifiers.contains(text)
-    }
-
-    static func isSimpleSwiftIdentifier(_ text: String) -> Bool {
-        var iterator = text.utf8.makeIterator()
-        guard let first = iterator.next(),
-              first == 95 || (first >= 65 && first <= 90) || (first >= 97 && first <= 122)
-        else {
-            return false
-        }
-
-        while let byte = iterator.next() {
-            guard byte == 95 || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) else {
-                return false
-            }
-        }
-        return true
-    }
-
-    private static let swiftKeywordLikePlainIdentifiers: Set<String> = [
-        "Any",
-        "GKInspectable",
-        "IBAction",
-        "IBDesignable",
-        "IBInspectable",
-        "IBOutlet",
-        "IBSegueAction",
-        "NSApplicationMain",
-        "NSCopying",
-        "NSManaged",
-        "Protocol",
-        "Self",
-        "Sendable",
-        "Type",
-        "UIApplicationMain",
-        "_implementationOnly",
-        "_modify",
-        "_read",
-        "_spi",
-        "actor",
-        "actorIndependent",
-        "any",
-        "as",
-        "associatedtype",
-        "async",
-        "asyncHandler",
-        "attached",
-        "autoclosure",
-        "available",
-        "await",
-        "backDeployed",
-        "break",
-        "case",
-        "catch",
-        "class",
-        "concurrent",
-        "continue",
-        "convenience",
-        "convention",
-        "defer",
-        "deinit",
-        "didSet",
-        "discardableResult",
-        "do",
-        "dynamic",
-        "dynamicCallable",
-        "dynamicMemberLookup",
-        "else",
-        "enum",
-        "escaping",
-        "extension",
-        "fallthrough",
-        "false",
-        "fileprivate",
-        "final",
-        "for",
-        "freestanding",
-        "frozen",
-        "func",
-        "get",
-        "globalActor",
-        "guard",
-        "if",
-        "implementation",
-        "import",
-        "in",
-        "indirect",
-        "infix",
-        "init",
-        "inlinable",
-        "inline",
-        "internal",
-        "isolated",
-        "lazy",
-        "let",
-        "macro",
-        "main",
-        "modify",
-        "mutating",
-        "nil",
-        "none",
-        "nonisolated",
-        "nonmutating",
-        "nonobjc",
-        "noreturn",
-        "objc",
-        "objcMembers",
-        "open",
-        "operator",
-        "optional",
-        "override",
-        "postfix",
-        "preconcurrency",
-        "precedencegroup",
-        "prefix",
-        "private",
-        "propertyWrapper",
-        "protocol",
-        "public",
-        "read",
-        "required",
-        "requires_stored_property_inits",
-        "resultBuilder",
-        "return",
-        "retroactive",
-        "rethrows",
-        "right",
-        "safe",
-        "self",
-        "set",
-        "some",
-        "specialized",
-        "static",
-        "storageRestrictions",
-        "struct",
-        "subscript",
-        "super",
-        "switch",
-        "testable",
-        "throw",
-        "throws",
-        "true",
-        "try",
-        "typealias",
-        "unchecked",
-        "unknown",
-        "unowned",
-        "unsafe",
-        "usableFromInline",
-        "var",
-        "warn_unqualified_access",
-        "weak",
-        "where",
-        "while",
-        "willSet",
-    ]
-
-    static func isSimpleDecimalNumber(_ text: String) -> Bool {
-        guard !text.isEmpty else {
-            return false
-        }
-        for byte in text.utf8 {
-            guard byte >= 48 && byte <= 57 else {
-                return false
-            }
-        }
-        return true
-    }
-
     static func union(_ lhs: NSRange, _ rhs: NSRange) -> NSRange {
         let lower = min(lhs.location, rhs.location)
         let upper = max(lhs.upperBound, rhs.upperBound)
         return NSRange(location: lower, length: upper - lower)
-    }
-
-    static func range(_ outer: NSRange, contains inner: NSRange) -> Bool {
-        inner.location >= outer.location && inner.upperBound <= outer.upperBound
     }
 
     static func inputEdit(
@@ -2467,11 +1481,15 @@ private extension SyntaxHighlightSession {
     }
 }
 
-private final class SyntaxHighlightLineIndex {
-    private var lineStartOffsets: [Int] = [0]
+package final class SyntaxHighlightLineIndex {
+    private let lineOffsets = LineOffsetTable()
+
+    var lineCount: Int {
+        lineOffsets.lineCount
+    }
 
     func reset(source: String) {
-        lineStartOffsets = Self.lineStarts(in: source, baseOffset: 0)
+        lineOffsets.reset(source: source)
     }
 
     func apply(mutation: SyntaxHighlightMutation, previousSource: String) {
@@ -2496,28 +1514,34 @@ private final class SyntaxHighlightLineIndex {
                 replacement: mutation.replacement
             )
         ], to: oldSegment)
-        let starts = Self.lineStarts(in: newSegment, baseOffset: affectedRange.location)
-        let replacementStarts = affectedRange.upperBound < nsSource.length && Self.endsWithLineBreak(newSegment)
-            ? starts.dropLast()
-            : starts[...]
+        var replacementLengths = LineOffsetTable.lineLengths(in: newSegment)
+        if affectedRange.upperBound < nsSource.length,
+           Self.endsWithLineBreak(newSegment),
+           replacementLengths.count > 1 {
+            replacementLengths.removeLast()
+        }
         let startIndex = lineIndex(containingUTF16Offset: affectedRange.location)
         let endIndex = oldLineEndIndex(for: affectedRange, sourceUTF16Length: nsSource.length)
-        lineStartOffsets.replaceSubrange(startIndex..<endIndex, with: replacementStarts)
-
-        let delta = mutation.replacement.utf16.count - mutation.length
-        guard delta != 0 else { return }
-        let adjustmentStart = startIndex + replacementStarts.count
-        guard adjustmentStart < lineStartOffsets.count else { return }
-        for index in adjustmentStart..<lineStartOffsets.count {
-            lineStartOffsets[index] += delta
-        }
+        lineOffsets.replaceLines(in: startIndex..<endIndex, with: replacementLengths)
     }
 
     func point(at utf16Offset: Int) -> Point {
         let clampedOffset = max(0, utf16Offset)
         let index = lineIndex(containingUTF16Offset: clampedOffset)
-        let lineStart = lineStartOffsets[index]
+        let lineStart = lineOffsets.lineStartOffset(at: index)
         return Point(row: index, column: max(0, clampedOffset - lineStart) * 2)
+    }
+
+    func lineRange(containingUTF16Range range: NSRange) -> Range<Int> {
+        lineOffsets.lineRange(containingUTF16Range: range)
+    }
+
+    func lineStartOffset(at index: Int) -> Int {
+        lineOffsets.lineStartOffset(at: index)
+    }
+
+    func lineEndOffset(at index: Int) -> Int {
+        lineOffsets.lineEndOffset(at: index)
     }
 }
 
@@ -2543,52 +1567,30 @@ private extension SyntaxHighlightLineIndex {
             with: NSRange(location: mutation.location, length: mutation.length)
         )
         if (Self.containsLineBreak(deletedText) || Self.containsLineBreak(mutation.replacement)),
-           endIndex < lineStartOffsets.count {
+           endIndex < lineOffsets.lineCount {
             endIndex += 1
         }
 
-        let lower = lineStartOffsets[startIndex]
-        let upper = endIndex < lineStartOffsets.count
-            ? lineStartOffsets[endIndex]
+        let lower = lineOffsets.lineStartOffset(at: startIndex)
+        let upper = endIndex < lineOffsets.lineCount
+            ? lineOffsets.lineStartOffset(at: endIndex)
             : nsSource.length
         return NSRange(location: lower, length: upper - lower)
     }
 
     func lineIndex(containingUTF16Offset offset: Int) -> Int {
-        var lower = 0
-        var upper = lineStartOffsets.count
-        while lower < upper {
-            let mid = (lower + upper) / 2
-            if lineStartOffsets[mid] <= offset {
-                lower = mid + 1
-            } else {
-                upper = mid
-            }
-        }
-        return max(0, min(lineStartOffsets.count - 1, lower - 1))
+        lineOffsets.lineIndex(containingUTF16Offset: offset)
     }
 
     func oldLineEndIndex(for range: NSRange, sourceUTF16Length: Int) -> Int {
-        guard !lineStartOffsets.isEmpty else { return 0 }
+        guard lineOffsets.lineCount > 0 else { return 0 }
         let upperBound = min(sourceUTF16Length, range.upperBound)
         let lookup = range.length == 0
             ? range.location
             : upperBound == sourceUTF16Length
                 ? upperBound
                 : max(range.location, upperBound - 1)
-        return min(lineStartOffsets.count, lineIndex(containingUTF16Offset: lookup) + 1)
-    }
-
-    static func lineStarts(in source: String, baseOffset: Int) -> [Int] {
-        var starts = [baseOffset]
-        var utf16Offset = baseOffset
-        for codeUnit in source.utf16 {
-            if codeUnit == 10 {
-                starts.append(utf16Offset + 1)
-            }
-            utf16Offset += 1
-        }
-        return starts
+        return min(lineOffsets.lineCount, lineIndex(containingUTF16Offset: lookup) + 1)
     }
 
     static func endsWithLineBreak(_ source: String) -> Bool {

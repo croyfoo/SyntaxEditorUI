@@ -986,6 +986,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             )
             return boxedExpressionRefreshRange(around: mutationTargetRange, in: source) ?? mutationTargetRange
         }
+        if let mutation,
+           objectiveCInsertedTextCanKeepSemanticTarget(mutation) {
+            let mutationTargetRange = source.lineRange(
+                for: objectiveCMutationChangedRange(mutation, in: source)
+            )
+            return boxedExpressionRefreshRange(around: mutationTargetRange, in: source) ?? mutationTargetRange
+        }
         guard !objectiveCRefreshLooksStructural(context) else {
             guard let mutation,
                   objectiveCLocalEditCanKeepSemanticTarget(mutation, in: source) else {
@@ -1051,6 +1058,17 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
         return ObjectiveCSemanticLineSignatureIndex.signaturesForChangedLines(mutation, in: source)
             .allSatisfy { !$0.contributesToSignature }
+    }
+
+    private static func objectiveCInsertedTextCanKeepSemanticTarget(
+        _ mutation: SyntaxHighlightMutation
+    ) -> Bool {
+        guard mutation.length == 0,
+              !mutation.replacement.isEmpty else {
+            return false
+        }
+
+        return !objectiveCRefreshLooksStructural(mutation.replacement)
     }
 
     private static func boxedExpressionRefreshRange(around targetRange: NSRange, in source: NSString) -> NSRange? {

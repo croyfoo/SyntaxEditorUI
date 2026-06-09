@@ -339,6 +339,44 @@ struct SyntaxEditorUICommonTests {
         ])
     }
 
+    @Test("Pending highlight edit coalesces continuous typing")
+    func pendingHighlightEditCoalescesContinuousTyping() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet:
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 5, length: 0, replacement: "x"),
+            currentTextLength: 11
+        )
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 6, length: 0, replacement: "y"),
+            currentTextLength: 12
+        )
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 7, length: 0, replacement: "z"),
+            currentTextLength: 13
+        )
+
+        #expect(store.pendingEditCountForTesting == 1)
+        #expect(store.pendingDirtyRangesForTesting == [NSRange(location: 5, length: 3)])
+        #expect(store.colorRuns(in: NSRange(location: 0, length: 13)).map(\.range) == [
+            NSRange(location: 0, length: 5),
+            NSRange(location: 8, length: 5),
+        ])
+    }
+
     @Test("Highlight visible resolver suppresses marked text ranges")
     func highlightVisibleResolverSuppressesMarkedTextRanges() {
         let store = HighlightRenderSnapshotStore()
