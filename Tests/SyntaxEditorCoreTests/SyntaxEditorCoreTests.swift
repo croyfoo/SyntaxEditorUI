@@ -6588,7 +6588,6 @@ struct SyntaxHighlighterEngineTests {
         let returnLineRange = nsUpdatedSource.range(of: "return value")
         let returnValueRange = nsUpdatedSource.range(of: "value", options: [], range: returnLineRange)
         #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: returnValueRange) == returnValueRange)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
 
         let valueReference = try effectiveSemanticSnapshot(
             in: incremental.tokens,
@@ -6631,6 +6630,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens.contains {
             tokenIntersects($0, range: returnItemRange, syntaxID: .identifierVariable, language: .swift)
         } == false)
+        #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: returnItemRange) == returnItemRange)
     }
 
     @Test("SyntaxHighlighterEngine strips stale Swift system macro overlays after local macro declarations")
@@ -10990,8 +10990,11 @@ struct SyntaxHighlighterEngineTests {
         }
         @end
         """
-        let updatedSource = source.replacingOccurrences(of: "foo", with: "bar")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let nsSource = source as NSString
+        let declarationRange = nsSource.range(of: "@property(nonatomic) NSInteger foo;")
+        let declarationNameRange = nsSource.range(of: "foo", options: [], range: declarationRange)
+        let updatedSource = nsSource.replacingCharacters(in: declarationNameRange, with: "bar")
+        let mutation = SyntaxHighlightMutation(location: declarationNameRange.location, length: declarationNameRange.length, replacement: "bar")
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11000,11 +11003,18 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+        let nsUpdatedSource = updatedSource as NSString
+        let referenceRange = nsUpdatedSource.range(of: "self.foo")
+        let referenceNameRange = nsUpdatedSource.range(of: "foo", options: [], range: referenceRange)
 
         #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: referenceNameRange, syntaxID: .identifierVariable, language: .objectiveC)
+        } == false)
+        #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: referenceNameRange) == referenceNameRange)
     }
 
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after property keyword edits")

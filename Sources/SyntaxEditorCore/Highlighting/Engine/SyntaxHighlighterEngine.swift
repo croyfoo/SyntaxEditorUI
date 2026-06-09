@@ -682,11 +682,9 @@ private final class SyntaxHighlightSession {
         let semanticOverlayRefreshRange = semanticPartialRefreshRange.map {
             Self.union($0, replacementMergeRange)
         }
-        let semanticComparisonRange = semanticOverlayRefreshRange ?? replacementMergeRange
-        let previousSemanticComparisonTokens = tokenStore.tokens(
-            in: semanticComparisonRange,
-            lineIndex: lineIndex
-        )
+        let previousSemanticComparisonTokens = semanticOverlayRefreshRange.map {
+            tokenStore.tokens(in: $0, lineIndex: lineIndex)
+        } ?? tokenStore.tokens(lineIndex: lineIndex)
 
         tokenStore.applyEdit(
             layeredMutation,
@@ -761,7 +759,8 @@ private final class SyntaxHighlightSession {
                     sourceUTF16Length: nextSourceLength,
                     comparisonRange: semanticOverlayRefreshRange
                 )
-                if semanticDiffRefreshRange.length >= nextSourceLength,
+                if semanticOverlayRefreshRange != nil,
+                   semanticDiffRefreshRange.length >= nextSourceLength,
                    syntacticRefreshRange.length < nextSourceLength {
                     return syntacticRefreshRange
                 }
