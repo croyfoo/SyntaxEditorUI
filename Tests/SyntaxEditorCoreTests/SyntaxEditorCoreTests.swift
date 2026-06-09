@@ -11372,6 +11372,44 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.refreshRange.length < updatedSource.utf16.count / 2)
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after declaration value member edits")
+    func highlighterRebuildsObjectiveCSemanticIndexAfterDeclarationValueMemberEdits() async throws {
+        let source = """
+        @interface Sample : NSObject
+        @property(nonatomic) NSInteger bar;
+        @end
+
+        @implementation Sample
+        - (void)run
+        {
+            NSInteger value = self.foo;
+            NSLog(@"%ld", (long)value);
+        }
+        @end
+        """
+        let updatedSource = source.replacingOccurrences(of: "self.foo", with: "self.bar")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "bar",
+            inOccurrenceOf: "NSInteger value = self.bar;"
+        ).contains(.identifierVariable))
+    }
+
     @Test("SyntaxHighlighterEngine keeps Objective-C local shadows plain")
     func highlighterKeepsObjectiveCLocalShadowsPlain() async throws {
         let source = """

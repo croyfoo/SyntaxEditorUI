@@ -1202,6 +1202,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return objectiveCMutationCanChangeMemberAccessReceiver(
             line: line,
             relativeChangedRange: relativeChangedRange
+        ) || objectiveCMutationCanChangeMemberAccessField(
+            line: line,
+            relativeChangedRange: relativeChangedRange
         )
     }
 
@@ -1368,6 +1371,49 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 continue
             }
             return true
+        }
+
+        return false
+    }
+
+    private static func objectiveCMutationCanChangeMemberAccessField(
+        line: NSString,
+        relativeChangedRange: NSRange
+    ) -> Bool {
+        guard line.range(of: ".").location != NSNotFound
+            || line.range(of: "->").location != NSNotFound
+        else {
+            return false
+        }
+
+        var cursor = 0
+        while cursor < line.length {
+            if let nextCursor = locationAfterSkippedCommentOrLiteral(startingAt: cursor, in: line) {
+                cursor = nextCursor
+                continue
+            }
+
+            let operatorRange: NSRange
+            let character = line.substring(with: NSRange(location: cursor, length: 1))
+            if character == "." {
+                operatorRange = NSRange(location: cursor, length: 1)
+            } else if character == "-",
+                      cursor + 1 < line.length,
+                      line.substring(with: NSRange(location: cursor + 1, length: 1)) == ">" {
+                operatorRange = NSRange(location: cursor, length: 2)
+            } else {
+                cursor += 1
+                continue
+            }
+
+            guard let fieldRange = memberFieldIdentifierRange(after: operatorRange.upperBound, in: line) else {
+                cursor = operatorRange.upperBound
+                continue
+            }
+            if rangesIntersect(fieldRange, relativeChangedRange) {
+                return true
+            }
+            cursor = fieldRange.upperBound
         }
 
         return false
