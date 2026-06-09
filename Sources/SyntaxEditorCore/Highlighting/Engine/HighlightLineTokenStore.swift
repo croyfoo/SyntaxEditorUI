@@ -63,7 +63,7 @@ package final class HighlightLineTokenStore {
         let deletedText = nsSource.substring(
             with: NSRange(location: mutation.location, length: mutation.length)
         )
-        if deletedText.utf16.contains(10),
+        if LineOffsetTable.containsLineBreak(deletedText),
            oldLineRange.upperBound < lines.count,
            oldLineRange.upperBound > oldLineRange.lowerBound,
            mutation.location + mutation.length == lineIndex.lineEndOffset(at: oldLineRange.upperBound - 1) {
@@ -87,7 +87,7 @@ package final class HighlightLineTokenStore {
         ], to: oldSegment)
         var replacementLineCount = LineOffsetTable.lineLengths(in: newSegment).count
         if affectedRange.upperBound < nsSource.length,
-           newSegment.utf16.last == 10,
+           LineOffsetTable.endsWithLineBreak(newSegment),
            replacementLineCount > 1 {
             replacementLineCount -= 1
         }

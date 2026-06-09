@@ -1457,12 +1457,12 @@ private extension SyntaxHighlightSession {
         var row = point.row
         var column = point.column
 
-        for codeUnit in source.utf16 {
-            if codeUnit == 10 {
+        for character in source {
+            if LineOffsetTable.isLineBreak(character) {
                 row += 1
                 column = 0
             } else {
-                column += 2
+                column += UInt32(character.utf16.count * 2)
             }
         }
 
@@ -1600,11 +1600,11 @@ private extension SyntaxHighlightLineIndex {
     }
 
     static func endsWithLineBreak(_ source: String) -> Bool {
-        source.utf16.last == 10
+        LineOffsetTable.endsWithLineBreak(source)
     }
 
     static func containsLineBreak(_ source: String) -> Bool {
-        source.utf16.contains(10)
+        LineOffsetTable.containsLineBreak(source)
     }
 }
 

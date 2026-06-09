@@ -155,13 +155,11 @@ private extension LineMetricsIndex {
     }
 
     static func endsWithLineBreak(_ source: String) -> Bool {
-        source.last.map(isLineBreak) ?? false
+        LineOffsetTable.endsWithLineBreak(source)
     }
 
     static func isLineBreak(_ character: Character) -> Bool {
-        character.unicodeScalars.contains { scalar in
-            scalar.value == 10 || scalar.value == 13
-        }
+        LineOffsetTable.isLineBreak(character)
     }
 
     func rebuildColumnCountsAndHeap() {

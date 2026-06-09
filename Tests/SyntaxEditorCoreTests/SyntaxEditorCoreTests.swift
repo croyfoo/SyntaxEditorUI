@@ -8124,6 +8124,62 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(incremental.tokens, full.tokens))
     }
 
+    @Test("SyntaxHighlighterEngine keeps incremental state after deleting a carriage-return line break")
+    func highlighterIncrementalEditHandlesDeletedCarriageReturnFollowedByEdit() async throws {
+        let source = "const first = 1;\rconst second = 2;\rconst third = 3;"
+        let mergedSource = "const first = 1;const second = 2;\rconst third = 3;"
+        let updatedSource = "const first = 1;let second = 2;\rconst third = 3;"
+        let deleteLineBreak = try #require(TextMutation.diff(from: source, to: mergedSource))
+        let editMergedLine = try #require(TextMutation.diff(from: mergedSource, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: mergedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(deleteLineBreak)
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: mergedSource,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(editMergedLine)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
+    }
+
+    @Test("SyntaxHighlighterEngine keeps incremental state after inserting a carriage-return line break")
+    func highlighterIncrementalEditHandlesInsertedCarriageReturnFollowedByEdit() async throws {
+        let source = "const first = 1;const second = 2;\rconst third = 3;"
+        let splitSource = "const first = 1;\rconst second = 2;\rconst third = 3;"
+        let updatedSource = "const first = 1;\rlet second = 2;\rconst third = 3;"
+        let insertLineBreak = try #require(TextMutation.diff(from: source, to: splitSource))
+        let editSplitLine = try #require(TextMutation.diff(from: splitSource, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.javascript)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: splitSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(insertLineBreak)
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: splitSource,
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: SyntaxHighlightMutation(editSplitLine)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
+
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
+    }
+
     @Test("SyntaxHighlighterEngine keeps incremental state after deleting a final line break")
     func highlighterIncrementalEditHandlesDeletedFinalLineBreakFollowedByEdit() async throws {
         let source = "const first = 1;\n"
