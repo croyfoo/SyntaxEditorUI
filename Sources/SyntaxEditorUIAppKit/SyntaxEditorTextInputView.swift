@@ -676,9 +676,10 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         let markedRange = markedTextRangeStorage
         let markedAttributedString = markedTextAttributedStringStorage
         let range = markedRange ?? effectiveReplacementRange(replacementRange)
-        if markedRange != nil {
+        if let markedRange {
             markedTextRangeStorage = nil
             markedTextAttributedStringStorage = nil
+            invalidateSyntaxRenderingAttributesForMarkedTextChange(from: markedRange, to: nil)
         }
         let didReplace = replaceText(
             in: range,
@@ -688,6 +689,9 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         if !didReplace {
             markedTextRangeStorage = markedRange
             markedTextAttributedStringStorage = markedAttributedString
+            if let markedRange {
+                invalidateSyntaxRenderingAttributesForMarkedTextChange(from: nil, to: markedRange)
+            }
         }
     }
 

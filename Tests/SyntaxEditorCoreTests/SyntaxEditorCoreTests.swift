@@ -6467,6 +6467,51 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine keeps Swift semantic index after EOF append past trailing newline")
+    func highlighterKeepsSwiftSemanticIndexAfterEOFAppendPastTrailingNewline() async throws {
+        let source = "let item = 1\n"
+        let appendedText = """
+        func render() -> Int {
+            return item
+        }
+        """
+        let appendedSource = source + appendedText
+        let updatedSource = appendedSource.replacingOccurrences(of: "return item", with: "return item + 1")
+        let appendMutation = SyntaxHighlightMutation(
+            location: source.utf16.count,
+            length: 0,
+            replacement: appendedText
+        )
+        let referenceMutation = try #require(TextMutation.diff(from: appendedSource, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        _ = await incrementalEngine.update(
+            previousSource: source,
+            source: appendedSource,
+            language: SyntaxLanguage.swift,
+            mutation: appendMutation
+        )
+        let incremental = await incrementalEngine.update(
+            previousSource: appendedSource,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(referenceMutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        _ = try effectiveSemanticSnapshot(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "item",
+            syntaxID: .identifierVariable,
+            language: .swift,
+            inOccurrenceOf: "return item + 1"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine removes Swift semantic overlays after declaration syntax removal")
     func highlighterRemovesSwiftSemanticOverlaysAfterDeclarationSyntaxRemoval() async throws {
         let source = """

@@ -57,20 +57,31 @@ fileprivate struct SwiftSemanticLineSignatureIndex {
         }
 
         let oldEnd = mutation.location + mutation.length
-        let startIndex = lineIndex(containing: mutation.location, previousSourceLength: previousSourceLength)
+        let insertsAfterLastSignature = insertsAtEOFAfterTrailingLineBreak(
+            mutation,
+            source: source,
+            previousSourceLength: previousSourceLength
+        )
+        let startIndex = insertsAfterLastSignature
+            ? lines.count
+            : lineIndex(containing: mutation.location, previousSourceLength: previousSourceLength)
         let endLookup = mutation.length == 0 ? mutation.location : max(mutation.location, oldEnd - 1)
-        let endIndex = lineIndex(containing: endLookup, previousSourceLength: previousSourceLength)
+        let endIndex = insertsAfterLastSignature
+            ? lines.count - 1
+            : lineIndex(containing: endLookup, previousSourceLength: previousSourceLength)
         let changedLineSignatures = Self.signaturesForChangedLines(mutation, in: source)
         guard !changedLineSignatures.isEmpty else { return nil }
         let delta = replacementLength - mutation.length
 
         var nextLines: [SwiftSemanticLineSignature] = []
         nextLines.reserveCapacity(lines.count - (endIndex - startIndex + 1) + changedLineSignatures.count)
+        var insertedChangedLines = false
         for index in lines.indices {
             if index < startIndex {
                 nextLines.append(lines[index])
             } else if index == startIndex {
                 nextLines.append(contentsOf: changedLineSignatures)
+                insertedChangedLines = true
             } else if index <= endIndex {
                 continue
             } else {
@@ -81,7 +92,25 @@ fileprivate struct SwiftSemanticLineSignatureIndex {
                 ))
             }
         }
+        if !insertedChangedLines {
+            nextLines.append(contentsOf: changedLineSignatures)
+        }
         return SwiftSemanticLineSignatureIndex(lines: nextLines)
+    }
+
+    private func insertsAtEOFAfterTrailingLineBreak(
+        _ mutation: SyntaxHighlightMutation,
+        source: NSString,
+        previousSourceLength: Int
+    ) -> Bool {
+        guard mutation.length == 0,
+              mutation.location == previousSourceLength,
+              previousSourceLength > 0 else {
+            return false
+        }
+        return LineOffsetTable.containsLineBreak(
+            source.substring(with: NSRange(location: previousSourceLength - 1, length: 1))
+        )
     }
 
     private func lineIndex(containing location: Int, previousSourceLength: Int) -> Int {

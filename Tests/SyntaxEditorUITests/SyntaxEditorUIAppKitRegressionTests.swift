@@ -2366,6 +2366,54 @@ extension SyntaxEditorUITests {
         #expect(editorView.textView.selectedRange() == NSRange(location: expectedSource.utf16.count, length: 0))
     }
 
+    @Test("SyntaxEditorView clears macOS marked-text highlight suppression after IME commit")
+    @MainActor
+    func syntaxEditorViewMacClearsMarkedTextHighlightSuppressionAfterIMECommit() async {
+        let source = "let value = 1"
+        let theme = syntaxEditorUITestTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            theme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        layoutMacEditorView(editorView)
+        let originalMarkedTextHook = editorView.textView.didChangeMarkedTextRange
+        var markedTextHookCallCount = 0
+        editorView.textView.didChangeMarkedTextRange = {
+            markedTextHookCallCount += 1
+            originalMarkedTextHook?()
+        }
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        editorView.textView.setSelectedRange(NSRange(location: 0, length: 3))
+        editorView.textView.setMarkedText(
+            "let",
+            selectedRange: NSRange(location: 3, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+        #expect(markedTextHookCallCount == 1)
+
+        editorView.textView.insertText("let", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        #expect(editorView.textView.markedRange().location == NSNotFound)
+        #expect(markedTextHookCallCount == 2)
+    }
+
     @Test("SyntaxEditorView preserves macOS attributed marked text attributes")
     @MainActor
     func syntaxEditorViewMacPreservesAttributedMarkedTextAttributes() async throws {
