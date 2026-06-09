@@ -1025,7 +1025,7 @@ extension SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
-        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxHighlightPhase.complete))
+        #expect(await editorView.waitForPendingHighlightForTesting())
 
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.string))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), theme.baseForeground))

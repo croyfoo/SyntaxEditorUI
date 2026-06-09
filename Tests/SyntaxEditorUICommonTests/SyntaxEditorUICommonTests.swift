@@ -398,6 +398,15 @@ struct SyntaxEditorUICommonTests {
             NSRange(location: 0, length: 3),
             NSRange(location: 6, length: 4),
         ])
+        #expect(store.appliedColorRunsForTesting.map(\.range) == [
+            NSRange(location: 0, length: 10),
+        ])
+
+        store.updateSuppressionRanges([], textLength: 10)
+
+        #expect(store.colorRuns(in: NSRange(location: 0, length: 10)).map(\.range) == [
+            NSRange(location: 0, length: 10),
+        ])
     }
 
     @Test("Snapshot commit clears pending highlight edits")

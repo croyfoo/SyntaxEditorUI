@@ -679,10 +679,6 @@ package final class HighlightRenderSnapshotStore {
         let normalizedColorRuns = HighlightRunUtilities.clippedColorRuns(
             HighlightRunUtilities.coalescedColorRuns(
                 HighlightRunUtilities.normalizedColorRuns(runSet.colorRuns, textLength: nextTextLength)
-                    .flatMap { run in
-                        HighlightRunUtilities.rangesBySubtracting(normalizedSuppressionRanges, from: run.range)
-                            .map { HighlightColorRun(range: $0, color: run.color) }
-                    }
             ),
             to: clampedRefreshRange
         )

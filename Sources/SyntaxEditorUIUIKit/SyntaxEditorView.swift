@@ -1309,6 +1309,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             TextEditingTransaction.perform(on: textContentStorage) { storage in
                 storage.addAttribute(.foregroundColor, value: nextBaseForeground, range: fullRange)
             }
+            invalidateSyntaxRenderingAttributes(for: [fullRange])
         }
         setNeedsDisplayForVisibleTextFragments()
     }
@@ -2643,10 +2644,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     ) {
         let textLength = source.utf16.count
         guard let mutation else {
-            let fullRange = NSRange(location: 0, length: textLength)
-            if fullRange.length > 0 {
-                setNeedsDisplayForVisibleTextFragments()
-            }
+            clearSyntaxHighlightRendering()
             return
         }
 
@@ -2743,10 +2741,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func applyMarkedTextAttributes() {
         let textLength = text.utf16.count
+        let suppressionRanges = foregroundSuppressionRanges(textLength: textLength)
         highlightStyleStore.updateSuppressionRanges(
-            foregroundSuppressionRanges(textLength: textLength),
+            suppressionRanges,
             textLength: textLength
         )
+        invalidateSyntaxRenderingAttributes(for: suppressionRanges)
         guard let markedRange else { return }
         let targetRange = SyntaxEditorRangeUtilities.clampedRange(markedRange, utf16Length: textLength)
         guard targetRange.length > 0 else { return }
@@ -2770,6 +2770,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             foregroundSuppressionRanges(textLength: textLength),
             textLength: textLength
         )
+        invalidateSyntaxRenderingAttributes(for: [targetRange])
         reapplyTextAttributes(in: targetRange)
         setNeedsDisplayForVisibleTextFragments()
     }

@@ -230,7 +230,7 @@ extension SyntaxEditorUITests {
         #expect(didSuspendInitialHighlight)
         guard didSuspendInitialHighlight else { return }
         await resetGate.resumeAll()
-        let didApplyInitialHighlight = await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxHighlightPhase.complete)
+        let didApplyInitialHighlight = await editorView.waitForPendingHighlightForTesting()
         #expect(didApplyInitialHighlight)
         guard didApplyInitialHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
