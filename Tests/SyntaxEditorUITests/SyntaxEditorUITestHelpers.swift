@@ -1006,6 +1006,22 @@ func iOSEditorFont(_ editorView: SyntaxEditorView, at location: Int) -> UIFont? 
         return nil
     }
 
+    if let font = editorView.syntaxFontForTesting(at: location) {
+        return font
+    }
+
+    return attributedText.attribute(.font, at: location, effectiveRange: nil) as? UIFont
+}
+
+@MainActor
+func iOSEditorPermanentFont(_ editorView: SyntaxEditorView, at location: Int) -> UIFont? {
+    guard let attributedText = editorView.attributedText,
+          location >= 0,
+          location < attributedText.length
+    else {
+        return nil
+    }
+
     return attributedText.attribute(.font, at: location, effectiveRange: nil) as? UIFont
 }
 

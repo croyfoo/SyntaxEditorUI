@@ -384,13 +384,18 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             || (structuralFingerprintChanged && localStructuralTargetRange == nil)
             ? nil
             : (localStructuralTargetRange ?? proposedTargetRange)
-        let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
         let shouldRebuildIndex = proposedTargetRange == nil
             || previousIndex == nil
             || requiresSemanticIndexRebuild
             || structuralFingerprintChanged
             || cannotShiftPreviousIndex
             || (previousIndex?.sourceUTF16Length != nsSource.length && mutation == nil)
+        let preparation = preparedOverlayInput(
+            from: tokens,
+            source: nsSource,
+            targetRange: targetRange,
+            preparesFullIndex: shouldRebuildIndex
+        )
         let semanticIndex: ObjectiveCSemanticIndex
         if shouldRebuildIndex {
             guard let rebuiltIndex = ObjectiveCFileSymbolIndex(
@@ -773,7 +778,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         SyntaxEditorRangeUtilities.intersection(of: lhs, and: rhs).length > 0
     }
 
-    static func semanticTargetRange(_ refreshRange: NSRange, in source: NSString) -> NSRange? {
+    static func semanticTargetRange(
+        _ refreshRange: NSRange,
+        in source: NSString,
+        mutation: SyntaxHighlightMutation? = nil
+    ) -> NSRange? {
         let clamped = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: source.length)
         guard clamped.length > 0 else {
             return nil
@@ -782,10 +791,44 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let targetRange = source.lineRange(for: clamped)
         let contextRange = objectiveCUnsafeEditContextRange(around: targetRange, in: source)
         let context = source.substring(with: contextRange)
-        guard !objectiveCRefreshLooksStructural(context) else {
+        guard !objectiveCRefreshLooksStructural(context)
+                || mutation.map({ objectiveCLocalValueEditCanKeepSemanticTarget($0, in: source) }) == true else {
             return nil
         }
         return boxedExpressionRefreshRange(around: targetRange, in: source) ?? targetRange
+    }
+
+    private static func objectiveCLocalValueEditCanKeepSemanticTarget(
+        _ mutation: SyntaxHighlightMutation,
+        in source: NSString
+    ) -> Bool {
+        guard mutation.replacement.rangeOfCharacter(from: .newlines) == nil,
+              mutation.replacement.rangeOfCharacter(from: objectiveCSemanticStructuralCharacters) == nil else {
+            return false
+        }
+
+        let replacementLength = mutation.replacement.utf16.count
+        let changedLocation = min(max(0, mutation.location), source.length)
+        let changedStart = max(0, changedLocation - (mutation.length > 0 ? 1 : 0))
+        let changedEnd = min(source.length, max(changedLocation + max(1, replacementLength), changedStart + 1))
+        let changedRange = NSRange(location: changedStart, length: changedEnd - changedStart)
+        let lineRange = source.lineRange(for: changedRange)
+        let line = source.substring(with: lineRange) as NSString
+        let lineString = line as String
+        let fullRange = NSRange(location: 0, length: line.length)
+        let relativeChangedRange = NSRange(
+            location: max(0, changedRange.location - lineRange.location),
+            length: changedRange.length
+        )
+
+        if objectiveCVariableDeclarationLineRegex.firstMatch(in: lineString, range: fullRange) != nil {
+            let statementEnd = line.range(of: ";").location
+            guard statementEnd != NSNotFound else { return false }
+            return objectiveCDeclarationSignatureRanges(in: line, statementEnd: statementEnd)
+                .contains { rangesIntersect($0, relativeChangedRange) } == false
+        }
+
+        return false
     }
 
     private static func boxedExpressionRefreshRange(around targetRange: NSRange, in source: NSString) -> NSRange? {
@@ -2381,15 +2424,27 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             range: range,
             syntaxID: syntaxID,
             language: .objectiveC,
-            rawCaptureName: EditorSyntaxCapture.rawCaptureName(syntaxID: syntaxID, language: .objectiveC)
+            rawCaptureName: EditorSyntaxCapture.rawCaptureName(syntaxID: syntaxID, language: .objectiveC),
+            isSemanticOverlay: true
         )
     }
 
     private static func preparedOverlayInput(
         from tokens: [SyntaxHighlightToken],
         source: NSString,
-        targetRange: NSRange?
+        targetRange: NSRange?,
+        preparesFullIndex: Bool = true
     ) -> ObjectiveCOverlayPreparation {
+        if targetRange != nil, tokens.contains(where: \.isSemanticOverlay) {
+            return preparedTaggedOverlayInput(
+                from: tokens,
+                source: source,
+                targetRange: targetRange,
+                preparesFullIndex: preparesFullIndex
+            )
+        }
+
+        let indexRange = preparesFullIndex ? nil : targetRange
         var syntaxIDsByRange: [ObjectiveCRangeKey: ObjectiveCSyntaxIDMask] = [:]
         for token in tokens where token.language == .objectiveC || token.language == nil {
             syntaxIDsByRange[ObjectiveCRangeKey(token.range), default: []]
@@ -2406,38 +2461,88 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         var baseTokensForIndex: [SyntaxHighlightToken] = []
         var outputBaseTokens: [SyntaxHighlightToken] = []
         var preservedOverlayTokens: [SyntaxHighlightToken] = []
-        baseTokensForIndex.reserveCapacity(tokens.count)
+        baseTokensForIndex.reserveCapacity(preparesFullIndex ? tokens.count : 256)
         outputBaseTokens.reserveCapacity(tokens.count)
         preservedOverlayTokens.reserveCapacity(tokens.count / 4)
 
         for token in tokens {
             let syntaxIDs = syntaxIDsByRange[ObjectiveCRangeKey(token.range)] ?? []
-            let stripsFromIndex = isObjectiveCSemanticOverlayToken(
+            let preparesTokenForIndex = indexRange.map {
+                rangesIntersect(token.range, $0)
+            } ?? true
+            let isOverlayToken = isObjectiveCSemanticOverlayToken(
                 token,
                 syntaxIDsAtSameRange: syntaxIDs,
                 source: source,
                 preprocessorRanges: preprocessorRanges,
                 strippingSemanticOverlaysIn: nil
             )
-            if !stripsFromIndex {
+            if preparesTokenForIndex && !isOverlayToken {
                 baseTokensForIndex.append(token)
             }
 
-            let stripsFromOutput = targetRange.map {
+            let stripsFromOutput = targetRange.map { stripRange in
                 isObjectiveCSemanticOverlayToken(
                     token,
                     syntaxIDsAtSameRange: syntaxIDs,
                     source: source,
                     preprocessorRanges: preprocessorRanges,
-                    strippingSemanticOverlaysIn: $0
+                    strippingSemanticOverlaysIn: stripRange
                 )
-            } ?? stripsFromIndex
+            } ?? isOverlayToken
             if !stripsFromOutput {
-                if stripsFromIndex {
+                if isOverlayToken {
                     preservedOverlayTokens.append(token)
                 } else {
                     outputBaseTokens.append(token)
                 }
+            }
+        }
+
+        return ObjectiveCOverlayPreparation(
+            baseTokensForIndex: baseTokensForIndex,
+            outputBaseTokens: outputBaseTokens,
+            preservedOverlayTokens: preservedOverlayTokens,
+            nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex(
+                tokens: baseTokensForIndex,
+                sourceLength: source.length
+            ),
+            tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source)
+        )
+    }
+
+    private static func preparedTaggedOverlayInput(
+        from tokens: [SyntaxHighlightToken],
+        source: NSString,
+        targetRange: NSRange?,
+        preparesFullIndex: Bool
+    ) -> ObjectiveCOverlayPreparation {
+        let indexRange = preparesFullIndex ? nil : targetRange
+        var baseTokensForIndex: [SyntaxHighlightToken] = []
+        var outputBaseTokens: [SyntaxHighlightToken] = []
+        var preservedOverlayTokens: [SyntaxHighlightToken] = []
+        baseTokensForIndex.reserveCapacity(preparesFullIndex ? tokens.count : 256)
+        outputBaseTokens.reserveCapacity(tokens.count)
+        preservedOverlayTokens.reserveCapacity(tokens.count / 4)
+
+        for token in tokens {
+            let preparesTokenForIndex = indexRange.map {
+                rangesIntersect(token.range, $0)
+            } ?? true
+            if preparesTokenForIndex && !token.isSemanticOverlay {
+                baseTokensForIndex.append(token)
+            }
+
+            let stripsFromOutput = targetRange.map {
+                token.isSemanticOverlay && rangesIntersect(token.range, $0)
+            } ?? token.isSemanticOverlay
+            guard !stripsFromOutput else {
+                continue
+            }
+            if token.isSemanticOverlay {
+                preservedOverlayTokens.append(token)
+            } else {
+                outputBaseTokens.append(token)
             }
         }
 

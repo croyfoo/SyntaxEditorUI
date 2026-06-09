@@ -716,7 +716,7 @@ struct SyntaxEditorCoreTests {
             appearance: .light
         )
         #expect(lightComment?.font.family == "HelveticaNeue")
-        #expect(lightComment?.font.size == 12)
+        #expect(lightComment?.font.size == 12 + SyntaxEditorFontSize.platformThemePointSizeAdjustment)
 
         let darkKeyword = SyntaxEditorHighlightTheme.style(
             for: "keyword.control",
@@ -11337,6 +11337,39 @@ struct SyntaxHighlighterEngineTests {
             text: "Token",
             inOccurrenceOf: "NSLog(@\"%@\", Token)"
         ).contains(.identifierVariableSystem) == false)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C value edits local")
+    func highlighterKeepsObjectiveCValueEditsLocal() async throws {
+        let source = """
+        static NSInteger Token = 1;
+
+        void run(void)
+        {
+            NSInteger local = 1;
+            NSLog(@"%ld", (long)local);
+            NSLog(@"%ld", (long)Token);
+        }
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "NSInteger local = 1;",
+            with: "NSInteger local = 2;"
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count / 2)
     }
 
     @Test("SyntaxHighlighterEngine keeps Objective-C local shadows plain")

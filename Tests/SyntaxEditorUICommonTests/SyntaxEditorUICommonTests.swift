@@ -130,126 +130,37 @@ struct SyntaxEditorUICommonTests {
         #expect(narrow.height > wide.height)
     }
 
-    @Test("Text editing transaction applies style operations incrementally")
-    func appliesStyleOperationsIncrementally() async {
+    @Test("Highlight render snapshot leaves TextKit storage unchanged")
+    func highlightRenderSnapshotLeavesTextKitStorageUnchanged() {
         let system = EditorTextSystem()
-        TextEditingTransaction.perform(on: system.textContentStorage) { storage in
-            storage.setAttributedString(NSAttributedString(string: "abcdef"))
-        }
-
-        let font = SyntaxEditorFont.monospacedSystemFont(ofSize: 18, weight: .bold)
-        let completed = await TextEditingTransaction.applyIncrementally(
-            HighlightStyleOperations(
-                colorOperations: [HighlightColorOperation(range: NSRange(location: 0, length: 6), color: redColor)],
-                fontOperations: [HighlightFontOperation(range: NSRange(location: 1, length: 3), font: font)]
-            ),
-            to: system.textContentStorage,
-            maximumOperationsPerTransaction: 1
-        )
-
-        #expect(completed)
-        #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorColor)?.isEqual(redColor) == true)
-        #expect((system.textStorage.attribute(.font, at: 1, effectiveRange: nil) as? SyntaxEditorFont) == font)
-    }
-
-    @Test("Text editing transaction rolls back incremental font operations after cancellation validation fails")
-    func rollsBackIncrementalFontOperationsAfterCancellationValidationFails() async {
-        let system = EditorTextSystem()
-        TextEditingTransaction.perform(on: system.textContentStorage) { storage in
-            storage.setAttributedString(NSAttributedString(string: "abcdef"))
-        }
-
-        let firstFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 18, weight: .bold)
-        let secondFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 20, weight: .bold)
-        var validationCount = 0
-        let completed = await TextEditingTransaction.applyIncrementally(
-            HighlightStyleOperations(
-                colorOperations: [],
-                fontOperations: [
-                    HighlightFontOperation(range: NSRange(location: 0, length: 1), font: firstFont),
-                    HighlightFontOperation(range: NSRange(location: 1, length: 1), font: secondFont),
-                ]
-            ),
-            to: system.textContentStorage,
-            maximumOperationsPerTransaction: 1,
-            shouldContinue: {
-                validationCount += 1
-                return validationCount < 2
-            }
-        )
-
-        #expect(!completed)
-        #expect(system.textStorage.attribute(.font, at: 0, effectiveRange: nil) == nil)
-        #expect(system.textStorage.attribute(.font, at: 1, effectiveRange: nil) == nil)
-    }
-
-    @Test("Highlight style store leaves storage unchanged after incremental cancellation")
-    func leavesStorageUnchangedAfterIncrementalCancellation() async {
-        let system = EditorTextSystem()
-        let store = HighlightStyleStore()
         TextEditingTransaction.perform(on: system.textContentStorage) { storage in
             let attributedString = NSMutableAttributedString(string: "ab")
             attributedString.addAttribute(.foregroundColor, value: baseForeground, range: NSRange(location: 0, length: 2))
             storage.setAttributedString(attributedString)
         }
 
-        let transaction = store.prepareApply(
-            HighlightRunSet(
-                colorRuns: [
-                    HighlightColorRun(range: NSRange(location: 0, length: 1), color: redColor),
-                    HighlightColorRun(range: NSRange(location: 1, length: 1), color: blueColor),
-                ],
+        system.styleStore.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 2), color: redColor)],
                 fontRuns: []
             ),
-            refreshedRange: NSRange(location: 0, length: 2),
-            mutation: nil,
+            range: NSRange(location: 0, length: 2),
+            revision: 1,
+            language: .swift,
             textLength: 2,
             baseForeground: baseForeground,
             baseFont: nil
         )
-        var validationCount = 0
 
-        let completed = await TextEditingTransaction.applyIncrementally(
-            transaction.operations,
-            to: system.textContentStorage,
-            maximumOperationsPerTransaction: 1,
-            shouldContinue: {
-                validationCount += 1
-                return validationCount < 2
-            }
-        )
-
-        #expect(!completed)
-        #expect(store.appliedColorRunsForTesting.isEmpty)
-        #expect(store.epoch == 0)
         #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorColor)?.isEqual(baseForeground) == true)
+        #expect(system.styleStore.foregroundColor(at: 0)?.isEqual(redColor) == true)
     }
 
-    @Test("Highlight style store emits content attribute operations")
-    func emitsContentAttributeOperations() {
-        let store = HighlightStyleStore()
-        let operations = store.apply(
-            HighlightRunSet(
-                colorRuns: [HighlightColorRun(range: NSRange(location: 1, length: 3), color: .red)],
-                fontRuns: []
-            ),
-            refreshedRange: NSRange(location: 0, length: 8),
-            mutation: nil,
-            textLength: 8,
-            baseForeground: baseForeground,
-            baseFont: nil
-        )
-
-        #expect(operations.colorOperations.count == 1)
-        #expect(operations.colorOperations.first?.range == NSRange(location: 1, length: 3))
-        #expect(operations.colorOperations.first?.color.isEqual(redColor) == true)
-        #expect(store.epoch == 1)
-    }
-
-    @Test("Highlight style store coalesces adjacent same-color foreground runs")
-    func coalescesAdjacentSameColorForegroundRuns() {
-        let store = HighlightStyleStore()
-        let operations = store.apply(
+    @Test("Highlight render snapshot coalesces adjacent same-color runs")
+    func highlightRenderSnapshotCoalescesAdjacentSameColorRuns() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet:
             HighlightRunSet(
                 colorRuns: [
                     HighlightColorRun(range: NSRange(location: 0, length: 2), color: redColor),
@@ -257,22 +168,25 @@ struct SyntaxEditorUICommonTests {
                 ],
                 fontRuns: []
             ),
-            refreshedRange: NSRange(location: 0, length: 5),
-            mutation: nil,
+            range: NSRange(location: 0, length: 5),
+            revision: 1,
+            language: .swift,
             textLength: 5,
             baseForeground: baseForeground,
             baseFont: nil
         )
 
-        #expect(operations.colorOperations.count == 1)
-        #expect(operations.colorOperations.first?.range == NSRange(location: 0, length: 5))
-        #expect(store.appliedColorRunsForTesting.count == 1)
+        #expect(store.appliedColorRunsForTesting.map(\.range) == [
+            NSRange(location: 0, length: 5),
+        ])
+        #expect(store.epoch == 1)
     }
 
-    @Test("Highlight style store diffs only refreshed foreground ranges")
-    func diffsOnlyRefreshedForegroundRanges() {
-        let store = HighlightStyleStore()
-        _ = store.apply(
+    @Test("Highlight render snapshot replaces only committed range")
+    func highlightRenderSnapshotReplacesOnlyCommittedRange() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet:
             HighlightRunSet(
                 colorRuns: [
                     HighlightColorRun(range: NSRange(location: 0, length: 3), color: redColor),
@@ -280,195 +194,223 @@ struct SyntaxEditorUICommonTests {
                 ],
                 fontRuns: []
             ),
-            refreshedRange: NSRange(location: 0, length: 20),
-            mutation: nil,
+            range: NSRange(location: 0, length: 20),
+            revision: 1,
+            language: .swift,
             textLength: 20,
             baseForeground: baseForeground,
             baseFont: nil
         )
-
-        let unchangedOperations = store.apply(
-            HighlightRunSet(
-                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 3), color: redColor)],
-                fontRuns: []
-            ),
-            refreshedRange: NSRange(location: 0, length: 3),
-            mutation: nil,
-            textLength: 20,
-            baseForeground: baseForeground,
-            baseFont: nil
-        )
-        #expect(unchangedOperations.colorOperations.isEmpty)
-
-        let changedOperations = store.apply(
+        store.commitSnapshot(
+            runSet:
             HighlightRunSet(
                 colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 3), color: blueColor)],
                 fontRuns: []
             ),
-            refreshedRange: NSRange(location: 0, length: 3),
-            mutation: nil,
+            range: NSRange(location: 0, length: 3),
+            revision: 2,
+            language: .swift,
             textLength: 20,
             baseForeground: baseForeground,
             baseFont: nil
         )
-        #expect(changedOperations.colorOperations.map(\.range) == [
-            NSRange(location: 0, length: 3),
-            NSRange(location: 0, length: 3),
-        ])
+
         #expect(store.appliedColorRunsForTesting.map(\.range) == [
             NSRange(location: 0, length: 3),
             NSRange(location: 10, length: 3),
         ])
+        #expect(store.appliedColorRunsForTesting.first?.color.isEqual(blueColor) == true)
+        #expect(store.appliedColorRunsForTesting.last?.color.isEqual(redColor) == true)
     }
 
-    @Test("Highlight style store refreshes plain foreground when base foreground changes")
-    func refreshesPlainForegroundWhenBaseForegroundChanges() {
-        let store = HighlightStyleStore()
-        _ = store.apply(
-            HighlightRunSet(
-                colorRuns: [HighlightColorRun(range: NSRange(location: 4, length: 2), color: redColor)],
-                fontRuns: []
-            ),
-            refreshedRange: NSRange(location: 0, length: 12),
-            mutation: nil,
-            textLength: 12,
-            baseForeground: baseForeground,
-            baseFont: nil
-        )
-
-        let operations = store.apply(
-            HighlightRunSet(
-                colorRuns: [HighlightColorRun(range: NSRange(location: 4, length: 2), color: redColor)],
-                fontRuns: []
-            ),
-            refreshedRange: NSRange(location: 0, length: 12),
-            mutation: nil,
-            textLength: 12,
-            baseForeground: blueColor,
-            baseFont: nil
-        )
-
-        #expect(operations.colorOperations.map(\.range) == [
-            NSRange(location: 0, length: 12),
-            NSRange(location: 4, length: 2),
-        ])
-        #expect(operations.colorOperations.first?.color.isEqual(blueColor) == true)
-        #expect(operations.colorOperations.last?.color.isEqual(redColor) == true)
-    }
-
-    @Test("Highlight style store resets expanding foreground runs before applying replacement style")
-    func resetsExpandingForegroundRunsBeforeApplyingReplacementStyle() {
-        let store = HighlightStyleStore()
-        _ = store.apply(
-            HighlightRunSet(
-                colorRuns: [HighlightColorRun(range: NSRange(location: 5, length: 5), color: blueColor)],
-                fontRuns: []
-            ),
-            refreshedRange: NSRange(location: 0, length: 10),
-            mutation: nil,
-            textLength: 10,
-            baseForeground: baseForeground,
-            baseFont: nil
-        )
-
-        let operations = store.apply(
+    @Test("Pending highlight edit keeps snapshot unshifted and resolves visible insertion lazily")
+    func pendingHighlightEditKeepsSnapshotUnshiftedAndResolvesVisibleInsertionLazily() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet:
             HighlightRunSet(
                 colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
                 fontRuns: []
             ),
-            refreshedRange: NSRange(location: 0, length: 10),
-            mutation: nil,
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
             textLength: 10,
             baseForeground: baseForeground,
             baseFont: nil
         )
 
-        #expect(operations.colorOperations.map(\.range) == [
-            NSRange(location: 5, length: 5),
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            currentTextLength: 12
+        )
+
+        #expect(store.appliedColorRunsForTesting.map(\.range) == [
             NSRange(location: 0, length: 10),
         ])
-        #expect(operations.colorOperations.first?.color.isEqual(baseForeground) == true)
-        #expect(operations.colorOperations.last?.color.isEqual(redColor) == true)
-    }
-
-    @Test("Highlight style store records text mutation without repainting unaffected split runs")
-    func recordsTextMutationWithoutRepaintingUnaffectedSplitRuns() {
-        let store = HighlightStyleStore()
-        _ = store.apply(
-            HighlightRunSet(
-                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
-                fontRuns: []
-            ),
-            refreshedRange: NSRange(location: 0, length: 10),
-            mutation: nil,
-            textLength: 10,
-            baseForeground: baseForeground,
-            baseFont: nil
-        )
-
-        let operations = store.apply(
-            HighlightRunSet(colorRuns: [], fontRuns: []),
-            refreshedRange: NSRange(location: 5, length: 2),
-            mutation: SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
-            textLength: 12,
-            baseForeground: baseForeground,
-            baseFont: nil
-        )
-        #expect(store.appliedColorRunsForTesting.map(\.range) == [
+        #expect(store.colorRuns(in: NSRange(location: 0, length: 12)).map(\.range) == [
             NSRange(location: 0, length: 5),
             NSRange(location: 7, length: 5),
         ])
-        #expect(operations.colorOperations.isEmpty)
+        #expect(store.pendingDirtyRangesForTesting == [NSRange(location: 5, length: 2)])
     }
 
-    @Test("Highlight style store resets shrinking font runs before applying replacement style")
-    func resetsShrinkingFontRunsBeforeApplyingReplacementStyle() {
-        let store = HighlightStyleStore()
-        let baseFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        let boldFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 13, weight: .bold)
-
-        _ = store.apply(
-            HighlightRunSet(
-                colorRuns: [],
-                fontRuns: [HighlightFontRun(range: NSRange(location: 0, length: 10), font: boldFont)]
-            ),
-            refreshedRange: NSRange(location: 0, length: 10),
-            mutation: nil,
-            textLength: 10,
-            baseForeground: baseForeground,
-            baseFont: baseFont
-        )
-
-        let operations = store.apply(
-            HighlightRunSet(
-                colorRuns: [],
-                fontRuns: [HighlightFontRun(range: NSRange(location: 0, length: 5), font: boldFont)]
-            ),
-            refreshedRange: NSRange(location: 0, length: 10),
-            mutation: nil,
-            textLength: 10,
-            baseForeground: baseForeground,
-            baseFont: baseFont
-        )
-
-        #expect(operations.fontOperations.map(\.range) == [
-            NSRange(location: 0, length: 10),
-            NSRange(location: 0, length: 5),
-        ])
-        #expect(operations.fontOperations.first?.font == baseFont)
-        #expect(operations.fontOperations.last?.font == boldFont)
-    }
-
-    @Test("Highlight style store resets logical state without repaint operations")
-    func resetsLogicalStateWithoutRepaintOperations() {
-        let store = HighlightStyleStore()
-        _ = store.apply(
+    @Test("Pending highlight edit resolves deletion and replacement lazily")
+    func pendingHighlightEditResolvesDeletionAndReplacementLazily() {
+        let deletionStore = HighlightRenderSnapshotStore()
+        deletionStore.commitSnapshot(
+            runSet:
             HighlightRunSet(
                 colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
                 fontRuns: []
             ),
-            refreshedRange: NSRange(location: 0, length: 10),
-            mutation: nil,
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+        deletionStore.recordPendingEdit(
+            SyntaxHighlightMutation(location: 3, length: 2, replacement: ""),
+            currentTextLength: 8
+        )
+        #expect(deletionStore.colorRuns(in: NSRange(location: 0, length: 8)).map(\.range) == [
+            NSRange(location: 0, length: 3),
+            NSRange(location: 4, length: 4),
+        ])
+
+        let replacementStore = HighlightRenderSnapshotStore()
+        replacementStore.commitSnapshot(
+            runSet:
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+        replacementStore.recordPendingEdit(
+            SyntaxHighlightMutation(location: 2, length: 3, replacement: "XY"),
+            currentTextLength: 9
+        )
+        #expect(replacementStore.colorRuns(in: NSRange(location: 0, length: 9)).map(\.range) == [
+            NSRange(location: 0, length: 2),
+            NSRange(location: 4, length: 5),
+        ])
+    }
+
+    @Test("Pending highlight edit composes multiple edits")
+    func pendingHighlightEditComposesMultipleEdits() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet:
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            currentTextLength: 12
+        )
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 0, length: 0, replacement: "y"),
+            currentTextLength: 13
+        )
+
+        #expect(store.colorRuns(in: NSRange(location: 0, length: 13)).map(\.range) == [
+            NSRange(location: 1, length: 5),
+            NSRange(location: 8, length: 5),
+        ])
+        #expect(store.pendingDirtyRangesForTesting == [
+            NSRange(location: 0, length: 1),
+            NSRange(location: 6, length: 2),
+        ])
+    }
+
+    @Test("Highlight visible resolver suppresses marked text ranges")
+    func highlightVisibleResolverSuppressesMarkedTextRanges() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil,
+            suppressionRanges: [NSRange(location: 3, length: 3)]
+        )
+
+        #expect(store.colorRuns(in: NSRange(location: 0, length: 10)).map(\.range) == [
+            NSRange(location: 0, length: 3),
+            NSRange(location: 6, length: 4),
+        ])
+    }
+
+    @Test("Snapshot commit clears pending highlight edits")
+    func snapshotCommitClearsPendingHighlightEdits() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            currentTextLength: 12
+        )
+        #expect(store.hasPendingEditsForTesting)
+
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 12), color: blueColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 12),
+            revision: 2,
+            language: .swift,
+            textLength: 12,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        #expect(!store.hasPendingEditsForTesting)
+        #expect(store.foregroundColor(at: 5)?.isEqual(blueColor) == true)
+    }
+
+    @Test("Highlight render snapshot resets logical state")
+    func highlightRenderSnapshotResetsLogicalState() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
             textLength: 10,
             baseForeground: baseForeground,
             baseFont: nil
@@ -479,16 +421,6 @@ struct SyntaxEditorUICommonTests {
         #expect(store.appliedColorRunsForTesting.isEmpty)
         #expect(store.appliedFontRunsForTesting.isEmpty)
         #expect(store.epoch == 2)
-
-        let operations = store.apply(
-            HighlightRunSet(colorRuns: [], fontRuns: []),
-            refreshedRange: NSRange(location: 0, length: 40),
-            mutation: nil,
-            textLength: 40,
-            baseForeground: baseForeground,
-            baseFont: nil
-        )
-        #expect(operations.isEmpty)
     }
 }
 

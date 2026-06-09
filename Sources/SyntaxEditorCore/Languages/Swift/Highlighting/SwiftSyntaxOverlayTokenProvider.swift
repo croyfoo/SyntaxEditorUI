@@ -631,7 +631,8 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             range: range,
             syntaxID: syntaxID,
             language: .swift,
-            rawCaptureName: EditorSyntaxCapture.rawCaptureName(syntaxID: syntaxID, language: .swift)
+            rawCaptureName: EditorSyntaxCapture.rawCaptureName(syntaxID: syntaxID, language: .swift),
+            isSemanticOverlay: true
         )
     }
 

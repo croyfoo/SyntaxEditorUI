@@ -7,11 +7,26 @@ package struct SyntaxHighlightToken: Equatable, Sendable {
     package let syntaxID: EditorSourceSyntaxID
     package let language: SyntaxLanguage?
     package let rawCaptureName: String
+    package let isSemanticOverlay: Bool
 
     package init(
         range: NSRange,
         rawCaptureName: String,
         language: SyntaxLanguage = .swift
+    ) {
+        self.init(
+            range: range,
+            rawCaptureName: rawCaptureName,
+            language: language,
+            isSemanticOverlay: false
+        )
+    }
+
+    package init(
+        range: NSRange,
+        rawCaptureName: String,
+        language: SyntaxLanguage,
+        isSemanticOverlay: Bool
     ) {
         let classification = EditorSyntaxCapture.parse(
             rawCaptureName: rawCaptureName,
@@ -21,7 +36,8 @@ package struct SyntaxHighlightToken: Equatable, Sendable {
             range: range,
             syntaxID: classification.syntaxID,
             language: classification.language ?? language,
-            rawCaptureName: rawCaptureName
+            rawCaptureName: rawCaptureName,
+            isSemanticOverlay: isSemanticOverlay
         )
     }
 
@@ -31,10 +47,27 @@ package struct SyntaxHighlightToken: Equatable, Sendable {
         language: SyntaxLanguage?,
         rawCaptureName: String
     ) {
+        self.init(
+            range: range,
+            syntaxID: syntaxID,
+            language: language,
+            rawCaptureName: rawCaptureName,
+            isSemanticOverlay: false
+        )
+    }
+
+    package init(
+        range: NSRange,
+        syntaxID: EditorSourceSyntaxID,
+        language: SyntaxLanguage?,
+        rawCaptureName: String,
+        isSemanticOverlay: Bool
+    ) {
         self.range = range
         self.syntaxID = syntaxID
         self.language = language
         self.rawCaptureName = rawCaptureName
+        self.isSemanticOverlay = isSemanticOverlay
     }
 }
 
@@ -622,7 +655,8 @@ private final class SyntaxHighlightSession {
         )
         let semanticPartialRefreshRange = semanticPartialRefreshRange(
             source: nextLayeredSource,
-            refreshRange: semanticRefreshSeedRange
+            refreshRange: semanticRefreshSeedRange,
+            mutation: layeredMutation
         )
         let replacementHighlight = semanticPartialRefreshRange.flatMap {
             guard Self.range($0, contains: queryRange) else {
@@ -913,7 +947,8 @@ private extension SyntaxHighlightSession {
                 range: adjustedRange,
                 syntaxID: token.syntaxID,
                 language: token.language,
-                rawCaptureName: token.rawCaptureName
+                rawCaptureName: token.rawCaptureName,
+                isSemanticOverlay: token.isSemanticOverlay
             )
             if adjustedRange.location < refreshedRange.location {
                 before.append(adjustedToken)
@@ -1039,7 +1074,8 @@ private extension SyntaxHighlightSession {
                     range: adjustedRange,
                     syntaxID: token.syntaxID,
                     language: token.language,
-                    rawCaptureName: token.rawCaptureName
+                    rawCaptureName: token.rawCaptureName,
+                    isSemanticOverlay: token.isSemanticOverlay
                 )
             )
         }
@@ -1123,14 +1159,19 @@ private extension SyntaxHighlightSession {
 
     func semanticPartialRefreshRange(
         source: String,
-        refreshRange: NSRange
+        refreshRange: NSRange,
+        mutation: SyntaxHighlightMutation? = nil
     ) -> NSRange? {
         let nsSource = source as NSString
         switch language {
         case .swift:
             return SwiftSyntaxOverlayTokenProvider.semanticTargetRange(refreshRange, in: nsSource)
         case .objectiveC:
-            return ObjectiveCSyntaxOverlayTokenProvider.semanticTargetRange(refreshRange, in: nsSource)
+            return ObjectiveCSyntaxOverlayTokenProvider.semanticTargetRange(
+                refreshRange,
+                in: nsSource,
+                mutation: mutation
+            )
         default:
             return nil
         }

@@ -12,13 +12,13 @@ package final class EditorTextSystem {
     package let textContentStorage: NSTextContentStorage
     package let layoutManager: NSTextLayoutManager
     package let container: NSTextContainer
-    package let styleStore: HighlightStyleStore
+    package let styleStore: HighlightRenderSnapshotStore
 
     package init(
         textContentStorage: NSTextContentStorage = NSTextContentStorage(),
         layoutManager: NSTextLayoutManager = NSTextLayoutManager(),
         container: NSTextContainer = NSTextContainer(),
-        styleStore: HighlightStyleStore = HighlightStyleStore()
+        styleStore: HighlightRenderSnapshotStore = HighlightRenderSnapshotStore()
     ) {
         self.textContentStorage = textContentStorage
         self.layoutManager = layoutManager
