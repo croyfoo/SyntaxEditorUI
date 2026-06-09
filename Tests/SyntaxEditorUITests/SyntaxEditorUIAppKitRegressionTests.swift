@@ -2311,6 +2311,51 @@ extension SyntaxEditorUITests {
         #expect(renderingForeground == nil)
     }
 
+    @Test("SyntaxEditorView clears macOS marked-text highlight suppression after unmarking")
+    @MainActor
+    func syntaxEditorViewMacClearsMarkedTextHighlightSuppressionAfterUnmarking() async {
+        let source = "let value = 1"
+        let theme = syntaxEditorUITestTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            theme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+        layoutMacEditorView(editorView)
+
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+
+        let markedRange = NSRange(location: 0, length: 3)
+        editorView.textView.markedTextRangeStorage = markedRange
+        editorView.textView.markedTextAttributedStringStorage = NSAttributedString(
+            string: "let",
+            attributes: editorView.textView.typingAttributes
+        )
+        editorView.textView.applyMarkedTextAttributes()
+        editorView.textView.didChangeMarkedTextRange?()
+
+        #expect(editorView.textView.markedRange() == markedRange)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+
+        editorView.textView.unmarkText()
+
+        #expect(editorView.textView.markedRange().location == NSNotFound)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+    }
+
     @Test("SyntaxEditorView preserves macOS highlights for observed document edits")
     @MainActor
     func syntaxEditorViewMacObservedDocumentEditsPreserveExistingHighlights() async {

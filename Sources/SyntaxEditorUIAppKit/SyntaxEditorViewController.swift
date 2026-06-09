@@ -315,6 +315,9 @@ public final class SyntaxEditorView: NSScrollView {
         nativeTextView.lineWrappingStateProvider = { [weak self] in
             self?.model.lineWrappingEnabled ?? false
         }
+        nativeTextView.didChangeMarkedTextRange = { [weak self] in
+            self?.syncMarkedTextSuppressionRanges()
+        }
 
         configureScrollView()
         configureTextView()
@@ -2023,6 +2026,14 @@ public final class SyntaxEditorView: NSScrollView {
         guard markedRange.location != NSNotFound else { return [] }
         let clamped = SyntaxEditorRangeUtilities.clampedRange(markedRange, utf16Length: textLength)
         return clamped.length > 0 ? [clamped] : []
+    }
+
+    private func syncMarkedTextSuppressionRanges() {
+        let textLength = textStorage.length
+        textSystem.styleStore.updateSuppressionRanges(
+            foregroundSuppressionRanges(textLength: textLength),
+            textLength: textLength
+        )
     }
 
     private func syntaxHighlightRunSet(

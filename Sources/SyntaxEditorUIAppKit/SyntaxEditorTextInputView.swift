@@ -20,6 +20,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     var lineWrappingStateProvider: (() -> Bool)?
     var didChangeText: (() -> Void)?
     var didChangeSelection: (() -> Void)?
+    var didChangeMarkedTextRange: (() -> Void)?
     var shouldChangeText: (([NSRange], [String]) -> Bool)?
 
     var typingAttributes: [NSAttributedString.Key: Any] = [:]
@@ -777,6 +778,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         from previousRange: NSRange?,
         to currentRange: NSRange?
     ) {
+        didChangeMarkedTextRange?()
         let ranges = [previousRange, currentRange].compactMap { range -> NSRange? in
             guard let range,
                   range.location != NSNotFound,
