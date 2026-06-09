@@ -508,7 +508,9 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
     let fastTokens: [SyntaxHighlightToken]
     let updateFastTokens: [SyntaxHighlightToken]?
     let completeTokens: [SyntaxHighlightToken]
+    let updateCompleteTokens: [SyntaxHighlightToken]?
     let completeGate: ManualSyntaxHighlightGate?
+    let updateRefreshRange: NSRange?
     var resetCount = 0
     var updateCount = 0
 
@@ -516,12 +518,16 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         fastTokens: [SyntaxHighlightToken],
         updateFastTokens: [SyntaxHighlightToken]? = nil,
         completeTokens: [SyntaxHighlightToken],
-        completeGate: ManualSyntaxHighlightGate? = nil
+        updateCompleteTokens: [SyntaxHighlightToken]? = nil,
+        completeGate: ManualSyntaxHighlightGate? = nil,
+        updateRefreshRange: NSRange? = nil
     ) {
         self.fastTokens = fastTokens
         self.updateFastTokens = updateFastTokens
         self.completeTokens = completeTokens
+        self.updateCompleteTokens = updateCompleteTokens
         self.completeGate = completeGate
+        self.updateRefreshRange = updateRefreshRange
     }
 
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
@@ -534,7 +540,8 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
             source: source,
             language: language,
             revision: revision,
-            phase: .complete
+            phase: .complete,
+            refreshRange: nil
         )
     }
 
@@ -548,6 +555,7 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
             fastTokens: fastTokens,
             completeTokens: completeTokens,
             completeGate: completeGate,
+            refreshRange: nil,
             source: source,
             language: language,
             revision: revision
@@ -565,11 +573,12 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
             await completeGate.suspend()
         }
         return Self.result(
-            tokens: completeTokens,
+            tokens: updateCompleteTokens ?? completeTokens,
             source: source,
             language: language,
             revision: revision,
-            phase: .complete
+            phase: .complete,
+            refreshRange: updateRefreshRange
         )
     }
 
@@ -582,8 +591,9 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         updateCount += 1
         return Self.phases(
             fastTokens: updateFastTokens ?? fastTokens,
-            completeTokens: completeTokens,
+            completeTokens: updateCompleteTokens ?? completeTokens,
             completeGate: completeGate,
+            refreshRange: updateRefreshRange,
             source: source,
             language: language,
             revision: revision
@@ -598,6 +608,7 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         fastTokens: [SyntaxHighlightToken],
         completeTokens: [SyntaxHighlightToken],
         completeGate: ManualSyntaxHighlightGate?,
+        refreshRange: NSRange?,
         source: String,
         language: SyntaxLanguage,
         revision: Int
@@ -610,7 +621,8 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
                         source: source,
                         language: language,
                         revision: revision,
-                        phase: .syntacticFastPass
+                        phase: .syntacticFastPass,
+                        refreshRange: refreshRange
                     )
                 )
                 if let completeGate {
@@ -626,7 +638,8 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
                         source: source,
                         language: language,
                         revision: revision,
-                        phase: .complete
+                        phase: .complete,
+                        refreshRange: refreshRange
                     )
                 )
                 continuation.finish()
@@ -642,14 +655,15 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         source: String,
         language: SyntaxLanguage,
         revision: Int,
-        phase: SyntaxHighlightPhase
+        phase: SyntaxHighlightPhase,
+        refreshRange: NSRange?
     ) -> SyntaxHighlightResult {
         SyntaxHighlightResult(
             tokens: tokens,
             source: source,
             language: language,
             revision: revision,
-            refreshRange: NSRange(location: 0, length: source.utf16.count),
+            refreshRange: refreshRange ?? NSRange(location: 0, length: source.utf16.count),
             phase: phase
         )
     }

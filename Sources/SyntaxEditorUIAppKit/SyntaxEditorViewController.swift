@@ -1514,11 +1514,6 @@ public final class SyntaxEditorView: NSScrollView {
             && textSystem.styleStore.hasMaterializedRuns
     }
 
-    private func canApplyIncrementalHighlightRefreshRange(for result: SyntaxHighlightResult) -> Bool {
-        hasMaterializedCompletedHighlightToAvoidDowngrade(for: result)
-            && lastHighlightRevision == result.revision - 1
-    }
-
     private func highlightApplicationRefreshRange(
         for result: SyntaxHighlightResult,
         mutation: SyntaxHighlightMutation?
@@ -1526,11 +1521,13 @@ public final class SyntaxEditorView: NSScrollView {
         guard mutation != nil else {
             return result.refreshRange
         }
-
-        guard canApplyIncrementalHighlightRefreshRange(for: result) else {
+        guard textSystem.styleStore.hasMaterializedRuns else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
-
+        if let lastHighlightRevision,
+           (lastHighlightRevision != result.revision - 1 || lastHighlightLanguage != result.language) {
+            return NSRange(location: 0, length: result.source.utf16.count)
+        }
         return result.refreshRange
     }
 
@@ -2142,12 +2139,13 @@ public final class SyntaxEditorView: NSScrollView {
         _ range: NSRange,
         from runs: inout [SyntaxHighlightResolvedRun]
     ) {
-        var index = runs.count
-        while index > 0 {
-            index -= 1
+        var index = firstResolvedRunIndex(intersecting: range, in: runs)
+        while index < runs.count {
             let run = runs[index]
+            guard run.range.location < range.upperBound else { break }
             let intersection = SyntaxEditorRangeUtilities.intersection(of: run.range, and: range)
             guard intersection.length > 0 else {
+                index += 1
                 continue
             }
 
@@ -2160,8 +2158,10 @@ public final class SyntaxEditorView: NSScrollView {
                 runs.remove(at: index)
             } else if resetStart <= runStart {
                 runs[index].range = NSRange(location: resetEnd, length: runEnd - resetEnd)
+                break
             } else if resetEnd >= runEnd {
                 runs[index].range = NSRange(location: runStart, length: resetStart - runStart)
+                index += 1
             } else {
                 let trailingRun = SyntaxHighlightResolvedRun(
                     key: run.key,
@@ -2170,8 +2170,26 @@ public final class SyntaxEditorView: NSScrollView {
                 )
                 runs[index].range = NSRange(location: runStart, length: resetStart - runStart)
                 runs.insert(trailingRun, at: index + 1)
+                break
             }
         }
+    }
+
+    private func firstResolvedRunIndex(
+        intersecting range: NSRange,
+        in runs: [SyntaxHighlightResolvedRun]
+    ) -> Int {
+        var lowerBound = 0
+        var upperBound = runs.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if runs[middle].range.upperBound <= range.location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
     }
 
     private func recordAppliedHighlight(

@@ -11926,6 +11926,38 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine inserts Objective-C semantic overlays inside partial target range")
+    func highlighterInsertsObjectiveCSemanticOverlaysInsidePartialTargetRange() async throws {
+        let source = """
+        id boxed(void)
+        {
+            return ;
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "return ;", with: "return @YES;")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(syntaxIDs(
+            in: incremental.tokens,
+            source: updatedSource,
+            text: "@YES",
+            inOccurrenceOf: "return @YES;"
+        ).contains(.number))
+    }
+
     @Test("SyntaxHighlighterEngine strips stale Objective-C boxed expression delimiters across partial ranges")
     func highlighterStripsStaleObjectiveCBoxedExpressionDelimitersAcrossPartialRanges() async throws {
         let source = """

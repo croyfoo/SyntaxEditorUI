@@ -877,6 +877,76 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView keeps macOS complete incremental materialization inside refresh range")
+    @MainActor
+    func syntaxEditorViewMacKeepsCompleteIncrementalMaterializationInsideRefreshRange() async {
+        let source = "let value = 1"
+        let theme = syntaxEditorUITestTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0xABCDEF),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let insertedRange = NSRange(location: source.utf16.count, length: 1)
+        let completeGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorPhasedTestHighlighter(
+            fastTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            updateFastTokens: [],
+            completeTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            updateCompleteTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.string"
+                ),
+                SyntaxHighlightToken(
+                    range: insertedRange,
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            completeGate: completeGate,
+            updateRefreshRange: insertedRange
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            theme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await completeGate.waitUntilSuspended()
+        #expect(await syntaxEditorWaitForColor(
+            { macEditorForegroundColor(editorView, at: 0) },
+            equals: theme.keyword
+        ))
+
+        let insertionRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.textView.setSelectedRange(insertionRange)
+        let updateSuspensionCount = await completeGate.currentSuspensionCount()
+        editorView.textView.insertText("x", replacementRange: insertionRange)
+        await completeGate.waitUntilSuspended(after: updateSuspensionCount)
+
+        await completeGate.resumeAll()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.textView.string == "\(source)x")
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(
+            syntaxEditorUITestColorsEqual(
+                macEditorForegroundColor(editorView, at: source.utf16.count),
+                theme.keyword
+            )
+        )
+    }
+
     @Test("SyntaxEditorView applies macOS incremental fast pass after empty complete highlight")
     @MainActor
     func syntaxEditorViewMacAppliesIncrementalFastPassAfterEmptyCompleteHighlight() async {

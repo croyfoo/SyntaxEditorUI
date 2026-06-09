@@ -481,6 +481,7 @@ private final class SyntaxHighlightSession {
     private var layer: LanguageLayer?
     private let lineIndex = SyntaxHighlightLineIndex()
     private var tokens: [SyntaxHighlightToken] = []
+    private var tokenPrefixMaxUpperBounds: [Int] = []
     private var swiftSemanticState: SwiftSemanticOverlayState?
     private var objectiveCSemanticState: ObjectiveCSemanticOverlayState?
 
@@ -503,6 +504,7 @@ private final class SyntaxHighlightSession {
         guard !layeredSource.isEmpty else {
             layer = nil
             tokens = []
+            tokenPrefixMaxUpperBounds = []
             return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
         }
 
@@ -511,6 +513,7 @@ private final class SyntaxHighlightSession {
             guard let fullEdit = Self.fullReplacementInputEdit(for: layeredSource) else {
                 self.layer = nil
                 tokens = []
+                tokenPrefixMaxUpperBounds = []
                 return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
             }
             _ = layer.didChangeContent(
@@ -537,6 +540,7 @@ private final class SyntaxHighlightSession {
                 swiftSemanticState = nil
                 objectiveCSemanticState = nil
                 tokens = []
+                tokenPrefixMaxUpperBounds = []
                 return SyntaxHighlightResult(
                     tokens: [],
                     source: source,
@@ -548,9 +552,11 @@ private final class SyntaxHighlightSession {
             let classifiedTokens = semanticResult.tokens
 
             tokens = classifiedTokens
+            tokenPrefixMaxUpperBounds = Self.prefixMaxUpperBounds(for: tokens)
         } catch {
             layer = nil
             tokens = []
+            tokenPrefixMaxUpperBounds = []
         }
 
         return SyntaxHighlightResult(
@@ -681,24 +687,24 @@ private final class SyntaxHighlightSession {
         let semanticOverlayRefreshRange = semanticPartialRefreshRange.map {
             Self.union($0, replacementMergeRange)
         }
-        let mergedHighlight = Self.mergedHighlightTokens(
-            existingTokens: tokens,
+        let syntacticRefreshRange = Self.mergeHighlightTokens(
+            into: &tokens,
+            prefixMaxUpperBounds: &tokenPrefixMaxUpperBounds,
             replacementTokens: replacementHighlight.tokens,
             refreshedRange: replacementMergeRange,
             mutation: layeredMutation,
             previousSourceUTF16Length: previousLayeredSource.utf16.count,
             nextSourceUTF16Length: nextSourceLength
         )
-        let refreshRange = mergedHighlight.refreshRange
         emitSyntacticFastPassIfNeeded(
-            tokens: mergedHighlight.tokens,
+            tokens: tokens,
             source: nextSource,
             revision: revision,
-            refreshRange: refreshRange,
+            refreshRange: syntacticRefreshRange,
             emitFastPass: emitFastPass
         )
         let semanticResult = semanticClassifiedTokensIfNeeded(
-            mergedHighlight.tokens,
+            tokens,
             source: nextLayeredSource,
             rootNode: semanticRootNodeSnapshot(),
             refreshRange: semanticOverlayRefreshRange,
@@ -711,9 +717,9 @@ private final class SyntaxHighlightSession {
         let resultRefreshRange = semanticResult.refreshRangeOverride.map {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
         } ?? semanticRefreshRange(
-            previousTokens: mergedHighlight.tokens,
+            previousTokens: tokens,
             classifiedTokens: classifiedTokens,
-            baseRefreshRange: refreshRange,
+            baseRefreshRange: syntacticRefreshRange,
             sourceUTF16Length: nextSourceLength
         )
 
@@ -721,6 +727,7 @@ private final class SyntaxHighlightSession {
         layeredSource = nextLayeredSource
         lineIndex.apply(mutation: layeredMutation, previousSource: previousLayeredSource)
         tokens = classifiedTokens
+        tokenPrefixMaxUpperBounds = Self.prefixMaxUpperBounds(for: tokens)
 
         return SyntaxHighlightResult(
             tokens: tokens,
@@ -865,6 +872,7 @@ private extension SyntaxHighlightSession {
         layer = nil
         swiftSemanticState = nil
         objectiveCSemanticState = nil
+        tokenPrefixMaxUpperBounds = []
         return cancelledUpdateResult(revision: revision)
     }
 
@@ -901,20 +909,115 @@ private extension SyntaxHighlightSession {
         return nsSource.lineRange(for: NSRange(location: location, length: 0))
     }
 
-    static func mergedHighlightTokens(
-        existingTokens: [SyntaxHighlightToken],
+    static func mergeHighlightTokens(
+        into existingTokens: inout [SyntaxHighlightToken],
+        prefixMaxUpperBounds: inout [Int],
         replacementTokens: [SyntaxHighlightToken],
         refreshedRange: NSRange,
         mutation: SyntaxHighlightMutation,
         previousSourceUTF16Length: Int,
         nextSourceUTF16Length: Int
-    ) -> (tokens: [SyntaxHighlightToken], refreshRange: NSRange) {
+    ) -> NSRange {
         let oldRefreshRange = oldRange(
             correspondingTo: refreshedRange,
             mutation: mutation,
             previousSourceUTF16Length: previousSourceUTF16Length,
             nextSourceUTF16Length: nextSourceUTF16Length
         )
+        var refreshRange = refreshedRange
+        if prefixMaxUpperBounds.count != existingTokens.count {
+            prefixMaxUpperBounds = Self.prefixMaxUpperBounds(for: existingTokens)
+        }
+        let removalLowerBound = firstTokenIndex(
+            intersecting: oldRefreshRange,
+            prefixMaxUpperBounds: prefixMaxUpperBounds
+        )
+        if removalLowerBound < existingTokens.count,
+           existingTokens[removalLowerBound].range.location < oldRefreshRange.location {
+            return mergeHighlightTokensByScanning(
+                into: &existingTokens,
+                prefixMaxUpperBounds: &prefixMaxUpperBounds,
+                replacementTokens: replacementTokens,
+                refreshedRange: refreshedRange,
+                oldRefreshRange: oldRefreshRange,
+                mutation: mutation,
+                previousSourceUTF16Length: previousSourceUTF16Length,
+                nextSourceUTF16Length: nextSourceUTF16Length
+            )
+        }
+        var removalUpperBound = removalLowerBound
+        while removalUpperBound < existingTokens.count,
+              existingTokens[removalUpperBound].range.location < oldRefreshRange.upperBound {
+            let token = existingTokens[removalUpperBound]
+            let oldRange = SyntaxEditorRangeUtilities.clampedRange(
+                token.range,
+                utf16Length: previousSourceUTF16Length
+            )
+            if SyntaxEditorRangeUtilities.intersection(of: oldRange, and: oldRefreshRange).length == 0 {
+                break
+            }
+            if let adjustedRange = rangeForRefreshAfterApplyingMutation(
+                oldRange,
+                mutation: mutation,
+                nextSourceUTF16Length: nextSourceUTF16Length
+            ) {
+                refreshRange = union(refreshRange, adjustedRange)
+            }
+            removalUpperBound += 1
+        }
+
+        var suffixWriteIndex = removalUpperBound
+        var suffixReadIndex = removalUpperBound
+        while suffixReadIndex < existingTokens.count {
+            let token = existingTokens[suffixReadIndex]
+            let oldRange = SyntaxEditorRangeUtilities.clampedRange(
+                token.range,
+                utf16Length: previousSourceUTF16Length
+            )
+            guard let adjustedRange = rangeAfterApplyingMutation(
+                oldRange,
+                mutation: mutation,
+                nextSourceUTF16Length: nextSourceUTF16Length
+            ) else {
+                suffixReadIndex += 1
+                continue
+            }
+            existingTokens[suffixWriteIndex] = SyntaxHighlightToken(
+                range: adjustedRange,
+                syntaxID: token.syntaxID,
+                language: token.language,
+                rawCaptureName: token.rawCaptureName,
+                isSemanticOverlay: token.isSemanticOverlay
+            )
+            suffixWriteIndex += 1
+            suffixReadIndex += 1
+        }
+
+        if suffixWriteIndex < existingTokens.count {
+            existingTokens.removeSubrange(suffixWriteIndex..<existingTokens.count)
+        }
+        existingTokens.replaceSubrange(
+            removalLowerBound..<removalUpperBound,
+            with: replacementTokens.sorted(by: SyntaxHighlightTokenOrdering.displayOrder)
+        )
+        rebuildPrefixMaxUpperBounds(
+            &prefixMaxUpperBounds,
+            for: existingTokens,
+            from: removalLowerBound
+        )
+        return refreshRange
+    }
+
+    static func mergeHighlightTokensByScanning(
+        into existingTokens: inout [SyntaxHighlightToken],
+        prefixMaxUpperBounds: inout [Int],
+        replacementTokens: [SyntaxHighlightToken],
+        refreshedRange: NSRange,
+        oldRefreshRange: NSRange,
+        mutation: SyntaxHighlightMutation,
+        previousSourceUTF16Length: Int,
+        nextSourceUTF16Length: Int
+    ) -> NSRange {
         var refreshRange = refreshedRange
         var before: [SyntaxHighlightToken] = []
         var after: [SyntaxHighlightToken] = []
@@ -957,7 +1060,63 @@ private extension SyntaxHighlightSession {
             }
         }
 
-        return ((before + replacementTokens + after).sorted(by: SyntaxHighlightTokenOrdering.displayOrder), refreshRange)
+        existingTokens = (before + replacementTokens + after)
+            .sorted(by: SyntaxHighlightTokenOrdering.displayOrder)
+        prefixMaxUpperBounds = Self.prefixMaxUpperBounds(for: existingTokens)
+        return refreshRange
+    }
+
+    static func prefixMaxUpperBounds(for tokens: [SyntaxHighlightToken]) -> [Int] {
+        var maxUpperBound = 0
+        var prefix: [Int] = []
+        prefix.reserveCapacity(tokens.count)
+        for token in tokens {
+            maxUpperBound = max(maxUpperBound, token.range.upperBound)
+            prefix.append(maxUpperBound)
+        }
+        return prefix
+    }
+
+    static func rebuildPrefixMaxUpperBounds(
+        _ prefixMaxUpperBounds: inout [Int],
+        for tokens: [SyntaxHighlightToken],
+        from startIndex: Int
+    ) {
+        let startIndex = min(max(0, startIndex), tokens.count)
+        if prefixMaxUpperBounds.count != tokens.count {
+            let preservedCount = min(startIndex, prefixMaxUpperBounds.count, tokens.count)
+            prefixMaxUpperBounds = Array(prefixMaxUpperBounds.prefix(preservedCount))
+            if prefixMaxUpperBounds.count < tokens.count {
+                prefixMaxUpperBounds.append(
+                    contentsOf: repeatElement(0, count: tokens.count - prefixMaxUpperBounds.count)
+                )
+            }
+        }
+
+        var maxUpperBound = startIndex > 0 ? prefixMaxUpperBounds[startIndex - 1] : 0
+        guard startIndex < tokens.count else { return }
+        for index in startIndex..<tokens.count {
+            maxUpperBound = max(maxUpperBound, tokens[index].range.upperBound)
+            prefixMaxUpperBounds[index] = maxUpperBound
+        }
+    }
+
+    static func firstTokenIndex(
+        intersecting range: NSRange,
+        prefixMaxUpperBounds: [Int]
+    ) -> Int {
+        guard range.length > 0 else { return 0 }
+        var lowerBound = 0
+        var upperBound = prefixMaxUpperBounds.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if prefixMaxUpperBounds[middle] <= range.location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
     }
 
     static func lexicallyAdjustedReplacementHighlight(

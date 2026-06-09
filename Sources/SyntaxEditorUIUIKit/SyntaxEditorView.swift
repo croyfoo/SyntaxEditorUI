@@ -2107,11 +2107,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             && highlightStyleStore.hasMaterializedRuns
     }
 
-    private func canApplyIncrementalHighlightRefreshRange(for result: SyntaxHighlightResult) -> Bool {
-        hasMaterializedCompletedHighlightToAvoidDowngrade(for: result)
-            && lastHighlightRevision == result.revision - 1
-    }
-
     func highlightApplicationRefreshRange(
         for result: SyntaxHighlightResult,
         mutation: SyntaxHighlightMutation?
@@ -2119,11 +2114,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guard mutation != nil else {
             return result.refreshRange
         }
-
-        guard canApplyIncrementalHighlightRefreshRange(for: result) else {
+        guard highlightStyleStore.hasMaterializedRuns else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
-
+        if let lastHighlightRevision,
+           (lastHighlightRevision != result.revision - 1 || lastHighlightLanguage != result.language) {
+            return NSRange(location: 0, length: result.source.utf16.count)
+        }
         return result.refreshRange
     }
 
@@ -2209,11 +2206,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guard model.revision == expectedRevision else { return }
 
         let textLength = expectedSource.utf16.count
-        let clampedRefreshRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
-        let targetRange = SyntaxEditorRangeUtilities.clampedRange(
-            (expectedSource as NSString).paragraphRange(for: clampedRefreshRange),
-            utf16Length: textLength
-        )
+        let targetRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
         guard targetRange.length > 0 else {
             applyMatchingBracketHighlight(force: true)
             return
@@ -2258,11 +2251,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         let textLength = expectedSource.utf16.count
-        let clampedRefreshRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
-        let targetRange = SyntaxEditorRangeUtilities.clampedRange(
-            (expectedSource as NSString).paragraphRange(for: clampedRefreshRange),
-            utf16Length: textLength
-        )
+        let targetRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
         guard targetRange.length > 0 else {
             applyMatchingBracketHighlight(force: true)
             return true
@@ -2377,12 +2366,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         _ range: NSRange,
         fromColorRuns runs: inout [HighlightColorRun]
     ) {
-        var index = runs.count
-        while index > 0 {
-            index -= 1
+        var index = firstColorRunIndex(intersecting: range, in: runs)
+        while index < runs.count {
             let run = runs[index]
+            guard run.range.location < range.upperBound else { break }
             let intersection = SyntaxEditorRangeUtilities.intersection(of: run.range, and: range)
             guard intersection.length > 0 else {
+                index += 1
                 continue
             }
 
@@ -2395,8 +2385,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 runs.remove(at: index)
             } else if resetStart <= runStart {
                 runs[index].range = NSRange(location: resetEnd, length: runEnd - resetEnd)
+                break
             } else if resetEnd >= runEnd {
                 runs[index].range = NSRange(location: runStart, length: resetStart - runStart)
+                index += 1
             } else {
                 let trailingRun = HighlightColorRun(
                     range: NSRange(location: resetEnd, length: runEnd - resetEnd),
@@ -2404,6 +2396,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 )
                 runs[index].range = NSRange(location: runStart, length: resetStart - runStart)
                 runs.insert(trailingRun, at: index + 1)
+                break
             }
         }
     }
@@ -2412,12 +2405,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         _ range: NSRange,
         fromFontRuns runs: inout [HighlightFontRun]
     ) {
-        var index = runs.count
-        while index > 0 {
-            index -= 1
+        var index = firstFontRunIndex(intersecting: range, in: runs)
+        while index < runs.count {
             let run = runs[index]
+            guard run.range.location < range.upperBound else { break }
             let intersection = SyntaxEditorRangeUtilities.intersection(of: run.range, and: range)
             guard intersection.length > 0 else {
+                index += 1
                 continue
             }
 
@@ -2430,8 +2424,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 runs.remove(at: index)
             } else if resetStart <= runStart {
                 runs[index].range = NSRange(location: resetEnd, length: runEnd - resetEnd)
+                break
             } else if resetEnd >= runEnd {
                 runs[index].range = NSRange(location: runStart, length: resetStart - runStart)
+                index += 1
             } else {
                 let trailingRun = HighlightFontRun(
                     range: NSRange(location: resetEnd, length: runEnd - resetEnd),
@@ -2439,8 +2435,37 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                 )
                 runs[index].range = NSRange(location: runStart, length: resetStart - runStart)
                 runs.insert(trailingRun, at: index + 1)
+                break
             }
         }
+    }
+
+    private func firstColorRunIndex(intersecting range: NSRange, in runs: [HighlightColorRun]) -> Int {
+        var lowerBound = 0
+        var upperBound = runs.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if runs[middle].range.upperBound <= range.location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
+    }
+
+    private func firstFontRunIndex(intersecting range: NSRange, in runs: [HighlightFontRun]) -> Int {
+        var lowerBound = 0
+        var upperBound = runs.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if runs[middle].range.upperBound <= range.location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
     }
 
     private func commitSyntaxHighlightSnapshot(

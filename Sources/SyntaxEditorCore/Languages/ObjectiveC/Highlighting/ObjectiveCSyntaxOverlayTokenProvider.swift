@@ -22,6 +22,8 @@ private struct ObjectiveCOverlayPreparation {
     let preservedOverlayTokens: [SyntaxHighlightToken]
     let nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex
     let tokenIndex: ObjectiveCTokenIndex
+    let partialMergeTargetRange: NSRange?
+    let partialMergeTokenRange: Range<Int>?
 }
 
 private struct ObjectiveCSemanticIndex {
@@ -453,12 +455,22 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 nonCodeRanges: preparation.nonCodeRangeIndex.ranges,
                 targetRange: targetRange
             )
-        let mergedTokens = deduplicated(
-            mergedTokens(
-                baseTokens: preparation.outputBaseTokens,
-                overlayTokens: preparation.preservedOverlayTokens + overlayTokens
+        let mergedTokens = if let partialMergeTargetRange = preparation.partialMergeTargetRange,
+                              let partialMergeTokenRange = preparation.partialMergeTokenRange {
+            partialMergedTokens(
+                existingTokens: tokens,
+                replacementOverlayTokens: overlayTokens,
+                targetRange: partialMergeTargetRange,
+                tokenRange: partialMergeTokenRange
             )
-        )
+        } else {
+            deduplicated(
+                mergedTokens(
+                    baseTokens: preparation.outputBaseTokens,
+                    overlayTokens: preparation.preservedOverlayTokens + overlayTokens
+                )
+            )
+        }
         state = ObjectiveCSemanticOverlayState(index: semanticIndex)
         return ObjectiveCSemanticOverlayResult(
             tokens: mergedTokens,
@@ -2553,7 +2565,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 tokens: baseTokensForIndex,
                 sourceLength: source.length
             ),
-            tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source)
+            tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source),
+            partialMergeTargetRange: nil,
+            partialMergeTokenRange: nil
         )
     }
 
@@ -2563,6 +2577,14 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         targetRange: NSRange?,
         preparesFullIndex: Bool
     ) -> ObjectiveCOverlayPreparation {
+        if let targetRange, !preparesFullIndex {
+            return preparedPartialTaggedOverlayInput(
+                from: tokens,
+                source: source,
+                targetRange: targetRange
+            )
+        }
+
         let indexRange = preparesFullIndex ? nil : targetRange
         var baseTokensForIndex: [SyntaxHighlightToken] = []
         var outputBaseTokens: [SyntaxHighlightToken] = []
@@ -2600,7 +2622,41 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 tokens: baseTokensForIndex,
                 sourceLength: source.length
             ),
-            tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source)
+            tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source),
+            partialMergeTargetRange: nil,
+            partialMergeTokenRange: nil
+        )
+    }
+
+    private static func preparedPartialTaggedOverlayInput(
+        from tokens: [SyntaxHighlightToken],
+        source: NSString,
+        targetRange: NSRange
+    ) -> ObjectiveCOverlayPreparation {
+        let clampedTargetRange = SyntaxEditorRangeUtilities.clampedRange(
+            targetRange,
+            utf16Length: source.length
+        )
+        let tokenRange = tokenIndexRangeForPartialMerge(in: tokens, targetRange: clampedTargetRange)
+        var baseTokensForIndex: [SyntaxHighlightToken] = []
+        baseTokensForIndex.reserveCapacity(tokenRange.count)
+
+        for token in tokens[tokenRange] where !token.isSemanticOverlay {
+            guard rangesIntersect(token.range, clampedTargetRange) else { continue }
+            baseTokensForIndex.append(token)
+        }
+
+        return ObjectiveCOverlayPreparation(
+            baseTokensForIndex: baseTokensForIndex,
+            outputBaseTokens: [],
+            preservedOverlayTokens: [],
+            nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex(
+                tokens: baseTokensForIndex,
+                sourceLength: source.length
+            ),
+            tokenIndex: ObjectiveCTokenIndex(tokens: baseTokensForIndex, source: source),
+            partialMergeTargetRange: clampedTargetRange,
+            partialMergeTokenRange: tokenRange
         )
     }
 
@@ -2623,6 +2679,98 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             }
             return SyntaxHighlightTokenOrdering.displayOrder(lhs.token, rhs.token)
         }.map(\.token)
+    }
+
+    private static func partialMergedTokens(
+        existingTokens: [SyntaxHighlightToken],
+        replacementOverlayTokens: [SyntaxHighlightToken],
+        targetRange: NSRange,
+        tokenRange: Range<Int>
+    ) -> [SyntaxHighlightToken] {
+        var baseSegment: [SyntaxHighlightToken] = []
+        var overlaySegment: [SyntaxHighlightToken] = []
+        baseSegment.reserveCapacity(tokenRange.count)
+        overlaySegment.reserveCapacity(tokenRange.count + replacementOverlayTokens.count)
+        for token in existingTokens[tokenRange] {
+            if token.isSemanticOverlay {
+                guard !rangesIntersect(token.range, targetRange) else {
+                    continue
+                }
+                overlaySegment.append(token)
+            } else {
+                baseSegment.append(token)
+            }
+        }
+        overlaySegment.append(contentsOf: replacementOverlayTokens)
+        let segment = deduplicated(mergedTokens(baseTokens: baseSegment, overlayTokens: overlaySegment))
+
+        var merged = existingTokens
+        merged.replaceSubrange(tokenRange, with: segment)
+        return merged
+    }
+
+    private static func tokenIndexRangeForPartialMerge(
+        in tokens: [SyntaxHighlightToken],
+        targetRange: NSRange
+    ) -> Range<Int> {
+        guard targetRange.length > 0 else { return 0..<0 }
+
+        let prefixMaxUpperBounds = prefixMaxUpperBounds(for: tokens)
+        let startIndex = firstTokenIndex(
+            intersecting: targetRange,
+            prefixMaxUpperBounds: prefixMaxUpperBounds
+        )
+        var upperBound = lowerBoundForTokenLocation(targetRange.upperBound, in: tokens)
+        while upperBound < tokens.count,
+              tokens[upperBound].range.location < targetRange.upperBound {
+            upperBound += 1
+        }
+        return startIndex..<upperBound
+    }
+
+    private static func prefixMaxUpperBounds(for tokens: [SyntaxHighlightToken]) -> [Int] {
+        var prefixMaxUpperBounds: [Int] = []
+        prefixMaxUpperBounds.reserveCapacity(tokens.count)
+        var maxUpperBound = 0
+        for token in tokens {
+            maxUpperBound = max(maxUpperBound, token.range.upperBound)
+            prefixMaxUpperBounds.append(maxUpperBound)
+        }
+        return prefixMaxUpperBounds
+    }
+
+    private static func firstTokenIndex(
+        intersecting range: NSRange,
+        prefixMaxUpperBounds: [Int]
+    ) -> Int {
+        var lowerBound = 0
+        var upperBound = prefixMaxUpperBounds.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if prefixMaxUpperBounds[middle] <= range.location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
+    }
+
+    private static func lowerBoundForTokenLocation(
+        _ location: Int,
+        in tokens: [SyntaxHighlightToken]
+    ) -> Int {
+        var lowerBound = 0
+        var upperBound = tokens.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if tokens[middle].range.location < location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
     }
 
     private static func isObjectiveCSemanticOverlayToken(
@@ -3981,7 +4129,7 @@ private struct ObjectiveCFileSymbolIndex {
     private static func firstNonWhitespaceLocation(in line: NSString) -> Int {
         var cursor = 0
         while cursor < line.length {
-            if !isWhitespace(line.substring(with: NSRange(location: cursor, length: 1))) {
+            if !isWhitespaceCodeUnit(line.character(at: cursor)) {
                 return cursor
             }
             cursor += 1
@@ -4003,8 +4151,8 @@ private struct ObjectiveCFileSymbolIndex {
                 cursor = min(nextCursor, upperBound)
                 continue
             }
-            let character = declaration.substring(with: NSRange(location: cursor, length: 1))
-            if character == ",",
+            let character = declaration.character(at: cursor)
+            if character == commaCodeUnit,
                parenDepth == 0,
                bracketDepth == 0,
                braceDepth == 0,
@@ -4022,8 +4170,8 @@ private struct ObjectiveCFileSymbolIndex {
             updateDeclarationDelimiterDepth(
                 character: character,
                 next: cursor + 1 < declaration.length
-                    ? declaration.substring(with: NSRange(location: cursor + 1, length: 1))
-                    : "",
+                    ? declaration.character(at: cursor + 1)
+                    : 0,
                 parenDepth: &parenDepth,
                 bracketDepth: &bracketDepth,
                 braceDepth: &braceDepth,
@@ -4044,7 +4192,7 @@ private struct ObjectiveCFileSymbolIndex {
         let searchEnd = declarationAssignmentLocation(in: segmentRange, declaration: declaration) ?? segmentRange.upperBound
         var end = min(searchEnd, declaration.length)
         while end > segmentRange.location,
-              isWhitespace(declaration.substring(with: NSRange(location: end - 1, length: 1))) {
+              isWhitespaceCodeUnit(declaration.character(at: end - 1)) {
             end -= 1
         }
         guard let range = identifierRange(before: end, in: declaration) else {
@@ -4072,8 +4220,8 @@ private struct ObjectiveCFileSymbolIndex {
                 cursor = min(nextCursor, upperBound)
                 continue
             }
-            let character = declaration.substring(with: NSRange(location: cursor, length: 1))
-            if character == "=",
+            let character = declaration.character(at: cursor)
+            if character == equalsCodeUnit,
                parenDepth == 0,
                bracketDepth == 0,
                braceDepth == 0,
@@ -4083,8 +4231,8 @@ private struct ObjectiveCFileSymbolIndex {
             updateDeclarationDelimiterDepth(
                 character: character,
                 next: cursor + 1 < declaration.length
-                    ? declaration.substring(with: NSRange(location: cursor + 1, length: 1))
-                    : "",
+                    ? declaration.character(at: cursor + 1)
+                    : 0,
                 parenDepth: &parenDepth,
                 bracketDepth: &bracketDepth,
                 braceDepth: &braceDepth,
@@ -4093,6 +4241,75 @@ private struct ObjectiveCFileSymbolIndex {
             cursor += 1
         }
         return nil
+    }
+
+    private static let backslashCodeUnit: unichar = 92
+    private static let colonCodeUnit: unichar = 58
+    private static let commaCodeUnit: unichar = 44
+    private static let doubleQuoteCodeUnit: unichar = 34
+    private static let equalsCodeUnit: unichar = 61
+    private static let greaterThanCodeUnit: unichar = 62
+    private static let lessThanCodeUnit: unichar = 60
+    private static let openBraceCodeUnit: unichar = 123
+    private static let openBracketCodeUnit: unichar = 91
+    private static let openParenCodeUnit: unichar = 40
+    private static let closeBraceCodeUnit: unichar = 125
+    private static let closeBracketCodeUnit: unichar = 93
+    private static let closeParenCodeUnit: unichar = 41
+    private static let semicolonCodeUnit: unichar = 59
+    private static let singleQuoteCodeUnit: unichar = 39
+    private static let slashCodeUnit: unichar = 47
+    private static let starCodeUnit: unichar = 42
+
+    private static func singleUTF16CodeUnit(_ text: String) -> unichar? {
+        var iterator = text.utf16.makeIterator()
+        guard let first = iterator.next(),
+              iterator.next() == nil else {
+            return nil
+        }
+        return first
+    }
+
+    private static func isWhitespaceCodeUnit(_ codeUnit: unichar) -> Bool {
+        switch codeUnit {
+        case 9, 10, 11, 12, 13, 32:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func updateDeclarationDelimiterDepth(
+        character: unichar,
+        next: unichar,
+        parenDepth: inout Int,
+        bracketDepth: inout Int,
+        braceDepth: inout Int,
+        angleDepth: inout Int
+    ) {
+        if character == openParenCodeUnit {
+            parenDepth += 1
+        } else if character == closeParenCodeUnit {
+            parenDepth = max(0, parenDepth - 1)
+        } else if character == openBracketCodeUnit {
+            bracketDepth += 1
+        } else if character == closeBracketCodeUnit {
+            bracketDepth = max(0, bracketDepth - 1)
+        } else if character == openBraceCodeUnit {
+            braceDepth += 1
+        } else if character == closeBraceCodeUnit {
+            braceDepth = max(0, braceDepth - 1)
+        } else if character == lessThanCodeUnit,
+                  next != lessThanCodeUnit,
+                  parenDepth == 0,
+                  bracketDepth == 0,
+                  braceDepth == 0 {
+            angleDepth += 1
+        } else if character == greaterThanCodeUnit,
+                  angleDepth > 0,
+                  next != greaterThanCodeUnit {
+            angleDepth -= 1
+        }
     }
 
     private static func updateDeclarationDelimiterDepth(
@@ -4399,16 +4616,16 @@ private struct ObjectiveCFileSymbolIndex {
                 cursor = min(nextCursor, upperBound)
                 continue
             }
-            let character = source.substring(with: NSRange(location: cursor, length: 1))
-            if character.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let character = source.character(at: cursor)
+            if isWhitespaceCodeUnit(character) {
                 cursor += 1
                 continue
             }
-            if character == "{",
+            if character == openBraceCodeUnit,
                let closeBrace = matchingClosingBraceLocation(in: source, openBraceLocation: cursor) {
                 return min(scopeUpperBound, closeBrace + 1)
             }
-            if character == ";" {
+            if character == semicolonCodeUnit {
                 return min(scopeUpperBound, cursor + 1)
             }
             cursor += 1
@@ -4443,12 +4660,12 @@ private struct ObjectiveCFileSymbolIndex {
                 cursor = nextCursor
                 continue
             }
-            let character = clause.substring(with: NSRange(location: cursor, length: 1))
+            let character = clause.character(at: cursor)
             updateDeclarationDelimiterDepth(
                 character: character,
                 next: cursor + 1 < clause.length
-                    ? clause.substring(with: NSRange(location: cursor + 1, length: 1))
-                    : "",
+                    ? clause.character(at: cursor + 1)
+                    : 0,
                 parenDepth: &parenDepth,
                 bracketDepth: &bracketDepth,
                 braceDepth: &braceDepth,
@@ -4458,7 +4675,7 @@ private struct ObjectiveCFileSymbolIndex {
                bracketDepth == 0,
                braceDepth == 0,
                angleDepth == 0 {
-                if character == ";" {
+                if character == semicolonCodeUnit {
                     return cursor
                 }
                 if clauseHasStandaloneIn(at: cursor, in: clause) {
@@ -4496,10 +4713,10 @@ private struct ObjectiveCFileSymbolIndex {
                 cursor = min(nextCursor, upperBound)
                 continue
             }
-            let character = source.substring(with: NSRange(location: cursor, length: 1))
-            if character == "{" {
+            let character = source.character(at: cursor)
+            if character == openBraceCodeUnit {
                 stack.append(cursor)
-            } else if character == "}" {
+            } else if character == closeBraceCodeUnit {
                 _ = stack.popLast()
             }
             cursor += 1
@@ -4517,12 +4734,12 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static func methodParameterNameRange(_ range: NSRange, in header: NSString) -> Bool {
         guard let closeParen = previousNonWhitespaceLocation(before: range.location, in: header),
-              header.substring(with: NSRange(location: closeParen, length: 1)) == ")",
+              header.character(at: closeParen) == closeParenCodeUnit,
               let openParen = matchingOpeningParenLocation(before: closeParen, in: header),
               let beforeType = previousNonWhitespaceLocation(before: openParen, in: header) else {
             return false
         }
-        return header.substring(with: NSRange(location: beforeType, length: 1)) == ":"
+        return header.character(at: beforeType) == colonCodeUnit
     }
 
     private static func cParameterNameRange(_ range: NSRange, in header: NSString) -> Bool {
@@ -4545,8 +4762,8 @@ private struct ObjectiveCFileSymbolIndex {
         guard location > 0 else { return nil }
         var cursor = min(location, text.length) - 1
         while cursor >= 0 {
-            let character = text.substring(with: NSRange(location: cursor, length: 1))
-            if !isWhitespace(character) {
+            let character = text.character(at: cursor)
+            if !isWhitespaceCodeUnit(character) {
                 return cursor
             }
             if cursor == 0 { break }
@@ -4559,10 +4776,10 @@ private struct ObjectiveCFileSymbolIndex {
         var depth = 0
         var cursor = closeParen
         while cursor >= 0 {
-            let character = text.substring(with: NSRange(location: cursor, length: 1))
-            if character == ")" {
+            let character = text.character(at: cursor)
+            if character == closeParenCodeUnit {
                 depth += 1
-            } else if character == "(" {
+            } else if character == openParenCodeUnit {
                 depth -= 1
                 if depth == 0 {
                     return cursor
@@ -4575,11 +4792,12 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func previousLocation(ofAny needles: [String], before location: Int, in text: NSString) -> Int? {
+        let needleCodeUnits = needles.compactMap(singleUTF16CodeUnit)
         guard location > 0 else { return nil }
         var cursor = min(location, text.length) - 1
         while cursor >= 0 {
-            let character = text.substring(with: NSRange(location: cursor, length: 1))
-            if needles.contains(character) {
+            let character = text.character(at: cursor)
+            if needleCodeUnits.contains(character) {
                 return cursor
             }
             if cursor == 0 { break }
@@ -4589,10 +4807,11 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func nextLocation(ofAny needles: [String], after location: Int, in text: NSString) -> Int? {
+        let needleCodeUnits = needles.compactMap(singleUTF16CodeUnit)
         var cursor = min(max(0, location), text.length)
         while cursor < text.length {
-            let character = text.substring(with: NSRange(location: cursor, length: 1))
-            if needles.contains(character) {
+            let character = text.character(at: cursor)
+            if needleCodeUnits.contains(character) {
                 return cursor
             }
             cursor += 1
@@ -4608,10 +4827,10 @@ private struct ObjectiveCFileSymbolIndex {
                 cursor = nextCursor
                 continue
             }
-            let character = text.substring(with: NSRange(location: cursor, length: 1))
-            if character == "(" {
+            let character = text.character(at: cursor)
+            if character == openParenCodeUnit {
                 depth += 1
-            } else if character == ")" {
+            } else if character == closeParenCodeUnit {
                 depth -= 1
                 if depth == 0 {
                     return cursor
@@ -4630,12 +4849,12 @@ private struct ObjectiveCFileSymbolIndex {
                 cursor = nextCursor
                 continue
             }
-            let character = source.substring(with: NSRange(location: cursor, length: 1))
-            if character == "{", depth == 0 {
+            let character = source.character(at: cursor)
+            if character == openBraceCodeUnit, depth == 0 {
                 depth = 1
-            } else if character == "{" {
+            } else if character == openBraceCodeUnit {
                 depth += 1
-            } else if character == "}" {
+            } else if character == closeBraceCodeUnit {
                 depth -= 1
                 if depth == 0 {
                     return cursor
@@ -4651,22 +4870,22 @@ private struct ObjectiveCFileSymbolIndex {
               location < text.length else {
             return nil
         }
-        let character = text.substring(with: NSRange(location: location, length: 1))
+        let character = text.character(at: location)
         let next = location + 1 < text.length
-            ? text.substring(with: NSRange(location: location + 1, length: 1))
-            : ""
-        if character == "\"" || character == "'" {
+            ? text.character(at: location + 1)
+            : 0
+        if character == doubleQuoteCodeUnit || character == singleQuoteCodeUnit {
             return indexAfterQuotedLiteral(startingAt: location, quote: character, in: text)
         }
-        if character == "/", next == "/" {
+        if character == slashCodeUnit, next == slashCodeUnit {
             return text.lineRange(for: NSRange(location: location, length: 0)).upperBound
         }
-        if character == "/", next == "*" {
+        if character == slashCodeUnit, next == starCodeUnit {
             var cursor = location + 2
             while cursor + 1 < text.length {
-                let current = text.substring(with: NSRange(location: cursor, length: 1))
-                let following = text.substring(with: NSRange(location: cursor + 1, length: 1))
-                if current == "*", following == "/" {
+                let current = text.character(at: cursor)
+                let following = text.character(at: cursor + 1)
+                if current == starCodeUnit, following == slashCodeUnit {
                     return cursor + 2
                 }
                 cursor += 1
@@ -4700,13 +4919,13 @@ private struct ObjectiveCFileSymbolIndex {
         var isInBlockComment = isInBlockComment
         var cursor = 0
         while cursor < line.length {
-            let character = line.substring(with: NSRange(location: cursor, length: 1))
+            let character = line.character(at: cursor)
             let nextLocation = cursor + 1
             let next = nextLocation < line.length
-                ? line.substring(with: NSRange(location: nextLocation, length: 1))
-                : nil
+                ? line.character(at: nextLocation)
+                : 0
             if isInBlockComment {
-                if character == "*", next == "/" {
+                if character == starCodeUnit, next == slashCodeUnit {
                     isInBlockComment = false
                     cursor += 2
                     continue
@@ -4714,21 +4933,21 @@ private struct ObjectiveCFileSymbolIndex {
                 cursor += 1
                 continue
             }
-            if character == "/", next == "/" {
+            if character == slashCodeUnit, next == slashCodeUnit {
                 break
             }
-            if character == "/", next == "*" {
+            if character == slashCodeUnit, next == starCodeUnit {
                 isInBlockComment = true
                 cursor += 2
                 continue
             }
-            if character == "\"" || character == "'" {
+            if character == doubleQuoteCodeUnit || character == singleQuoteCodeUnit {
                 cursor = indexAfterQuotedLiteral(startingAt: cursor, quote: character, in: line)
                 continue
             }
-            if character == "{" {
+            if character == openBraceCodeUnit {
                 result += 1
-            } else if character == "}" {
+            } else if character == closeBraceCodeUnit {
                 result = max(0, result - 1)
             }
             cursor += 1
@@ -4737,13 +4956,20 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func indexAfterQuotedLiteral(startingAt quoteLocation: Int, quote: String, in text: NSString) -> Int {
+        guard let quote = singleUTF16CodeUnit(quote) else {
+            return min(text.length, quoteLocation + 1)
+        }
+        return indexAfterQuotedLiteral(startingAt: quoteLocation, quote: quote, in: text)
+    }
+
+    private static func indexAfterQuotedLiteral(startingAt quoteLocation: Int, quote: unichar, in text: NSString) -> Int {
         var cursor = quoteLocation + 1
         var isEscaped = false
         while cursor < text.length {
-            let character = text.substring(with: NSRange(location: cursor, length: 1))
+            let character = text.character(at: cursor)
             if isEscaped {
                 isEscaped = false
-            } else if character == "\\" {
+            } else if character == backslashCodeUnit {
                 isEscaped = true
             } else if character == quote {
                 return cursor + 1
@@ -4836,17 +5062,23 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     private static func firstBraceRange(in line: NSString, brace: String, after location: Int = 0) -> NSRange? {
-        firstCodeCharacterRange(in: line, character: brace, after: location)
+        guard let brace = singleUTF16CodeUnit(brace) else { return nil }
+        return firstCodeCharacterRange(in: line, character: brace, after: location)
     }
 
     private static func firstCodeCharacterRange(in line: NSString, character: String, after location: Int = 0) -> NSRange? {
+        guard let character = singleUTF16CodeUnit(character) else { return nil }
+        return firstCodeCharacterRange(in: line, character: character, after: location)
+    }
+
+    private static func firstCodeCharacterRange(in line: NSString, character: unichar, after location: Int = 0) -> NSRange? {
         var cursor = min(max(0, location), line.length)
         while cursor < line.length {
             if let nextCursor = indexAfterCommentOrQuotedLiteral(startingAt: cursor, in: line) {
                 cursor = nextCursor
                 continue
             }
-            if line.substring(with: NSRange(location: cursor, length: 1)) == character {
+            if line.character(at: cursor) == character {
                 return NSRange(location: cursor, length: 1)
             }
             cursor += 1
