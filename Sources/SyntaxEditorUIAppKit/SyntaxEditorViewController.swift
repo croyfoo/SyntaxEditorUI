@@ -1972,17 +1972,16 @@ public final class SyntaxEditorView: NSScrollView {
             return
         }
         var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes)
-        let fullRange = NSRange(location: 0, length: textLength)
         let runSet = syntaxHighlightRunSet(
             for: tokens,
-            targetRange: fullRange,
+            targetRange: targetRange,
             textLength: textLength,
             resolver: &resolver,
             baseFont: baseAttributes[.font] as? NSFont
         )
         let invalidatedDirtyRanges = textSystem.styleStore.commitSnapshot(
             runSet: runSet,
-            range: fullRange,
+            range: targetRange,
             revision: revision,
             language: language,
             textLength: textLength,
@@ -2004,10 +2003,9 @@ public final class SyntaxEditorView: NSScrollView {
             return false
         }
         var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes)
-        let fullRange = NSRange(location: 0, length: textLength)
         let runSet = syntaxHighlightRunSet(
             for: tokens,
-            targetRange: fullRange,
+            targetRange: targetRange,
             textLength: textLength,
             resolver: &resolver,
             baseFont: baseAttributes[.font] as? NSFont
@@ -2015,7 +2013,7 @@ public final class SyntaxEditorView: NSScrollView {
         guard !Task.isCancelled, model.revision == expectedRevision else { return false }
         let invalidatedDirtyRanges = textSystem.styleStore.commitSnapshot(
             runSet: runSet,
-            range: fullRange,
+            range: targetRange,
             revision: expectedRevision,
             language: model.language,
             textLength: textLength,

@@ -244,12 +244,18 @@ package struct HighlightVisibleRunResolver {
     private let pendingEditMap: PendingHighlightEditMap
     private let currentTextLength: Int
     private let currentSuppressionRanges: [NSRange]
+    private let currentColorRuns: [HighlightColorRun]
+    private let currentFontRuns: [HighlightFontRun]
+    private let currentMaterializedRanges: [NSRange]
 
     package init(
         snapshot: HighlightRenderSnapshot,
         pendingEditMap: PendingHighlightEditMap,
         currentTextLength: Int,
-        currentSuppressionRanges: [NSRange]
+        currentSuppressionRanges: [NSRange],
+        currentColorRuns: [HighlightColorRun],
+        currentFontRuns: [HighlightFontRun],
+        currentMaterializedRanges: [NSRange]
     ) {
         self.snapshot = snapshot
         self.pendingEditMap = pendingEditMap
@@ -258,12 +264,26 @@ package struct HighlightVisibleRunResolver {
             currentSuppressionRanges,
             textLength: max(0, currentTextLength)
         )
+        self.currentColorRuns = HighlightRunUtilities.coalescedColorRuns(
+            HighlightRunUtilities.normalizedColorRuns(currentColorRuns, textLength: max(0, currentTextLength))
+        )
+        self.currentFontRuns = HighlightRunUtilities.coalescedFontRuns(
+            HighlightRunUtilities.normalizedFontRuns(currentFontRuns, textLength: max(0, currentTextLength))
+        )
+        self.currentMaterializedRanges = HighlightRunUtilities.normalizedRanges(
+            currentMaterializedRanges,
+            textLength: max(0, currentTextLength)
+        )
     }
 
     package func forEachColorRun(
         in currentRange: NSRange,
         _ body: (HighlightColorRun) -> Void
     ) {
+        forEachCurrentColorRun(in: currentRange) { run in
+            body(HighlightColorRun(range: run.range, color: run.color))
+        }
+
         forEachCurrentVisibleRange(in: currentRange) { visibleRange in
             for snapshotRange in snapshotRanges(forCurrentVisibleRange: visibleRange) {
                 HighlightRunUtilities.forEachColorRun(snapshot.colorRuns, in: snapshotRange) { run in
@@ -281,6 +301,10 @@ package struct HighlightVisibleRunResolver {
         in currentRange: NSRange,
         _ body: (HighlightFontRun) -> Void
     ) {
+        forEachCurrentFontRun(in: currentRange) { run in
+            body(HighlightFontRun(range: run.range, font: run.font))
+        }
+
         forEachCurrentVisibleRange(in: currentRange) { visibleRange in
             for snapshotRange in snapshotRanges(forCurrentVisibleRange: visibleRange) {
                 HighlightRunUtilities.forEachFontRun(snapshot.fontRuns, in: snapshotRange) { run in
@@ -294,6 +318,32 @@ package struct HighlightVisibleRunResolver {
         }
     }
 
+    private func forEachCurrentColorRun(
+        in currentRange: NSRange,
+        _ body: (HighlightColorRun) -> Void
+    ) {
+        let visibleRanges = currentVisibleRangesForMaterializedRuns(in: currentRange)
+        for visibleRange in visibleRanges {
+            HighlightRunUtilities.forEachColorRun(currentColorRuns, in: visibleRange, body)
+        }
+    }
+
+    private func forEachCurrentFontRun(
+        in currentRange: NSRange,
+        _ body: (HighlightFontRun) -> Void
+    ) {
+        let visibleRanges = currentVisibleRangesForMaterializedRuns(in: currentRange)
+        for visibleRange in visibleRanges {
+            HighlightRunUtilities.forEachFontRun(currentFontRuns, in: visibleRange, body)
+        }
+    }
+
+    private func currentVisibleRangesForMaterializedRuns(in currentRange: NSRange) -> [NSRange] {
+        let clamped = SyntaxEditorRangeUtilities.clampedRange(currentRange, utf16Length: currentTextLength)
+        guard clamped.length > 0 else { return [] }
+        return HighlightRunUtilities.rangesBySubtracting(currentSuppressionRanges, from: clamped)
+    }
+
     private func forEachCurrentVisibleRange(
         in currentRange: NSRange,
         _ body: (NSRange) -> Void
@@ -302,7 +352,7 @@ package struct HighlightVisibleRunResolver {
         guard clamped.length > 0 else { return }
 
         let suppressedRanges = HighlightRunUtilities.normalizedRanges(
-            pendingEditMap.visibleDirtyRanges + currentSuppressionRanges,
+            pendingEditMap.visibleDirtyRanges + currentSuppressionRanges + currentMaterializedRanges,
             textLength: currentTextLength
         )
         for visibleRange in HighlightRunUtilities.rangesBySubtracting(suppressedRanges, from: clamped) {
@@ -328,6 +378,9 @@ package final class HighlightRenderSnapshotStore {
     private var pendingEditMap = PendingHighlightEditMap()
     private var currentTextLength = 0
     private var currentSuppressionRanges: [NSRange] = []
+    private var currentColorRuns: [HighlightColorRun] = []
+    private var currentFontRuns: [HighlightFontRun] = []
+    private var currentMaterializedRanges: [NSRange] = []
 
     package var baseForeground: SyntaxEditorColor? {
         snapshot.baseForeground
@@ -350,7 +403,7 @@ package final class HighlightRenderSnapshotStore {
     }
 
     package var hasMaterializedRuns: Bool {
-        !snapshot.colorRuns.isEmpty || !snapshot.fontRuns.isEmpty
+        !snapshot.colorRuns.isEmpty || !snapshot.fontRuns.isEmpty || !currentColorRuns.isEmpty || !currentFontRuns.isEmpty
     }
 
     package func colorRuns(in range: NSRange) -> [HighlightColorRun] {
@@ -427,13 +480,23 @@ package final class HighlightRenderSnapshotStore {
             baseChanged = true
         }
 
-        let invalidatedFontRanges = clearsFontRuns
-            ? HighlightRunUtilities.normalizedRanges(snapshot.fontRuns.map(\.range), textLength: nextTextLength)
-            : []
+        let invalidatedFontRanges: [NSRange]
+        if clearsFontRuns {
+            let snapshotFontRanges = snapshot.fontRuns.flatMap { run in
+                pendingEditMap.currentRanges(forSnapshotRange: run.range)
+            }
+            invalidatedFontRanges = HighlightRunUtilities.normalizedRanges(
+                snapshotFontRanges + currentFontRuns.map(\.range),
+                textLength: nextTextLength
+            )
+        } else {
+            invalidatedFontRanges = []
+        }
         let nextFontRuns = clearsFontRuns ? [] : snapshot.fontRuns
+        let clearsCurrentFontRuns = clearsFontRuns && !currentFontRuns.isEmpty
         let textLengthChanged = currentTextLength != nextTextLength
         currentTextLength = nextTextLength
-        guard baseChanged || textLengthChanged || nextFontRuns.count != snapshot.fontRuns.count else {
+        guard baseChanged || textLengthChanged || nextFontRuns.count != snapshot.fontRuns.count || clearsCurrentFontRuns else {
             return invalidatedFontRanges
         }
 
@@ -447,6 +510,9 @@ package final class HighlightRenderSnapshotStore {
             fontRuns: nextFontRuns,
             suppressionRanges: snapshot.suppressionRanges
         )
+        if clearsFontRuns {
+            currentFontRuns = []
+        }
         generation += 1
         return invalidatedFontRanges
     }
@@ -509,6 +575,19 @@ package final class HighlightRenderSnapshotStore {
             to: clampedRefreshRange
         )
 
+        if !pendingEditMap.isEmpty, !clampedRefreshRange.coversFullText(length: nextTextLength) {
+            HighlightRunUtilities.replaceColorRuns(&currentColorRuns, in: clampedRefreshRange, with: normalizedColorRuns)
+            HighlightRunUtilities.replaceFontRuns(&currentFontRuns, in: clampedRefreshRange, with: normalizedFontRuns)
+            currentMaterializedRanges = HighlightRunUtilities.normalizedRanges(
+                currentMaterializedRanges + [clampedRefreshRange],
+                textLength: nextTextLength
+            )
+            currentTextLength = nextTextLength
+            currentSuppressionRanges = normalizedSuppressionRanges
+            generation += 1
+            return []
+        }
+
         HighlightRunUtilities.replaceColorRuns(&nextColorRuns, in: clampedRefreshRange, with: normalizedColorRuns)
         HighlightRunUtilities.replaceFontRuns(&nextFontRuns, in: clampedRefreshRange, with: normalizedFontRuns)
 
@@ -525,6 +604,9 @@ package final class HighlightRenderSnapshotStore {
         currentTextLength = nextTextLength
         currentSuppressionRanges = normalizedSuppressionRanges
         pendingEditMap.clear()
+        currentColorRuns = []
+        currentFontRuns = []
+        currentMaterializedRanges = []
         generation += 1
         return clearedDirtyRanges
     }
@@ -570,6 +652,9 @@ package final class HighlightRenderSnapshotStore {
         currentTextLength = nextTextLength
         currentSuppressionRanges = []
         pendingEditMap.clear()
+        currentColorRuns = []
+        currentFontRuns = []
+        currentMaterializedRanges = []
         generation += 1
     }
 
@@ -588,6 +673,9 @@ package final class HighlightRenderSnapshotStore {
         currentTextLength = nextTextLength
         currentSuppressionRanges = []
         pendingEditMap.clear()
+        currentColorRuns = []
+        currentFontRuns = []
+        currentMaterializedRanges = []
         generation += 1
     }
 
@@ -596,8 +684,17 @@ package final class HighlightRenderSnapshotStore {
             snapshot: snapshot,
             pendingEditMap: pendingEditMap,
             currentTextLength: currentTextLength,
-            currentSuppressionRanges: currentSuppressionRanges
+            currentSuppressionRanges: currentSuppressionRanges,
+            currentColorRuns: currentColorRuns,
+            currentFontRuns: currentFontRuns,
+            currentMaterializedRanges: currentMaterializedRanges
         )
+    }
+}
+
+private extension NSRange {
+    func coversFullText(length textLength: Int) -> Bool {
+        location == 0 && length == textLength
     }
 }
 

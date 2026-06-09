@@ -2453,16 +2453,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     ) {
         guard let baseForeground = baseAttributes[.foregroundColor] as? UIColor else { return }
         var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes)
-        let fullRange = NSRange(location: 0, length: textLength)
         let runSet = syntaxHighlightRunSet(
             for: tokens,
-            renderRange: fullRange,
+            renderRange: targetRange,
             textLength: textLength,
             resolver: &resolver
         )
         let invalidatedDirtyRanges = highlightStyleStore.commitSnapshot(
             runSet: runSet,
-            range: fullRange,
+            range: targetRange,
             revision: revision,
             language: language,
             textLength: textLength,
