@@ -335,6 +335,47 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 3), theme.baseForeground))
     }
 
+    @Test("SyntaxEditorView resets multi-level empty-style macOS tokens to the base theme")
+    @MainActor
+    func syntaxEditorViewMacResetsMultiLevelEmptyStyleTokensToBaseTheme() async {
+        let source = "0123456789"
+        let theme = syntaxEditorUITestTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0x654321),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 10),
+                    rawCaptureName: "editor.syntax.javascript.keyword"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: 2, length: 6),
+                    rawCaptureName: "editor.syntax.javascript.string"
+                ),
+                SyntaxHighlightToken(
+                    range: NSRange(location: 4, length: 2),
+                    rawCaptureName: "editor.syntax.javascript.plain"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.javascript,
+            theme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 2), theme.string))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 4), theme.baseForeground))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 6), theme.string))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 8), theme.keyword))
+    }
+
     @Test("SyntaxEditorView reapplies macOS same-style tokens after empty-style splits")
     @MainActor
     func syntaxEditorViewMacReappliesSameStyleTokensAfterEmptyStyleSplits() async {

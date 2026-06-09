@@ -2316,41 +2316,94 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             }
 
             subtractSyntaxHighlightRange(intersection, fromColorRuns: &colorRuns, fontRuns: &fontRuns)
-            if var last = colorRuns.last,
-               last.color.isEqual(resolved.style.foregroundColor),
-               last.range.upperBound >= intersection.location,
-               intersection.upperBound >= last.range.location {
-                let lowerBound = min(last.range.location, intersection.location)
-                let upperBound = max(last.range.upperBound, intersection.upperBound)
-                last.range = NSRange(
-                    location: lowerBound,
-                    length: upperBound - lowerBound
-                )
-                colorRuns[colorRuns.count - 1] = last
-            } else {
-                colorRuns.append(
-                    HighlightColorRun(
-                        range: intersection,
-                        color: resolved.style.foregroundColor
-                    )
-                )
-            }
+            insertHighlightColorRun(
+                HighlightColorRun(
+                    range: intersection,
+                    color: resolved.style.foregroundColor
+                ),
+                into: &colorRuns
+            )
 
             let font = resolved.style.font
-            if var last = fontRuns.last,
-               last.font.isEqual(font),
-               last.range.upperBound >= intersection.location,
-               intersection.upperBound >= last.range.location {
-                let lowerBound = min(last.range.location, intersection.location)
-                let upperBound = max(last.range.upperBound, intersection.upperBound)
-                last.range = NSRange(location: lowerBound, length: upperBound - lowerBound)
-                fontRuns[fontRuns.count - 1] = last
-            } else {
-                fontRuns.append(HighlightFontRun(range: intersection, font: font))
-            }
+            insertHighlightFontRun(
+                HighlightFontRun(range: intersection, font: font),
+                into: &fontRuns
+            )
         }
 
         return HighlightRunSet(colorRuns: colorRuns, fontRuns: fontRuns)
+    }
+
+    private func insertHighlightColorRun(
+        _ run: HighlightColorRun,
+        into runs: inout [HighlightColorRun]
+    ) {
+        let insertionIndex = firstColorRunIndex(startingAtOrAfter: run.range.location, in: runs)
+        runs.insert(run, at: insertionIndex)
+        coalesceColorRuns(around: insertionIndex, in: &runs)
+    }
+
+    private func coalesceColorRuns(
+        around insertionIndex: Int,
+        in runs: inout [HighlightColorRun]
+    ) {
+        var index = insertionIndex
+        if index > 0, colorRunsCanCoalesce(runs[index - 1], runs[index]) {
+            let mergedRange = unionRange(runs[index - 1].range, runs[index].range)
+            runs[index - 1].range = mergedRange
+            runs.remove(at: index)
+            index -= 1
+        }
+        if index + 1 < runs.count, colorRunsCanCoalesce(runs[index], runs[index + 1]) {
+            let mergedRange = unionRange(runs[index].range, runs[index + 1].range)
+            runs[index].range = mergedRange
+            runs.remove(at: index + 1)
+        }
+    }
+
+    private func colorRunsCanCoalesce(_ lhs: HighlightColorRun, _ rhs: HighlightColorRun) -> Bool {
+        lhs.color.isEqual(rhs.color)
+            && lhs.range.upperBound >= rhs.range.location
+            && rhs.range.upperBound >= lhs.range.location
+    }
+
+    private func insertHighlightFontRun(
+        _ run: HighlightFontRun,
+        into runs: inout [HighlightFontRun]
+    ) {
+        let insertionIndex = firstFontRunIndex(startingAtOrAfter: run.range.location, in: runs)
+        runs.insert(run, at: insertionIndex)
+        coalesceFontRuns(around: insertionIndex, in: &runs)
+    }
+
+    private func coalesceFontRuns(
+        around insertionIndex: Int,
+        in runs: inout [HighlightFontRun]
+    ) {
+        var index = insertionIndex
+        if index > 0, fontRunsCanCoalesce(runs[index - 1], runs[index]) {
+            let mergedRange = unionRange(runs[index - 1].range, runs[index].range)
+            runs[index - 1].range = mergedRange
+            runs.remove(at: index)
+            index -= 1
+        }
+        if index + 1 < runs.count, fontRunsCanCoalesce(runs[index], runs[index + 1]) {
+            let mergedRange = unionRange(runs[index].range, runs[index + 1].range)
+            runs[index].range = mergedRange
+            runs.remove(at: index + 1)
+        }
+    }
+
+    private func fontRunsCanCoalesce(_ lhs: HighlightFontRun, _ rhs: HighlightFontRun) -> Bool {
+        lhs.font.isEqual(rhs.font)
+            && lhs.range.upperBound >= rhs.range.location
+            && rhs.range.upperBound >= lhs.range.location
+    }
+
+    private func unionRange(_ lhs: NSRange, _ rhs: NSRange) -> NSRange {
+        let lowerBound = min(lhs.location, rhs.location)
+        let upperBound = max(lhs.upperBound, rhs.upperBound)
+        return NSRange(location: lowerBound, length: upperBound - lowerBound)
     }
 
     private func subtractSyntaxHighlightRange(
@@ -2454,12 +2507,40 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return lowerBound
     }
 
+    private func firstColorRunIndex(startingAtOrAfter location: Int, in runs: [HighlightColorRun]) -> Int {
+        var lowerBound = 0
+        var upperBound = runs.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if runs[middle].range.location < location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
+    }
+
     private func firstFontRunIndex(intersecting range: NSRange, in runs: [HighlightFontRun]) -> Int {
         var lowerBound = 0
         var upperBound = runs.count
         while lowerBound < upperBound {
             let middle = lowerBound + (upperBound - lowerBound) / 2
             if runs[middle].range.upperBound <= range.location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
+    }
+
+    private func firstFontRunIndex(startingAtOrAfter location: Int, in runs: [HighlightFontRun]) -> Int {
+        var lowerBound = 0
+        var upperBound = runs.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if runs[middle].range.location < location {
                 lowerBound = middle + 1
             } else {
                 upperBound = middle

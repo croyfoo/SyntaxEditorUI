@@ -2110,29 +2110,59 @@ public final class SyntaxEditorView: NSScrollView {
             }
 
             subtractSyntaxHighlightRange(intersection, from: &runs)
-            if var last = runs.last,
-               last.key == resolved.key,
-               last.range.upperBound >= intersection.location,
-               intersection.upperBound >= last.range.location {
-                let lowerBound = min(last.range.location, intersection.location)
-                let upperBound = max(last.range.upperBound, intersection.upperBound)
-                last.range = NSRange(
-                    location: lowerBound,
-                    length: upperBound - lowerBound
-                )
-                runs[runs.count - 1] = last
-            } else {
-                runs.append(
-                    SyntaxHighlightResolvedRun(
-                        key: resolved.key,
-                        range: intersection,
-                        style: resolved.style
-                    )
-                )
-            }
+            insertSyntaxHighlightResolvedRun(
+                SyntaxHighlightResolvedRun(
+                    key: resolved.key,
+                    range: intersection,
+                    style: resolved.style
+                ),
+                into: &runs
+            )
         }
 
         return runs
+    }
+
+    private func insertSyntaxHighlightResolvedRun(
+        _ run: SyntaxHighlightResolvedRun,
+        into runs: inout [SyntaxHighlightResolvedRun]
+    ) {
+        let insertionIndex = firstResolvedRunIndex(startingAtOrAfter: run.range.location, in: runs)
+        runs.insert(run, at: insertionIndex)
+        coalesceResolvedRuns(around: insertionIndex, in: &runs)
+    }
+
+    private func coalesceResolvedRuns(
+        around insertionIndex: Int,
+        in runs: inout [SyntaxHighlightResolvedRun]
+    ) {
+        var index = insertionIndex
+        if index > 0, resolvedRunsCanCoalesce(runs[index - 1], runs[index]) {
+            let mergedRange = unionRange(runs[index - 1].range, runs[index].range)
+            runs[index - 1].range = mergedRange
+            runs.remove(at: index)
+            index -= 1
+        }
+        if index + 1 < runs.count, resolvedRunsCanCoalesce(runs[index], runs[index + 1]) {
+            let mergedRange = unionRange(runs[index].range, runs[index + 1].range)
+            runs[index].range = mergedRange
+            runs.remove(at: index + 1)
+        }
+    }
+
+    private func resolvedRunsCanCoalesce(
+        _ lhs: SyntaxHighlightResolvedRun,
+        _ rhs: SyntaxHighlightResolvedRun
+    ) -> Bool {
+        lhs.key == rhs.key
+            && lhs.range.upperBound >= rhs.range.location
+            && rhs.range.upperBound >= lhs.range.location
+    }
+
+    private func unionRange(_ lhs: NSRange, _ rhs: NSRange) -> NSRange {
+        let lowerBound = min(lhs.location, rhs.location)
+        let upperBound = max(lhs.upperBound, rhs.upperBound)
+        return NSRange(location: lowerBound, length: upperBound - lowerBound)
     }
 
     private func subtractSyntaxHighlightRange(
@@ -2184,6 +2214,23 @@ public final class SyntaxEditorView: NSScrollView {
         while lowerBound < upperBound {
             let middle = lowerBound + (upperBound - lowerBound) / 2
             if runs[middle].range.upperBound <= range.location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
+    }
+
+    private func firstResolvedRunIndex(
+        startingAtOrAfter location: Int,
+        in runs: [SyntaxHighlightResolvedRun]
+    ) -> Int {
+        var lowerBound = 0
+        var upperBound = runs.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if runs[middle].range.location < location {
                 lowerBound = middle + 1
             } else {
                 upperBound = middle
