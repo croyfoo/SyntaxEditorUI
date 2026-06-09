@@ -741,8 +741,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             )
         }
 
-        highlightStyleStore.forEachColorRun(in: fragmentRange) { [self] colorRun in
-            guard let textRange = textRange(forUTF16Range: colorRun.range) else { return }
+        let resolvedRuns = highlightStyleStore.resolveVisibleRuns(in: fragmentRange)
+        for colorRun in resolvedRuns.colorRuns {
+            guard let textRange = textRange(forUTF16Range: colorRun.range) else { continue }
             textLayoutManager.addRenderingAttribute(
                 .foregroundColor,
                 value: colorRun.color,
@@ -750,8 +751,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             )
         }
 
-        highlightStyleStore.forEachFontRun(in: fragmentRange) { [self] fontRun in
-            guard let textRange = textRange(forUTF16Range: fontRun.range) else { return }
+        for fontRun in resolvedRuns.fontRuns {
+            guard let textRange = textRange(forUTF16Range: fontRun.range) else { continue }
             textLayoutManager.addRenderingAttribute(
                 .font,
                 value: fontRun.font,
@@ -2051,6 +2052,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     ) async {
         guard !Task.isCancelled else { return }
         guard model.revision == result.revision else { return }
+        guard canApplyHighlightTokenPayload(for: result) else {
+            recordSkippedHighlightPhaseForTesting(result.phase, revision: result.revision)
+            scheduleHighlight(source: result.source, language: result.language, revision: result.revision)
+            return
+        }
         guard shouldMaterializeHighlightResult(result, mutation: mutation) else {
             recordSkippedHighlightPhaseForTesting(result.phase, revision: result.revision)
             return
@@ -2065,7 +2071,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             source: result.source,
             language: result.language,
             refreshRange: refreshRange,
-            mutation: mutation
+            mutation: mutation,
+            tokenPayload: result.tokenPayload
         )
         guard didApplyHighlight else { return }
         recordMaterializedHighlight(
@@ -2075,10 +2082,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         )
         recordAppliedHighlightPhaseForTesting(result.phase, revision: result.revision)
         guard result.phase == .complete else { return }
-        lastHighlightTokens = result.tokens
-        lastHighlightSource = result.source
-        lastHighlightRevision = result.revision
-        lastHighlightLanguage = result.language
+        recordAppliedHighlightTokenSnapshot(
+            tokens: result.tokens,
+            source: result.source,
+            revision: result.revision,
+            language: result.language,
+            tokenPayload: result.tokenPayload
+        )
     }
 
     private func shouldMaterializeHighlightResult(
@@ -2095,12 +2105,15 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func hasMaterializedCompletedHighlightToAvoidDowngrade(for result: SyntaxHighlightResult) -> Bool {
-        guard let lastHighlightRevision else {
+        guard materializedHighlightPhase == .complete,
+              materializedHighlightLanguage == result.language,
+              highlightStyleStore.hasMaterializedRuns,
+              let materializedHighlightRevision
+        else {
             return false
         }
 
-        return hasMaterializedCompletedHighlight(for: result)
-            && lastHighlightRevision < result.revision
+        return materializedHighlightRevision < result.revision
     }
 
     func highlightApplicationRefreshRange(
@@ -2110,31 +2123,19 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guard mutation != nil else {
             return result.refreshRange
         }
-        guard hasCompletedMaterializedHighlightBaseline(for: result) else {
-            return NSRange(location: 0, length: result.source.utf16.count)
-        }
         return result.refreshRange
     }
 
-    private func hasCompletedMaterializedHighlightBaseline(for result: SyntaxHighlightResult) -> Bool {
-        guard let lastHighlightRevision else {
+    private func canApplyHighlightTokenPayload(for result: SyntaxHighlightResult) -> Bool {
+        guard result.tokenPayload == .replacement else {
+            return true
+        }
+        guard materializedHighlightLanguage == result.language,
+              let materializedHighlightRevision
+        else {
             return false
         }
-
-        return hasMaterializedCompletedHighlight(for: result)
-            && lastHighlightRevision == result.revision - 1
-    }
-
-    private func hasMaterializedCompletedHighlight(for result: SyntaxHighlightResult) -> Bool {
-        guard let lastHighlightRevision else {
-            return false
-        }
-
-        return materializedHighlightPhase == .complete
-            && materializedHighlightRevision == lastHighlightRevision
-            && materializedHighlightLanguage == result.language
-            && lastHighlightLanguage == result.language
-            && highlightStyleStore.hasMaterializedRuns
+        return materializedHighlightRevision <= result.revision
     }
 
     func reapplyCachedHighlight() {
@@ -2254,7 +2255,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         source expectedSource: String,
         language expectedLanguage: SyntaxLanguage,
         refreshRange: NSRange,
-        mutation: SyntaxHighlightMutation?
+        mutation: SyntaxHighlightMutation?,
+        tokenPayload _: SyntaxHighlightTokenPayload = .fullSnapshot
     ) async -> Bool {
         guard model.revision == expectedRevision else { return false }
         guard model.language == expectedLanguage,
@@ -2287,6 +2289,30 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         applyMatchingBracketHighlight(force: true)
         setNeedsDisplayForVisibleTextFragments()
         return true
+    }
+
+    private func recordAppliedHighlightTokenSnapshot(
+        tokens: [SyntaxHighlightToken],
+        source: String,
+        revision: Int,
+        language: SyntaxLanguage,
+        tokenPayload: SyntaxHighlightTokenPayload
+    ) {
+        guard tokenPayload == .fullSnapshot else {
+            clearRecordedHighlightTokenSnapshot()
+            return
+        }
+        lastHighlightTokens = tokens
+        lastHighlightSource = source
+        lastHighlightRevision = revision
+        lastHighlightLanguage = language
+    }
+
+    private func clearRecordedHighlightTokenSnapshot() {
+        lastHighlightTokens = []
+        lastHighlightSource = nil
+        lastHighlightRevision = nil
+        lastHighlightLanguage = nil
     }
 
     private func makeSyntaxHighlightAttributeResolver(

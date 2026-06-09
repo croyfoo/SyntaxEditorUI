@@ -268,6 +268,152 @@ struct SwiftFileSymbolIndex {
         rebuildLookupTables()
     }
 
+    func shifted(by mutation: SyntaxHighlightMutation, sourceUTF16Length: Int) -> SwiftFileSymbolIndex? {
+        func shiftedRange(_ range: NSRange) -> NSRange? {
+            guard range.location != NSNotFound,
+                  range.location >= 0,
+                  range.length >= 0 else {
+                return nil
+            }
+            let oldEnd = mutation.location + mutation.length
+            let replacementLength = mutation.replacement.utf16.count
+            let delta = replacementLength - mutation.length
+
+            let shifted: NSRange
+            if range.upperBound <= mutation.location {
+                shifted = range
+            } else if range.location >= oldEnd {
+                shifted = NSRange(location: range.location + delta, length: range.length)
+            } else if range.location <= mutation.location, oldEnd <= range.upperBound {
+                let length = range.length + delta
+                guard length >= 0 else { return nil }
+                shifted = NSRange(location: range.location, length: length)
+            } else {
+                return nil
+            }
+
+            guard shifted.location >= 0,
+                  shifted.length >= 0,
+                  shifted.upperBound <= sourceUTF16Length else {
+                return nil
+            }
+            return shifted
+        }
+
+        var shiftedEntries: [Entry] = []
+        shiftedEntries.reserveCapacity(entries.count)
+        for entry in entries {
+            guard let declarationRange = shiftedRange(entry.declarationRange),
+                  let scopeRange = shiftedRange(entry.scopeRange) else {
+                return nil
+            }
+            shiftedEntries.append(Entry(
+                name: entry.name,
+                kind: entry.kind,
+                role: entry.role,
+                declarationRange: declarationRange,
+                scopeRange: scopeRange,
+                ownerQualifiedName: entry.ownerQualifiedName
+            ))
+        }
+
+        var shiftedTypeDeclarations: [TypeDeclaration] = []
+        shiftedTypeDeclarations.reserveCapacity(typeDeclarations.count)
+        for declaration in typeDeclarations {
+            guard let nameRange = shiftedRange(declaration.nameRange) else { return nil }
+            let bodyRange: NSRange?
+            if let existingBodyRange = declaration.bodyRange {
+                guard let shiftedBodyRange = shiftedRange(existingBodyRange) else { return nil }
+                bodyRange = shiftedBodyRange
+            } else {
+                bodyRange = nil
+            }
+            shiftedTypeDeclarations.append(TypeDeclaration(
+                name: declaration.name,
+                kind: declaration.kind,
+                nameRange: nameRange,
+                bodyRange: bodyRange
+            ))
+        }
+
+        var shiftedFunctionDeclarations: [FunctionDeclaration] = []
+        shiftedFunctionDeclarations.reserveCapacity(functionDeclarations.count)
+        for declaration in functionDeclarations {
+            guard let nameRange = shiftedRange(declaration.nameRange) else { return nil }
+            shiftedFunctionDeclarations.append(FunctionDeclaration(name: declaration.name, nameRange: nameRange))
+        }
+
+        var shiftedTypeScopes: [TypeScope] = []
+        shiftedTypeScopes.reserveCapacity(typeScopes.count)
+        for scope in typeScopes {
+            guard let bodyRange = shiftedRange(scope.bodyRange) else { return nil }
+            shiftedTypeScopes.append(TypeScope(
+                name: scope.name,
+                qualifiedName: scope.qualifiedName,
+                kind: scope.kind,
+                bodyRange: bodyRange
+            ))
+        }
+
+        var shiftedFunctionScopes: [FunctionScope] = []
+        shiftedFunctionScopes.reserveCapacity(functionScopes.count)
+        for scope in functionScopes {
+            guard let bodyRange = shiftedRange(scope.bodyRange) else { return nil }
+            let parameterListRange: NSRange?
+            if let existingParameterListRange = scope.parameterListRange {
+                guard let shiftedParameterListRange = shiftedRange(existingParameterListRange) else {
+                    return nil
+                }
+                parameterListRange = shiftedParameterListRange
+            } else {
+                parameterListRange = nil
+            }
+            shiftedFunctionScopes.append(FunctionScope(bodyRange: bodyRange, parameterListRange: parameterListRange))
+        }
+
+        var shiftedTypedValues: [TypedValue] = []
+        shiftedTypedValues.reserveCapacity(typedValues.count)
+        for value in typedValues {
+            guard let scopeRange = shiftedRange(value.scopeRange),
+                  let declarationRange = shiftedRange(value.declarationRange) else {
+                return nil
+            }
+            shiftedTypedValues.append(TypedValue(
+                name: value.name,
+                typeName: value.typeName,
+                scopeRange: scopeRange,
+                declarationRange: declarationRange
+            ))
+        }
+
+        var shiftedSwitchCaseClauseRanges: [NSRange] = []
+        shiftedSwitchCaseClauseRanges.reserveCapacity(switchCaseClauseRanges.count)
+        for range in switchCaseClauseRanges {
+            guard let shiftedRange = shiftedRange(range) else { return nil }
+            shiftedSwitchCaseClauseRanges.append(shiftedRange)
+        }
+
+        var shiftedExtensionScopeCandidates: [(qualifiedName: String, bodyRange: NSRange)] = []
+        shiftedExtensionScopeCandidates.reserveCapacity(extensionScopeCandidates.count)
+        for candidate in extensionScopeCandidates {
+            guard let bodyRange = shiftedRange(candidate.bodyRange) else { return nil }
+            shiftedExtensionScopeCandidates.append((qualifiedName: candidate.qualifiedName, bodyRange: bodyRange))
+        }
+
+        var next = self
+        next.entries = shiftedEntries
+        next.typeDeclarations = shiftedTypeDeclarations
+        next.functionDeclarations = shiftedFunctionDeclarations
+        next.typeScopes = shiftedTypeScopes
+        next.functionScopes = shiftedFunctionScopes
+        next.typedValues = shiftedTypedValues
+        next.switchCaseClauseRanges = shiftedSwitchCaseClauseRanges
+        next.switchCaseClauseRangeIndex = ContainmentRangeIndex(ranges: shiftedSwitchCaseClauseRanges)
+        next.extensionScopeCandidates = shiftedExtensionScopeCandidates
+        next.rebuildLookupTables()
+        return next
+    }
+
     func entry(
         named name: String,
         at range: NSRange,

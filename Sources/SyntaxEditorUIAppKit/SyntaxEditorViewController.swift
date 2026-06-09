@@ -44,6 +44,7 @@ private struct PendingHighlightApplication {
     let mutation: SyntaxHighlightMutation?
     let recordsCache: Bool
     let phase: SyntaxHighlightPhase
+    let tokenPayload: SyntaxHighlightTokenPayload
 }
 
 private struct ScheduledHighlightRequest {
@@ -1468,6 +1469,11 @@ public final class SyntaxEditorView: NSScrollView {
     ) async {
         guard !Task.isCancelled else { return }
         guard model.revision == result.revision else { return }
+        guard canApplyHighlightTokenPayload(for: result) else {
+            recordSkippedHighlightPhaseForTesting(result.phase, revision: result.revision)
+            scheduleHighlight(source: result.source, language: result.language, revision: result.revision)
+            return
+        }
         guard shouldMaterializeHighlightResult(result, mutation: mutation) else {
             recordSkippedHighlightPhaseForTesting(result.phase, revision: result.revision)
             return
@@ -1484,7 +1490,8 @@ public final class SyntaxEditorView: NSScrollView {
             refreshRange: refreshRange,
             mutation: mutation,
             recordsCache: result.phase == .complete,
-            phase: result.phase
+            phase: result.phase,
+            tokenPayload: result.tokenPayload
         )
     }
 
@@ -1502,12 +1509,15 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func hasMaterializedCompletedHighlightToAvoidDowngrade(for result: SyntaxHighlightResult) -> Bool {
-        guard let lastHighlightRevision else {
+        guard materializedHighlightPhase == .complete,
+              materializedHighlightLanguage == result.language,
+              textSystem.styleStore.hasMaterializedRuns,
+              let materializedHighlightRevision
+        else {
             return false
         }
 
-        return hasMaterializedCompletedHighlight(for: result)
-            && lastHighlightRevision < result.revision
+        return materializedHighlightRevision < result.revision
     }
 
     private func highlightApplicationRefreshRange(
@@ -1517,31 +1527,19 @@ public final class SyntaxEditorView: NSScrollView {
         guard mutation != nil else {
             return result.refreshRange
         }
-        guard hasCompletedMaterializedHighlightBaseline(for: result) else {
-            return NSRange(location: 0, length: result.source.utf16.count)
-        }
         return result.refreshRange
     }
 
-    private func hasCompletedMaterializedHighlightBaseline(for result: SyntaxHighlightResult) -> Bool {
-        guard let lastHighlightRevision else {
+    private func canApplyHighlightTokenPayload(for result: SyntaxHighlightResult) -> Bool {
+        guard result.tokenPayload == .replacement else {
+            return true
+        }
+        guard materializedHighlightLanguage == result.language,
+              let materializedHighlightRevision
+        else {
             return false
         }
-
-        return hasMaterializedCompletedHighlight(for: result)
-            && lastHighlightRevision == result.revision - 1
-    }
-
-    private func hasMaterializedCompletedHighlight(for result: SyntaxHighlightResult) -> Bool {
-        guard let lastHighlightRevision else {
-            return false
-        }
-
-        return materializedHighlightPhase == .complete
-            && materializedHighlightRevision == lastHighlightRevision
-            && materializedHighlightLanguage == result.language
-            && lastHighlightLanguage == result.language
-            && textSystem.styleStore.hasMaterializedRuns
+        return materializedHighlightRevision <= result.revision
     }
 
     private func reapplyCachedHighlight() {
@@ -1778,7 +1776,8 @@ public final class SyntaxEditorView: NSScrollView {
         refreshRange: NSRange,
         mutation: SyntaxHighlightMutation?,
         recordsCache: Bool = true,
-        phase: SyntaxHighlightPhase = .complete
+        phase: SyntaxHighlightPhase = .complete,
+        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot
     ) -> Bool {
         guard model.revision == expectedRevision else { return false }
         guard model.language == expectedLanguage,
@@ -1795,7 +1794,8 @@ public final class SyntaxEditorView: NSScrollView {
             refreshRange: refreshRange,
             mutation: mutation,
             recordsCache: recordsCache,
-            phase: phase
+            phase: phase,
+            tokenPayload: tokenPayload
         )
         guard textView.selectedRange().length == 0 else {
             pendingHighlightApplication = pendingApplication
@@ -1813,7 +1813,8 @@ public final class SyntaxEditorView: NSScrollView {
                     tokens: tokens,
                     source: expectedSource,
                     revision: expectedRevision,
-                    language: expectedLanguage
+                    language: expectedLanguage,
+                    tokenPayload: tokenPayload
                 )
             }
             applyMatchingBracketHighlight(force: true)
@@ -1846,7 +1847,8 @@ public final class SyntaxEditorView: NSScrollView {
                 tokens: tokens,
                 source: expectedSource,
                 revision: expectedRevision,
-                language: expectedLanguage
+                language: expectedLanguage,
+                tokenPayload: tokenPayload
             )
         }
         recordMaterializedHighlight(
@@ -1866,7 +1868,8 @@ public final class SyntaxEditorView: NSScrollView {
         refreshRange: NSRange,
         mutation: SyntaxHighlightMutation?,
         recordsCache: Bool = true,
-        phase: SyntaxHighlightPhase = .complete
+        phase: SyntaxHighlightPhase = .complete,
+        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot
     ) async -> Bool {
         guard model.revision == expectedRevision else { return false }
         guard model.language == expectedLanguage,
@@ -1883,7 +1886,8 @@ public final class SyntaxEditorView: NSScrollView {
             refreshRange: refreshRange,
             mutation: mutation,
             recordsCache: recordsCache,
-            phase: phase
+            phase: phase,
+            tokenPayload: tokenPayload
         )
         guard textView.selectedRange().length == 0 else {
             pendingHighlightApplication = pendingApplication
@@ -1901,7 +1905,8 @@ public final class SyntaxEditorView: NSScrollView {
                     tokens: tokens,
                     source: expectedSource,
                     revision: expectedRevision,
-                    language: expectedLanguage
+                    language: expectedLanguage,
+                    tokenPayload: tokenPayload
                 )
             }
             applyMatchingBracketHighlight(force: true)
@@ -1934,7 +1939,8 @@ public final class SyntaxEditorView: NSScrollView {
                 tokens: tokens,
                 source: expectedSource,
                 revision: expectedRevision,
-                language: expectedLanguage
+                language: expectedLanguage,
+                tokenPayload: tokenPayload
             )
         }
         recordMaterializedHighlight(
@@ -2256,12 +2262,24 @@ public final class SyntaxEditorView: NSScrollView {
         tokens: [SyntaxHighlightToken],
         source: String,
         revision: Int,
-        language: SyntaxLanguage
+        language: SyntaxLanguage,
+        tokenPayload: SyntaxHighlightTokenPayload
     ) {
+        guard tokenPayload == .fullSnapshot else {
+            clearRecordedHighlightTokenSnapshot()
+            return
+        }
         lastHighlightTokens = tokens
         lastHighlightSource = source
         lastHighlightRevision = revision
         lastHighlightLanguage = language
+    }
+
+    private func clearRecordedHighlightTokenSnapshot() {
+        lastHighlightTokens = []
+        lastHighlightSource = nil
+        lastHighlightRevision = nil
+        lastHighlightLanguage = nil
     }
 
     private func recordMaterializedHighlight(
@@ -2296,7 +2314,8 @@ public final class SyntaxEditorView: NSScrollView {
             refreshRange: pendingHighlightApplication.refreshRange,
             mutation: pendingHighlightApplication.mutation,
             recordsCache: pendingHighlightApplication.recordsCache,
-            phase: pendingHighlightApplication.phase
+            phase: pendingHighlightApplication.phase,
+            tokenPayload: pendingHighlightApplication.tokenPayload
         )
     }
 

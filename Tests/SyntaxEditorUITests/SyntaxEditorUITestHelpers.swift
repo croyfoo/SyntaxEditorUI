@@ -438,6 +438,7 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     let resetGate: ManualSyntaxHighlightGate?
     let updateGate: ManualSyntaxHighlightGate?
     let updateRefreshRange: NSRange?
+    let updateTokenPayload: SyntaxHighlightTokenPayload
     var resetCount = 0
     var updateCount = 0
 
@@ -446,13 +447,15 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
         updateTokens: [SyntaxHighlightToken]? = nil,
         resetGate: ManualSyntaxHighlightGate? = nil,
         updateGate: ManualSyntaxHighlightGate? = nil,
-        updateRefreshRange: NSRange? = nil
+        updateRefreshRange: NSRange? = nil,
+        updateTokenPayload: SyntaxHighlightTokenPayload = .replacement
     ) {
         self.tokens = tokens
         self.updateTokens = updateTokens
         self.resetGate = resetGate
         self.updateGate = updateGate
         self.updateRefreshRange = updateRefreshRange
+        self.updateTokenPayload = updateTokenPayload
     }
 
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
@@ -478,7 +481,8 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
             source: source,
             language: language,
             revision: revision,
-            refreshRange: updateRefreshRange
+            refreshRange: updateRefreshRange,
+            tokenPayload: updateTokenPayload
         )
     }
 
@@ -491,7 +495,8 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
         source: String,
         language: SyntaxLanguage,
         revision: Int,
-        refreshRange: NSRange?
+        refreshRange: NSRange?,
+        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot
     ) -> SyntaxHighlightResult {
         let resolvedTokens = language == .plainText ? [] : tokens ?? self.tokens
         return SyntaxHighlightResult(
@@ -499,7 +504,11 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
             source: source,
             language: language,
             revision: revision,
-            refreshRange: refreshRange ?? NSRange(location: 0, length: source.utf16.count)
+            refreshRange: syntaxEditorTestClampedRange(
+                refreshRange ?? NSRange(location: 0, length: source.utf16.count),
+                textLength: source.utf16.count
+            ),
+            tokenPayload: tokenPayload
         )
     }
 }
@@ -578,7 +587,8 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
             language: language,
             revision: revision,
             phase: .complete,
-            refreshRange: updateRefreshRange
+            refreshRange: updateRefreshRange,
+            tokenPayload: .replacement
         )
     }
 
@@ -594,6 +604,7 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
             completeTokens: updateCompleteTokens ?? completeTokens,
             completeGate: completeGate,
             refreshRange: updateRefreshRange,
+            tokenPayload: .replacement,
             source: source,
             language: language,
             revision: revision
@@ -609,6 +620,7 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         completeTokens: [SyntaxHighlightToken],
         completeGate: ManualSyntaxHighlightGate?,
         refreshRange: NSRange?,
+        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot,
         source: String,
         language: SyntaxLanguage,
         revision: Int
@@ -622,7 +634,8 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
                         language: language,
                         revision: revision,
                         phase: .syntacticFastPass,
-                        refreshRange: refreshRange
+                        refreshRange: refreshRange,
+                        tokenPayload: tokenPayload
                     )
                 )
                 if let completeGate {
@@ -639,7 +652,8 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
                         language: language,
                         revision: revision,
                         phase: .complete,
-                        refreshRange: refreshRange
+                        refreshRange: refreshRange,
+                        tokenPayload: tokenPayload
                     )
                 )
                 continuation.finish()
@@ -656,17 +670,29 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         language: SyntaxLanguage,
         revision: Int,
         phase: SyntaxHighlightPhase,
-        refreshRange: NSRange?
+        refreshRange: NSRange?,
+        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot
     ) -> SyntaxHighlightResult {
-        SyntaxHighlightResult(
+        return SyntaxHighlightResult(
             tokens: tokens,
             source: source,
             language: language,
             revision: revision,
-            refreshRange: refreshRange ?? NSRange(location: 0, length: source.utf16.count),
-            phase: phase
+            refreshRange: syntaxEditorTestClampedRange(
+                refreshRange ?? NSRange(location: 0, length: source.utf16.count),
+                textLength: source.utf16.count
+            ),
+            phase: phase,
+            tokenPayload: tokenPayload
         )
     }
+}
+
+private func syntaxEditorTestClampedRange(_ range: NSRange, textLength: Int) -> NSRange {
+    let textLength = max(0, textLength)
+    let location = min(max(0, range.location), textLength)
+    let upperBound = min(max(location, range.location + max(0, range.length)), textLength)
+    return NSRange(location: location, length: upperBound - location)
 }
 
 actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {

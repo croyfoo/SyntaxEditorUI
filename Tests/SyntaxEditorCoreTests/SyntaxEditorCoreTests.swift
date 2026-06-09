@@ -372,7 +372,19 @@ private extension SyntaxHighlighterEngine {
         mutation: SyntaxHighlightMutation
     ) async -> SyntaxHighlightResult {
         _ = previousSource
-        return await update(source: source, language: language, mutation: mutation, revision: 1)
+        let result = await update(source: source, language: language, mutation: mutation, revision: 1)
+        guard result.tokenPayload == .replacement else {
+            return result
+        }
+        return SyntaxHighlightResult(
+            tokens: currentTokensForTesting(),
+            source: result.source,
+            language: result.language,
+            revision: result.revision,
+            refreshRange: result.refreshRange,
+            phase: result.phase,
+            tokenPayload: .fullSnapshot
+        )
     }
 }
 
@@ -6185,6 +6197,68 @@ struct SyntaxHighlighterEngineTests {
         )
     }
 
+    @Test("SyntaxHighlighterEngine keeps large Swift value edits scoped")
+    func highlighterKeepsLargeSwiftValueEditsScoped() async throws {
+        let declarations = (0..<3_000)
+            .map { "let value\($0) = \($0)" }
+            .joined(separator: "\n")
+        let source = """
+        \(declarations)
+
+        func render() -> Int {
+            let local = 1
+            return local
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "let local = 1", with: "let local = 12")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < 256)
+    }
+
+    @Test("SyntaxHighlighterEngine returns replacement token payloads for incremental updates")
+    func highlighterReturnsReplacementTokenPayloadsForIncrementalUpdates() async throws {
+        let source = """
+        let value = 1
+
+        func render() -> Int {
+            return value
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "return value", with: "return value + 1")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let engine = SyntaxHighlighterEngine()
+
+        let reset = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 0)
+        let update = await engine.update(
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation),
+            revision: 1
+        )
+        let currentTokens = await engine.currentTokensForTesting()
+
+        #expect(reset.tokenPayload == .fullSnapshot)
+        #expect(update.tokenPayload == .replacement)
+        #expect(update.containsCompleteTokenSnapshot == false)
+        #expect(update.tokens.count < currentTokens.count)
+        #expect(update.tokens.allSatisfy {
+            SyntaxEditorRangeUtilities.intersection(of: $0.range, and: update.refreshRange).length > 0
+        })
+    }
+
     @Test("SyntaxHighlighterEngine treats standalone Swift brace edits as structural")
     func highlighterTreatsStandaloneSwiftBraceEditsAsStructural() {
         let source = """
@@ -8108,7 +8182,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await SyntaxHighlighterEngine()
             .reset(source: updatedSource, language: SyntaxLanguage.javascript, revision: 2)
 
-        #expect(highlightTokensMatch(staleUpdate.tokens, full.tokens))
+        #expect(highlightTokensMatch(await engine.currentTokensForTesting(), full.tokens))
         #expect(staleUpdate.refreshRange.location == 0)
         #expect(staleUpdate.refreshRange.length < updatedSource.utf16.count)
     }
@@ -8150,7 +8224,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await SyntaxHighlighterEngine()
             .reset(source: source, language: SyntaxLanguage.swift, revision: 20)
 
-        #expect(highlightTokensMatch(result.tokens, full.tokens))
+        #expect(highlightTokensMatch(await engine.currentTokensForTesting(), full.tokens))
     }
 
     @Test("SyntaxHighlighterEngine keeps switch-heavy Swift paste updates finite")
@@ -8202,7 +8276,7 @@ struct SyntaxHighlighterEngineTests {
 
         let full = await SyntaxHighlighterEngine()
             .reset(source: source, language: SyntaxLanguage.swift, revision: 20)
-        #expect(highlightTokensMatch(result.tokens, full.tokens))
+        #expect(highlightTokensMatch(await engine.currentTokensForTesting(), full.tokens))
     }
 
     @Test("Swift semantic overlay exits before indexing cancelled paste work")
@@ -11370,6 +11444,118 @@ struct SyntaxHighlighterEngineTests {
 
         #expect(incremental.tokens == full.tokens)
         #expect(incremental.refreshRange.length < updatedSource.utf16.count / 2)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps large Objective-C value edits scoped")
+    func highlighterKeepsLargeObjectiveCValueEditsScoped() async throws {
+        let declarations = (0..<3_000)
+            .map { "static NSInteger Value\($0) = \($0);" }
+            .joined(separator: "\n")
+        let source = """
+        \(declarations)
+
+        void run(void)
+        {
+            NSInteger local = 1;
+            NSLog(@"%ld", (long)local);
+        }
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "NSInteger local = 1;",
+            with: "NSInteger local = 2;"
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < 256)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps large Objective-C multiline body edits scoped")
+    func highlighterKeepsLargeObjectiveCMultilineBodyEditsScoped() async throws {
+        let declarations = (0..<3_000)
+            .map { "static NSInteger Value\($0) = \($0);" }
+            .joined(separator: "\n")
+        let source = """
+        \(declarations)
+
+        static NSInteger ReferenceCallInteger(id object, NSString *selectorName)
+        {
+            return ((NSInteger (*)(id, SEL))objc_msgSend)(object, NSSelectorFromString(selectorName));
+        }
+
+        static BOOL ReferenceCallBool(id object, NSString *selectorName)
+        {
+            return ((BOOL (*)(id, SEL))objc_msgSend)(object, NSSelectorFromString(selectorName));
+        }
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "    return ((NSInteger (*)(id, SEL))objc_msgSend)(object, NSSelectorFromString(selectorName));",
+            with: """
+                return aa;
+                sefepuaepufepua
+                feousoueoufeouseoure;
+                return ((NSInteger (*)(id, SEL))objc_msgSend)(object, NSSelectorFromString(selectorName));
+            """
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < 512)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Objective-C macro continuation edits scoped")
+    func highlighterKeepsObjectiveCMacroContinuationEditsScoped() async throws {
+        let source = """
+        #define LOG_VALUE(value) \\
+            NSLog(@"%ld", (long)(value))
+
+        void run(void)
+        {
+            NSInteger local = 1;
+            LOG_VALUE(local);
+        }
+        """
+        let updatedSource = source.replacingOccurrences(
+            of: "LOG_VALUE(local);",
+            with: "LOG_VALUE(local + 1);"
+        )
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after declaration value member edits")

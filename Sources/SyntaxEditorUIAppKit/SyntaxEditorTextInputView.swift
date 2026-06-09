@@ -1167,8 +1167,9 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
                     )
                 }
 
-                textSystem.styleStore.forEachColorRun(in: displayRange) { [self] colorRun in
-                    guard let textRange = textRange(forUTF16Range: colorRun.range) else { return }
+                let resolvedRuns = textSystem.styleStore.resolveVisibleRuns(in: displayRange)
+                for colorRun in resolvedRuns.colorRuns {
+                    guard let textRange = textRange(forUTF16Range: colorRun.range) else { continue }
                     syntaxRenderingAttributeColorRunCountForTesting += 1
                     textLayoutManager.addRenderingAttribute(
                         .foregroundColor,
@@ -1177,8 +1178,8 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
                     )
                 }
 
-                textSystem.styleStore.forEachFontRun(in: displayRange) { [self] fontRun in
-                    guard let textRange = textRange(forUTF16Range: fontRun.range) else { return }
+                for fontRun in resolvedRuns.fontRuns {
+                    guard let textRange = textRange(forUTF16Range: fontRun.range) else { continue }
                     textLayoutManager.addRenderingAttribute(
                         .font,
                         value: fontRun.font,

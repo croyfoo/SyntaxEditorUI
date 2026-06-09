@@ -447,6 +447,90 @@ struct SyntaxEditorUICommonTests {
         #expect(visibleRuns[2].color.isEqual(redColor))
     }
 
+    @Test("Highlight render snapshot keeps current materialized runs normalized")
+    func highlightRenderSnapshotKeepsCurrentMaterializedRunsNormalized() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [
+                    HighlightColorRun(range: NSRange(location: 6, length: 4), color: redColor),
+                    HighlightColorRun(range: NSRange(location: 0, length: 6), color: redColor),
+                ],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            currentTextLength: 12
+        )
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [
+                    HighlightColorRun(range: NSRange(location: 5, length: 1), color: blueColor),
+                    HighlightColorRun(range: NSRange(location: 6, length: 1), color: blueColor),
+                ],
+                fontRuns: []
+            ),
+            range: NSRange(location: 5, length: 2),
+            revision: 2,
+            language: .swift,
+            textLength: 12,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        #expect(store.maintainsNormalizedRunInvariantForTesting)
+        #expect(store.colorRuns(in: NSRange(location: 0, length: 12)).map(\.range) == [
+            NSRange(location: 0, length: 5),
+            NSRange(location: 5, length: 2),
+            NSRange(location: 7, length: 5),
+        ])
+    }
+
+    @Test("Highlight render snapshot resolves visible color and font runs together")
+    func highlightRenderSnapshotResolvesVisibleColorAndFontRunsTogether() {
+        #if canImport(UIKit)
+        let syntaxFont = UIFont.boldSystemFont(ofSize: 13)
+        #elseif canImport(AppKit)
+        let syntaxFont = NSFont.boldSystemFont(ofSize: 13)
+        #endif
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [
+                    HighlightColorRun(range: NSRange(location: 0, length: 5), color: redColor),
+                    HighlightColorRun(range: NSRange(location: 12, length: 4), color: blueColor),
+                ],
+                fontRuns: [
+                    HighlightFontRun(range: NSRange(location: 2, length: 4), font: syntaxFont),
+                    HighlightFontRun(range: NSRange(location: 14, length: 2), font: syntaxFont),
+                ]
+            ),
+            range: NSRange(location: 0, length: 20),
+            revision: 1,
+            language: .swift,
+            textLength: 20,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        let resolvedRuns = store.resolveVisibleRuns(in: NSRange(location: 3, length: 11))
+
+        #expect(resolvedRuns.colorRuns.map(\.range) == [
+            NSRange(location: 3, length: 2),
+            NSRange(location: 12, length: 2),
+        ])
+        #expect(resolvedRuns.fontRuns.map(\.range) == [
+            NSRange(location: 3, length: 3),
+        ])
+    }
+
     @Test("Partial snapshot commit shifts materialized ranges after later edits")
     func partialSnapshotCommitShiftsMaterializedRangesAfterLaterEdits() {
         let store = HighlightRenderSnapshotStore()

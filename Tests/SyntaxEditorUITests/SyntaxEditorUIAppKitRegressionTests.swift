@@ -868,7 +868,7 @@ extension SyntaxEditorUITests {
             string: syntaxEditorUITestColor(hex: 0xABCDEF),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
-        let updateRefreshRange = NSRange(location: source.utf16.count, length: 1)
+        let updateRefreshRange = NSRange(location: 0, length: source.utf16.count + 1)
         let completeGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [
@@ -2180,7 +2180,8 @@ extension SyntaxEditorUITests {
             ],
             resetGate: resetGate,
             updateGate: updateGate,
-            updateRefreshRange: NSRange(location: 0, length: 3)
+            updateRefreshRange: NSRange(location: 0, length: source.utf16.count),
+            updateTokenPayload: .fullSnapshot
         )
         let model = SyntaxEditorTestContext(
             text: source,
@@ -2537,7 +2538,11 @@ extension SyntaxEditorUITests {
             ],
             resetGate: resetGate,
             updateGate: updateGate,
-            updateRefreshRange: NSRange(location: firstPaste.utf16.count, length: secondPaste.utf16.count)
+            updateRefreshRange: NSRange(
+                location: 0,
+                length: firstPaste.utf16.count + secondPaste.utf16.count
+            ),
+            updateTokenPayload: .fullSnapshot
         )
         let model = SyntaxEditorTestContext(
             text: "",

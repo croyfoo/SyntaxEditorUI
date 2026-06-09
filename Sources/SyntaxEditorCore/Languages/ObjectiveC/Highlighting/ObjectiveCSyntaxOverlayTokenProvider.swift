@@ -16,6 +16,165 @@ private struct ObjectiveCSemanticIndexSignature {
     let structuralEditRanges: [NSRange]
 }
 
+fileprivate struct ObjectiveCSemanticLineSignature {
+    let range: NSRange
+    let contributesToSignature: Bool
+    let fingerprint: Int
+    let structuralEditRanges: [NSRange]
+}
+
+fileprivate struct ObjectiveCSemanticLineSignatureIndex {
+    let lines: [ObjectiveCSemanticLineSignature]
+    let fingerprint: Int
+    let structuralEditRanges: [NSRange]
+
+    init(source: NSString) {
+        var lines: [ObjectiveCSemanticLineSignature] = []
+        lines.reserveCapacity(max(1, source.length / 48))
+
+        var location = 0
+        while location < source.length {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            lines.append(Self.signature(for: lineRange, in: source))
+            let nextLocation = lineRange.upperBound
+            guard nextLocation > location else { break }
+            location = nextLocation
+        }
+
+        self.init(lines: lines)
+    }
+
+    private init(lines: [ObjectiveCSemanticLineSignature]) {
+        self.lines = lines
+        self.fingerprint = Self.fingerprint(for: lines)
+        self.structuralEditRanges = lines.flatMap(\.structuralEditRanges)
+    }
+
+    func applying(
+        _ mutation: SyntaxHighlightMutation,
+        to source: NSString
+    ) -> ObjectiveCSemanticLineSignatureIndex? {
+        guard !lines.isEmpty else {
+            return nil
+        }
+
+        let replacementLength = mutation.replacement.utf16.count
+        let previousSourceLength = source.length - (replacementLength - mutation.length)
+        guard previousSourceLength >= 0,
+              mutation.location >= 0,
+              mutation.location <= previousSourceLength,
+              mutation.location + mutation.length <= previousSourceLength else {
+            return nil
+        }
+
+        let oldEnd = mutation.location + mutation.length
+        let startIndex = lineIndex(containing: mutation.location, previousSourceLength: previousSourceLength)
+        let endLookup = mutation.length == 0 ? mutation.location : max(mutation.location, oldEnd - 1)
+        let endIndex = lineIndex(containing: endLookup, previousSourceLength: previousSourceLength)
+        let changedLineSignatures = Self.signaturesForChangedLines(mutation, in: source)
+        guard !changedLineSignatures.isEmpty else { return nil }
+        let delta = replacementLength - mutation.length
+
+        var nextLines: [ObjectiveCSemanticLineSignature] = []
+        nextLines.reserveCapacity(lines.count - (endIndex - startIndex + 1) + changedLineSignatures.count)
+        for index in lines.indices {
+            if index < startIndex {
+                nextLines.append(lines[index])
+            } else if index == startIndex {
+                nextLines.append(contentsOf: changedLineSignatures)
+            } else if index <= endIndex {
+                continue
+            } else {
+                let line = lines[index]
+                nextLines.append(
+                    ObjectiveCSemanticLineSignature(
+                        range: NSRange(location: line.range.location + delta, length: line.range.length),
+                        contributesToSignature: line.contributesToSignature,
+                        fingerprint: line.fingerprint,
+                        structuralEditRanges: line.structuralEditRanges.map {
+                            NSRange(location: $0.location + delta, length: $0.length)
+                        }
+                    )
+                )
+            }
+        }
+        return ObjectiveCSemanticLineSignatureIndex(lines: nextLines)
+    }
+
+    private func lineIndex(containing location: Int, previousSourceLength: Int) -> Int {
+        let clampedLocation = min(max(0, location), max(0, previousSourceLength - 1))
+        var lower = 0
+        var upper = lines.count
+        while lower < upper {
+            let midpoint = (lower + upper) / 2
+            if lines[midpoint].range.upperBound <= clampedLocation {
+                lower = midpoint + 1
+            } else {
+                upper = midpoint
+            }
+        }
+        return min(lower, max(0, lines.count - 1))
+    }
+
+    static func signaturesForChangedLines(
+        _ mutation: SyntaxHighlightMutation,
+        in source: NSString
+    ) -> [ObjectiveCSemanticLineSignature] {
+        guard source.length > 0 else { return [] }
+        let replacementLength = mutation.replacement.utf16.count
+        let changedLocation = min(max(0, mutation.location), source.length)
+        let changedEnd = min(
+            source.length,
+            max(changedLocation + max(1, replacementLength), changedLocation + 1)
+        )
+        let changedRange = NSRange(location: changedLocation, length: max(0, changedEnd - changedLocation))
+        let changedLineRange = source.lineRange(for: changedRange)
+        var signatures: [ObjectiveCSemanticLineSignature] = []
+        var cursor = changedLineRange.location
+        while cursor < changedLineRange.upperBound {
+            let lineRange = source.lineRange(for: NSRange(location: cursor, length: 0))
+            signatures.append(signature(for: lineRange, in: source))
+            let next = lineRange.upperBound
+            guard next > cursor else { break }
+            cursor = next
+        }
+        return signatures
+    }
+
+    fileprivate static func signature(
+        for lineRange: NSRange,
+        in source: NSString
+    ) -> ObjectiveCSemanticLineSignature {
+        let line = source.substring(with: lineRange) as NSString
+        var hasher = Hasher()
+        let contributes = ObjectiveCSyntaxOverlayTokenProvider.appendObjectiveCSemanticIndexSignature(
+            from: line,
+            lineOffset: lineRange.location,
+            into: &hasher
+        )
+        let structuralEditRanges = contributes
+            ? ObjectiveCSyntaxOverlayTokenProvider.objectiveCSemanticStructuralEditRanges(
+                in: line,
+                lineOffset: lineRange.location
+            )
+            : []
+        return ObjectiveCSemanticLineSignature(
+            range: lineRange,
+            contributesToSignature: contributes,
+            fingerprint: hasher.finalize(),
+            structuralEditRanges: structuralEditRanges
+        )
+    }
+
+    private static func fingerprint(for lines: [ObjectiveCSemanticLineSignature]) -> Int {
+        var hasher = Hasher()
+        for line in lines where line.contributesToSignature {
+            hasher.combine(line.fingerprint)
+        }
+        return hasher.finalize()
+    }
+}
+
 private struct ObjectiveCOverlayPreparation {
     let baseTokensForIndex: [SyntaxHighlightToken]
     let outputBaseTokens: [SyntaxHighlightToken]
@@ -31,27 +190,33 @@ private struct ObjectiveCSemanticIndex {
     let sourceUTF16Length: Int
     let structuralFingerprint: Int
     let structuralEditRanges: [NSRange]
+    let lineSignatureIndex: ObjectiveCSemanticLineSignatureIndex
 
     func shifted(
         by mutation: SyntaxHighlightMutation,
-        sourceUTF16Length nextSourceUTF16Length: Int
+        source nextSource: NSString
     ) -> ObjectiveCSemanticIndex? {
         guard let shiftedSymbols = fileSymbols.shifted(
             by: mutation,
-            sourceUTF16Length: nextSourceUTF16Length
+            sourceUTF16Length: nextSource.length
         ),
-              let shiftedStructuralEditRanges = Self.shiftedRanges(
+              Self.shiftedRanges(
                 structuralEditRanges,
                 by: mutation,
-                sourceUTF16Length: nextSourceUTF16Length
+                sourceUTF16Length: nextSource.length
+              ) != nil,
+              let shiftedLineSignatureIndex = lineSignatureIndex.applying(
+                mutation,
+                to: nextSource
               ) else {
             return nil
         }
         return ObjectiveCSemanticIndex(
             fileSymbols: shiftedSymbols,
-            sourceUTF16Length: nextSourceUTF16Length,
-            structuralFingerprint: structuralFingerprint,
-            structuralEditRanges: shiftedStructuralEditRanges
+            sourceUTF16Length: nextSource.length,
+            structuralFingerprint: shiftedLineSignatureIndex.fingerprint,
+            structuralEditRanges: shiftedLineSignatureIndex.structuralEditRanges,
+            lineSignatureIndex: shiftedLineSignatureIndex
         )
     }
 
@@ -326,6 +491,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         rootNode: Node? = nil,
         refreshRange: NSRange? = nil,
         mutation: SyntaxHighlightMutation?,
+        tokenPrefixMaxUpperBounds: [Int]? = nil,
         state: inout ObjectiveCSemanticOverlayState?
     ) -> ObjectiveCSemanticOverlayResult {
         let nsSource = source as NSString
@@ -349,11 +515,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 previousIndex: previousIndex
             )
         } ?? false
+        let shiftedLineSignatureIndex = mutation.flatMap { mutation in
+            previousIndex?.lineSignatureIndex.applying(mutation, to: nsSource)
+        }
         let shiftedPreviousIndex = mutation.flatMap { mutation in
-            previousIndex?.shifted(
-                by: mutation,
-                sourceUTF16Length: nsSource.length
-            )
+            previousIndex?.shifted(by: mutation, source: nsSource)
         }
         let cannotShiftPreviousIndex = mutation != nil
             && previousIndex != nil
@@ -368,6 +534,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 fingerprint: previousIndex.structuralFingerprint,
                 structuralEditRanges: previousIndex.structuralEditRanges
             )
+        } else if let shiftedLineSignatureIndex {
+            ObjectiveCSemanticIndexSignature(
+                fingerprint: shiftedLineSignatureIndex.fingerprint,
+                structuralEditRanges: shiftedLineSignatureIndex.structuralEditRanges
+            )
         } else {
             semanticIndexSignature(in: nsSource)
         }
@@ -381,21 +552,25 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         } else {
             nil as NSRange?
         }
+        let structuralCheckRequiresFullTarget = structuralFingerprintChanged
+            && localStructuralTargetRange == nil
         let targetRange = proposedTargetRange == nil
             || previousIndex == nil
-            || (structuralFingerprintChanged && localStructuralTargetRange == nil)
+            || structuralCheckRequiresFullTarget
             ? nil
             : (localStructuralTargetRange ?? proposedTargetRange)
         let shouldRebuildIndex = proposedTargetRange == nil
             || previousIndex == nil
             || requiresSemanticIndexRebuild
             || structuralFingerprintChanged
+            || structuralCheckRequiresFullTarget
             || cannotShiftPreviousIndex
             || (previousIndex?.sourceUTF16Length != nsSource.length && mutation == nil)
         let preparation = preparedOverlayInput(
             from: tokens,
             source: nsSource,
             targetRange: targetRange,
+            tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds,
             preparesFullIndex: shouldRebuildIndex
         )
         let semanticIndex: ObjectiveCSemanticIndex
@@ -417,7 +592,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 fileSymbols: rebuiltIndex,
                 sourceUTF16Length: nsSource.length,
                 structuralFingerprint: structuralSignature.fingerprint,
-                structuralEditRanges: structuralSignature.structuralEditRanges
+                structuralEditRanges: structuralSignature.structuralEditRanges,
+                lineSignatureIndex: ObjectiveCSemanticLineSignatureIndex(source: nsSource)
             )
         } else if let shiftedIndex = shiftedPreviousIndex {
             semanticIndex = shiftedIndex
@@ -803,27 +979,60 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         let targetRange = source.lineRange(for: clamped)
         let contextRange = objectiveCUnsafeEditContextRange(around: targetRange, in: source)
         let context = source.substring(with: contextRange)
-        guard !objectiveCRefreshLooksStructural(context)
-                || mutation.map({ objectiveCLocalValueEditCanKeepSemanticTarget($0, in: source) }) == true else {
+        if let mutation,
+           objectiveCLocalEditCanKeepSemanticTarget(mutation, in: source) {
+            let mutationTargetRange = source.lineRange(
+                for: objectiveCMutationChangedRange(mutation, in: source)
+            )
+            return boxedExpressionRefreshRange(around: mutationTargetRange, in: source) ?? mutationTargetRange
+        }
+        guard !objectiveCRefreshLooksStructural(context) else {
+            guard let mutation,
+                  objectiveCLocalEditCanKeepSemanticTarget(mutation, in: source) else {
+                return nil
+            }
+            let mutationTargetRange = source.lineRange(
+                for: objectiveCMutationChangedRange(mutation, in: source)
+            )
+            if !objectiveCRefreshLooksStructural(source.substring(with: mutationTargetRange)) {
+                return boxedExpressionRefreshRange(around: mutationTargetRange, in: source) ?? mutationTargetRange
+            }
+            guard let scopeRange = ObjectiveCFileSymbolIndex.containingFunctionLikeScopeRange(
+                containing: min(max(0, mutation.location), max(0, source.length - 1)),
+                in: source
+            ) else {
+                return nil
+            }
+            return boxedExpressionRefreshRange(around: scopeRange, in: source) ?? scopeRange
+        }
+        guard mutation.map({ objectiveCLocalEditCanKeepSemanticTarget($0, in: source) }) != false else {
             return nil
         }
         return boxedExpressionRefreshRange(around: targetRange, in: source) ?? targetRange
     }
 
-    private static func objectiveCLocalValueEditCanKeepSemanticTarget(
+    private static func objectiveCMutationChangedRange(
         _ mutation: SyntaxHighlightMutation,
         in source: NSString
-    ) -> Bool {
-        guard mutation.replacement.rangeOfCharacter(from: .newlines) == nil,
-              mutation.replacement.rangeOfCharacter(from: objectiveCSemanticStructuralCharacters) == nil else {
-            return false
-        }
-
+    ) -> NSRange {
         let replacementLength = mutation.replacement.utf16.count
         let changedLocation = min(max(0, mutation.location), source.length)
         let changedStart = max(0, changedLocation - (mutation.length > 0 ? 1 : 0))
         let changedEnd = min(source.length, max(changedLocation + max(1, replacementLength), changedStart + 1))
-        let changedRange = NSRange(location: changedStart, length: changedEnd - changedStart)
+        return NSRange(location: changedStart, length: changedEnd - changedStart)
+    }
+
+    private static func objectiveCLocalEditCanKeepSemanticTarget(
+        _ mutation: SyntaxHighlightMutation,
+        in source: NSString
+    ) -> Bool {
+        guard source.length > 0,
+              mutation.location >= 0,
+              mutation.location <= source.length else {
+            return false
+        }
+
+        let changedRange = objectiveCMutationChangedRange(mutation, in: source)
         let lineRange = source.lineRange(for: changedRange)
         let line = source.substring(with: lineRange) as NSString
         let lineString = line as String
@@ -840,7 +1049,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 .contains { rangesIntersect($0, relativeChangedRange) } == false
         }
 
-        return false
+        return ObjectiveCSemanticLineSignatureIndex.signaturesForChangedLines(mutation, in: source)
+            .allSatisfy { !$0.contributesToSignature }
     }
 
     private static func boxedExpressionRefreshRange(around targetRange: NSRange, in source: NSString) -> NSRange? {
@@ -960,38 +1170,14 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func semanticIndexSignature(in source: NSString) -> ObjectiveCSemanticIndexSignature {
-        var hasher = Hasher()
-        var structuralEditRanges: [NSRange] = []
-
-        var location = 0
-        while location < source.length {
-            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
-            let line = source.substring(with: lineRange) as NSString
-            let contributesToSignature = appendObjectiveCSemanticIndexSignature(
-                from: line,
-                lineOffset: lineRange.location,
-                into: &hasher
-            )
-            if contributesToSignature {
-                structuralEditRanges.append(
-                    contentsOf: objectiveCSemanticStructuralEditRanges(
-                        in: line,
-                        lineOffset: lineRange.location
-                    )
-                )
-            }
-            let nextLocation = lineRange.upperBound
-            guard nextLocation > location else { break }
-            location = nextLocation
-        }
-
+        let lineSignatureIndex = ObjectiveCSemanticLineSignatureIndex(source: source)
         return ObjectiveCSemanticIndexSignature(
-            fingerprint: hasher.finalize(),
-            structuralEditRanges: structuralEditRanges
+            fingerprint: lineSignatureIndex.fingerprint,
+            structuralEditRanges: lineSignatureIndex.structuralEditRanges
         )
     }
 
-    private static func objectiveCSemanticStructuralEditRanges(
+    fileprivate static func objectiveCSemanticStructuralEditRanges(
         in line: NSString,
         lineOffset: Int
     ) -> [NSRange] {
@@ -1225,14 +1411,6 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         in source: NSString,
         previousIndex: ObjectiveCSemanticIndex?
     ) -> Bool {
-        if mutation.replacement.rangeOfCharacter(from: .newlines) != nil {
-            return true
-        }
-        if mutation.replacement.rangeOfCharacter(
-            from: objectiveCSemanticStructuralCharacters
-        ) != nil {
-            return true
-        }
         if objectiveCMutationReplacesPreviousStructuralSignatureText(mutation, previousIndex: previousIndex) {
             return true
         }
@@ -1241,6 +1419,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             in: source,
             previousIndex: previousIndex
         ) {
+            return true
+        }
+        if let previousIndex,
+           let shiftedLineSignatureIndex = previousIndex.lineSignatureIndex.applying(mutation, to: source) {
+            return shiftedLineSignatureIndex.fingerprint != previousIndex.structuralFingerprint
+        }
+        if mutation.replacement.rangeOfCharacter(from: objectiveCSemanticStructuralCharacters) != nil {
             return true
         }
 
@@ -1280,12 +1465,6 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         in source: NSString,
         previousIndex: ObjectiveCSemanticIndex?
     ) -> NSRange? {
-        if mutation.replacement.rangeOfCharacter(from: .newlines) != nil {
-            return nil
-        }
-        if mutation.replacement.rangeOfCharacter(from: objectiveCSemanticStructuralCharacters) != nil {
-            return nil
-        }
         if objectiveCMutationReplacesPreviousStructuralSignatureText(mutation, previousIndex: previousIndex) {
             return nil
         }
@@ -1456,7 +1635,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return NSRange(location: start, length: cursor - start)
     }
 
-    private static func appendObjectiveCSemanticIndexSignature(
+    fileprivate static func appendObjectiveCSemanticIndexSignature(
         from line: NSString,
         lineOffset _: Int,
         into hasher: inout Hasher
@@ -2491,13 +2670,24 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         from tokens: [SyntaxHighlightToken],
         source: NSString,
         targetRange: NSRange?,
+        tokenPrefixMaxUpperBounds: [Int]? = nil,
         preparesFullIndex: Bool = true
     ) -> ObjectiveCOverlayPreparation {
+        if let targetRange, !preparesFullIndex {
+            return preparedPartialTaggedOverlayInput(
+                from: tokens,
+                source: source,
+                targetRange: targetRange,
+                tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
+            )
+        }
+
         if targetRange != nil, tokens.contains(where: \.isSemanticOverlay) {
             return preparedTaggedOverlayInput(
                 from: tokens,
                 source: source,
                 targetRange: targetRange,
+                tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds,
                 preparesFullIndex: preparesFullIndex
             )
         }
@@ -2575,13 +2765,15 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         from tokens: [SyntaxHighlightToken],
         source: NSString,
         targetRange: NSRange?,
+        tokenPrefixMaxUpperBounds: [Int]?,
         preparesFullIndex: Bool
     ) -> ObjectiveCOverlayPreparation {
         if let targetRange, !preparesFullIndex {
             return preparedPartialTaggedOverlayInput(
                 from: tokens,
                 source: source,
-                targetRange: targetRange
+                targetRange: targetRange,
+                tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
             )
         }
 
@@ -2631,13 +2823,18 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     private static func preparedPartialTaggedOverlayInput(
         from tokens: [SyntaxHighlightToken],
         source: NSString,
-        targetRange: NSRange
+        targetRange: NSRange,
+        tokenPrefixMaxUpperBounds: [Int]?
     ) -> ObjectiveCOverlayPreparation {
         let clampedTargetRange = SyntaxEditorRangeUtilities.clampedRange(
             targetRange,
             utf16Length: source.length
         )
-        let tokenRange = tokenIndexRangeForPartialMerge(in: tokens, targetRange: clampedTargetRange)
+        let tokenRange = tokenIndexRangeForPartialMerge(
+            in: tokens,
+            targetRange: clampedTargetRange,
+            tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
+        )
         var baseTokensForIndex: [SyntaxHighlightToken] = []
         baseTokensForIndex.reserveCapacity(tokenRange.count)
 
@@ -2711,11 +2908,17 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static func tokenIndexRangeForPartialMerge(
         in tokens: [SyntaxHighlightToken],
-        targetRange: NSRange
+        targetRange: NSRange,
+        tokenPrefixMaxUpperBounds: [Int]?
     ) -> Range<Int> {
         guard targetRange.length > 0 else { return 0..<0 }
 
-        let prefixMaxUpperBounds = prefixMaxUpperBounds(for: tokens)
+        let prefixMaxUpperBounds = if let tokenPrefixMaxUpperBounds,
+                                      tokenPrefixMaxUpperBounds.count == tokens.count {
+            tokenPrefixMaxUpperBounds
+        } else {
+            prefixMaxUpperBounds(for: tokens)
+        }
         let startIndex = firstTokenIndex(
             intersecting: targetRange,
             prefixMaxUpperBounds: prefixMaxUpperBounds

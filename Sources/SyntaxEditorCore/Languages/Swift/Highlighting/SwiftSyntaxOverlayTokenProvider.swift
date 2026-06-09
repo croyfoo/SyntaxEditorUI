@@ -7,15 +7,149 @@ struct SwiftSemanticOverlayState: SyntaxOverlayState {
     fileprivate var index: SwiftFileSymbolIndex?
     fileprivate var indexedSourceUTF16Length: Int
     fileprivate var indexedDeclarationFingerprint: Int
+    fileprivate var lineSignatureIndex: SwiftSemanticLineSignatureIndex
 }
 
 typealias SwiftSemanticOverlayResult = SyntaxOverlayResult
+
+fileprivate struct SwiftSemanticLineSignature {
+    let range: NSRange
+    let component: String?
+}
+
+fileprivate struct SwiftSemanticLineSignatureIndex {
+    let lines: [SwiftSemanticLineSignature]
+    let fingerprint: Int
+
+    init(source: NSString) {
+        var lines: [SwiftSemanticLineSignature] = []
+        lines.reserveCapacity(max(1, source.length / 48))
+
+        var location = 0
+        while location < source.length {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            lines.append(Self.signature(for: lineRange, in: source))
+            let nextLocation = lineRange.upperBound
+            guard nextLocation > location else { break }
+            location = nextLocation
+        }
+
+        self.init(lines: lines)
+    }
+
+    private init(lines: [SwiftSemanticLineSignature]) {
+        self.lines = lines
+        self.fingerprint = Self.fingerprint(for: lines)
+    }
+
+    func applying(
+        _ mutation: SyntaxHighlightMutation,
+        to source: NSString
+    ) -> SwiftSemanticLineSignatureIndex? {
+        guard !lines.isEmpty else { return nil }
+        let replacementLength = mutation.replacement.utf16.count
+        let previousSourceLength = source.length - (replacementLength - mutation.length)
+        guard previousSourceLength >= 0,
+              mutation.location >= 0,
+              mutation.location <= previousSourceLength,
+              mutation.location + mutation.length <= previousSourceLength else {
+            return nil
+        }
+
+        let oldEnd = mutation.location + mutation.length
+        let startIndex = lineIndex(containing: mutation.location, previousSourceLength: previousSourceLength)
+        let endLookup = mutation.length == 0 ? mutation.location : max(mutation.location, oldEnd - 1)
+        let endIndex = lineIndex(containing: endLookup, previousSourceLength: previousSourceLength)
+        let changedLineSignatures = Self.signaturesForChangedLines(mutation, in: source)
+        guard !changedLineSignatures.isEmpty else { return nil }
+        let delta = replacementLength - mutation.length
+
+        var nextLines: [SwiftSemanticLineSignature] = []
+        nextLines.reserveCapacity(lines.count - (endIndex - startIndex + 1) + changedLineSignatures.count)
+        for index in lines.indices {
+            if index < startIndex {
+                nextLines.append(lines[index])
+            } else if index == startIndex {
+                nextLines.append(contentsOf: changedLineSignatures)
+            } else if index <= endIndex {
+                continue
+            } else {
+                let line = lines[index]
+                nextLines.append(SwiftSemanticLineSignature(
+                    range: NSRange(location: line.range.location + delta, length: line.range.length),
+                    component: line.component
+                ))
+            }
+        }
+        return SwiftSemanticLineSignatureIndex(lines: nextLines)
+    }
+
+    private func lineIndex(containing location: Int, previousSourceLength: Int) -> Int {
+        let clampedLocation = min(max(0, location), max(0, previousSourceLength - 1))
+        var lower = 0
+        var upper = lines.count
+        while lower < upper {
+            let midpoint = (lower + upper) / 2
+            if lines[midpoint].range.upperBound <= clampedLocation {
+                lower = midpoint + 1
+            } else {
+                upper = midpoint
+            }
+        }
+        return min(lower, max(0, lines.count - 1))
+    }
+
+    private static func signaturesForChangedLines(
+        _ mutation: SyntaxHighlightMutation,
+        in source: NSString
+    ) -> [SwiftSemanticLineSignature] {
+        guard source.length > 0 else { return [] }
+        let replacementLength = mutation.replacement.utf16.count
+        let changedLocation = min(max(0, mutation.location), source.length)
+        let changedEnd = min(
+            source.length,
+            max(changedLocation + max(1, replacementLength), changedLocation + 1)
+        )
+        let changedRange = NSRange(location: changedLocation, length: max(0, changedEnd - changedLocation))
+        let changedLineRange = source.lineRange(for: changedRange)
+        var signatures: [SwiftSemanticLineSignature] = []
+        var cursor = changedLineRange.location
+        while cursor < changedLineRange.upperBound {
+            let lineRange = source.lineRange(for: NSRange(location: cursor, length: 0))
+            signatures.append(signature(for: lineRange, in: source))
+            let next = lineRange.upperBound
+            guard next > cursor else { break }
+            cursor = next
+        }
+        return signatures
+    }
+
+    private static func signature(for lineRange: NSRange, in source: NSString) -> SwiftSemanticLineSignature {
+        SwiftSemanticLineSignature(
+            range: lineRange,
+            component: SwiftSyntaxOverlayTokenProvider.swiftSemanticIndexFingerprintComponent(
+                in: source.substring(with: lineRange)
+            )
+        )
+    }
+
+    private static func fingerprint(for lines: [SwiftSemanticLineSignature]) -> Int {
+        var hasher = Hasher()
+        for line in lines {
+            guard let component = line.component else { continue }
+            hasher.combine(component)
+        }
+        return hasher.finalize()
+    }
+}
 
 private struct SwiftOverlayPreparation {
     let baseTokensForIndex: [SyntaxHighlightToken]
     let outputBaseTokens: [SyntaxHighlightToken]
     let tokenIndex: SwiftTokenIndex
     let excludedPreprocessorRanges: [NSRange]
+    let partialMergeTargetRange: NSRange?
+    let partialMergeTokenRange: Range<Int>?
 }
 
 private struct SwiftIndexedToken {
@@ -113,6 +247,25 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         refreshRange: NSRange? = nil,
         state: inout SwiftSemanticOverlayState?
     ) -> SwiftSemanticOverlayResult {
+        mergingOverlayResult(
+            tokens: tokens,
+            source: source,
+            rootNode: rootNode,
+            refreshRange: refreshRange,
+            mutation: nil,
+            state: &state
+        )
+    }
+
+    static func mergingOverlayResult(
+        tokens: [SyntaxHighlightToken],
+        source: String,
+        rootNode: Node? = nil,
+        refreshRange: NSRange? = nil,
+        mutation: SyntaxHighlightMutation? = nil,
+        tokenPrefixMaxUpperBounds: [Int]? = nil,
+        state: inout SwiftSemanticOverlayState?
+    ) -> SwiftSemanticOverlayResult {
         let nsSource = source as NSString
         guard nsSource.length > 0 else {
             state = nil
@@ -127,22 +280,33 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
         }
         let previousState = state
-        let declarationFingerprint = semanticIndexFingerprint(in: nsSource)
+        let shiftedLineSignatureIndex = mutation.flatMap {
+            previousState?.lineSignatureIndex.applying($0, to: nsSource)
+        }
+        let lineSignatureIndex = shiftedLineSignatureIndex ?? SwiftSemanticLineSignatureIndex(source: nsSource)
+        let declarationFingerprint = lineSignatureIndex.fingerprint
         let declarationFingerprintChanged = previousState.map {
             $0.indexedDeclarationFingerprint != declarationFingerprint
         } ?? true
+        let shiftedIndex = mutation.flatMap {
+            previousState?.index?.shifted(by: $0, sourceUTF16Length: nsSource.length)
+        }
         let targetRange = proposedTargetRange == nil
             || previousState?.index == nil
             || declarationFingerprintChanged
             ? nil
             : proposedTargetRange
-        let preparation = preparedOverlayInput(from: tokens, source: nsSource, targetRange: targetRange)
+        let preparation = preparedOverlayInput(
+            from: tokens,
+            source: nsSource,
+            targetRange: targetRange,
+            tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
+        )
         let shouldRebuildIndex = proposedTargetRange == nil
             || previousState?.index == nil
-            || previousState?.indexedSourceUTF16Length != nsSource.length
             || declarationFingerprintChanged
+            || (previousState?.indexedSourceUTF16Length != nsSource.length && shiftedIndex == nil)
         let index: SwiftFileSymbolIndex
-        var rebuiltState: SwiftSemanticOverlayState?
         if shouldRebuildIndex {
             index = SwiftFileSymbolIndex(source: nsSource, tokens: preparation.baseTokensForIndex, rootNode: rootNode)
             guard !index.isCancelled else {
@@ -152,14 +316,15 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                     isCancelled: true
                 )
             }
-            rebuiltState = SwiftSemanticOverlayState(
-                index: index,
-                indexedSourceUTF16Length: nsSource.length,
-                indexedDeclarationFingerprint: declarationFingerprint
-            )
         } else {
-            index = previousState!.index!
+            index = shiftedIndex ?? previousState!.index!
         }
+        let nextState = SwiftSemanticOverlayState(
+            index: index,
+            indexedSourceUTF16Length: nsSource.length,
+            indexedDeclarationFingerprint: declarationFingerprint,
+            lineSignatureIndex: lineSignatureIndex
+        )
 
         guard !Task.isCancelled else {
             return SwiftSemanticOverlayResult(
@@ -186,12 +351,16 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 index: index,
                 targetRange: targetRange
             )
-        if let rebuiltState {
-            state = rebuiltState
-        }
-        guard overlayTokens.isEmpty == false else {
+        state = nextState
+        if let partialMergeTargetRange = preparation.partialMergeTargetRange,
+           let partialMergeTokenRange = preparation.partialMergeTokenRange {
             return SwiftSemanticOverlayResult(
-                tokens: preparation.outputBaseTokens,
+                tokens: partialMergedTokens(
+                    existingTokens: tokens,
+                    replacementOverlayTokens: overlayTokens,
+                    targetRange: partialMergeTargetRange,
+                    tokenRange: partialMergeTokenRange
+                ),
                 refreshRangeOverride: targetRange,
                 isCancelled: false
             )
@@ -699,15 +868,52 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return unique
     }
 
-    static func semanticTargetRange(_ refreshRange: NSRange, in source: NSString) -> NSRange? {
+    static func semanticTargetRange(
+        _ refreshRange: NSRange,
+        in source: NSString,
+        mutation: SyntaxHighlightMutation? = nil
+    ) -> NSRange? {
         let targetRange = RefreshRangePolicy.lineEnvelope(containing: refreshRange, in: source)
         guard targetRange.length > 0 else {
             return nil
+        }
+        if let mutation,
+           swiftLocalEditCanKeepSemanticTarget(mutation, in: source) {
+            return source.lineRange(for: swiftMutationChangedRange(mutation, in: source))
         }
 
         let context = source.substring(with: targetRange)
         let editedRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: source.length)
         return swiftRefreshLooksStructural(context, editedRange: editedRange, lineRange: targetRange) ? nil : targetRange
+    }
+
+    private static func swiftLocalEditCanKeepSemanticTarget(
+        _ mutation: SyntaxHighlightMutation,
+        in source: NSString
+    ) -> Bool {
+        guard source.length > 0,
+              mutation.location >= 0,
+              mutation.location <= source.length else {
+            return false
+        }
+        let changedRange = swiftMutationChangedRange(mutation, in: source)
+        let lineRange = source.lineRange(for: changedRange)
+        return !swiftRefreshLooksStructural(
+            source.substring(with: lineRange),
+            editedRange: changedRange,
+            lineRange: lineRange
+        )
+    }
+
+    private static func swiftMutationChangedRange(
+        _ mutation: SyntaxHighlightMutation,
+        in source: NSString
+    ) -> NSRange {
+        let replacementLength = mutation.replacement.utf16.count
+        let changedLocation = min(max(0, mutation.location), source.length)
+        let changedStart = max(0, changedLocation - (mutation.length > 0 ? 1 : 0))
+        let changedEnd = min(source.length, max(changedLocation + max(1, replacementLength), changedStart + 1))
+        return NSRange(location: changedStart, length: changedEnd - changedStart)
     }
 
     private static func swiftRefreshLooksStructural(
@@ -784,7 +990,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return hasher.finalize()
     }
 
-    private static func swiftSemanticIndexFingerprintComponent(in line: String) -> String? {
+    fileprivate static func swiftSemanticIndexFingerprintComponent(in line: String) -> String? {
         let nsLine = line as NSString
         let fullRange = NSRange(location: 0, length: nsLine.length)
         if valueDeclarationHeadRegex.firstMatch(in: line, range: fullRange) != nil {
@@ -948,8 +1154,20 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     private static func preparedOverlayInput(
         from tokens: [SyntaxHighlightToken],
         source: NSString,
-        targetRange: NSRange?
+        targetRange: NSRange?,
+        tokenPrefixMaxUpperBounds: [Int]? = nil
     ) -> SwiftOverlayPreparation {
+        if let targetRange,
+           tokenPrefixMaxUpperBounds?.count == tokens.count,
+           tokens.contains(where: \.isSemanticOverlay) {
+            return preparedPartialOverlayInput(
+                from: tokens,
+                source: source,
+                targetRange: targetRange,
+                tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
+            )
+        }
+
         let generatedMacroOverlayRangeKeys = generatedSystemMacroOverlayRangeKeys(from: tokens, source: source)
         var baseTokensForIndex: [SyntaxHighlightToken] = []
         var outputBaseTokens: [SyntaxHighlightToken] = []
@@ -977,8 +1195,133 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             baseTokensForIndex: baseTokensForIndex,
             outputBaseTokens: outputBaseTokens,
             tokenIndex: SwiftTokenIndex(tokens: baseTokensForIndex, source: source, targetRange: targetRange),
-            excludedPreprocessorRanges: mergedExcludedPreprocessorRanges(existingTokens: baseTokensForIndex)
+            excludedPreprocessorRanges: mergedExcludedPreprocessorRanges(existingTokens: baseTokensForIndex),
+            partialMergeTargetRange: nil,
+            partialMergeTokenRange: nil
         )
+    }
+
+    private static func preparedPartialOverlayInput(
+        from tokens: [SyntaxHighlightToken],
+        source: NSString,
+        targetRange: NSRange,
+        tokenPrefixMaxUpperBounds: [Int]?
+    ) -> SwiftOverlayPreparation {
+        let clampedTargetRange = SyntaxEditorRangeUtilities.clampedRange(
+            targetRange,
+            utf16Length: source.length
+        )
+        let tokenRange = tokenIndexRangeForPartialMerge(
+            in: tokens,
+            targetRange: clampedTargetRange,
+            tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
+        )
+        var baseTokensForIndex: [SyntaxHighlightToken] = []
+        baseTokensForIndex.reserveCapacity(tokenRange.count)
+        for token in tokens[tokenRange] where !token.isSemanticOverlay {
+            guard rangesIntersect(token.range, clampedTargetRange) else { continue }
+            baseTokensForIndex.append(token)
+        }
+
+        return SwiftOverlayPreparation(
+            baseTokensForIndex: baseTokensForIndex,
+            outputBaseTokens: [],
+            tokenIndex: SwiftTokenIndex(tokens: baseTokensForIndex, source: source, targetRange: clampedTargetRange),
+            excludedPreprocessorRanges: mergedExcludedPreprocessorRanges(existingTokens: baseTokensForIndex),
+            partialMergeTargetRange: clampedTargetRange,
+            partialMergeTokenRange: tokenRange
+        )
+    }
+
+    private static func partialMergedTokens(
+        existingTokens: [SyntaxHighlightToken],
+        replacementOverlayTokens: [SyntaxHighlightToken],
+        targetRange: NSRange,
+        tokenRange: Range<Int>
+    ) -> [SyntaxHighlightToken] {
+        var segment: [SyntaxHighlightToken] = []
+        segment.reserveCapacity(tokenRange.count + replacementOverlayTokens.count)
+        for token in existingTokens[tokenRange] {
+            if token.isSemanticOverlay, rangesIntersect(token.range, targetRange) {
+                continue
+            }
+            segment.append(token)
+        }
+        segment.append(contentsOf: replacementOverlayTokens)
+        let mergedSegment = deduplicated(segment.sorted(by: SyntaxHighlightTokenOrdering.displayOrder))
+
+        var merged = existingTokens
+        merged.replaceSubrange(tokenRange, with: mergedSegment)
+        return merged
+    }
+
+    private static func tokenIndexRangeForPartialMerge(
+        in tokens: [SyntaxHighlightToken],
+        targetRange: NSRange,
+        tokenPrefixMaxUpperBounds: [Int]?
+    ) -> Range<Int> {
+        guard targetRange.length > 0 else { return 0..<0 }
+        let prefixMaxUpperBounds = if let tokenPrefixMaxUpperBounds,
+                                      tokenPrefixMaxUpperBounds.count == tokens.count {
+            tokenPrefixMaxUpperBounds
+        } else {
+            prefixMaxUpperBounds(for: tokens)
+        }
+        let startIndex = firstTokenIndex(
+            intersecting: targetRange,
+            prefixMaxUpperBounds: prefixMaxUpperBounds
+        )
+        var upperBound = lowerBoundForTokenLocation(targetRange.upperBound, in: tokens)
+        while upperBound < tokens.count,
+              tokens[upperBound].range.location < targetRange.upperBound {
+            upperBound += 1
+        }
+        return startIndex..<upperBound
+    }
+
+    private static func prefixMaxUpperBounds(for tokens: [SyntaxHighlightToken]) -> [Int] {
+        var prefixMaxUpperBounds: [Int] = []
+        prefixMaxUpperBounds.reserveCapacity(tokens.count)
+        var maxUpperBound = 0
+        for token in tokens {
+            maxUpperBound = max(maxUpperBound, token.range.upperBound)
+            prefixMaxUpperBounds.append(maxUpperBound)
+        }
+        return prefixMaxUpperBounds
+    }
+
+    private static func firstTokenIndex(
+        intersecting range: NSRange,
+        prefixMaxUpperBounds: [Int]
+    ) -> Int {
+        var lowerBound = 0
+        var upperBound = prefixMaxUpperBounds.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if prefixMaxUpperBounds[middle] <= range.location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
+    }
+
+    private static func lowerBoundForTokenLocation(
+        _ location: Int,
+        in tokens: [SyntaxHighlightToken]
+    ) -> Int {
+        var lowerBound = 0
+        var upperBound = tokens.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if tokens[middle].range.location < location {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        return lowerBound
     }
 
     private static func isSwiftSemanticOverlayToken(

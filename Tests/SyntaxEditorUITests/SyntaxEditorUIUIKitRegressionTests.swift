@@ -1621,7 +1621,7 @@ extension SyntaxEditorUITests {
             string: syntaxEditorUITestColor(hex: 0xABCDEF),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
-        let updateRefreshRange = NSRange(location: source.utf16.count, length: 1)
+        let updateRefreshRange = NSRange(location: 0, length: source.utf16.count + 1)
         let completeGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [
@@ -1653,6 +1653,7 @@ extension SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
         await completeGate.waitUntilSuspended()
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxHighlightPhase.syntacticFastPass))
         #expect(await syntaxEditorWaitForColor(
             { iOSEditorForegroundColor(editorView, at: 0) },
             equals: theme.keyword
@@ -1661,6 +1662,7 @@ extension SyntaxEditorUITests {
         editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
         editorView.insertText("x")
 
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxHighlightPhase.syntacticFastPass))
         #expect(await syntaxEditorWaitForColor(
             { iOSEditorForegroundColor(editorView, at: 0) },
             equals: theme.string
@@ -2221,7 +2223,11 @@ extension SyntaxEditorUITests {
             ],
             resetGate: resetGate,
             updateGate: updateGate,
-            updateRefreshRange: NSRange(location: firstPaste.utf16.count, length: secondPaste.utf16.count)
+            updateRefreshRange: NSRange(
+                location: 0,
+                length: firstPaste.utf16.count + secondPaste.utf16.count
+            ),
+            updateTokenPayload: .fullSnapshot
         )
         let model = SyntaxEditorTestContext(
             text: "",

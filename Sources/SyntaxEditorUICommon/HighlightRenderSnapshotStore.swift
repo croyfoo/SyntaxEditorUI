@@ -240,6 +240,12 @@ package struct PendingHighlightEditMap {
 }
 
 package struct HighlightVisibleRunResolver {
+    private struct SnapshotVisibleMapping {
+        let snapshotRange: NSRange
+        let currentRange: NSRange
+        let delta: Int
+    }
+
     private let snapshot: HighlightRenderSnapshot
     private let pendingEditMap: PendingHighlightEditMap
     private let currentTextLength: Int
@@ -260,20 +266,10 @@ package struct HighlightVisibleRunResolver {
         self.snapshot = snapshot
         self.pendingEditMap = pendingEditMap
         self.currentTextLength = max(0, currentTextLength)
-        self.currentSuppressionRanges = HighlightRunUtilities.normalizedRanges(
-            currentSuppressionRanges,
-            textLength: max(0, currentTextLength)
-        )
-        self.currentColorRuns = HighlightRunUtilities.coalescedColorRuns(
-            HighlightRunUtilities.normalizedColorRuns(currentColorRuns, textLength: max(0, currentTextLength))
-        )
-        self.currentFontRuns = HighlightRunUtilities.coalescedFontRuns(
-            HighlightRunUtilities.normalizedFontRuns(currentFontRuns, textLength: max(0, currentTextLength))
-        )
-        self.currentMaterializedRanges = HighlightRunUtilities.normalizedRanges(
-            currentMaterializedRanges,
-            textLength: max(0, currentTextLength)
-        )
+        self.currentSuppressionRanges = currentSuppressionRanges
+        self.currentColorRuns = currentColorRuns
+        self.currentFontRuns = currentFontRuns
+        self.currentMaterializedRanges = currentMaterializedRanges
     }
 
     package func forEachColorRun(
@@ -285,12 +281,29 @@ package struct HighlightVisibleRunResolver {
         }
 
         forEachCurrentVisibleRange(in: currentRange) { visibleRange in
-            for snapshotRange in snapshotRanges(forCurrentVisibleRange: visibleRange) {
-                HighlightRunUtilities.forEachColorRun(snapshot.colorRuns, in: snapshotRange) { run in
-                    for currentRunRange in pendingEditMap.currentRanges(forSnapshotRange: run.range) {
-                        let intersection = SyntaxEditorRangeUtilities.intersection(of: currentRunRange, and: visibleRange)
-                        guard intersection.length > 0 else { continue }
+            if let mappings = snapshotVisibleMappings(forCurrentVisibleRange: visibleRange) {
+                for mapping in mappings {
+                    HighlightRunUtilities.forEachColorRun(snapshot.colorRuns, in: mapping.snapshotRange) { run in
+                        let shiftedRange = NSRange(
+                            location: run.range.location + mapping.delta,
+                            length: run.range.length
+                        )
+                        let intersection = SyntaxEditorRangeUtilities.intersection(
+                            of: shiftedRange,
+                            and: mapping.currentRange
+                        )
+                        guard intersection.length > 0 else { return }
                         body(HighlightColorRun(range: intersection, color: run.color))
+                    }
+                }
+            } else {
+                for snapshotRange in snapshotRanges(forCurrentVisibleRange: visibleRange) {
+                    HighlightRunUtilities.forEachColorRun(snapshot.colorRuns, in: snapshotRange) { run in
+                        for currentRunRange in pendingEditMap.currentRanges(forSnapshotRange: run.range) {
+                            let intersection = SyntaxEditorRangeUtilities.intersection(of: currentRunRange, and: visibleRange)
+                            guard intersection.length > 0 else { continue }
+                            body(HighlightColorRun(range: intersection, color: run.color))
+                        }
                     }
                 }
             }
@@ -306,12 +319,29 @@ package struct HighlightVisibleRunResolver {
         }
 
         forEachCurrentVisibleRange(in: currentRange) { visibleRange in
-            for snapshotRange in snapshotRanges(forCurrentVisibleRange: visibleRange) {
-                HighlightRunUtilities.forEachFontRun(snapshot.fontRuns, in: snapshotRange) { run in
-                    for currentRunRange in pendingEditMap.currentRanges(forSnapshotRange: run.range) {
-                        let intersection = SyntaxEditorRangeUtilities.intersection(of: currentRunRange, and: visibleRange)
-                        guard intersection.length > 0 else { continue }
+            if let mappings = snapshotVisibleMappings(forCurrentVisibleRange: visibleRange) {
+                for mapping in mappings {
+                    HighlightRunUtilities.forEachFontRun(snapshot.fontRuns, in: mapping.snapshotRange) { run in
+                        let shiftedRange = NSRange(
+                            location: run.range.location + mapping.delta,
+                            length: run.range.length
+                        )
+                        let intersection = SyntaxEditorRangeUtilities.intersection(
+                            of: shiftedRange,
+                            and: mapping.currentRange
+                        )
+                        guard intersection.length > 0 else { return }
                         body(HighlightFontRun(range: intersection, font: run.font))
+                    }
+                }
+            } else {
+                for snapshotRange in snapshotRanges(forCurrentVisibleRange: visibleRange) {
+                    HighlightRunUtilities.forEachFontRun(snapshot.fontRuns, in: snapshotRange) { run in
+                        for currentRunRange in pendingEditMap.currentRanges(forSnapshotRange: run.range) {
+                            let intersection = SyntaxEditorRangeUtilities.intersection(of: currentRunRange, and: visibleRange)
+                            guard intersection.length > 0 else { continue }
+                            body(HighlightFontRun(range: intersection, font: run.font))
+                        }
                     }
                 }
             }
@@ -367,6 +397,50 @@ package struct HighlightVisibleRunResolver {
         }
         return pendingEditMap.snapshotRanges(forCurrentRange: range)
     }
+
+    private func snapshotVisibleMappings(forCurrentVisibleRange range: NSRange) -> [SnapshotVisibleMapping]? {
+        if pendingEditMap.isEmpty {
+            let snapshotRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: snapshot.textLength)
+            guard snapshotRange.length > 0 else { return [] }
+            return [
+                SnapshotVisibleMapping(
+                    snapshotRange: snapshotRange,
+                    currentRange: range,
+                    delta: range.location - snapshotRange.location
+                ),
+            ]
+        }
+
+        let snapshotRanges = pendingEditMap.snapshotRanges(forCurrentRange: range)
+        var mappings: [SnapshotVisibleMapping] = []
+        mappings.reserveCapacity(snapshotRanges.count)
+
+        for snapshotRange in snapshotRanges {
+            let currentRanges = pendingEditMap.currentRanges(forSnapshotRange: snapshotRange)
+                .map { SyntaxEditorRangeUtilities.intersection(of: $0, and: range) }
+                .filter { $0.length > 0 }
+            guard currentRanges.count == 1,
+                  let currentRange = currentRanges.first,
+                  currentRange.length == snapshotRange.length
+            else {
+                return nil
+            }
+            mappings.append(
+                SnapshotVisibleMapping(
+                    snapshotRange: snapshotRange,
+                    currentRange: currentRange,
+                    delta: currentRange.location - snapshotRange.location
+                )
+            )
+        }
+
+        return mappings
+    }
+}
+
+package struct HighlightResolvedVisibleRuns {
+    package let colorRuns: [HighlightColorRun]
+    package let fontRuns: [HighlightFontRun]
 }
 
 @MainActor
@@ -404,6 +478,13 @@ package final class HighlightRenderSnapshotStore {
 
     package var hasMaterializedRuns: Bool {
         !snapshot.colorRuns.isEmpty || !snapshot.fontRuns.isEmpty || !currentColorRuns.isEmpty || !currentFontRuns.isEmpty
+    }
+
+    package var maintainsNormalizedRunInvariantForTesting: Bool {
+        HighlightRunUtilities.colorRunsAreNormalized(currentColorRuns, textLength: currentTextLength)
+            && HighlightRunUtilities.fontRunsAreNormalized(currentFontRuns, textLength: currentTextLength)
+            && HighlightRunUtilities.rangesAreNormalized(currentSuppressionRanges, textLength: currentTextLength)
+            && HighlightRunUtilities.rangesAreNormalized(currentMaterializedRanges, textLength: currentTextLength)
     }
 
     package func colorRuns(in range: NSRange) -> [HighlightColorRun] {
@@ -529,6 +610,15 @@ package final class HighlightRenderSnapshotStore {
         _ body: (HighlightFontRun) -> Void
     ) {
         resolver().forEachFontRun(in: range, body)
+    }
+
+    package func resolveVisibleRuns(in range: NSRange) -> HighlightResolvedVisibleRuns {
+        let resolver = resolver()
+        var colorRuns: [HighlightColorRun] = []
+        var fontRuns: [HighlightFontRun] = []
+        resolver.forEachColorRun(in: range) { colorRuns.append($0) }
+        resolver.forEachFontRun(in: range) { fontRuns.append($0) }
+        return HighlightResolvedVisibleRuns(colorRuns: colorRuns, fontRuns: fontRuns)
     }
 
     @discardableResult
@@ -986,6 +1076,27 @@ fileprivate enum HighlightRunUtilities {
         return coalescedRuns
     }
 
+    static func colorRunsAreNormalized(
+        _ runs: [HighlightColorRun],
+        textLength: Int
+    ) -> Bool {
+        guard runs.allSatisfy({ $0.range.location >= 0 && $0.range.length > 0 && $0.range.upperBound <= textLength }) else {
+            return false
+        }
+        for index in runs.indices.dropFirst() {
+            let previous = runs[runs.index(before: index)]
+            let current = runs[index]
+            guard sortColorRun(lhs: previous, rhs: current) else {
+                return false
+            }
+            if previous.color.isEqual(current.color),
+               previous.range.upperBound >= current.range.location {
+                return false
+            }
+        }
+        return true
+    }
+
     static func coalescedFontRuns(
         _ runs: [HighlightFontRun]
     ) -> [HighlightFontRun] {
@@ -1007,6 +1118,45 @@ fileprivate enum HighlightRunUtilities {
         }
 
         return coalescedRuns
+    }
+
+    static func fontRunsAreNormalized(
+        _ runs: [HighlightFontRun],
+        textLength: Int
+    ) -> Bool {
+        guard runs.allSatisfy({ $0.range.location >= 0 && $0.range.length > 0 && $0.range.upperBound <= textLength }) else {
+            return false
+        }
+        for index in runs.indices.dropFirst() {
+            let previous = runs[runs.index(before: index)]
+            let current = runs[index]
+            guard sortFontRun(lhs: previous, rhs: current) else {
+                return false
+            }
+            if previous.font == current.font,
+               previous.range.upperBound >= current.range.location {
+                return false
+            }
+        }
+        return true
+    }
+
+    static func rangesAreNormalized(
+        _ ranges: [NSRange],
+        textLength: Int
+    ) -> Bool {
+        guard ranges.allSatisfy({ $0.location >= 0 && $0.length > 0 && $0.upperBound <= textLength }) else {
+            return false
+        }
+        for index in ranges.indices.dropFirst() {
+            let previous = ranges[ranges.index(before: index)]
+            let current = ranges[index]
+            guard previous.location < current.location,
+                  previous.upperBound < current.location else {
+                return false
+            }
+        }
+        return true
     }
 
     static func rangesBySubtracting(_ removals: [NSRange], from range: NSRange) -> [NSRange] {
