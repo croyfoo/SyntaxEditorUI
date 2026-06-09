@@ -1506,12 +1506,8 @@ public final class SyntaxEditorView: NSScrollView {
             return false
         }
 
-        return materializedHighlightPhase == .complete
-            && materializedHighlightRevision == lastHighlightRevision
+        return hasMaterializedCompletedHighlight(for: result)
             && lastHighlightRevision < result.revision
-            && materializedHighlightLanguage == result.language
-            && lastHighlightLanguage == result.language
-            && textSystem.styleStore.hasMaterializedRuns
     }
 
     private func highlightApplicationRefreshRange(
@@ -1521,14 +1517,31 @@ public final class SyntaxEditorView: NSScrollView {
         guard mutation != nil else {
             return result.refreshRange
         }
-        guard textSystem.styleStore.hasMaterializedRuns else {
-            return NSRange(location: 0, length: result.source.utf16.count)
-        }
-        if let lastHighlightRevision,
-           (lastHighlightRevision != result.revision - 1 || lastHighlightLanguage != result.language) {
+        guard hasCompletedMaterializedHighlightBaseline(for: result) else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
         return result.refreshRange
+    }
+
+    private func hasCompletedMaterializedHighlightBaseline(for result: SyntaxHighlightResult) -> Bool {
+        guard let lastHighlightRevision else {
+            return false
+        }
+
+        return hasMaterializedCompletedHighlight(for: result)
+            && lastHighlightRevision == result.revision - 1
+    }
+
+    private func hasMaterializedCompletedHighlight(for result: SyntaxHighlightResult) -> Bool {
+        guard let lastHighlightRevision else {
+            return false
+        }
+
+        return materializedHighlightPhase == .complete
+            && materializedHighlightRevision == lastHighlightRevision
+            && materializedHighlightLanguage == result.language
+            && lastHighlightLanguage == result.language
+            && textSystem.styleStore.hasMaterializedRuns
     }
 
     private func reapplyCachedHighlight() {

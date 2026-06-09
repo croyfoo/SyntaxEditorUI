@@ -868,6 +868,7 @@ extension SyntaxEditorUITests {
             string: syntaxEditorUITestColor(hex: 0xABCDEF),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
+        let updateRefreshRange = NSRange(location: source.utf16.count, length: 1)
         let completeGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [
@@ -888,7 +889,8 @@ extension SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            completeGate: completeGate
+            completeGate: completeGate,
+            updateRefreshRange: updateRefreshRange
         )
         let model = SyntaxEditorTestContext(
             text: source,
@@ -968,6 +970,9 @@ extension SyntaxEditorUITests {
             { macEditorForegroundColor(editorView, at: 0) },
             equals: theme.keyword
         ))
+        await completeGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         let insertionRange = NSRange(location: source.utf16.count, length: 0)
         editorView.textView.setSelectedRange(insertionRange)

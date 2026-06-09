@@ -1621,6 +1621,7 @@ extension SyntaxEditorUITests {
             string: syntaxEditorUITestColor(hex: 0xABCDEF),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
         )
+        let updateRefreshRange = NSRange(location: source.utf16.count, length: 1)
         let completeGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [
@@ -1641,7 +1642,8 @@ extension SyntaxEditorUITests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            completeGate: completeGate
+            completeGate: completeGate,
+            updateRefreshRange: updateRefreshRange
         )
         let model = SyntaxEditorTestContext(
             text: source,
@@ -1720,6 +1722,9 @@ extension SyntaxEditorUITests {
             { iOSEditorForegroundColor(editorView, at: 0) },
             equals: theme.keyword
         ))
+        await completeGate.resumeOne()
+        await editorView.waitForPendingHighlightForTesting()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
         let updateSuspensionCount = await completeGate.currentSuspensionCount()

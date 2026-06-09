@@ -2099,12 +2099,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return false
         }
 
-        return materializedHighlightPhase == .complete
-            && materializedHighlightRevision == lastHighlightRevision
+        return hasMaterializedCompletedHighlight(for: result)
             && lastHighlightRevision < result.revision
-            && materializedHighlightLanguage == result.language
-            && lastHighlightLanguage == result.language
-            && highlightStyleStore.hasMaterializedRuns
     }
 
     func highlightApplicationRefreshRange(
@@ -2114,14 +2110,31 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guard mutation != nil else {
             return result.refreshRange
         }
-        guard highlightStyleStore.hasMaterializedRuns else {
-            return NSRange(location: 0, length: result.source.utf16.count)
-        }
-        if let lastHighlightRevision,
-           (lastHighlightRevision != result.revision - 1 || lastHighlightLanguage != result.language) {
+        guard hasCompletedMaterializedHighlightBaseline(for: result) else {
             return NSRange(location: 0, length: result.source.utf16.count)
         }
         return result.refreshRange
+    }
+
+    private func hasCompletedMaterializedHighlightBaseline(for result: SyntaxHighlightResult) -> Bool {
+        guard let lastHighlightRevision else {
+            return false
+        }
+
+        return hasMaterializedCompletedHighlight(for: result)
+            && lastHighlightRevision == result.revision - 1
+    }
+
+    private func hasMaterializedCompletedHighlight(for result: SyntaxHighlightResult) -> Bool {
+        guard let lastHighlightRevision else {
+            return false
+        }
+
+        return materializedHighlightPhase == .complete
+            && materializedHighlightRevision == lastHighlightRevision
+            && materializedHighlightLanguage == result.language
+            && lastHighlightLanguage == result.language
+            && highlightStyleStore.hasMaterializedRuns
     }
 
     func reapplyCachedHighlight() {
