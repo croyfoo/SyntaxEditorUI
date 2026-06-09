@@ -8422,6 +8422,54 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens == full.tokens)
     }
 
+    @Test("SyntaxHighlighterEngine rebuilds semantic state after cancelled incremental update")
+    func highlighterRebuildsSemanticStateAfterCancelledIncrementalUpdate() async throws {
+        let prefix = (0..<2_000)
+            .map { "let cachedValue\($0) = \($0)" }
+            .joined(separator: "\n")
+        let source = """
+        \(prefix)
+
+        func render() -> Int {
+            let item = 1
+            return item
+        }
+        """
+        let firstUpdatedSource = source.replacingOccurrences(of: "let item = 1", with: "let renamed = 1")
+        let firstMutation = try #require(TextMutation.diff(from: source, to: firstUpdatedSource))
+        let secondUpdatedSource = firstUpdatedSource.replacingOccurrences(of: "return item", with: "return renamed")
+        let secondMutation = try #require(TextMutation.diff(from: firstUpdatedSource, to: secondUpdatedSource))
+        let engine = SyntaxHighlighterEngine()
+
+        _ = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 1)
+        let firstPhaseTask = Task {
+            let phases = await engine.updatePhases(
+                source: firstUpdatedSource,
+                language: SyntaxLanguage.swift,
+                mutation: SyntaxHighlightMutation(firstMutation),
+                revision: 2
+            )
+            var iterator = phases.makeAsyncIterator()
+            return await iterator.next()
+        }
+        let firstPhase = await firstPhaseTask.value
+        #expect(firstPhase?.phase == .syntacticFastPass)
+        try await Task.sleep(for: .milliseconds(10))
+
+        let incremental = await engine.update(
+            previousSource: firstUpdatedSource,
+            source: secondUpdatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(secondMutation)
+        )
+        let full = await SyntaxHighlighterEngine().reset(
+            source: secondUpdatedSource,
+            language: SyntaxLanguage.swift
+        )
+
+        #expect(incremental.tokens == full.tokens)
+    }
+
     @Test("SyntaxHighlighterEngine keeps current session after cancelled reset")
     func highlighterKeepsCurrentSessionAfterCancelledReset() async throws {
         let source = """

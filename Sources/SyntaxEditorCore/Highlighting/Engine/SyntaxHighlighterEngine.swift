@@ -744,6 +744,7 @@ private final class SyntaxHighlightSession {
         let classifiedTokens: [SyntaxHighlightToken]
         var resultRefreshRange: NSRange
         if semanticResult.isCancelled || Task.isCancelled {
+            invalidateSemanticState()
             classifiedTokens = syntacticResultTokens
             resultRefreshRange = syntacticRefreshRange
         } else {
@@ -1111,6 +1112,11 @@ private extension SyntaxHighlightSession {
             return nil
         }
         return layer?.snapshot()?.rootSnapshot.tree.rootNode
+    }
+
+    func invalidateSemanticState() {
+        swiftSemanticState = nil
+        objectiveCSemanticState = nil
     }
 
     func semanticRefreshRange(
