@@ -1257,9 +1257,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             storage.addAttribute(.font, value: baseFont, range: fullRange)
         }
         var didRecomputeSyntaxFontRuns = false
-        if lastHighlightRevision == model.revision,
-           lastHighlightLanguage == model.language,
-           lastHighlightSource == source,
+        if hasReusableRecordedHighlightSnapshot(
+            source: source,
+            language: model.language,
+            revision: model.revision
+        ),
            let baseForeground = baseAttributes()[.foregroundColor] as? UIColor {
             var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes())
             let runSet = syntaxHighlightRunSet(
@@ -2143,10 +2145,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return
         }
         let source = text
-        guard lastHighlightRevision == model.revision,
-              lastHighlightLanguage == model.language,
-              lastHighlightSource == source
-        else {
+        guard hasReusableRecordedHighlightSnapshot(
+            source: source,
+            language: model.language,
+            revision: model.revision
+        ) else {
             scheduleHighlight(source: source, language: model.language, revision: model.revision)
             return
         }
@@ -2157,6 +2160,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             source: source,
             refreshRange: NSRange(location: 0, length: source.utf16.count)
         )
+    }
+
+    private func hasReusableRecordedHighlightSnapshot(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) -> Bool {
+        lastHighlightRevision == revision
+            && lastHighlightLanguage == language
+            && lastHighlightSource == source
     }
 
     private func hasScheduledFullResetHighlight(
@@ -2709,9 +2722,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let targetRange = SyntaxEditorRangeUtilities.clampedRange(range, utf16Length: textLength)
         guard targetRange.length > 0 else { return }
 
-        if lastHighlightRevision == model.revision,
-           lastHighlightLanguage == model.language,
-           lastHighlightSource == text {
+        if hasReusableRecordedHighlightSnapshot(
+            source: text,
+            language: model.language,
+            revision: model.revision
+        ) {
             applyHighlight(
                 lastHighlightTokens,
                 expectedRevision: model.revision,

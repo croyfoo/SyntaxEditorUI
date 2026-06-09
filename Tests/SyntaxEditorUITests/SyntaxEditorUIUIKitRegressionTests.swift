@@ -1228,6 +1228,51 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 3), updatedTheme.baseForeground))
     }
 
+    @Test("SyntaxEditorView refreshes iOS syntax colors when theme changes after incremental edits")
+    @MainActor
+    func syntaxEditorViewIOSThemeRefreshesAfterIncrementalEditDropsCachedTokens() async {
+        let source = "let value = \"text\""
+        let initialTheme = syntaxEditorUITestTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x345678)
+        )
+        let updatedTheme = syntaxEditorUITestTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            keyword: syntaxEditorUITestColor(hex: 0x876543)
+        )
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            theme: initialTheme
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
+
+        await editorView.waitForPendingHighlightForTesting()
+        let initialCallCount = await highlighter.callCount()
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), initialTheme.keyword))
+
+        editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
+        editorView.insertText("!")
+        await editorView.waitForPendingHighlightForTesting()
+        let editedCallCount = await highlighter.callCount()
+        #expect(editedCallCount == initialCallCount + 1)
+
+        model.model.theme = updatedTheme
+        editorView.synchronizeDocumentForTesting()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(await highlighter.callCount() == editedCallCount + 1)
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))
+    }
+
     @Test("SyntaxEditorView preserves cached iOS syntax colors after font size delta changes")
     @MainActor
     func syntaxEditorViewIOSFontSizeDeltaPreservesCachedHighlightTokens() async throws {

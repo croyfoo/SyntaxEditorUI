@@ -1547,10 +1547,11 @@ public final class SyntaxEditorView: NSScrollView {
             return
         }
         let source = textView.string
-        guard lastHighlightRevision == model.revision,
-              lastHighlightLanguage == model.language,
-              lastHighlightSource == source
-        else {
+        guard hasReusableRecordedHighlightSnapshot(
+            source: source,
+            language: model.language,
+            revision: model.revision
+        ) else {
             scheduleHighlight(source: source, language: model.language, revision: model.revision)
             return
         }
@@ -1563,6 +1564,16 @@ public final class SyntaxEditorView: NSScrollView {
             refreshRange: NSRange(location: 0, length: source.utf16.count),
             mutation: nil
         )
+    }
+
+    private func hasReusableRecordedHighlightSnapshot(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) -> Bool {
+        lastHighlightRevision == revision
+            && lastHighlightLanguage == language
+            && lastHighlightSource == source
     }
 
     private func hasScheduledFullResetHighlight(
@@ -1633,9 +1644,11 @@ public final class SyntaxEditorView: NSScrollView {
         }
 
         var didRecomputeSyntaxFontRuns = false
-        if lastHighlightRevision == model.revision,
-           lastHighlightLanguage == model.language,
-           lastHighlightSource == textView.string,
+        if hasReusableRecordedHighlightSnapshot(
+            source: textView.string,
+            language: model.language,
+            revision: model.revision
+        ),
            let baseForeground = base[.foregroundColor] as? NSColor {
             var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: base)
             let runSet = syntaxHighlightRunSet(
@@ -1713,9 +1726,11 @@ public final class SyntaxEditorView: NSScrollView {
         textLength: Int
     ) -> [HighlightFontRun]? {
         guard textLength > 0,
-              lastHighlightRevision == model.revision,
-              lastHighlightLanguage == language,
-              lastHighlightSource == source
+              hasReusableRecordedHighlightSnapshot(
+                  source: source,
+                  language: language,
+                  revision: model.revision
+              )
         else {
             return nil
         }
