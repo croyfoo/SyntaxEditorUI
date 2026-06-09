@@ -8180,6 +8180,36 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(incremental.tokens, full.tokens))
     }
 
+    @Test("SyntaxHighlightMutationLineRange includes the line created by newline insertion")
+    func syntaxHighlightMutationLineRangeIncludesInsertedNewlineLine() throws {
+        let source = "let first = 1let second = 2"
+        let updatedSource = "let first = 1\nlet second = 2"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let nsSource = updatedSource as NSString
+
+        let changedLineRange = SyntaxHighlightMutationLineRange.changedLineRange(
+            for: SyntaxHighlightMutation(mutation),
+            in: nsSource
+        )
+
+        #expect(changedLineRange == NSRange(location: 0, length: nsSource.length))
+    }
+
+    @Test("SyntaxHighlightMutationLineRange includes the line created by carriage-return insertion")
+    func syntaxHighlightMutationLineRangeIncludesInsertedCarriageReturnLine() throws {
+        let source = "let first = 1let second = 2"
+        let updatedSource = "let first = 1\rlet second = 2"
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let nsSource = updatedSource as NSString
+
+        let changedLineRange = SyntaxHighlightMutationLineRange.changedLineRange(
+            for: SyntaxHighlightMutation(mutation),
+            in: nsSource
+        )
+
+        #expect(changedLineRange == NSRange(location: 0, length: nsSource.length))
+    }
+
     @Test("SyntaxHighlighterEngine keeps incremental state after deleting a final line break")
     func highlighterIncrementalEditHandlesDeletedFinalLineBreakFollowedByEdit() async throws {
         let source = "const first = 1;\n"

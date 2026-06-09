@@ -104,14 +104,7 @@ fileprivate struct SwiftSemanticLineSignatureIndex {
         in source: NSString
     ) -> [SwiftSemanticLineSignature] {
         guard source.length > 0 else { return [] }
-        let replacementLength = mutation.replacement.utf16.count
-        let changedLocation = min(max(0, mutation.location), source.length)
-        let changedEnd = min(
-            source.length,
-            max(changedLocation + max(1, replacementLength), changedLocation + 1)
-        )
-        let changedRange = NSRange(location: changedLocation, length: max(0, changedEnd - changedLocation))
-        let changedLineRange = source.lineRange(for: changedRange)
+        let changedLineRange = SyntaxHighlightMutationLineRange.changedLineRange(for: mutation, in: source)
         var signatures: [SwiftSemanticLineSignature] = []
         var cursor = changedLineRange.location
         while cursor < changedLineRange.upperBound {
