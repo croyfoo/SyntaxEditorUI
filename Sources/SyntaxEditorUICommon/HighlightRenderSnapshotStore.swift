@@ -615,9 +615,45 @@ package final class HighlightRenderSnapshotStore {
         _ mutation: SyntaxHighlightMutation,
         currentTextLength nextTextLength: Int
     ) {
-        currentTextLength = max(0, nextTextLength)
+        let nextTextLength = max(0, nextTextLength)
+        shiftCurrentMaterializedRuns(for: mutation, currentTextLength: nextTextLength)
+        currentTextLength = nextTextLength
         pendingEditMap.recordPendingEdit(mutation, currentTextLength: currentTextLength)
         generation += 1
+    }
+
+    private func shiftCurrentMaterializedRuns(
+        for mutation: SyntaxHighlightMutation,
+        currentTextLength nextTextLength: Int
+    ) {
+        guard !currentMaterializedRanges.isEmpty else { return }
+
+        var editMap = PendingHighlightEditMap()
+        editMap.recordPendingEdit(mutation, currentTextLength: nextTextLength)
+        currentColorRuns = HighlightRunUtilities.coalescedColorRuns(
+            HighlightRunUtilities.normalizedColorRuns(
+                currentColorRuns.flatMap { run in
+                    editMap.currentRanges(forSnapshotRange: run.range)
+                        .map { HighlightColorRun(range: $0, color: run.color) }
+                },
+                textLength: nextTextLength
+            )
+        )
+        currentFontRuns = HighlightRunUtilities.coalescedFontRuns(
+            HighlightRunUtilities.normalizedFontRuns(
+                currentFontRuns.flatMap { run in
+                    editMap.currentRanges(forSnapshotRange: run.range)
+                        .map { HighlightFontRun(range: $0, font: run.font) }
+                },
+                textLength: nextTextLength
+            )
+        )
+        currentMaterializedRanges = HighlightRunUtilities.normalizedRanges(
+            currentMaterializedRanges.flatMap {
+                editMap.currentRanges(forSnapshotRange: $0)
+            },
+            textLength: nextTextLength
+        )
     }
 
     package func updateSuppressionRanges(_ suppressionRanges: [NSRange], textLength nextTextLength: Int? = nil) {

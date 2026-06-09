@@ -447,6 +447,54 @@ struct SyntaxEditorUICommonTests {
         #expect(visibleRuns[2].color.isEqual(redColor))
     }
 
+    @Test("Partial snapshot commit shifts materialized ranges after later edits")
+    func partialSnapshotCommitShiftsMaterializedRangesAfterLaterEdits() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            currentTextLength: 12
+        )
+        store.commitSnapshot(
+            runSet: HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 5, length: 2), color: blueColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 5, length: 2),
+            revision: 2,
+            language: .swift,
+            textLength: 12,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 0, length: 0, replacement: "y"),
+            currentTextLength: 13
+        )
+
+        let visibleRuns = store.colorRuns(in: NSRange(location: 0, length: 13))
+        #expect(visibleRuns.map(\.range) == [
+            NSRange(location: 1, length: 5),
+            NSRange(location: 6, length: 2),
+            NSRange(location: 8, length: 5),
+        ])
+        #expect(visibleRuns[0].color.isEqual(redColor))
+        #expect(visibleRuns[1].color.isEqual(blueColor))
+        #expect(visibleRuns[2].color.isEqual(redColor))
+    }
+
     @Test("Highlight render snapshot clears stale font runs without dropping color runs")
     func highlightRenderSnapshotClearsStaleFontRunsWithoutDroppingColorRuns() {
         #if canImport(UIKit)
