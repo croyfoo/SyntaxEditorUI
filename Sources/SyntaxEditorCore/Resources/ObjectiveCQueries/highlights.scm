@@ -127,7 +127,7 @@
 
 (field_identifier) @editor.syntax.objectivec.plain
 (statement_identifier) @editor.syntax.objectivec.plain
-(type_identifier) @editor.syntax.objectivec.identifier.type.system
+(type_identifier) @editor.syntax.objectivec.plain
 (primitive_type) @editor.syntax.objectivec.keyword
 (sized_type_specifier) @editor.syntax.objectivec.keyword
 (storage_class_specifier) @editor.syntax.objectivec.keyword
@@ -339,6 +339,120 @@
   (#eq? @editor.syntax.objectivec.preprocessor "testassert"))
 
 ; Types
+
+(type_name
+  (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(generic_specifier
+  (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(generic_specifier
+  (type_name
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(parameterized_arguments
+  (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(parameterized_arguments
+  (type_name
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(argument_list
+  (type_identifier) @editor.syntax.objectivec.identifier.type.system
+  .
+  "<")
+
+(declaration
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system
+  declarator: (_)
+  ";" @editor.syntax.objectivec.plain
+  (#eq? @editor.syntax.objectivec.plain ";"))
+
+(function_definition
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(for_statement
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(type_definition
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system
+  declarator: (_))
+
+(type_definition
+  declarator: [
+    (type_identifier) @editor.syntax.objectivec.identifier.type
+    (parenthesized_declarator
+      (type_identifier) @editor.syntax.objectivec.identifier.type)
+    (parenthesized_declarator
+      (array_declarator
+        declarator: (type_identifier) @editor.syntax.objectivec.identifier.type))
+    (pointer_declarator
+      declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)
+    (pointer_declarator
+      declarator: (array_declarator
+        declarator: (type_identifier) @editor.syntax.objectivec.identifier.type))
+    (function_declarator
+      declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)
+    (function_declarator
+      declarator: (parenthesized_declarator
+        (block_pointer_declarator
+          declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)))
+    (function_declarator
+      declarator: (parenthesized_declarator
+        (block_pointer_declarator
+          declarator: (array_declarator
+            declarator: (type_identifier) @editor.syntax.objectivec.identifier.type))))
+    (function_declarator
+      declarator: (parenthesized_declarator
+        (pointer_declarator
+          declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)))
+    (function_declarator
+      declarator: (parenthesized_declarator
+        (pointer_declarator
+          declarator: (array_declarator
+            declarator: (type_identifier) @editor.syntax.objectivec.identifier.type))))
+    (array_declarator
+      declarator: (type_identifier) @editor.syntax.objectivec.identifier.type)
+  ])
+
+(parameter_declaration
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(method_parameter
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(field_declaration
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(type_descriptor
+  type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(property_declaration
+  (struct_declaration
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(instance_variable
+  (struct_declaration
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(property_declaration
+  (atomic_declaration
+    (type_identifier) @editor.syntax.objectivec.identifier.type.system))
+
+(struct_specifier
+  name: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(enum_specifier
+  name: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(enum_specifier
+  underlying_type: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(enum_specifier
+  base: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
+
+(union_specifier
+  name: (type_identifier) @editor.syntax.objectivec.identifier.type.system)
 
 (class_declaration (identifier) @editor.syntax.objectivec.identifier.type)
 

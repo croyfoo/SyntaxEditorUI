@@ -8357,6 +8357,263 @@ struct SyntaxHighlighterEngineTests {
         })
     }
 
+    @Test("SyntaxHighlighterEngine keeps incomplete Objective-C body identifiers plain")
+    func highlighterKeepsIncompleteObjectiveCBodyIdentifiersPlain() async throws {
+        let incompleteIdentifier = "sepufepuaepufeofeoueoufeouseoufeou"
+        let sources = [
+            """
+            typedef NSString *ReferenceName;
+            typedef NSDictionary<NSString *, NSString *> *ReferenceMap;
+
+            static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
+            {
+                return nil;
+            }
+
+            static const char *ReferenceEncodedType(void)
+            {
+                return @encode(NSString *);
+            }
+
+            static void ReferenceEnumerate(NSArray<NSString *> *items)
+            {
+                for (NSString *item in items) {
+                    NSLog(@"%@", item);
+                }
+            }
+
+            @interface ReferenceBufferProvider : NSObject <NSCopying>
+            @property (nonatomic, copy) NSString *text;
+            - (void)setText:(NSString *)text;
+            @end
+
+            @implementation ReferenceBufferProvider
+            - (NSUInteger)length
+            {
+                \(incompleteIdentifier)
+                return self.text.length;
+            }
+            @end
+            """,
+            """
+            typedef NSString *ReferenceName;
+            typedef NSDictionary<NSString *, NSString *> *ReferenceMap;
+
+            static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
+            {
+                return nil;
+            }
+
+            static const char *ReferenceEncodedType(void)
+            {
+                return @encode(NSString *);
+            }
+
+            static void ReferenceEnumerate(NSArray<NSString *> *items)
+            {
+                for (NSString *item in items) {
+                    NSLog(@"%@", item);
+                }
+            }
+
+            @interface ReferenceBufferProvider : NSObject <NSCopying>
+            @property (nonatomic, copy) NSString *text;
+            - (void)setText:(NSString *)text;
+            @end
+
+            @implementation ReferenceBufferProvider
+            - (NSUInteger)length
+            {
+                \(incompleteIdentifier);
+                return self.text.length;
+            }
+            @end
+            """
+        ]
+
+        for source in sources {
+            let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: incompleteIdentifier,
+                syntaxID: .plain,
+                language: .objectiveC,
+                inOccurrenceOf: incompleteIdentifier
+            )
+            #expect(syntaxIDs(
+                in: tokens,
+                source: source,
+                text: incompleteIdentifier,
+                inOccurrenceOf: incompleteIdentifier
+            ).contains(.identifierTypeSystem) == false)
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSUInteger",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "- (NSUInteger)length"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "@property (nonatomic, copy) NSString *text;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "- (void)setText:(NSString *)text;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSString *ReferenceName;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "ReferenceName",
+                syntaxID: .declarationType,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSString *ReferenceName;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSDictionary",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSDictionary<NSString *, NSString *> *ReferenceMap;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSDictionary<NSString *, NSString *> *ReferenceMap;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "ReferenceMap",
+                syntaxID: .declarationType,
+                language: .objectiveC,
+                inOccurrenceOf: "typedef NSDictionary<NSString *, NSString *> *ReferenceMap;"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSDictionary",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "@encode(NSString *)"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSString",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "for (NSString *item in items)"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSObject",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "@interface ReferenceBufferProvider : NSObject <NSCopying>"
+            )
+            _ = try effectiveSemanticSnapshot(
+                in: tokens,
+                source: source,
+                text: "NSCopying",
+                syntaxID: .identifierTypeSystem,
+                language: .objectiveC,
+                inOccurrenceOf: "@interface ReferenceBufferProvider : NSObject <NSCopying>"
+            )
+        }
+    }
+
+    @Test("SyntaxHighlighterEngine preserves Objective-C parameterized macro argument type highlights")
+    func highlighterPreservesObjectiveCParameterizedMacroArgumentTypes() async throws {
+        let source = """
+            #define REFERENCE_TYPE_MACRO(type) type
+
+            static void ReferenceMacroArgument(void)
+            {
+                REFERENCE_TYPE_MACRO(NSArray<NSString *>);
+            }
+            """
+
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSArray",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "REFERENCE_TYPE_MACRO(NSArray<NSString *>)"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "REFERENCE_TYPE_MACRO(NSArray<NSString *>)"
+        )
+    }
+
+    @Test("SyntaxHighlighterEngine preserves Objective-C C-style method parameter type highlights")
+    func highlighterPreservesObjectiveCCStyleMethodParameterTypes() async throws {
+        let source = """
+            @interface ReferenceBufferProvider : NSObject
+            - (void)consumeObject:(id)object, NSString *name;
+            @end
+            """
+
+        let tokens = await sharedSyntaxHighlighterEngine.render(source: source, language: SyntaxLanguage.objectiveC)
+
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "- (void)consumeObject:(id)object, NSString *name;"
+        )
+    }
+
     @Test("SyntaxHighlighterEngine highlights Objective-C structures")
     func highlighterSupportsObjectiveC() async throws {
         let engine = sharedSyntaxHighlighterEngine
@@ -8377,6 +8634,11 @@ struct SyntaxHighlighterEngineTests {
         */
 
         typedef void (^ReferenceCompletion)(id object, NSError **error);
+        typedef int (*ReferenceCallback)(int value);
+        typedef int *ReferencePointerArray[10];
+        typedef void (^ReferenceBlockArray[10])(void);
+        typedef int (ReferenceParenthesizedInt);
+        typedef int (ReferenceParenthesizedArray[10]);
 
         static NSDictionary<NSString *, NSString *> *ReferenceLanguageAliases(void)
         {
@@ -8552,6 +8814,7 @@ struct SyntaxHighlighterEngineTests {
         )
         let dictionaryStringRange = nsSource.range(of: "@\"objc\"")
         let blockTypedefDeclarationRange = nsSource.range(of: "typedef void (^ReferenceCompletion)")
+        let functionPointerTypedefDeclarationRange = nsSource.range(of: "typedef int (*ReferenceCallback)")
         let typedefRange = nsSource.range(of: "typedef", options: [], range: blockTypedefDeclarationRange)
         let idRange = nsSource.range(of: "id object")
         let selectorRange = nsSource.range(of: "SEL")
@@ -9523,6 +9786,91 @@ struct SyntaxHighlighterEngineTests {
         #expect(tokens.contains {
             tokenIntersects($0, range: typedefRange, syntaxID: .keyword, language: .objectiveC)
         })
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceCompletion",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef void (^ReferenceCompletion)"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceCompletion",
+            inOccurrenceOf: "typedef void (^ReferenceCompletion)"
+        ).contains(.identifierType))
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceCallback",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef int (*ReferenceCallback)"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceCallback",
+            inOccurrenceOf: "typedef int (*ReferenceCallback)"
+        ).contains(.identifierType))
+        #expect(functionPointerTypedefDeclarationRange.location != NSNotFound)
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferencePointerArray",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef int *ReferencePointerArray[10];"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferencePointerArray",
+            inOccurrenceOf: "typedef int *ReferencePointerArray[10];"
+        ).contains(.identifierType))
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceBlockArray",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef void (^ReferenceBlockArray[10])(void);"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceBlockArray",
+            inOccurrenceOf: "typedef void (^ReferenceBlockArray[10])(void);"
+        ).contains(.identifierType))
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceParenthesizedInt",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef int (ReferenceParenthesizedInt);"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceParenthesizedInt",
+            inOccurrenceOf: "typedef int (ReferenceParenthesizedInt);"
+        ).contains(.identifierType))
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "ReferenceParenthesizedArray",
+            syntaxID: .declarationType,
+            language: .objectiveC,
+            inOccurrenceOf: "typedef int (ReferenceParenthesizedArray[10]);"
+        )
+        #expect(syntaxIDs(
+            in: tokens,
+            source: source,
+            text: "ReferenceParenthesizedArray",
+            inOccurrenceOf: "typedef int (ReferenceParenthesizedArray[10]);"
+        ).contains(.identifierType))
         #expect(tokens.contains {
             tokenIntersects($0, range: idRange, syntaxID: .keyword, language: .objectiveC)
         })
@@ -11246,11 +11594,15 @@ struct SyntaxHighlighterEngineTests {
     @Test("SyntaxHighlighterEngine handles inline Objective-C implementation ivar blocks")
     func highlighterHandlesInlineObjectiveCImplementationIvarBlocks() async throws {
         let source = """
-        @implementation Sample { BOOL _flag; }
+        @implementation Sample { BOOL _flag; NSString *_name; }
         - (BOOL)value
         {
             BOOL temporary;
             return _flag;
+        }
+        - (NSString *)name
+        {
+            return _name;
         }
         - (BOOL)other
         {
@@ -11267,6 +11619,22 @@ struct SyntaxHighlighterEngineTests {
             syntaxID: .identifierVariable,
             language: .objectiveC,
             inOccurrenceOf: "return _flag;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "NSString",
+            syntaxID: .identifierTypeSystem,
+            language: .objectiveC,
+            inOccurrenceOf: "NSString *_name;"
+        )
+        _ = try effectiveSemanticSnapshot(
+            in: tokens,
+            source: source,
+            text: "_name",
+            syntaxID: .identifierVariable,
+            language: .objectiveC,
+            inOccurrenceOf: "return _name;"
         )
         #expect(syntaxIDs(
             in: tokens,
