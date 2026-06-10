@@ -692,6 +692,9 @@ private final class SyntaxHighlightSession {
             lineIndex: lineIndex
         )
         lineIndex.apply(mutation: layeredMutation, previousSource: previousLayeredSource)
+        let shiftedSemanticComparisonTokens = semanticOverlayRefreshRange.map {
+            tokenStore.tokens(in: $0, lineIndex: lineIndex)
+        } ?? tokenStore.tokens(lineIndex: lineIndex)
         let shiftedSyntacticComparisonTokens = tokenStore.tokens(in: replacementMergeRange, lineIndex: lineIndex)
         tokenStore.replaceTokens(
             in: replacementMergeRange,
@@ -749,14 +752,38 @@ private final class SyntaxHighlightSession {
         } else {
             classifiedTokens = semanticResult.tokens
             resultRefreshRange = semanticPartialRefreshRange.map {
+                let semanticBaseRefreshRange = SyntaxEditorRangeUtilities.clampedRange(
+                    $0,
+                    utf16Length: nextSourceLength
+                )
+                let semanticRefreshRange = semanticResult.refreshRangeOverride.map {
+                    let semanticOverrideRange = SyntaxEditorRangeUtilities.clampedRange(
+                        $0,
+                        utf16Length: nextSourceLength
+                    )
+                    let semanticTokenChangeRange = Self.refreshRangeIncludingTokenChanges(
+                        from: shiftedSemanticComparisonTokens,
+                        to: classifiedTokens,
+                        baseRefreshRange: semanticBaseRefreshRange,
+                        sourceUTF16Length: nextSourceLength,
+                        comparisonRange: semanticOverrideRange
+                    )
+                    guard Self.shouldIncludeLocalRefreshEnvelope(
+                        semanticOverrideRange,
+                        sourceUTF16Length: nextSourceLength
+                    ) else {
+                        return semanticTokenChangeRange
+                    }
+                    return Self.union(semanticTokenChangeRange, semanticOverrideRange)
+                } ?? semanticBaseRefreshRange
                 let syntacticTokenChangeRange = Self.refreshRangeIncludingTokenChanges(
                     from: shiftedSyntacticComparisonTokens,
                     to: syntacticResultTokens,
-                    baseRefreshRange: SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength),
+                    baseRefreshRange: semanticRefreshRange,
                     sourceUTF16Length: nextSourceLength,
                     comparisonRange: syntacticRefreshRange
                 )
-                guard Self.shouldIncludeSyntacticRefreshEnvelope(
+                guard Self.shouldIncludeLocalRefreshEnvelope(
                     syntacticRefreshRange,
                     sourceUTF16Length: nextSourceLength
                 ) else {
@@ -1241,7 +1268,7 @@ private extension SyntaxHighlightSession {
         return NSRange(location: lower, length: upper - lower)
     }
 
-    static func shouldIncludeSyntacticRefreshEnvelope(
+    static func shouldIncludeLocalRefreshEnvelope(
         _ range: NSRange,
         sourceUTF16Length: Int
     ) -> Bool {
