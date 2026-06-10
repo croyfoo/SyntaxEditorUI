@@ -719,6 +719,7 @@ private final class SyntaxHighlightSession {
         let semanticInputPrefixMaxUpperBounds = Self.prefixMaxUpperBounds(for: semanticInputTokens)
         let previousSwiftSemanticState = swiftSemanticState
         let previousObjectiveCSemanticState = objectiveCSemanticState
+        var fullSemanticFallbackComparisonTokens: [SyntaxHighlightToken]?
         var semanticResult = semanticClassifiedTokensIfNeeded(
             semanticInputTokens,
             source: nextLayeredSource,
@@ -734,6 +735,7 @@ private final class SyntaxHighlightSession {
             swiftSemanticState = previousSwiftSemanticState
             objectiveCSemanticState = previousObjectiveCSemanticState
             let fullSemanticInputTokens = tokenStore.tokens(lineIndex: lineIndex)
+            fullSemanticFallbackComparisonTokens = fullSemanticInputTokens
             semanticResult = semanticClassifiedTokensIfNeeded(
                 fullSemanticInputTokens,
                 source: nextLayeredSource,
@@ -751,65 +753,76 @@ private final class SyntaxHighlightSession {
             resultRefreshRange = syntacticRefreshRange
         } else {
             classifiedTokens = semanticResult.tokens
-            resultRefreshRange = semanticPartialRefreshRange.map {
-                let semanticBaseRefreshRange = SyntaxEditorRangeUtilities.clampedRange(
-                    $0,
-                    utf16Length: nextSourceLength
+            if let fullSemanticFallbackComparisonTokens {
+                resultRefreshRange = semanticRefreshRange(
+                    previousTokens: fullSemanticFallbackComparisonTokens,
+                    classifiedTokens: classifiedTokens,
+                    baseRefreshRange: syntacticRefreshRange,
+                    sourceUTF16Length: nextSourceLength
                 )
-                let semanticRefreshRange = semanticResult.refreshRangeOverride.map {
-                    let semanticOverrideRange = SyntaxEditorRangeUtilities.clampedRange(
+            } else {
+                resultRefreshRange = semanticPartialRefreshRange.map {
+                    let semanticBaseRefreshRange = SyntaxEditorRangeUtilities.clampedRange(
                         $0,
                         utf16Length: nextSourceLength
                     )
-                    let semanticTokenChangeRange = Self.refreshRangeIncludingTokenChanges(
-                        from: shiftedSemanticComparisonTokens,
-                        to: classifiedTokens,
-                        baseRefreshRange: semanticBaseRefreshRange,
+                    let semanticRefreshRange = semanticResult.refreshRangeOverride.map {
+                        let semanticOverrideRange = SyntaxEditorRangeUtilities.clampedRange(
+                            $0,
+                            utf16Length: nextSourceLength
+                        )
+                        let semanticTokenChangeRange = Self.refreshRangeIncludingTokenChanges(
+                            from: shiftedSemanticComparisonTokens,
+                            to: classifiedTokens,
+                            baseRefreshRange: semanticBaseRefreshRange,
+                            sourceUTF16Length: nextSourceLength,
+                            comparisonRange: semanticOverrideRange
+                        )
+                        guard Self.shouldIncludeLocalRefreshEnvelope(
+                            semanticOverrideRange,
+                            sourceUTF16Length: nextSourceLength
+                        ) else {
+                            return semanticTokenChangeRange
+                        }
+                        return Self.union(semanticTokenChangeRange, semanticOverrideRange)
+                    } ?? semanticBaseRefreshRange
+                    let syntacticTokenChangeRange = Self.refreshRangeIncludingTokenChanges(
+                        from: shiftedSyntacticComparisonTokens,
+                        to: syntacticResultTokens,
+                        baseRefreshRange: semanticRefreshRange,
                         sourceUTF16Length: nextSourceLength,
-                        comparisonRange: semanticOverrideRange
+                        comparisonRange: syntacticRefreshRange
                     )
                     guard Self.shouldIncludeLocalRefreshEnvelope(
-                        semanticOverrideRange,
+                        syntacticRefreshRange,
                         sourceUTF16Length: nextSourceLength
                     ) else {
-                        return semanticTokenChangeRange
+                        return syntacticTokenChangeRange
                     }
-                    return Self.union(semanticTokenChangeRange, semanticOverrideRange)
-                } ?? semanticBaseRefreshRange
-                let syntacticTokenChangeRange = Self.refreshRangeIncludingTokenChanges(
-                    from: shiftedSyntacticComparisonTokens,
-                    to: syntacticResultTokens,
-                    baseRefreshRange: semanticRefreshRange,
-                    sourceUTF16Length: nextSourceLength,
-                    comparisonRange: syntacticRefreshRange
-                )
-                guard Self.shouldIncludeLocalRefreshEnvelope(
-                    syntacticRefreshRange,
-                    sourceUTF16Length: nextSourceLength
-                ) else {
-                    return syntacticTokenChangeRange
-                }
-                return Self.union(syntacticTokenChangeRange, syntacticRefreshRange)
-            } ?? semanticResult.refreshRangeOverride.map {
-                SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
-            } ?? {
-                let semanticDiffRefreshRange = semanticRefreshRange(
-                    previousTokens: previousSemanticComparisonTokens,
-                    classifiedTokens: classifiedTokens,
-                    baseRefreshRange: syntacticRefreshRange,
-                    sourceUTF16Length: nextSourceLength,
-                    comparisonRange: semanticOverlayRefreshRange
-                )
-                if semanticOverlayRefreshRange != nil,
-                   semanticDiffRefreshRange.length >= nextSourceLength,
-                   syntacticRefreshRange.length < nextSourceLength {
-                    return syntacticRefreshRange
-                }
-                return semanticDiffRefreshRange
-            }()
-            let semanticMaterializationRange = semanticOverlayRefreshRange.map {
-                SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
-            } ?? resultRefreshRange
+                    return Self.union(syntacticTokenChangeRange, syntacticRefreshRange)
+                } ?? semanticResult.refreshRangeOverride.map {
+                    SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
+                } ?? {
+                    let semanticDiffRefreshRange = semanticRefreshRange(
+                        previousTokens: previousSemanticComparisonTokens,
+                        classifiedTokens: classifiedTokens,
+                        baseRefreshRange: syntacticRefreshRange,
+                        sourceUTF16Length: nextSourceLength,
+                        comparisonRange: semanticOverlayRefreshRange
+                    )
+                    if semanticOverlayRefreshRange != nil,
+                       semanticDiffRefreshRange.length >= nextSourceLength,
+                       syntacticRefreshRange.length < nextSourceLength {
+                        return syntacticRefreshRange
+                    }
+                    return semanticDiffRefreshRange
+                }()
+            }
+            let semanticMaterializationRange = fullSemanticFallbackComparisonTokens == nil
+                ? semanticOverlayRefreshRange.map {
+                    SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
+                } ?? resultRefreshRange
+                : resultRefreshRange
             let classifiedCoverageRange = Self.highlightCoverageRange(
                 queryRange: semanticMaterializationRange,
                 replacementTokens: classifiedTokens,

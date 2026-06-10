@@ -6751,6 +6751,39 @@ struct SyntaxHighlighterEngineTests {
         #expect(valueReference.styleKeys.first == "editor.syntax.identifier.variable")
     }
 
+    @Test("SyntaxHighlighterEngine refreshes distant Swift references after declaration head edits")
+    func highlighterRefreshesDistantSwiftReferencesAfterDeclarationHeadEdits() async throws {
+        let source = """
+        let item = 1
+
+        func render() -> Int {
+            return item
+        }
+        """
+        let updatedSource = source.replacingOccurrences(of: "let item", with: "let value")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation)
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+        let nsUpdatedSource = updatedSource as NSString
+        let returnLineRange = nsUpdatedSource.range(of: "return item")
+        let returnItemRange = nsUpdatedSource.range(of: "item", options: [], range: returnLineRange)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: returnItemRange, syntaxID: .identifierVariable, language: .swift)
+        } == false)
+        #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: returnItemRange) == returnItemRange)
+    }
+
     @Test("SyntaxHighlighterEngine rebuilds Swift semantic index after modifier declaration edits")
     func highlighterRebuildsSwiftSemanticIndexAfterModifierDeclarationEdits() async throws {
         let source = """

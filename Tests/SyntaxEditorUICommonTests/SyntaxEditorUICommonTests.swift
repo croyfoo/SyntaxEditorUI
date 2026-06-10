@@ -418,11 +418,16 @@ struct SyntaxEditorUICommonTests {
 
     @Test("Highlight visible resolver suppresses marked text ranges")
     func highlightVisibleResolverSuppressesMarkedTextRanges() {
+        #if canImport(UIKit)
+        let syntaxFont = UIFont.boldSystemFont(ofSize: 13)
+        #elseif canImport(AppKit)
+        let syntaxFont = NSFont.boldSystemFont(ofSize: 13)
+        #endif
         let store = HighlightRenderSnapshotStore()
         store.commitSnapshot(
             runSet: HighlightRunSet(
                 colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
-                fontRuns: []
+                fontRuns: [HighlightFontRun(range: NSRange(location: 0, length: 10), font: syntaxFont)]
             ),
             range: NSRange(location: 0, length: 10),
             revision: 1,
@@ -440,6 +445,10 @@ struct SyntaxEditorUICommonTests {
         #expect(store.appliedColorRunsForTesting.map(\.range) == [
             NSRange(location: 0, length: 10),
         ])
+        #expect(store.resolveVisibleRuns(in: NSRange(location: 0, length: 10)).fontRuns.map(\.range) == [
+            NSRange(location: 0, length: 10),
+        ])
+        #expect(store.font(at: 4)?.isEqual(syntaxFont) == true)
 
         store.updateSuppressionRanges([], textLength: 10)
 

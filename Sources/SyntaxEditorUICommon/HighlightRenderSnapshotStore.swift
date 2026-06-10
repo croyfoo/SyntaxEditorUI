@@ -304,7 +304,7 @@ package struct HighlightVisibleRunResolver {
             body(HighlightColorRun(range: run.range, color: run.color))
         }
 
-        forEachCurrentVisibleRange(in: currentRange) { visibleRange in
+        forEachCurrentColorVisibleRange(in: currentRange) { visibleRange in
             if let mappings = snapshotVisibleMappings(forCurrentVisibleRange: visibleRange) {
                 for mapping in mappings {
                     HighlightRunUtilities.forEachColorRun(snapshot.colorRuns, in: mapping.snapshotRange) { run in
@@ -342,7 +342,7 @@ package struct HighlightVisibleRunResolver {
             body(HighlightFontRun(range: run.range, font: run.font))
         }
 
-        forEachCurrentVisibleRange(in: currentRange) { visibleRange in
+        forEachCurrentFontVisibleRange(in: currentRange) { visibleRange in
             if let mappings = snapshotVisibleMappings(forCurrentVisibleRange: visibleRange) {
                 for mapping in mappings {
                     HighlightRunUtilities.forEachFontRun(snapshot.fontRuns, in: mapping.snapshotRange) { run in
@@ -376,7 +376,7 @@ package struct HighlightVisibleRunResolver {
         in currentRange: NSRange,
         _ body: (HighlightColorRun) -> Void
     ) {
-        let visibleRanges = currentVisibleRangesForMaterializedRuns(in: currentRange)
+        let visibleRanges = currentColorVisibleRangesForMaterializedRuns(in: currentRange)
         for visibleRange in visibleRanges {
             HighlightRunUtilities.forEachColorRun(currentColorRuns, in: visibleRange, body)
         }
@@ -386,19 +386,24 @@ package struct HighlightVisibleRunResolver {
         in currentRange: NSRange,
         _ body: (HighlightFontRun) -> Void
     ) {
-        let visibleRanges = currentVisibleRangesForMaterializedRuns(in: currentRange)
+        let visibleRanges = currentFontVisibleRangesForMaterializedRuns(in: currentRange)
         for visibleRange in visibleRanges {
             HighlightRunUtilities.forEachFontRun(currentFontRuns, in: visibleRange, body)
         }
     }
 
-    private func currentVisibleRangesForMaterializedRuns(in currentRange: NSRange) -> [NSRange] {
+    private func currentColorVisibleRangesForMaterializedRuns(in currentRange: NSRange) -> [NSRange] {
         let clamped = SyntaxEditorRangeUtilities.clampedRange(currentRange, utf16Length: currentTextLength)
         guard clamped.length > 0 else { return [] }
         return HighlightRunUtilities.rangesBySubtracting(currentSuppressionRanges, from: clamped)
     }
 
-    private func forEachCurrentVisibleRange(
+    private func currentFontVisibleRangesForMaterializedRuns(in currentRange: NSRange) -> [NSRange] {
+        let clamped = SyntaxEditorRangeUtilities.clampedRange(currentRange, utf16Length: currentTextLength)
+        return clamped.length > 0 ? [clamped] : []
+    }
+
+    private func forEachCurrentColorVisibleRange(
         in currentRange: NSRange,
         _ body: (NSRange) -> Void
     ) {
@@ -407,6 +412,22 @@ package struct HighlightVisibleRunResolver {
 
         let suppressedRanges = HighlightRunUtilities.normalizedRanges(
             pendingEditMap.visibleDirtyRanges + currentSuppressionRanges + currentMaterializedRanges,
+            textLength: currentTextLength
+        )
+        for visibleRange in HighlightRunUtilities.rangesBySubtracting(suppressedRanges, from: clamped) {
+            body(visibleRange)
+        }
+    }
+
+    private func forEachCurrentFontVisibleRange(
+        in currentRange: NSRange,
+        _ body: (NSRange) -> Void
+    ) {
+        let clamped = SyntaxEditorRangeUtilities.clampedRange(currentRange, utf16Length: currentTextLength)
+        guard clamped.length > 0 else { return }
+
+        let suppressedRanges = HighlightRunUtilities.normalizedRanges(
+            pendingEditMap.visibleDirtyRanges + currentMaterializedRanges,
             textLength: currentTextLength
         )
         for visibleRange in HighlightRunUtilities.rangesBySubtracting(suppressedRanges, from: clamped) {
