@@ -6578,6 +6578,51 @@ struct SyntaxHighlighterEngineTests {
         } == false)
     }
 
+    @Test("SyntaxHighlighterEngine removes Swift semantic overlays after declaration line break deletion")
+    func highlighterRemovesSwiftSemanticOverlaysAfterDeclarationLineBreakDeletion() async throws {
+        let source = """
+        // disabled
+        let item = 1
+
+        func render() -> Int {
+            return item
+        }
+        """
+        let nsSource = source as NSString
+        let deletedLineBreakRange = nsSource.range(of: "\nlet item")
+        let deletedLineBreakLocation = try #require(
+            deletedLineBreakRange.location == NSNotFound ? nil : deletedLineBreakRange.location
+        )
+        let mutation = SyntaxHighlightMutation(
+            location: deletedLineBreakLocation,
+            length: 1,
+            replacement: ""
+        )
+        let updatedSource = nsSource.replacingCharacters(
+            in: NSRange(location: deletedLineBreakLocation, length: 1),
+            with: ""
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+        let updatedNSString = updatedSource as NSString
+        let returnRange = updatedNSString.range(of: "return item")
+        let itemRange = updatedNSString.range(of: "item", options: [], range: returnRange)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: itemRange, syntaxID: .identifierVariable, language: .swift)
+        } == false)
+    }
+
     @Test("SyntaxHighlighterEngine uses Swift parser invalidation beyond semantic line ranges")
     func highlighterUsesSwiftParserInvalidationBeyondSemanticLineRanges() async throws {
         let source = """
@@ -12330,6 +12375,56 @@ struct SyntaxHighlighterEngineTests {
         let nsSource = updatedSource as NSString
         let returnRange = nsSource.range(of: "self.name.length")
         let nameRange = nsSource.range(of: "name", options: [], range: returnRange)
+
+        #expect(incremental.tokens == full.tokens)
+        #expect(incremental.tokens.contains {
+            tokenIntersects($0, range: nameRange, syntaxID: .identifierVariable, language: .objectiveC)
+        } == false)
+    }
+
+    @Test("SyntaxHighlighterEngine removes Objective-C semantic overlays after property line break deletion")
+    func highlighterRemovesObjectiveCSemanticOverlaysAfterPropertyLineBreakDeletion() async throws {
+        let source = """
+        @interface Sample : NSObject
+        // disabled
+        @property(nonatomic, copy) NSString *name;
+        @end
+
+        @implementation Sample
+        - (NSUInteger)length
+        {
+            return self.name.length + 1;
+        }
+        @end
+        """
+        let nsSource = source as NSString
+        let deletedLineBreakRange = nsSource.range(of: "\n@property")
+        let deletedLineBreakLocation = try #require(
+            deletedLineBreakRange.location == NSNotFound ? nil : deletedLineBreakRange.location
+        )
+        let mutation = SyntaxHighlightMutation(
+            location: deletedLineBreakLocation,
+            length: 1,
+            replacement: ""
+        )
+        let updatedSource = nsSource.replacingCharacters(
+            in: NSRange(location: deletedLineBreakLocation, length: 1),
+            with: ""
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.objectiveC)
+        let incremental = await incrementalEngine.update(
+            previousSource: source,
+            source: updatedSource,
+            language: SyntaxLanguage.objectiveC,
+            mutation: mutation
+        )
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
+        let updatedNSString = updatedSource as NSString
+        let returnRange = updatedNSString.range(of: "self.name.length")
+        let nameRange = updatedNSString.range(of: "name", options: [], range: returnRange)
 
         #expect(incremental.tokens == full.tokens)
         #expect(incremental.tokens.contains {

@@ -65,10 +65,13 @@ fileprivate struct SwiftSemanticLineSignatureIndex {
         let startIndex = insertsAfterLastSignature
             ? lines.count
             : lineIndex(containing: mutation.location, previousSourceLength: previousSourceLength)
-        let endLookup = mutation.length == 0 ? mutation.location : max(mutation.location, oldEnd - 1)
         let endIndex = insertsAfterLastSignature
             ? lines.count - 1
-            : lineIndex(containing: endLookup, previousSourceLength: previousSourceLength)
+            : replacementEndLineIndex(
+                mutation: mutation,
+                oldEnd: oldEnd,
+                previousSourceLength: previousSourceLength
+            )
         let changedLineSignatures = Self.signaturesForChangedLines(mutation, in: source)
         guard !changedLineSignatures.isEmpty else { return nil }
         let delta = replacementLength - mutation.length
@@ -126,6 +129,22 @@ fileprivate struct SwiftSemanticLineSignatureIndex {
             }
         }
         return min(lower, max(0, lines.count - 1))
+    }
+
+    private func replacementEndLineIndex(
+        mutation: SyntaxHighlightMutation,
+        oldEnd: Int,
+        previousSourceLength: Int
+    ) -> Int {
+        let endLookup = mutation.length == 0 ? mutation.location : max(mutation.location, oldEnd - 1)
+        let endIndex = lineIndex(containing: endLookup, previousSourceLength: previousSourceLength)
+        guard mutation.length > 0,
+              oldEnd < previousSourceLength,
+              endIndex + 1 < lines.count,
+              oldEnd == lines[endIndex].range.upperBound else {
+            return endIndex
+        }
+        return endIndex + 1
     }
 
     private static func signaturesForChangedLines(
