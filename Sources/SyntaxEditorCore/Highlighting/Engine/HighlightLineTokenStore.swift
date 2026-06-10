@@ -257,22 +257,48 @@ package final class HighlightLineTokenStore {
         let upper = min(max(lower, lineRange.upperBound), lines.count)
         guard lower < upper else { return [] }
 
-        for line in lower..<upper {
+        func materialize(_ token: StoredToken, line: Int) {
             let lineStart = lineIndex.lineStartOffset(at: line)
-            for token in lines[line] {
-                let absoluteRange = NSRange(
-                    location: lineStart + token.startOffsetInLine,
-                    length: token.endOffsetInLine - token.startOffsetInLine
-                )
-                if var group = groups[token.groupID] {
-                    let nextLower = min(group.range.location, absoluteRange.location)
-                    let nextUpper = max(group.range.upperBound, absoluteRange.upperBound)
-                    group.range = NSRange(location: nextLower, length: nextUpper - nextLower)
-                    groups[token.groupID] = group
-                } else {
-                    groups[token.groupID] = (absoluteRange, token)
-                }
+            let absoluteRange = NSRange(
+                location: lineStart + token.startOffsetInLine,
+                length: token.endOffsetInLine - token.startOffsetInLine
+            )
+            if var group = groups[token.groupID] {
+                let nextLower = min(group.range.location, absoluteRange.location)
+                let nextUpper = max(group.range.upperBound, absoluteRange.upperBound)
+                group.range = NSRange(location: nextLower, length: nextUpper - nextLower)
+                groups[token.groupID] = group
+            } else {
+                groups[token.groupID] = (absoluteRange, token)
             }
+        }
+
+        var selectedGroupIDs = Set<Int>()
+        for line in lower..<upper {
+            for token in lines[line] {
+                selectedGroupIDs.insert(token.groupID)
+                materialize(token, line: line)
+            }
+        }
+
+        var lowerLine = lower - 1
+        while lines.indices.contains(lowerLine) {
+            let groupSegments = lines[lowerLine].filter { selectedGroupIDs.contains($0.groupID) }
+            guard !groupSegments.isEmpty else { break }
+            for token in groupSegments {
+                materialize(token, line: lowerLine)
+            }
+            lowerLine -= 1
+        }
+
+        var upperLine = upper
+        while lines.indices.contains(upperLine) {
+            let groupSegments = lines[upperLine].filter { selectedGroupIDs.contains($0.groupID) }
+            guard !groupSegments.isEmpty else { break }
+            for token in groupSegments {
+                materialize(token, line: upperLine)
+            }
+            upperLine += 1
         }
 
         return groups.values.map { group in

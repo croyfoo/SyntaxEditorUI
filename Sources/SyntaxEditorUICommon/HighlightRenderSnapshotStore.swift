@@ -612,7 +612,7 @@ package final class HighlightRenderSnapshotStore {
         snapshot = HighlightRenderSnapshot(
             revision: snapshot.revision,
             language: snapshot.language,
-            textLength: nextTextLength,
+            textLength: pendingEditMap.isEmpty ? nextTextLength : snapshot.textLength,
             baseForeground: snapshot.baseForeground,
             baseFont: font,
             colorRuns: snapshot.colorRuns,

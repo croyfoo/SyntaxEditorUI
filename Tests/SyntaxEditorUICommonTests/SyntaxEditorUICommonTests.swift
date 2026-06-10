@@ -304,6 +304,45 @@ struct SyntaxEditorUICommonTests {
         ])
     }
 
+    @Test("Pending highlight edit keeps snapshot coordinates after base font updates")
+    func pendingHighlightEditKeepsSnapshotCoordinatesAfterBaseFontUpdates() {
+        #if canImport(UIKit)
+        let baseFont = UIFont.systemFont(ofSize: 13)
+        let nextBaseFont = UIFont.systemFont(ofSize: 17)
+        #elseif canImport(AppKit)
+        let baseFont = NSFont.systemFont(ofSize: 13)
+        let nextBaseFont = NSFont.systemFont(ofSize: 17)
+        #endif
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet:
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: baseFont
+        )
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 0, length: 1, replacement: ""),
+            currentTextLength: 9
+        )
+
+        store.updateBaseFont(nextBaseFont, textLength: 9)
+
+        #expect(store.appliedColorRunsForTesting.map(\.range) == [
+            NSRange(location: 0, length: 10),
+        ])
+        #expect(store.colorRuns(in: NSRange(location: 0, length: 9)).map(\.range) == [
+            NSRange(location: 1, length: 8),
+        ])
+        #expect(store.foregroundColor(at: 8)?.isEqual(redColor) == true)
+    }
+
     @Test("Pending highlight edit composes multiple edits")
     func pendingHighlightEditComposesMultipleEdits() {
         let store = HighlightRenderSnapshotStore()

@@ -979,6 +979,33 @@ struct SyntaxEditorCoreTests {
         ])
     }
 
+    @Test("HighlightLineTokenStore returns full multi-line tokens for partial reads")
+    func highlightLineTokenStoreReturnsFullMultilineTokensForPartialReads() {
+        let source = "let text = \"\"\"\nhello\n\"\"\"\nlet next = 1\n"
+        let nsSource = source as NSString
+        let lineIndex = SyntaxHighlightLineIndex()
+        lineIndex.reset(source: source)
+        let store = HighlightLineTokenStore()
+        let multilineStringRange = nsSource.range(of: "\"\"\"\nhello\n\"\"\"")
+        store.reset(
+            tokens: [
+                SyntaxHighlightToken(
+                    range: multilineStringRange,
+                    syntaxID: .string,
+                    language: .swift,
+                    rawCaptureName: "editor.syntax.swift.string"
+                ),
+            ],
+            lineIndex: lineIndex
+        )
+
+        let middleLineRange = nsSource.range(of: "hello")
+
+        #expect(store.tokens(in: middleLineRange, lineIndex: lineIndex).map(\.range) == [
+            multilineStringRange,
+        ])
+    }
+
     @Test("EditorCommandEngine auto-pairs opening braces")
     func editorCommandEngineAutoPair() {
         let engine = EditorCommandEngine()
