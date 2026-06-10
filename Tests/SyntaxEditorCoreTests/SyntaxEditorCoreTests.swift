@@ -6331,6 +6331,40 @@ struct SyntaxHighlighterEngineTests {
         })
     }
 
+    @Test("SyntaxHighlighterEngine keeps complete refresh covering skipped Swift syntactic fast pass")
+    func highlighterKeepsCompleteRefreshCoveringSkippedSwiftSyntacticFastPass() async throws {
+        let source = """
+        let message = \"""
+        first
+        second
+        \"""
+        let tail = 1
+        """
+        let updatedSource = source.replacingOccurrences(of: "first", with: "first!")
+        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let engine = SyntaxHighlighterEngine()
+
+        _ = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 0)
+        let phases = await engine.updatePhases(
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: SyntaxHighlightMutation(mutation),
+            revision: 1
+        )
+        var iterator = phases.makeAsyncIterator()
+        let syntacticFastPass = try #require(await iterator.next())
+        let complete = try #require(await iterator.next())
+
+        #expect(syntacticFastPass.phase == .syntacticFastPass)
+        #expect(complete.phase == .complete)
+        #expect(
+            SyntaxEditorRangeUtilities.intersection(
+                of: complete.refreshRange,
+                and: syntacticFastPass.refreshRange
+            ) == syntacticFastPass.refreshRange
+        )
+    }
+
     @Test("SyntaxHighlighterEngine treats standalone Swift brace edits as structural")
     func highlighterTreatsStandaloneSwiftBraceEditsAsStructural() {
         let source = """

@@ -692,6 +692,7 @@ private final class SyntaxHighlightSession {
             lineIndex: lineIndex
         )
         lineIndex.apply(mutation: layeredMutation, previousSource: previousLayeredSource)
+        let shiftedSyntacticComparisonTokens = tokenStore.tokens(in: replacementMergeRange, lineIndex: lineIndex)
         tokenStore.replaceTokens(
             in: replacementMergeRange,
             with: replacementHighlight.tokens,
@@ -748,7 +749,20 @@ private final class SyntaxHighlightSession {
         } else {
             classifiedTokens = semanticResult.tokens
             resultRefreshRange = semanticPartialRefreshRange.map {
-                SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
+                let syntacticTokenChangeRange = Self.refreshRangeIncludingTokenChanges(
+                    from: shiftedSyntacticComparisonTokens,
+                    to: syntacticResultTokens,
+                    baseRefreshRange: SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength),
+                    sourceUTF16Length: nextSourceLength,
+                    comparisonRange: syntacticRefreshRange
+                )
+                guard Self.shouldIncludeSyntacticRefreshEnvelope(
+                    syntacticRefreshRange,
+                    sourceUTF16Length: nextSourceLength
+                ) else {
+                    return syntacticTokenChangeRange
+                }
+                return Self.union(syntacticTokenChangeRange, syntacticRefreshRange)
             } ?? semanticResult.refreshRangeOverride.map {
                 SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSourceLength)
             } ?? {
@@ -787,7 +801,11 @@ private final class SyntaxHighlightSession {
         layeredSource = nextLayeredSource
 
         return SyntaxHighlightResult(
-            tokens: tokenStore.tokens(in: resultRefreshRange, lineIndex: lineIndex),
+            tokens: resultTokens(
+                from: tokenStore.tokens(in: resultRefreshRange, lineIndex: lineIndex),
+                refreshRange: resultRefreshRange,
+                tokenPayload: .replacement
+            ),
             source: nextSource,
             language: language,
             revision: revision,
@@ -1221,6 +1239,14 @@ private extension SyntaxHighlightSession {
         let lower = min(lhs.location, rhs.location)
         let upper = max(lhs.upperBound, rhs.upperBound)
         return NSRange(location: lower, length: upper - lower)
+    }
+
+    static func shouldIncludeSyntacticRefreshEnvelope(
+        _ range: NSRange,
+        sourceUTF16Length: Int
+    ) -> Bool {
+        guard range.length > 0, sourceUTF16Length > 0 else { return false }
+        return range.length <= 8_192 || range.length <= sourceUTF16Length / 2
     }
 
     static func inputEdit(
