@@ -416,6 +416,65 @@ struct SyntaxEditorUICommonTests {
         ])
     }
 
+    @Test("Pending highlight edits self-checkpoint without changing resolution")
+    func pendingHighlightEditsSelfCheckpointWithoutChangingResolution() {
+        // Two identical edit sequences: the reference store never checkpoints
+        // (high threshold), the checkpointing store folds every few edits.
+        // Resolution must match throughout, and the map must stay bounded.
+        func makeStore() -> HighlightRenderSnapshotStore {
+            let store = HighlightRenderSnapshotStore()
+            store.commitSnapshot(
+                runSet: HighlightRunSet(
+                    colorRuns: [
+                        HighlightColorRun(range: NSRange(location: 0, length: 40), color: redColor),
+                        HighlightColorRun(range: NSRange(location: 60, length: 40), color: blueColor),
+                    ],
+                    fontRuns: []
+                ),
+                range: NSRange(location: 0, length: 100),
+                revision: 1,
+                language: .swift,
+                textLength: 100,
+                baseForeground: baseForeground,
+                baseFont: nil
+            )
+            return store
+        }
+
+        // Scattered single-character inserts that defeat the map's coalescing.
+        var edits: [(SyntaxHighlightMutation, Int)] = []
+        var length = 100
+        for step in 0..<12 {
+            let location = (step * 17 + (step.isMultiple(of: 2) ? 2 : 55)) % max(1, length - 1)
+            length += 1
+            edits.append((SyntaxHighlightMutation(location: location, length: 0, replacement: "x"), length))
+        }
+
+        HighlightRenderSnapshotStore.pendingEditCheckpointThresholdOverrideForTesting = 1_000_000
+        let reference = makeStore()
+        for (mutation, textLength) in edits {
+            reference.recordPendingEdit(mutation, currentTextLength: textLength)
+        }
+        let referenceRuns = reference.colorRuns(in: NSRange(location: 0, length: length))
+        let referenceEditCount = reference.pendingEditCountForTesting
+
+        HighlightRenderSnapshotStore.pendingEditCheckpointThresholdOverrideForTesting = 3
+        defer { HighlightRenderSnapshotStore.pendingEditCheckpointThresholdOverrideForTesting = nil }
+        let checkpointing = makeStore()
+        for (mutation, textLength) in edits {
+            checkpointing.recordPendingEdit(mutation, currentTextLength: textLength)
+        }
+        let checkpointedRuns = checkpointing.colorRuns(in: NSRange(location: 0, length: length))
+
+        #expect(referenceEditCount > 3)
+        #expect(checkpointing.pendingEditCountForTesting <= 3)
+        #expect(checkpointedRuns.count == referenceRuns.count)
+        for (lhs, rhs) in zip(checkpointedRuns, referenceRuns) {
+            #expect(lhs.range == rhs.range)
+            #expect(lhs.color.isEqual(rhs.color))
+        }
+    }
+
     @Test("Highlight visible resolver suppresses marked text ranges")
     func highlightVisibleResolverSuppressesMarkedTextRanges() {
         #if canImport(UIKit)

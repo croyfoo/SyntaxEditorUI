@@ -114,7 +114,7 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         // reset keeps the previous session usable — pinned behavior).
         let nextSession = HighlightSession(language: language, setup: setup)
         nextSession.visibleRangeHint = visibleRangeHint
-        let result = nextSession.reset(source: source, revision: revision, emitFastPass: emitFastPass)
+        let result = await nextSession.reset(source: source, revision: revision, emitFastPass: emitFastPass)
         guard !Task.isCancelled, let result else {
             return SyntaxHighlightResult(
                 tokens: [],
@@ -136,7 +136,7 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         emitFastPass: ((SyntaxHighlightResult) -> Void)?
     ) async -> SyntaxHighlightResult {
         if let session,
-           let result = session.update(
+           let result = await session.update(
                source: source,
                language: language,
                mutation: mutation,
@@ -177,6 +177,23 @@ final class HighlightSession {
     /// Committed-but-undelivered refresh obligations (results dropped by
     /// cancellation); unioned into the next emitted result.
     private var refreshDebt = EditedRangeSet()
+    /// Pending document ranges whose semantic overlays are stale (conservative
+    /// passes converted to chunked work). Spliced through every committed edit;
+    /// survives cancellation, so convergence is guaranteed by whichever update
+    /// drains last. Stale overlays stay visible until their chunk lands.
+    private var semanticDebt = EditedRangeSet()
+    private static let semanticDrainChunkBudget = 10_000
+    /// Documents above this UTF-16 length open progressively (viewport chunk
+    /// first); below it the monolithic reset keeps the historical two-phase
+    /// delivery. Tests lower the override to run the fixture suite through the
+    /// progressive path and assert equivalence.
+    private static let defaultProgressiveResetThreshold = 65_536
+    private static let syntacticResetChunkBudget = 16_384
+    /// Test-only escape hatch (serial test execution); never written in production.
+    nonisolated(unsafe) static var progressiveResetThresholdOverrideForTesting: Int?
+    private static var progressiveResetThreshold: Int {
+        progressiveResetThresholdOverrideForTesting ?? defaultProgressiveResetThreshold
+    }
 
     init(language: SyntaxLanguage, setup: HighlightingSetup) {
         self.language = language
@@ -196,14 +213,16 @@ final class HighlightSession {
     func reset(
         source: String,
         revision: Int,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?
-    ) -> SyntaxHighlightResult? {
+        emitFastPass: ((SyntaxHighlightResult) -> Void)?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async -> SyntaxHighlightResult? {
         self.source = source
         layeredSource = SyntacticPatcher.layeredSource(for: source, setup: setup)
         sourceBuffer.reset(layeredSource)
         lineTable.reset(source: layeredSource)
         semanticPass?.invalidate()
         refreshDebt.clear()
+        semanticDebt.clear()
 
         guard !layeredSource.isEmpty else {
             layer = nil
@@ -226,37 +245,76 @@ final class HighlightSession {
             layer = nextLayer
 
             let fullRange = NSRange(location: 0, length: layeredSource.utf16.count)
-            let baseTokens = SyntacticPatcher.highlightTokens(
-                in: fullRange,
-                layer: nextLayer,
-                source: layeredSource,
-                language: language,
-                clipTo: nil
-            )
-            planes.reset(tokens: baseTokens, lineTable: lineTable)
-
-            emitFastPassIfNeeded(
-                tokens: baseTokens,
-                source: source,
-                revision: revision,
-                refreshRange: NSRange(location: 0, length: source.utf16.count),
-                tokenPayload: .fullSnapshot,
-                emitFastPass: emitFastPass
-            )
-
-            if let semanticPass {
-                let outcome = semanticPass.fullMerge(
-                    tokens: baseTokens,
-                    source: layeredSource,
-                    rootNode: semanticRootNodeSnapshot()
-                )
-                guard !outcome.isCancelled, !Task.isCancelled else {
+            if usesDeferredSemanticHighlighting, fullRange.length > Self.progressiveResetThreshold {
+                // Progressive open for large documents: the viewport chunk paints
+                // first (parse + one bounded query instead of the whole-document
+                // query), then the remaining base chunks land with yields between
+                // them. Outcome identical to the monolithic path; only the
+                // delivery schedule differs.
+                guard await progressiveSyntacticReset(
+                    layer: nextLayer,
+                    fullRange: fullRange,
+                    revision: revision,
+                    emitFastPass: emitFastPass
+                ) else {
                     layer = nil
-                    self.semanticPass?.invalidate()
                     planes.clear(lineCount: lineTable.lineCount)
                     return nil
                 }
-                planes.reset(tokens: outcome.tokens, lineTable: lineTable)
+            } else {
+                let tokens = SyntacticPatcher.highlightTokens(
+                    in: fullRange,
+                    layer: nextLayer,
+                    source: layeredSource,
+                    language: language,
+                    clipTo: nil
+                )
+                planes.reset(tokens: tokens, lineTable: lineTable)
+
+                emitFastPassIfNeeded(
+                    tokens: tokens,
+                    source: source,
+                    revision: revision,
+                    refreshRange: NSRange(location: 0, length: source.utf16.count),
+                    tokenPayload: .fullSnapshot,
+                    emitFastPass: emitFastPass
+                )
+            }
+
+            if let semanticPass {
+                if semanticPass.supportsChunkedFullPass {
+                    // Chunked initial pass: same outcome as the monolithic merge,
+                    // but the actor stays responsive between chunks. A cancelled
+                    // reset is never installed, so leftover debt is irrelevant.
+                    var prepared = semanticPass.prepareFullPass(
+                        source: layeredSource,
+                        rootNode: semanticRootNodeSnapshot()
+                    )
+                    if prepared {
+                        semanticDebt.insert(fullRange)
+                        _ = await drainSemanticDebt(revision: revision, emit: emitFastPass)
+                        prepared = semanticDebt.isEmpty
+                    }
+                    guard prepared, !Task.isCancelled else {
+                        layer = nil
+                        self.semanticPass?.invalidate()
+                        planes.clear(lineCount: lineTable.lineCount)
+                        return nil
+                    }
+                } else {
+                    let outcome = semanticPass.fullMerge(
+                        tokens: planes.tokens(lineTable: lineTable),
+                        source: layeredSource,
+                        rootNode: semanticRootNodeSnapshot()
+                    )
+                    guard !outcome.isCancelled, !Task.isCancelled else {
+                        layer = nil
+                        self.semanticPass?.invalidate()
+                        planes.clear(lineCount: lineTable.lineCount)
+                        return nil
+                    }
+                    planes.reset(tokens: outcome.tokens, lineTable: lineTable)
+                }
             } else if Task.isCancelled {
                 layer = nil
                 planes.clear(lineCount: lineTable.lineCount)
@@ -276,6 +334,77 @@ final class HighlightSession {
         )
     }
 
+    /// Chunked base-plane construction for large-document opens. The chunk
+    /// nearest the viewport runs first and emits the first paint (a
+    /// `.fullSnapshot` fast pass — on a fresh document the not-yet-tokenized
+    /// remainder is legitimately uncolored); later chunks emit progressive
+    /// `.complete` replacements with a yield between them. Returns false on
+    /// cancellation — the caller never installs a half-built session.
+    private func progressiveSyntacticReset(
+        layer: LanguageLayer,
+        fullRange: NSRange,
+        revision: Int,
+        emitFastPass: ((SyntaxHighlightResult) -> Void)?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async -> Bool {
+        planes.clear(lineCount: lineTable.lineCount)
+        var syntacticDebt = EditedRangeSet()
+        syntacticDebt.insert(fullRange)
+        var emittedFirstPaint = false
+
+        while !syntacticDebt.isEmpty {
+            if Task.isCancelled {
+                return false
+            }
+            guard let chunk = syntacticDebt.popChunk(
+                near: visibleRangeHint?.location,
+                budget: Self.syntacticResetChunkBudget
+            ) else {
+                break
+            }
+            let target = SyntacticPatcher.lineEnvelope(
+                containing: SyntaxEditorRangeUtilities.clampedRange(chunk, utf16Length: fullRange.length),
+                source: layeredSource
+            )
+            guard target.length > 0 else { continue }
+            syntacticDebt.remove(target)
+            let tokens = SyntacticPatcher.highlightTokens(
+                in: target,
+                layer: layer,
+                source: layeredSource,
+                language: language,
+                clipTo: target
+            )
+            _ = planes.replaceTokens(in: target, with: tokens, plane: .base, lineTable: lineTable)
+            if !emittedFirstPaint {
+                emittedFirstPaint = true
+                emitFastPassIfNeeded(
+                    tokens: planes.tokens(in: target, lineTable: lineTable),
+                    source: source,
+                    revision: revision,
+                    refreshRange: target,
+                    tokenPayload: .fullSnapshot,
+                    emitFastPass: emitFastPass
+                )
+            } else if let emitFastPass, !syntacticDebt.isEmpty {
+                emitFastPass(SyntaxHighlightResult(
+                    tokens: resultTokens(
+                        from: planes.tokens(in: target, lineTable: lineTable),
+                        refreshRange: target,
+                        tokenPayload: .replacement
+                    ),
+                    source: source,
+                    language: language,
+                    revision: revision,
+                    refreshRange: target,
+                    tokenPayload: .replacement
+                ))
+            }
+            await Task.yield()
+        }
+        return !Task.isCancelled
+    }
+
     // MARK: - Update
 
     /// Incremental update. Returns nil when preconditions fail; the engine then
@@ -285,8 +414,9 @@ final class HighlightSession {
         language nextLanguage: SyntaxLanguage,
         mutation originalMutation: SyntaxHighlightMutation,
         revision: Int,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?
-    ) -> SyntaxHighlightResult? {
+        emitFastPass: ((SyntaxHighlightResult) -> Void)?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async -> SyntaxHighlightResult? {
         guard nextLanguage == language, let layer else {
             return nil
         }
@@ -379,6 +509,12 @@ final class HighlightSession {
         source = nextSource
         layeredSource = nextLayeredSource
         refreshDebt.splice(
+            location: layeredMutation.location,
+            oldLength: layeredMutation.length,
+            newLength: layeredMutation.replacement.utf16.count,
+            documentLength: nextLength
+        )
+        semanticDebt.splice(
             location: layeredMutation.location,
             oldLength: layeredMutation.length,
             newLength: layeredMutation.replacement.utf16.count,
@@ -487,29 +623,46 @@ final class HighlightSession {
                 }
             }
             if runConservative {
-                // Passes receive base-plane tokens only and re-derive every overlay:
-                // feeding stale overlays back in tripped the ObjC provider's
-                // preservation heuristics into keeping shifted leftovers.
-                let merged = semanticPass.fullMerge(
-                    tokens: planes.tokens(lineTable: lineTable).filter { !$0.isSemanticOverlay },
-                    source: nextLayeredSource,
-                    rootNode: rootNode
-                )
-                if merged.isCancelled || Task.isCancelled {
-                    semanticPass.invalidate()
-                    refreshDebt.insert(resultRefresh)
+                if semanticPass.supportsChunkedFullPass {
+                    // Convert the document-sized pass into drainable debt: stale
+                    // overlays stay visible until their chunk lands, and a
+                    // cancelled drain leaves the remainder to the next update.
+                    if semanticPass.prepareFullPass(source: nextLayeredSource, rootNode: rootNode) {
+                        semanticDebt.insert(NSRange(location: 0, length: nextLength))
+                    } else {
+                        // Cancelled mid-build; the base patch below still needs
+                        // redelivery because this result is about to be dropped.
+                        refreshDebt.insert(resultRefresh)
+                    }
                 } else {
-                    let fullRange = NSRange(location: 0, length: nextLength)
-                    if let semanticChanged = planes.replaceTokens(
-                        in: fullRange,
-                        with: merged.tokens,
-                        plane: .both,
-                        lineTable: lineTable
-                    ) {
-                        resultRefresh = SyntacticPatcher.union(resultRefresh, semanticChanged)
+                    // Passes receive base-plane tokens only and re-derive every
+                    // overlay: feeding stale overlays back in tripped the ObjC
+                    // provider's preservation heuristics into keeping shifted
+                    // leftovers.
+                    let merged = semanticPass.fullMerge(
+                        tokens: planes.tokens(lineTable: lineTable).filter { !$0.isSemanticOverlay },
+                        source: nextLayeredSource,
+                        rootNode: rootNode
+                    )
+                    if merged.isCancelled || Task.isCancelled {
+                        semanticPass.invalidate()
+                        refreshDebt.insert(resultRefresh)
+                    } else {
+                        let fullRange = NSRange(location: 0, length: nextLength)
+                        if let semanticChanged = planes.replaceTokens(
+                            in: fullRange,
+                            with: merged.tokens,
+                            plane: .both,
+                            lineTable: lineTable
+                        ) {
+                            resultRefresh = SyntacticPatcher.union(resultRefresh, semanticChanged)
+                        }
                     }
                 }
             }
+        }
+        if let drained = await drainSemanticDebt(revision: revision, emit: emitFastPass) {
+            resultRefresh = SyntacticPatcher.union(resultRefresh, drained)
         }
         resultRefresh = SyntaxEditorRangeUtilities.clampedRange(resultRefresh, utf16Length: nextSource.utf16.count)
 
@@ -525,6 +678,84 @@ final class HighlightSession {
             refreshRange: resultRefresh,
             tokenPayload: .replacement
         )
+    }
+
+    // MARK: - Semantic drain
+
+    /// Drains pending semantic obligations in ~10k-unit line-aligned chunks,
+    /// nearest the viewport first, with a yield between chunks so interleaved
+    /// actor work — the next keystroke — never waits behind a document-sized
+    /// pass. Cancellation stops between chunks and leaves the remaining debt
+    /// (plus the accumulated repaint duty) to the next update; an awaited,
+    /// uncancelled call always converges, which is what keeps incremental ==
+    /// full equivalence observable at the API.
+    ///
+    /// `emit` (the phase stream) receives a progressive `.complete` per chunk
+    /// while more debt remains, so the viewport recolors without waiting for
+    /// the tail. Single-chunk drains stay silent — small documents keep the
+    /// historical one-complete-per-update observable behavior.
+    private func drainSemanticDebt(
+        revision: Int,
+        emit: ((SyntaxHighlightResult) -> Void)?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async -> NSRange? {
+        guard let semanticPass, semanticPass.supportsChunkedFullPass else { return nil }
+        var refresh: NSRange?
+        while !semanticDebt.isEmpty {
+            await Task.yield()
+            if Task.isCancelled {
+                if let refresh { refreshDebt.insert(refresh) }
+                return refresh
+            }
+            let sourceLength = (layeredSource as NSString).length
+            guard sourceLength > 0,
+                  let chunk = semanticDebt.popChunk(
+                      near: visibleRangeHint?.location,
+                      budget: Self.semanticDrainChunkBudget
+                  )
+            else {
+                semanticDebt.clear()
+                break
+            }
+            let target = SyntacticPatcher.lineEnvelope(
+                containing: SyntaxEditorRangeUtilities.clampedRange(chunk, utf16Length: sourceLength),
+                source: layeredSource
+            )
+            guard target.length > 0 else { continue }
+            // The line envelope can exceed the popped chunk; drop the overlap so
+            // adjacent chunks never reclassify the same lines twice.
+            semanticDebt.remove(target)
+            let baseTokens = planes.tokens(in: target, lineTable: lineTable)
+                .filter { !$0.isSemanticOverlay }
+            let overlays = semanticPass.overlayTokens(
+                in: target,
+                baseTokens: baseTokens,
+                source: layeredSource
+            )
+            if let diff = planes.replaceTokens(
+                in: target,
+                with: overlays,
+                plane: .overlay,
+                lineTable: lineTable
+            ) {
+                refresh = refresh.map { SyntacticPatcher.union($0, diff) } ?? diff
+                if let emit, !semanticDebt.isEmpty {
+                    emit(SyntaxHighlightResult(
+                        tokens: resultTokens(
+                            from: planes.tokens(in: diff, lineTable: lineTable),
+                            refreshRange: diff,
+                            tokenPayload: .replacement
+                        ),
+                        source: source,
+                        language: language,
+                        revision: revision,
+                        refreshRange: diff,
+                        tokenPayload: .replacement
+                    ))
+                }
+            }
+        }
+        return refresh
     }
 
     // MARK: - Helpers

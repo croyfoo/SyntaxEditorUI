@@ -1425,7 +1425,10 @@ public final class SyntaxEditorView: NSScrollView {
         resetSkippedHighlightPhaseTrackingForTesting()
 
         let highlighter = self.highlighter
-        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation, requestID] in
+        // Viewport hint: progressive opens and background semantic drains
+        // process the chunk nearest this range first (pure ordering hint).
+        let visibleRange = textView.visibleCharacterRangeWithoutLayout()
+        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation, requestID, visibleRange] in
             defer {
                 Task { @MainActor [weak self] in
                     self?.clearScheduledHighlightRequestIfCurrent(id: requestID)
@@ -1435,6 +1438,7 @@ public final class SyntaxEditorView: NSScrollView {
             guard !Task.isCancelled else {
                 return
             }
+            await highlighter.setVisibleRange(visibleRange)
 
             let phases: AsyncStream<SyntaxHighlightResult>
             if let mutation {

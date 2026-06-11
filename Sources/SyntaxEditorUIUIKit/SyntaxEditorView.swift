@@ -2011,7 +2011,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         )
 
         let highlighter = self.highlighter
-        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation, requestID] in
+        // Viewport hint: progressive opens and background semantic drains
+        // process the chunk nearest this range first (pure ordering hint).
+        let visibleRange = visibleCharacterRangeForHighlightHint()
+        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation, requestID, visibleRange] in
             defer {
                 Task { @MainActor [weak self] in
                     self?.clearScheduledHighlightRequestIfCurrent(id: requestID)
@@ -2021,6 +2024,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             guard !Task.isCancelled else {
                 return
             }
+            await highlighter.setVisibleRange(visibleRange)
 
             let phases: AsyncStream<SyntaxHighlightResult>
             if let mutation {
@@ -3487,6 +3491,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         if !isLayingOutText {
             updateContentSizeIfNeeded()
         }
+    }
+
+    /// Currently laid-out viewport as a UTF-16 range, or nil before first
+    /// layout — used as the highlighter's drain-ordering hint.
+    func visibleCharacterRangeForHighlightHint() -> NSRange? {
+        guard let viewportRange = layoutManager.textViewportLayoutController.viewportRange else {
+            return nil
+        }
+        let range = utf16Range(for: viewportRange)
+        return range.length > 0 ? range : nil
     }
 
     func textLocation(forUTF16Offset offset: Int) -> NSTextLocation? {

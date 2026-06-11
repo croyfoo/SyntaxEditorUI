@@ -1049,6 +1049,13 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         return visibleCharacterRangeFromFragments()
     }
 
+    /// Passive variant for the highlighter's drain-ordering hint: reads the
+    /// current viewport state without forcing layout. Safe to call from text
+    /// mutation processing, where triggering TextKit layout is not.
+    func visibleCharacterRangeWithoutLayout() -> NSRange? {
+        viewportCharacterRange() ?? visibleCharacterRangeFromFragments()
+    }
+
     private func viewportCharacterRange() -> NSRange? {
         guard let viewportRange = textLayoutManager.textViewportLayoutController.viewportRange else {
             return nil

@@ -38,6 +38,16 @@ protocol SemanticPass: AnyObject {
         baseTokens: [SyntaxHighlightToken],
         source: String
     ) -> [SyntaxHighlightToken]
+
+    /// True when the full-document pass can run as chunked `overlayTokens`
+    /// calls over a debt set instead of one monolithic `fullMerge` — the
+    /// engine then never blocks its actor for a document-sized pass.
+    var supportsChunkedFullPass: Bool { get }
+
+    /// Validates/rebuilds whatever state `overlayTokens` needs for a chunked
+    /// full pass over the current text. Returns false when cancelled
+    /// mid-build; the engine then leaves convergence to the next update.
+    func prepareFullPass(source: String, rootNode: Node?) -> Bool
 }
 
 /// Outcome of `plannedUpdate`.
@@ -66,6 +76,12 @@ extension SemanticPass {
         source: String
     ) -> [SyntaxHighlightToken] {
         []
+    }
+
+    var supportsChunkedFullPass: Bool { false }
+
+    func prepareFullPass(source: String, rootNode: Node?) -> Bool {
+        true
     }
 }
 
@@ -119,12 +135,22 @@ final class SwiftSemanticPass: SemanticPass {
         source: String,
         rootNode: Node?
     ) -> SemanticUpdatePlan? {
-        guard let rootNode else { return .full }
+        // Every .full return discards state: a failed in-place shift leaves the
+        // index partially mutated, and a kept-but-stale index would otherwise
+        // slip past `prepareFullPass`'s length check on length-neutral edits.
+        guard let rootNode else {
+            state = nil
+            return .full
+        }
         let nsSource = source as NSString
-        guard nsSource.length > 0 else { return .full }
+        guard nsSource.length > 0 else {
+            state = nil
+            return .full
+        }
         guard let index = state?.scopeIndex,
               index.shiftInPlace(by: mutation, sourceUTF16Length: nsSource.length)
         else {
+            state = nil
             return .full
         }
         guard let update = index.applySubtreeUpdate(
@@ -158,6 +184,26 @@ final class SwiftSemanticPass: SemanticPass {
             source: source,
             index: state?.scopeIndex
         )
+    }
+
+    var supportsChunkedFullPass: Bool { true }
+
+    /// `.full` plans always discard state (see `plannedUpdate`), so a surviving
+    /// index here is the requiresFullPass case — already shifted and rebuilt for
+    /// this text. Anything else rebuilds from the current tree; nil = cancelled.
+    func prepareFullPass(source: String, rootNode: Node?) -> Bool {
+        let nsSource = source as NSString
+        guard nsSource.length > 0 else { return false }
+        if let existing = state, existing.scopeIndex != nil,
+           existing.indexedSourceUTF16Length == nsSource.length {
+            return true
+        }
+        guard let rootNode, let index = SwiftScopeIndex(rootNode: rootNode, source: nsSource) else {
+            state = nil
+            return false
+        }
+        state = SwiftSemanticOverlayState(scopeIndex: index, indexedSourceUTF16Length: nsSource.length)
+        return true
     }
 
     func invalidate() {

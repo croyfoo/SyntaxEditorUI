@@ -187,9 +187,15 @@ package protocol SyntaxHighlighting: Sendable {
         mutation: SyntaxHighlightMutation,
         revision: Int
     ) async -> AsyncStream<SyntaxHighlightResult>
+    /// Viewport hint: progressive opens and background semantic drains process
+    /// the chunk nearest this range first. Purely an ordering hint — results
+    /// and convergence are identical without it.
+    func setVisibleRange(_ range: NSRange?) async
 }
 
 package extension SyntaxHighlighting {
+    func setVisibleRange(_ range: NSRange?) async {}
+
     func resetPhases(
         source: String,
         language: SyntaxLanguage,

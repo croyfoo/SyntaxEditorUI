@@ -746,6 +746,13 @@ package final class HighlightRenderSnapshotStore {
         return clearedDirtyRanges
     }
 
+    /// Pending-edit checkpoint threshold: scattered (non-coalescing) edits grow
+    /// the map and every snapshot-range mapping costs O(#edits); the engine
+    /// delivers narrow refreshes by design, so the map never clears on its own.
+    package static let pendingEditCheckpointThreshold = 64
+    /// Test-only override (serial test execution).
+    nonisolated(unsafe) package static var pendingEditCheckpointThresholdOverrideForTesting: Int?
+
     package func recordPendingEdit(
         _ mutation: SyntaxHighlightMutation,
         currentTextLength nextTextLength: Int
@@ -754,7 +761,47 @@ package final class HighlightRenderSnapshotStore {
         shiftCurrentMaterializedRuns(for: mutation, currentTextLength: nextTextLength)
         currentTextLength = nextTextLength
         pendingEditMap.recordPendingEdit(mutation, currentTextLength: currentTextLength)
+        checkpointPendingEditsIfNeeded()
         generation += 1
+    }
+
+    /// Folds the snapshot, the pending-edit map, and the partially materialized
+    /// runs into a fresh snapshot in CURRENT coordinates. The resolver's output
+    /// is identical before and after: regions the map marked dirty simply have
+    /// no runs in the folded snapshot (they repaint when the engine's refresh
+    /// debt covers them). Deferred while suppression ranges exist — lifting a
+    /// suppression (IME composition end) must re-expose the underlying colors,
+    /// which a fold would have baked away.
+    private func checkpointPendingEditsIfNeeded() {
+        let threshold = Self.pendingEditCheckpointThresholdOverrideForTesting
+            ?? Self.pendingEditCheckpointThreshold
+        guard pendingEditMap.editCountForTesting > threshold,
+              currentSuppressionRanges.isEmpty
+        else {
+            return
+        }
+
+        let fullRange = NSRange(location: 0, length: currentTextLength)
+        let resolved = resolver()
+        var colorRuns: [HighlightColorRun] = []
+        var fontRuns: [HighlightFontRun] = []
+        resolved.forEachColorRun(in: fullRange) { colorRuns.append($0) }
+        resolved.forEachFontRun(in: fullRange) { fontRuns.append($0) }
+
+        snapshot = HighlightRenderSnapshot(
+            revision: snapshot.revision,
+            language: snapshot.language,
+            textLength: currentTextLength,
+            baseForeground: snapshot.baseForeground,
+            baseFont: snapshot.baseFont,
+            colorRuns: colorRuns,
+            fontRuns: fontRuns,
+            suppressionRanges: []
+        )
+        pendingEditMap.clear()
+        currentColorRuns = []
+        currentFontRuns = []
+        currentMaterializedRanges = []
     }
 
     private func shiftCurrentMaterializedRuns(

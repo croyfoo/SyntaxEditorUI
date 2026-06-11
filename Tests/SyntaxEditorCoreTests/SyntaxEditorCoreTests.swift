@@ -4308,6 +4308,27 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(reset.tokens, render))
     }
 
+    @Test(
+        "SyntaxHighlighterEngine progressive reset matches the monolithic reset",
+        arguments: [SyntaxLanguage.swift, .objectiveC]
+    )
+    func highlighterProgressiveResetMatchesMonolithicReset(language: SyntaxLanguage) async throws {
+        let filename = language == .swift ? "Reference.swift" : "Reference.m"
+        let unit = try referenceSampleText(named: filename)
+        // Repeat the fixture so the progressive path runs multiple chunks
+        // (chunk budget is 16k UTF-16 units).
+        let copies = max(1, 60_000 / max(1, unit.utf16.count) + 1)
+        let source = String(repeating: unit, count: copies)
+
+        let monolithic = await SyntaxHighlighterEngine().render(source: source, language: language)
+
+        HighlightSession.progressiveResetThresholdOverrideForTesting = 1024
+        defer { HighlightSession.progressiveResetThresholdOverrideForTesting = nil }
+        let progressive = await SyntaxHighlighterEngine().render(source: source, language: language)
+
+        #expect(highlightTokensMatch(progressive, monolithic))
+    }
+
     @Test("SyntaxHighlighterEngine emits canonical reference sample captures")
     func highlighterEmitsCanonicalReferenceSampleCaptures() async throws {
         let engine = sharedSyntaxHighlighterEngine
