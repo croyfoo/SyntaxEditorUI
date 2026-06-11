@@ -121,10 +121,29 @@ final class SwiftScopeIndex {
         var range: NSRange
         var declarations: [Declaration] = []
         var children: [Scope] = []
+        /// Lazy name → declaration indices for scopes whose declaration list is
+        /// long enough that per-query linear scans dominate (the file root in
+        /// generated/pasted code). Built on first query; stays valid because
+        /// edits either shift declarations in place (names and order unchanged)
+        /// or replace whole Scope instances.
+        var declarationNameIndex: [String: [Int]]?
 
         init(kind: Kind, range: NSRange) {
             self.kind = kind
             self.range = range
+        }
+
+        static let nameIndexThreshold = 16
+
+        func declarationIndices(named name: String) -> [Int]? {
+            if declarationNameIndex == nil {
+                var index = [String: [Int]](minimumCapacity: declarations.count)
+                for (position, declaration) in declarations.enumerated() {
+                    index[declaration.name, default: []].append(position)
+                }
+                declarationNameIndex = index
+            }
+            return declarationNameIndex?[name]
         }
 
         var typeQualifiedName: String? {
@@ -142,9 +161,13 @@ final class SwiftScopeIndex {
     private(set) var isCancelled = false
     /// Enum cases are visible file-wide with owner gating.
     private var enumCases: [String: [Declaration]] = [:]
-    /// Member declarations keyed by owner qualified name: members declared in any
-    /// body/extension of a type resolve from every body/extension of that type.
-    private var membersByOwner: [String: [Declaration]] = [:]
+    /// Member declarations keyed by owner qualified name, then declared name:
+    /// members declared in any body/extension of a type resolve from every
+    /// body/extension of that type. The second key level matters: resolution
+    /// queries one name at a time, and duplicated type names (common in
+    /// generated/pasted code) used to make every query walk every same-owner
+    /// member.
+    private var membersByOwner: [String: [String: [Declaration]]] = [:]
     /// Qualified names that have at least one extension scope in the file.
     private var extensionOwnerNames: Set<String> = []
 
@@ -170,7 +193,7 @@ final class SwiftScopeIndex {
             }
             for declaration in scope.declarations where declaration.role == .member {
                 guard let owner = declaration.ownerQualifiedName else { continue }
-                membersByOwner[owner, default: []].append(declaration)
+                membersByOwner[owner, default: [:]][declaration.name, default: []].append(declaration)
             }
             for child in scope.children {
                 collect(child)
@@ -198,9 +221,33 @@ final class SwiftScopeIndex {
         fileprivate func isValid(for range: NSRange) -> Bool {
             guard let innermost = path.last else { return false }
             guard SwiftScopeIndex.range(innermost.range, contains: range) else { return false }
-            for child in innermost.children where SwiftScopeIndex.range(child.range, contains: range) {
-                _ = child
-                return false
+            // Mirror collectScopePath's candidate walk exactly (children are in
+            // source order but enclosing siblings can share a start): binary-
+            // search the last child starting at or before the range, then walk
+            // back while siblings still reach past the range start. A linear
+            // scan here was a per-query cost at file scope, where the root has
+            // one child per toplevel declaration.
+            let children = innermost.children
+            var lower = 0
+            var upper = children.count
+            while lower < upper {
+                let middle = (lower + upper) / 2
+                if children[middle].range.location <= range.location {
+                    lower = middle + 1
+                } else {
+                    upper = middle
+                }
+            }
+            var index = lower - 1
+            while index >= 0 {
+                let child = children[index]
+                if SwiftScopeIndex.range(child.range, contains: range) {
+                    return false
+                }
+                if child.range.upperBound <= range.location {
+                    break
+                }
+                index -= 1
             }
             return true
         }
@@ -257,14 +304,23 @@ final class SwiftScopeIndex {
                 }
             }
 
-            for declaration in scope.declarations where declaration.role != .member {
-                consider(declaration)
+            if scope.declarations.count > Scope.nameIndexThreshold {
+                if let indices = scope.declarationIndices(named: name) {
+                    for index in indices where scope.declarations[index].role != .member {
+                        consider(scope.declarations[index])
+                    }
+                }
+            } else {
+                for declaration in scope.declarations where declaration.role != .member {
+                    consider(declaration)
+                }
             }
             // Members resolve via the owner map so declarations in sibling bodies and
             // extensions of the same type are visible — but only until the walk
             // crosses out of the innermost enclosing type.
-            if !crossedTypeBoundary, let owner = scopeQualifiedName {
-                for declaration in membersByOwner[owner] ?? [] {
+            if !crossedTypeBoundary, let owner = scopeQualifiedName,
+               let named = membersByOwner[owner]?[name] {
+                for declaration in named {
                     consider(declaration)
                 }
             }
@@ -333,11 +389,20 @@ final class SwiftScopeIndex {
                 }
             }
 
-            for declaration in scope.declarations where declaration.role != .member {
-                consider(declaration)
+            if scope.declarations.count > Scope.nameIndexThreshold {
+                if let indices = scope.declarationIndices(named: name) {
+                    for index in indices where scope.declarations[index].role != .member {
+                        consider(scope.declarations[index])
+                    }
+                }
+            } else {
+                for declaration in scope.declarations where declaration.role != .member {
+                    consider(declaration)
+                }
             }
-            if !crossedTypeBoundary, let owner = scopeQualifiedName {
-                for declaration in membersByOwner[owner] ?? [] {
+            if !crossedTypeBoundary, let owner = scopeQualifiedName,
+               let named = membersByOwner[owner]?[name] {
+                for declaration in named {
                     consider(declaration)
                 }
             }
@@ -369,6 +434,12 @@ final class SwiftScopeIndex {
         let delta = mutation.replacement.utf16.count - mutation.length
         let oldEnd = mutation.location + mutation.length
 
+        // A range partially overlapping the replaced region cannot be shifted
+        // exactly; the index is discarded and rebuilt. (Snapping such ranges to
+        // the edit point and relying on the subtree rebuild is NOT sound: hosts
+        // are rebuilt from their node's children, which cannot restore
+        // declarations the parent's visit attaches — closure parameters — as
+        // the same-length closure-parameter-edit regression test pins.)
         func shiftRange(_ range: NSRange) -> NSRange? {
             if range.upperBound <= mutation.location { return range }
             if range.location >= oldEnd {
@@ -436,7 +507,39 @@ final class SwiftScopeIndex {
             return true
         }
 
-        guard shiftDeclarationMap(&enumCases), shiftDeclarationMap(&membersByOwner) else {
+        func shiftNestedDeclarationMap(_ map: inout [String: [String: [Declaration]]]) -> Bool {
+            for (owner, byName) in map {
+                var shiftedByName = byName
+                var ownerChanged = false
+                for (name, declarations) in byName {
+                    var shifted = declarations
+                    var changed = false
+                    for index in shifted.indices {
+                        let declaration = shifted[index]
+                        if declaration.declarationRange.upperBound <= mutation.location,
+                           declaration.visibleFrom <= mutation.location {
+                            continue
+                        }
+                        guard let declarationRange = shiftRange(declaration.declarationRange) else { return false }
+                        shifted[index].declarationRange = declarationRange
+                        shifted[index].visibleFrom = declaration.visibleFrom <= mutation.location
+                            ? declaration.visibleFrom
+                            : max(mutation.location, declaration.visibleFrom + delta)
+                        changed = true
+                    }
+                    if changed {
+                        shiftedByName[name] = shifted
+                        ownerChanged = true
+                    }
+                }
+                if ownerChanged {
+                    map[owner] = shiftedByName
+                }
+            }
+            return true
+        }
+
+        guard shiftDeclarationMap(&enumCases), shiftNestedDeclarationMap(&membersByOwner) else {
             return false
         }
         sourceUTF16Length = newLength
@@ -603,30 +706,42 @@ final class SwiftScopeIndex {
                     }
                 }
             }
-            func collectRebuiltMembers(_ scope: Scope, into map: inout [String: [Declaration]]) {
+            func collectRebuiltMembers(_ scope: Scope, into map: inout [String: [String: [Declaration]]]) {
                 if case .typeExtension(let name) = scope.kind {
                     extensionOwnerNames.insert(name)
                 }
                 for declaration in scope.declarations where declaration.role == .member {
                     guard let owner = declaration.ownerQualifiedName else { continue }
                     touchedOwners.insert(owner)
-                    map[owner, default: []].append(declaration)
+                    map[owner, default: [:]][declaration.name, default: []].append(declaration)
                 }
                 for child in scope.children {
                     collectRebuiltMembers(child, into: &map)
                 }
             }
-            var rebuiltMembers: [String: [Declaration]] = [:]
+            var rebuiltMembers: [String: [String: [Declaration]]] = [:]
             collectRebuiltMembers(replacement, into: &rebuiltMembers)
             for owner in touchedOwners {
-                var kept = (membersByOwner[owner] ?? []).filter {
-                    !Self.range(host.range, contains: $0.declarationRange)
+                var keptByName = membersByOwner[owner] ?? [:]
+                var touchedNames = Set(keptByName.keys)
+                if let rebuiltByName = rebuiltMembers[owner] {
+                    touchedNames.formUnion(rebuiltByName.keys)
                 }
-                kept.append(contentsOf: rebuiltMembers[owner] ?? [])
-                if kept.isEmpty {
+                for name in touchedNames {
+                    var kept = (keptByName[name] ?? []).filter {
+                        !Self.range(host.range, contains: $0.declarationRange)
+                    }
+                    kept.append(contentsOf: rebuiltMembers[owner]?[name] ?? [])
+                    if kept.isEmpty {
+                        keptByName.removeValue(forKey: name)
+                    } else {
+                        keptByName[name] = kept
+                    }
+                }
+                if keptByName.isEmpty {
                     membersByOwner.removeValue(forKey: owner)
                 } else {
-                    membersByOwner[owner] = kept
+                    membersByOwner[owner] = keptByName
                 }
             }
 
