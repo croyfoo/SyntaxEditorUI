@@ -3224,7 +3224,26 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         guard !invalidatedRanges.isEmpty else { return }
-        setNeedsDisplayForTextRanges(invalidatedRanges)
+        // Revalidate already-laid-out fragments before redrawing: their line
+        // fragments cache the rendering attributes captured at layout time, so
+        // a bare setNeedsDisplay repaints the stale colors. Applies that arrive
+        // without an accompanying layout pass (progressive reset chunks,
+        // background drain results) otherwise never recolor the current
+        // viewport — only freshly scrolled-in fragments would run the
+        // validator. Mirrors the AppKit input view.
+        var didInvalidateFragment = false
+        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+            let fragmentRange = textRange(for: fragmentView.layoutFragment)
+            guard !TextLayoutGeometry.ranges(invalidatedRanges, intersecting: fragmentRange).isEmpty else {
+                continue
+            }
+            validateSyntaxRenderingAttributes(in: fragmentView.layoutFragment, using: layoutManager)
+            fragmentView.setNeedsDisplay()
+            didInvalidateFragment = true
+        }
+        if !didInvalidateFragment {
+            setNeedsDisplay()
+        }
     }
 
     func setNeedsDisplayForTextRanges(_ ranges: [NSRange]) {
