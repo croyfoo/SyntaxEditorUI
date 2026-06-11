@@ -15,7 +15,11 @@ import AppKit
 @testable import SyntaxEditorUIAppKit
 #endif
 
-@Suite("SyntaxEditorUI")
+/// Test waits are purely event-driven (no wall-clock timeouts, mirroring
+/// ObservationBridge); the time limit is the only failure detector for a
+/// pipeline that never settles, so it bounds hangs without ever racing a
+/// slow-but-correct run into a flaky false.
+@Suite("SyntaxEditorUI", .timeLimit(.minutes(1)))
 struct SyntaxEditorUITests {}
 
 extension SyntaxEditorUITests {
@@ -229,9 +233,7 @@ extension SyntaxEditorUITests {
         let didSuspendInitialHighlight = await resetGate.waitUntilSuspended()
         #expect(didSuspendInitialHighlight)
         guard didSuspendInitialHighlight else { return }
-        let didResumeInitialHighlight = await resetGate.resumeOne()
-        #expect(didResumeInitialHighlight)
-        guard didResumeInitialHighlight else { return }
+        await resetGate.resumeAll()
         let didApplyInitialHighlight = await editorView.waitForPendingHighlightForTesting()
         #expect(didApplyInitialHighlight)
         guard didApplyInitialHighlight else { return }
@@ -246,10 +248,8 @@ extension SyntaxEditorUITests {
         #expect(didSuspendReplacementHighlight)
         guard didSuspendReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.baseForeground))
-        let didResumeReplacementHighlight = await resetGate.resumeOne()
-        #expect(didResumeReplacementHighlight)
-        guard didResumeReplacementHighlight else { return }
-        let didApplyReplacementHighlight = await editorView.waitForPendingHighlightForTesting()
+        await resetGate.resumeAll()
+        let didApplyReplacementHighlight = await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxHighlightPhase.complete)
         #expect(didApplyReplacementHighlight)
         guard didApplyReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))

@@ -1358,7 +1358,8 @@ enum CSSSyntaxOverlayTokenProvider {
             range: range,
             syntaxID: syntaxID,
             language: .css,
-            rawCaptureName: sourceLocalOverlayRawCaptureName(syntaxID: syntaxID)
+            rawCaptureName: sourceLocalOverlayRawCaptureName(syntaxID: syntaxID),
+            isSemanticOverlay: true
         )
     }
 

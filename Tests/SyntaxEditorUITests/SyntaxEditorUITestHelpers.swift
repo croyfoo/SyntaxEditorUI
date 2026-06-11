@@ -294,7 +294,6 @@ actor ManualSyntaxHighlightGate {
         let id: Int
         let minimumCount: Int
         let continuation: CheckedContinuation<Bool, Never>
-        let timeoutTask: Task<Void, Never>
     }
 
     struct ResumeWaiter {
@@ -309,9 +308,6 @@ actor ManualSyntaxHighlightGate {
     var resumeContinuations: [ResumeWaiter] = []
 
     func suspend() async {
-        suspensionCount += 1
-        resumeReadySuspensionWaiters()
-
         let waiterID = nextResumeWaiterID
         nextResumeWaiterID += 1
         await withTaskCancellationHandler {
@@ -321,6 +317,8 @@ actor ManualSyntaxHighlightGate {
                     return
                 }
                 resumeContinuations.append(ResumeWaiter(id: waiterID, continuation: continuation))
+                suspensionCount += 1
+                resumeReadySuspensionWaiters()
             }
         } onCancel: {
             Task {
@@ -334,10 +332,7 @@ actor ManualSyntaxHighlightGate {
     }
 
     @discardableResult
-    func waitUntilSuspended(
-        _ minimumCount: Int = 1,
-        timeoutNanoseconds: UInt64 = 5_000_000_000
-    ) async -> Bool {
+    func waitUntilSuspended(_ minimumCount: Int = 1) async -> Bool {
         guard suspensionCount < minimumCount else { return true }
 
         let waiterID = nextSuspensionWaiterID
@@ -350,17 +345,11 @@ actor ManualSyntaxHighlightGate {
                     return
                 }
 
-                let timeoutTask = Task {
-                    try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                    self.resumeSuspensionWaiter(id: waiterID, result: false)
-                }
-
                 suspensionWaiters.append(
                     SuspensionWaiter(
                         id: waiterID,
                         minimumCount: minimumCount,
-                        continuation: continuation,
-                        timeoutTask: timeoutTask
+                        continuation: continuation
                     )
                 )
             }
@@ -372,14 +361,8 @@ actor ManualSyntaxHighlightGate {
     }
 
     @discardableResult
-    func waitUntilSuspended(
-        after previousCount: Int,
-        timeoutNanoseconds: UInt64 = 5_000_000_000
-    ) async -> Bool {
-        await waitUntilSuspended(
-            previousCount + 1,
-            timeoutNanoseconds: timeoutNanoseconds
-        )
+    func waitUntilSuspended(after previousCount: Int) async -> Bool {
+        await waitUntilSuspended(previousCount + 1)
     }
 
     @discardableResult
@@ -404,7 +387,6 @@ actor ManualSyntaxHighlightGate {
             return
         }
         let waiter = suspensionWaiters.remove(at: index)
-        waiter.timeoutTask.cancel()
         waiter.continuation.resume(returning: result)
     }
 
@@ -419,8 +401,7 @@ actor ManualSyntaxHighlightGate {
         }
 
         for waiter in readyWaiters {
-            waiter.timeoutTask.cancel()
-            waiter.continuation.resume(returning: true)
+                waiter.continuation.resume(returning: true)
         }
     }
 
@@ -439,6 +420,7 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     let resetGate: ManualSyntaxHighlightGate?
     let updateGate: ManualSyntaxHighlightGate?
     let updateRefreshRange: NSRange?
+    let updateTokenPayload: SyntaxHighlightTokenPayload
     var resetCount = 0
     var updateCount = 0
 
@@ -447,13 +429,15 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
         updateTokens: [SyntaxHighlightToken]? = nil,
         resetGate: ManualSyntaxHighlightGate? = nil,
         updateGate: ManualSyntaxHighlightGate? = nil,
-        updateRefreshRange: NSRange? = nil
+        updateRefreshRange: NSRange? = nil,
+        updateTokenPayload: SyntaxHighlightTokenPayload = .replacement
     ) {
         self.tokens = tokens
         self.updateTokens = updateTokens
         self.resetGate = resetGate
         self.updateGate = updateGate
         self.updateRefreshRange = updateRefreshRange
+        self.updateTokenPayload = updateTokenPayload
     }
 
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
@@ -479,7 +463,8 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
             source: source,
             language: language,
             revision: revision,
-            refreshRange: updateRefreshRange
+            refreshRange: updateRefreshRange,
+            tokenPayload: updateTokenPayload
         )
     }
 
@@ -492,7 +477,8 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
         source: String,
         language: SyntaxLanguage,
         revision: Int,
-        refreshRange: NSRange?
+        refreshRange: NSRange?,
+        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot
     ) -> SyntaxHighlightResult {
         let resolvedTokens = language == .plainText ? [] : tokens ?? self.tokens
         return SyntaxHighlightResult(
@@ -500,7 +486,11 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
             source: source,
             language: language,
             revision: revision,
-            refreshRange: refreshRange ?? NSRange(location: 0, length: source.utf16.count)
+            refreshRange: syntaxEditorTestClampedRange(
+                refreshRange ?? NSRange(location: 0, length: source.utf16.count),
+                textLength: source.utf16.count
+            ),
+            tokenPayload: tokenPayload
         )
     }
 }
@@ -509,7 +499,9 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
     let fastTokens: [SyntaxHighlightToken]
     let updateFastTokens: [SyntaxHighlightToken]?
     let completeTokens: [SyntaxHighlightToken]
+    let updateCompleteTokens: [SyntaxHighlightToken]?
     let completeGate: ManualSyntaxHighlightGate?
+    let updateRefreshRange: NSRange?
     var resetCount = 0
     var updateCount = 0
 
@@ -517,12 +509,16 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         fastTokens: [SyntaxHighlightToken],
         updateFastTokens: [SyntaxHighlightToken]? = nil,
         completeTokens: [SyntaxHighlightToken],
-        completeGate: ManualSyntaxHighlightGate? = nil
+        updateCompleteTokens: [SyntaxHighlightToken]? = nil,
+        completeGate: ManualSyntaxHighlightGate? = nil,
+        updateRefreshRange: NSRange? = nil
     ) {
         self.fastTokens = fastTokens
         self.updateFastTokens = updateFastTokens
         self.completeTokens = completeTokens
+        self.updateCompleteTokens = updateCompleteTokens
         self.completeGate = completeGate
+        self.updateRefreshRange = updateRefreshRange
     }
 
     func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
@@ -535,7 +531,8 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
             source: source,
             language: language,
             revision: revision,
-            phase: .complete
+            phase: .complete,
+            refreshRange: nil
         )
     }
 
@@ -549,6 +546,7 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
             fastTokens: fastTokens,
             completeTokens: completeTokens,
             completeGate: completeGate,
+            refreshRange: nil,
             source: source,
             language: language,
             revision: revision
@@ -566,11 +564,13 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
             await completeGate.suspend()
         }
         return Self.result(
-            tokens: completeTokens,
+            tokens: updateCompleteTokens ?? completeTokens,
             source: source,
             language: language,
             revision: revision,
-            phase: .complete
+            phase: .complete,
+            refreshRange: updateRefreshRange,
+            tokenPayload: .replacement
         )
     }
 
@@ -583,8 +583,10 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         updateCount += 1
         return Self.phases(
             fastTokens: updateFastTokens ?? fastTokens,
-            completeTokens: completeTokens,
+            completeTokens: updateCompleteTokens ?? completeTokens,
             completeGate: completeGate,
+            refreshRange: updateRefreshRange,
+            tokenPayload: .replacement,
             source: source,
             language: language,
             revision: revision
@@ -599,6 +601,8 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         fastTokens: [SyntaxHighlightToken],
         completeTokens: [SyntaxHighlightToken],
         completeGate: ManualSyntaxHighlightGate?,
+        refreshRange: NSRange?,
+        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot,
         source: String,
         language: SyntaxLanguage,
         revision: Int
@@ -611,7 +615,9 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
                         source: source,
                         language: language,
                         revision: revision,
-                        phase: .syntacticFastPass
+                        phase: .syntacticFastPass,
+                        refreshRange: refreshRange,
+                        tokenPayload: tokenPayload
                     )
                 )
                 if let completeGate {
@@ -627,7 +633,9 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
                         source: source,
                         language: language,
                         revision: revision,
-                        phase: .complete
+                        phase: .complete,
+                        refreshRange: refreshRange,
+                        tokenPayload: tokenPayload
                     )
                 )
                 continuation.finish()
@@ -643,17 +651,30 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         source: String,
         language: SyntaxLanguage,
         revision: Int,
-        phase: SyntaxHighlightPhase
+        phase: SyntaxHighlightPhase,
+        refreshRange: NSRange?,
+        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot
     ) -> SyntaxHighlightResult {
-        SyntaxHighlightResult(
+        return SyntaxHighlightResult(
             tokens: tokens,
             source: source,
             language: language,
             revision: revision,
-            refreshRange: NSRange(location: 0, length: source.utf16.count),
-            phase: phase
+            refreshRange: syntaxEditorTestClampedRange(
+                refreshRange ?? NSRange(location: 0, length: source.utf16.count),
+                textLength: source.utf16.count
+            ),
+            phase: phase,
+            tokenPayload: tokenPayload
         )
     }
+}
+
+private func syntaxEditorTestClampedRange(_ range: NSRange, textLength: Int) -> NSRange {
+    let textLength = max(0, textLength)
+    let location = min(max(0, range.location), textLength)
+    let upperBound = min(max(location, range.location + max(0, range.length)), textLength)
+    return NSRange(location: location, length: upperBound - location)
 }
 
 actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {
@@ -1007,6 +1028,22 @@ func iOSEditorFont(_ editorView: SyntaxEditorView, at location: Int) -> UIFont? 
         return nil
     }
 
+    if let font = editorView.syntaxFontForTesting(at: location) {
+        return font
+    }
+
+    return attributedText.attribute(.font, at: location, effectiveRange: nil) as? UIFont
+}
+
+@MainActor
+func iOSEditorPermanentFont(_ editorView: SyntaxEditorView, at location: Int) -> UIFont? {
+    guard let attributedText = editorView.attributedText,
+          location >= 0,
+          location < attributedText.length
+    else {
+        return nil
+    }
+
     return attributedText.attribute(.font, at: location, effectiveRange: nil) as? UIFont
 }
 
@@ -1165,6 +1202,10 @@ func macEditorFont(_ editorView: SyntaxEditorView, at location: Int) -> NSFont? 
           location < textStorage.length
     else {
         return nil
+    }
+
+    if let font = editorView.syntaxFontForTesting(at: location) {
+        return font
     }
 
     return textStorage.attribute(.font, at: location, effectiveRange: nil) as? NSFont
