@@ -38,7 +38,6 @@ private struct HighlightPhaseWaiter {
     let revision: Int
     let phase: SyntaxHighlightPhase
     let continuation: CheckedContinuation<Bool, Never>
-    let timeoutTask: Task<Void, Never>
 }
 
 private struct SyntaxHighlightAttributeResolver {
@@ -402,29 +401,17 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     @discardableResult
-    internal func waitForPendingHighlightForTesting(
-        timeoutNanoseconds: UInt64 = 10_000_000_000
-    ) async -> Bool {
-        // A result that cannot apply yet (payload gating, revision races)
-        // reschedules and lets its task complete unapplied — waiting on one
-        // task reference is not enough. Follow reschedules by generation until
-        // a waited task finishes without scheduling a successor.
-        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+    internal func waitForPendingHighlightForTesting() async -> Bool {
+        // Deterministic: a result that cannot apply yet (payload gating,
+        // revision races) reschedules and lets its task complete unapplied, so
+        // follow reschedules by generation until a waited task finishes
+        // without scheduling a successor. No wall-clock is involved — a
+        // pipeline that never settles is a real bug and surfaces as the
+        // suite's time limit, never as a racy early false.
         while true {
             guard let task = highlightTask else { return true }
             let generation = nextScheduledHighlightRequestID
-            let now = DispatchTime.now().uptimeNanoseconds
-            guard now < deadline else {
-                task.cancel()
-                return false
-            }
-            let completed = await syntaxEditorWaitForTaskCompletionForTesting(
-                task,
-                timeoutNanoseconds: deadline - now
-            ) {
-                task.cancel()
-            }
-            guard completed else { return false }
+            await task.value
             if nextScheduledHighlightRequestID == generation {
                 return true
             }
@@ -432,8 +419,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     internal func waitForAppliedHighlightPhaseForTesting(
-        _ phase: SyntaxHighlightPhase,
-        timeoutNanoseconds: UInt64 = 10_000_000_000
+        _ phase: SyntaxHighlightPhase
     ) async -> Bool {
         let expectedRevision = model.revision
         guard !hasAppliedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
@@ -443,25 +429,19 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let waiterID = nextHighlightPhaseWaiterID
         nextHighlightPhaseWaiterID += 1
         return await withCheckedContinuation { continuation in
-            let timeoutTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                self?.resumeAppliedHighlightPhaseWaiterForTesting(id: waiterID, result: false)
-            }
             appliedHighlightPhaseWaitersForTesting.append(
                 HighlightPhaseWaiter(
                     id: waiterID,
                     revision: expectedRevision,
                     phase: phase,
-                    continuation: continuation,
-                    timeoutTask: timeoutTask
+                    continuation: continuation
                 )
             )
         }
     }
 
     internal func waitForSkippedHighlightPhaseForTesting(
-        _ phase: SyntaxHighlightPhase,
-        timeoutNanoseconds: UInt64 = 10_000_000_000
+        _ phase: SyntaxHighlightPhase
     ) async -> Bool {
         let expectedRevision = model.revision
         guard !hasSkippedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
@@ -471,17 +451,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         let waiterID = nextHighlightPhaseWaiterID
         nextHighlightPhaseWaiterID += 1
         return await withCheckedContinuation { continuation in
-            let timeoutTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                self?.resumeSkippedHighlightPhaseWaiterForTesting(id: waiterID, result: false)
-            }
             skippedHighlightPhaseWaitersForTesting.append(
                 HighlightPhaseWaiter(
                     id: waiterID,
                     revision: expectedRevision,
                     phase: phase,
-                    continuation: continuation,
-                    timeoutTask: timeoutTask
+                    continuation: continuation
                 )
             )
         }
@@ -1942,7 +1917,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return
         }
         let waiter = appliedHighlightPhaseWaitersForTesting.remove(at: waiterIndex)
-        waiter.timeoutTask.cancel()
         waiter.continuation.resume(returning: result)
     }
 
@@ -1963,7 +1937,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         for waiter in matchedWaiters {
-            waiter.timeoutTask.cancel()
             waiter.continuation.resume(returning: result)
         }
     }
@@ -1974,7 +1947,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         let waiter = skippedHighlightPhaseWaitersForTesting.remove(at: waiterIndex)
-        waiter.timeoutTask.cancel()
         waiter.continuation.resume(returning: result)
     }
 
@@ -1995,7 +1967,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         for waiter in matchedWaiters {
-            waiter.timeoutTask.cancel()
             waiter.continuation.resume(returning: result)
         }
     }

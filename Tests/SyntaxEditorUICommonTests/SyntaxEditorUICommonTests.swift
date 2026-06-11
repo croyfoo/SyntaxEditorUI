@@ -11,6 +11,7 @@ import AppKit
 @testable import SyntaxEditorUICommon
 
 @MainActor
+@Suite(.timeLimit(.minutes(1)))
 struct SyntaxEditorUICommonTests {
     @Test("SyntaxEditorUICommon exposes highlight style storage")
     func exposesHighlightStyleStorage() {
@@ -880,33 +881,6 @@ struct SyntaxEditorUICommonTests {
         #expect(store.appliedColorRunsForTesting.isEmpty)
         #expect(store.appliedFontRunsForTesting.isEmpty)
         #expect(store.epoch == 2)
-    }
-}
-
-struct SyntaxEditorTaskWaiterTests {
-    @Test("Task waiter keeps timeout authoritative when timeout cancels waited task")
-    func keepsTimeoutAuthoritativeWhenTimeoutCancelsWaitedTask() async {
-        let taskFinished = DispatchSemaphore(value: 0)
-        let task = Task {
-            while !Task.isCancelled {
-                await Task.yield()
-            }
-            taskFinished.signal()
-        }
-        defer {
-            task.cancel()
-        }
-
-        let didComplete = await syntaxEditorWaitForTaskCompletionForTesting(
-            task,
-            timeoutNanoseconds: 1
-        ) {
-            task.cancel()
-            taskFinished.wait()
-            Thread.sleep(forTimeInterval: 0.01)
-        }
-
-        #expect(!didComplete)
     }
 }
 

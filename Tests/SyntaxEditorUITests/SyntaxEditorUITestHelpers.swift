@@ -294,7 +294,6 @@ actor ManualSyntaxHighlightGate {
         let id: Int
         let minimumCount: Int
         let continuation: CheckedContinuation<Bool, Never>
-        let timeoutTask: Task<Void, Never>
     }
 
     struct ResumeWaiter {
@@ -333,10 +332,7 @@ actor ManualSyntaxHighlightGate {
     }
 
     @discardableResult
-    func waitUntilSuspended(
-        _ minimumCount: Int = 1,
-        timeoutNanoseconds: UInt64 = 10_000_000_000
-    ) async -> Bool {
+    func waitUntilSuspended(_ minimumCount: Int = 1) async -> Bool {
         guard suspensionCount < minimumCount else { return true }
 
         let waiterID = nextSuspensionWaiterID
@@ -349,17 +345,11 @@ actor ManualSyntaxHighlightGate {
                     return
                 }
 
-                let timeoutTask = Task {
-                    try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                    self.resumeSuspensionWaiter(id: waiterID, result: false)
-                }
-
                 suspensionWaiters.append(
                     SuspensionWaiter(
                         id: waiterID,
                         minimumCount: minimumCount,
-                        continuation: continuation,
-                        timeoutTask: timeoutTask
+                        continuation: continuation
                     )
                 )
             }
@@ -371,14 +361,8 @@ actor ManualSyntaxHighlightGate {
     }
 
     @discardableResult
-    func waitUntilSuspended(
-        after previousCount: Int,
-        timeoutNanoseconds: UInt64 = 10_000_000_000
-    ) async -> Bool {
-        await waitUntilSuspended(
-            previousCount + 1,
-            timeoutNanoseconds: timeoutNanoseconds
-        )
+    func waitUntilSuspended(after previousCount: Int) async -> Bool {
+        await waitUntilSuspended(previousCount + 1)
     }
 
     @discardableResult
@@ -403,7 +387,6 @@ actor ManualSyntaxHighlightGate {
             return
         }
         let waiter = suspensionWaiters.remove(at: index)
-        waiter.timeoutTask.cancel()
         waiter.continuation.resume(returning: result)
     }
 
@@ -418,8 +401,7 @@ actor ManualSyntaxHighlightGate {
         }
 
         for waiter in readyWaiters {
-            waiter.timeoutTask.cancel()
-            waiter.continuation.resume(returning: true)
+                waiter.continuation.resume(returning: true)
         }
     }
 
