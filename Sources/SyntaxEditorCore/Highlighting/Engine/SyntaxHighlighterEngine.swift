@@ -200,7 +200,7 @@ final class HighlightSession {
     /// Test-only escape hatch (serial test execution); never written in production.
     nonisolated(unsafe) static var progressiveResetThresholdOverrideForTesting: Int?
     private static var progressiveResetThreshold: Int {
-        progressiveResetThresholdOverrideForTesting ?? defaultProgressiveResetThreshold
+        unsafe progressiveResetThresholdOverrideForTesting ?? defaultProgressiveResetThreshold
     }
 
     init(language: SyntaxLanguage, setup: HighlightingSetup) {
@@ -734,7 +734,7 @@ final class HighlightSession {
                 nonisolated(unsafe) let pass = semanticPass
                 nonisolated(unsafe) let rootNode = semanticRootNodeSnapshot()
                 let mergeTask = Task.detached(priority: .utility) {
-                    pass.fullMerge(tokens: inputTokens, source: mergeSource, rootNode: rootNode)
+                    unsafe pass.fullMerge(tokens: inputTokens, source: mergeSource, rootNode: rootNode)
                 }
                 monolithicMergeTask = mergeTask
                 let merged = await mergeTask.value

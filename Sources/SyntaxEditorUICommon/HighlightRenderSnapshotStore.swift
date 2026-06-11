@@ -773,7 +773,7 @@ package final class HighlightRenderSnapshotStore {
     /// suppression (IME composition end) must re-expose the underlying colors,
     /// which a fold would have baked away.
     private func checkpointPendingEditsIfNeeded() {
-        let threshold = Self.pendingEditCheckpointThresholdOverrideForTesting
+        let threshold = unsafe Self.pendingEditCheckpointThresholdOverrideForTesting
             ?? Self.pendingEditCheckpointThreshold
         guard pendingEditMap.editCountForTesting > threshold,
               currentSuppressionRanges.isEmpty
@@ -1171,10 +1171,10 @@ fileprivate enum HighlightRunUtilities {
         }
 
         if delta != 0, firstSuffix < runs.count {
-            runs.withUnsafeMutableBufferPointer { buffer in
+            unsafe runs.withUnsafeMutableBufferPointer { buffer in
                 var index = firstSuffix
                 while index < buffer.count {
-                    buffer[index].range.location += delta
+                    unsafe buffer[index].range.location += delta
                     index += 1
                 }
             }
@@ -1236,10 +1236,10 @@ fileprivate enum HighlightRunUtilities {
         }
 
         if delta != 0, firstSuffix < runs.count {
-            runs.withUnsafeMutableBufferPointer { buffer in
+            unsafe runs.withUnsafeMutableBufferPointer { buffer in
                 var index = firstSuffix
                 while index < buffer.count {
-                    buffer[index].range.location += delta
+                    unsafe buffer[index].range.location += delta
                     index += 1
                 }
             }
@@ -1301,10 +1301,10 @@ fileprivate enum HighlightRunUtilities {
         }
 
         if delta != 0, firstSuffix < ranges.count {
-            ranges.withUnsafeMutableBufferPointer { buffer in
+            unsafe ranges.withUnsafeMutableBufferPointer { buffer in
                 var index = firstSuffix
                 while index < buffer.count {
-                    buffer[index].location += delta
+                    unsafe buffer[index].location += delta
                     index += 1
                 }
             }

@@ -12,24 +12,24 @@ import SwiftTreeSitter
 /// Lifetime contract: windows returned by `readBlock()` borrow the buffer and
 /// are valid only until the next `apply`/`reset`. The engine actor parses
 /// synchronously inside one update, so no window outlives its content.
-final class UTF16SourceBuffer {
+@safe final class UTF16SourceBuffer {
     private var storage: UnsafeMutableBufferPointer<UInt16>
     private(set) var count: Int
 
     init() {
-        storage = UnsafeMutableBufferPointer<UInt16>.allocate(capacity: 0)
+        unsafe storage = UnsafeMutableBufferPointer<UInt16>.allocate(capacity: 0)
         count = 0
     }
 
     deinit {
-        storage.deallocate()
+        unsafe storage.deallocate()
     }
 
     func reset(_ source: String) {
         let nsSource = source as NSString
         reserve(minimumCapacity: nsSource.length)
         if nsSource.length > 0 {
-            nsSource.getCharacters(
+            unsafe nsSource.getCharacters(
                 storage.baseAddress!,
                 range: NSRange(location: 0, length: nsSource.length)
             )
@@ -47,26 +47,27 @@ final class UTF16SourceBuffer {
         let inserted = replacement.count
         let newCount = count - removed + inserted
 
-        if newCount > storage.count {
+        if unsafe newCount > storage.count {
+            let currentCapacity = unsafe storage.count
             let grown = UnsafeMutableBufferPointer<UInt16>.allocate(
-                capacity: max(newCount, storage.count + storage.count / 2)
+                capacity: max(newCount, currentCapacity + currentCapacity / 2)
             )
-            grown.baseAddress!.update(from: storage.baseAddress!, count: location)
-            (grown.baseAddress! + location + inserted).update(
+            unsafe grown.baseAddress!.update(from: storage.baseAddress!, count: location)
+            unsafe (grown.baseAddress! + location + inserted).update(
                 from: storage.baseAddress! + location + removed,
                 count: count - location - removed
             )
-            storage.deallocate()
-            storage = grown
+            unsafe storage.deallocate()
+            unsafe storage = grown
         } else if removed != inserted {
-            (storage.baseAddress! + location + inserted).update(
+            unsafe (storage.baseAddress! + location + inserted).update(
                 from: storage.baseAddress! + location + removed,
                 count: count - location - removed
             )
         }
         var offset = location
         for unit in replacement {
-            storage[offset] = unit
+            unsafe storage[offset] = unit
             offset += 1
         }
         count = newCount
@@ -79,7 +80,7 @@ final class UTF16SourceBuffer {
         { [self] byteOffset, _ in
             let location = byteOffset / 2
             guard location >= 0, location < count else { return nil }
-            return Data(
+            return unsafe Data(
                 bytesNoCopy: UnsafeMutableRawPointer(storage.baseAddress! + location),
                 count: (count - location) * 2,
                 deallocator: .none
@@ -88,8 +89,8 @@ final class UTF16SourceBuffer {
     }
 
     private func reserve(minimumCapacity: Int) {
-        guard minimumCapacity > storage.count else { return }
-        storage.deallocate()
-        storage = UnsafeMutableBufferPointer<UInt16>.allocate(capacity: minimumCapacity)
+        guard unsafe minimumCapacity > storage.count else { return }
+        unsafe storage.deallocate()
+        unsafe storage = UnsafeMutableBufferPointer<UInt16>.allocate(capacity: minimumCapacity)
     }
 }

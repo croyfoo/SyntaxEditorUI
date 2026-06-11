@@ -21,12 +21,12 @@ package final class HighlightLineTable {
 
         init(lengths: ArraySlice<Int32>) {
             var offsets = ContiguousArray(lengths)
-            offsets.withUnsafeMutableBufferPointer { buffer in
+            unsafe offsets.withUnsafeMutableBufferPointer { buffer in
                 var running: Int32 = 0
                 var index = 0
                 while index < buffer.count {
-                    running += buffer[index]
-                    buffer[index] = running
+                    running += unsafe buffer[index]
+                    unsafe buffer[index] = running
                     index += 1
                 }
             }
@@ -251,10 +251,10 @@ package final class HighlightLineTable {
             if chunkIndex < chunks.count, local < chunks[chunkIndex].lineCount {
                 let delta = Int32(replacements[0] - chunks[chunkIndex].length(ofLocal: local))
                 if delta != 0 {
-                    chunks[chunkIndex].endOffsets.withUnsafeMutableBufferPointer { buffer in
+                    unsafe chunks[chunkIndex].endOffsets.withUnsafeMutableBufferPointer { buffer in
                         var index = local
                         while index < buffer.count {
-                            buffer[index] += delta
+                            unsafe buffer[index] += delta
                             index += 1
                         }
                     }
