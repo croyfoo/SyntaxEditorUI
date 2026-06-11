@@ -500,8 +500,17 @@ final class HighlightSession {
             lineTable: lineTable
         )
         lineTable.apply(mutation: layeredMutation, previousSource: previousLayeredSource)
+        // The replace must cover every line the edit cleared (the edit leaves
+        // base chains into those lines dangling for this call to reconcile),
+        // so widen the envelope to the replacement lines' whole-line span.
+        var baseReplaceRange = envelope
+        let replacedSpan = editResult.replacedLines.lowerBound
+            ..< (editResult.replacedLines.lowerBound + editResult.replacementLineCount)
+        if let replacedWhole = wholeLineRange(ofLines: replacedSpan, sourceUTF16Length: nextLength) {
+            baseReplaceRange = SyntacticPatcher.union(baseReplaceRange, replacedWhole)
+        }
         let baseChanged = planes.replaceTokens(
-            in: envelope,
+            in: baseReplaceRange,
             with: replacementTokens,
             plane: .base,
             lineTable: lineTable
@@ -561,8 +570,13 @@ final class HighlightSession {
         var resultRefresh = syntacticRefresh
         if let semanticPass {
             let rootNode = semanticRootNodeSnapshot()
+            // Overlays go stale exactly where base tokens changed (shifts are
+            // algebraic); the raw reparse envelope can span an entire re-lexed
+            // multi-line token whose visible tokens didn't change, and feeding
+            // it here made every keystroke inside a big comment re-run the
+            // comment scanners over the whole token.
             let planEnvelope = SyntacticPatcher.lineEnvelope(
-                containing: SyntacticPatcher.union(syntacticRefresh, envelope),
+                containing: syntacticRefresh,
                 source: nextLayeredSource
             )
             var runConservative = true

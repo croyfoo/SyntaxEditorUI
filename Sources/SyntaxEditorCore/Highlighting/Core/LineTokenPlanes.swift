@@ -134,28 +134,31 @@ package final class LineTokenPlanes {
         var droppedUpper = upper
         let hadTokens = (lower..<upper).contains { !lines[$0].isEmpty }
 
-        // Sever and drop upward continuation chains entering the replaced span.
+        // Sever ONLY overlay-plane chains entering/leaving the replaced span;
+        // multi-line overlay tokens are practically nonexistent, so this stays
+        // O(1). Base chains are left dangling deliberately: the base-plane
+        // replace that follows every committed edit reconciles them against
+        // the fresh query (or severs them in its fallback path). Walking and
+        // dropping whole base chains here made typing inside a multi-line
+        // comment O(comment) per keystroke.
         if lower > 0, lower <= lines.count {
-            let seedBase = lines[lower - 1].base.indices.filter { lines[lower - 1].base[$0].continuesToNext }
             let seedOverlay = lines[lower - 1].overlay.indices.filter { lines[lower - 1].overlay[$0].continuesToNext }
-            if !seedBase.isEmpty || !seedOverlay.isEmpty {
+            if !seedOverlay.isEmpty {
                 droppedLower = min(droppedLower, dropChains(
                     from: lower - 1,
                     direction: -1,
-                    seedBase: seedBase,
+                    seedBase: [],
                     seedOverlay: seedOverlay
                 ))
             }
         }
-        // Downward chains leaving the replaced span.
         if upper < lines.count {
-            let seedBase = lines[upper].base.indices.filter { lines[upper].base[$0].continuesFromPrevious }
             let seedOverlay = lines[upper].overlay.indices.filter { lines[upper].overlay[$0].continuesFromPrevious }
-            if !seedBase.isEmpty || !seedOverlay.isEmpty {
+            if !seedOverlay.isEmpty {
                 droppedUpper = max(droppedUpper, dropChains(
                     from: upper,
                     direction: 1,
-                    seedBase: seedBase,
+                    seedBase: [],
                     seedOverlay: seedOverlay
                 ) + 1)
             }
@@ -273,9 +276,17 @@ package final class LineTokenPlanes {
         case both
     }
 
-    /// Replaces tokens of `plane` intersecting `range` with `tokens` (full
-    /// logical-token removal, unclipped insertion). Returns the union UTF-16
-    /// whole-line range of lines whose segments changed, or nil.
+    /// Replaces tokens of `plane` intersecting `range` with `tokens`. Returns
+    /// the union UTF-16 sub-line range of segments that actually changed, nil
+    /// when nothing did.
+    ///
+    /// Fast path: a per-line targeted apply that PRESERVES continuation chains
+    /// crossing the patch boundary whenever the incoming tokens reinstate the
+    /// same (plane, style) crossings — typing inside a multi-line comment then
+    /// rewrites one line instead of re-dropping and re-inserting the whole
+    /// token, and the reported diff shrinks to the lines that changed. Any
+    /// seam that fails to reconcile falls back to whole-chain severing (the
+    /// previous behavior), which is what keeps real structure flips correct.
     package func replaceTokens(
         in range: NSRange,
         with tokens: [SyntaxHighlightToken],
@@ -287,6 +298,20 @@ package final class LineTokenPlanes {
         let lower = min(max(0, lineRange.lowerBound), lines.count)
         let upper = min(max(lower, lineRange.upperBound), lines.count)
         guard lower < upper else { return nil }
+
+        switch chainPreservingReplace(
+            in: range,
+            with: tokens,
+            plane: plane,
+            lineTable: lineTable,
+            lower: lower,
+            upper: upper
+        ) {
+        case .applied(let changed):
+            return changed
+        case .fallback:
+            break
+        }
 
         // Snapshot for the diff: chain removal and insertion can spill beyond the
         // patched lines; track every touched line lazily.
@@ -304,6 +329,17 @@ package final class LineTokenPlanes {
             removeTokens(intersecting: range, lineRange: lower..<upper, overlayPlane: true, lineTable: lineTable, willTouch: snapshot)
         }
         insert(tokens: tokens, lineTable: lineTable, willTouch: snapshot)
+        // Edits leave base chains crossing into their cleared lines dangling
+        // for the fast path to reconcile; when this severing path rebuilds the
+        // patch instead, drop whatever stale neighbor chains the final content
+        // does not reconnect.
+        repairBoundarySeams(
+            lower: lower,
+            upper: upper,
+            basePlane: plane != .overlay,
+            overlayPlane: plane != .base,
+            willTouch: snapshot
+        )
 
         var touched = Set(snapshots.keys)
         for line in lower..<upper { touched.insert(line) }
@@ -337,6 +373,336 @@ package final class LineTokenPlanes {
             changed = changed.map { union($0, span) } ?? span
         }
         return changed
+    }
+
+    // MARK: - Chain-preserving replace (fast path)
+
+    private enum ChainPreservingOutcome {
+        case applied(NSRange?)
+        case fallback
+    }
+
+    private func chainPreservingReplace(
+        in range: NSRange,
+        with tokens: [SyntaxHighlightToken],
+        plane: Plane,
+        lineTable: HighlightLineTable,
+        lower: Int,
+        upper: Int
+    ) -> ChainPreservingOutcome {
+        let span = upper - lower
+
+        // Per-line incoming segments, clipped to the patched lines. Flags come
+        // from the token's full extent, so segments at the patch edge carry the
+        // crossings that must match the untouched neighbors.
+        var incomingBase = [ContiguousArray<PackedSegment>](repeating: [], count: span)
+        var incomingOverlay = [ContiguousArray<PackedSegment>](repeating: [], count: span)
+        var hasIncomingBase = false
+        var hasIncomingOverlay = false
+        var tokenIndex = 0
+        while tokenIndex < tokens.count {
+            let token = tokens[tokenIndex]
+            tokenIndex += 1
+            guard token.range.length > 0 else { continue }
+            let styleID = styles.intern(token)
+            let overlayPlane = styles[styleID].isSemanticOverlay
+            let tokenLines = lineTable.lineRange(containingUTF16Range: token.range)
+            guard !tokenLines.isEmpty else { continue }
+            var line = max(tokenLines.lowerBound, lower)
+            let limit = min(tokenLines.upperBound, upper)
+            guard line < limit else { continue }
+            var lineStart = lineTable.lineStartOffset(at: line)
+            while line < limit {
+                let lineEnd = lineStart + lineTable.lineLength(at: line)
+                let segmentStart = max(token.range.location, lineStart)
+                let segmentEnd = min(token.range.upperBound, lineEnd)
+                if segmentEnd > segmentStart {
+                    var flags: UInt16 = 0
+                    if line > tokenLines.lowerBound {
+                        flags |= PackedSegment.continuesFromPrevious
+                    }
+                    if line < tokenLines.upperBound - 1, segmentEnd < token.range.upperBound {
+                        flags |= PackedSegment.continuesToNext
+                    }
+                    let segment = PackedSegment(
+                        startCol: UInt32(segmentStart - lineStart),
+                        endCol: UInt32(segmentEnd - lineStart),
+                        styleID: styleID,
+                        flags: flags
+                    )
+                    if overlayPlane {
+                        incomingOverlay[line - lower].append(segment)
+                        hasIncomingOverlay = true
+                    } else {
+                        incomingBase[line - lower].append(segment)
+                        hasIncomingBase = true
+                    }
+                }
+                line += 1
+                lineStart = lineEnd
+            }
+        }
+
+        // Legacy inserts route by the token's own plane even when that plane is
+        // not being replaced (accumulation); that shape can't reconcile here.
+        let replacesBase = plane != .overlay
+        let replacesOverlay = plane != .base
+        if !replacesBase, hasIncomingBase { return .fallback }
+        if !replacesOverlay, hasIncomingOverlay { return .fallback }
+
+        let baseTargets = replacesBase
+            ? makeTargets(overlayPlane: false, incoming: incomingBase, range: range, lineTable: lineTable, lower: lower, upper: upper)
+            : nil
+        let overlayTargets = replacesOverlay
+            ? makeTargets(overlayPlane: true, incoming: incomingOverlay, range: range, lineTable: lineTable, lower: lower, upper: upper)
+            : nil
+
+        var changedFlags = [Bool](repeating: false, count: span)
+        var anyChanged = false
+        var index = 0
+        while index < span {
+            let line = lower + index
+            if let baseTargets, baseTargets[index] != lines[line].base {
+                changedFlags[index] = true
+            }
+            if !changedFlags[index], let overlayTargets, overlayTargets[index] != lines[line].overlay {
+                changedFlags[index] = true
+            }
+            anyChanged = anyChanged || changedFlags[index]
+            index += 1
+        }
+        guard anyChanged else {
+            return .applied(nil)
+        }
+
+        // Chain seams need re-validation only where a side changed; an
+        // unchanged-vs-unchanged seam was consistent before and stays so.
+        if let baseTargets,
+           !seamsReconcile(targets: baseTargets, changedFlags: changedFlags, overlayPlane: false, lower: lower, upper: upper) {
+            return .fallback
+        }
+        if let overlayTargets,
+           !seamsReconcile(targets: overlayTargets, changedFlags: changedFlags, overlayPlane: true, lower: lower, upper: upper) {
+            return .fallback
+        }
+
+        // Commit changed lines and accumulate the sub-line diff.
+        var changed: NSRange?
+        index = 0
+        var lineStart = lineTable.lineStartOffset(at: lower)
+        while index < span {
+            let line = lower + index
+            let lineEnd = lineStart + lineTable.lineLength(at: line)
+            if changedFlags[index] {
+                var spanLower = Int.max
+                var spanUpper = Int.min
+                if let baseTargets {
+                    accumulateSegmentDiff(lines[line].base, baseTargets[index], lower: &spanLower, upper: &spanUpper)
+                    lines[line].base = baseTargets[index]
+                }
+                if let overlayTargets {
+                    accumulateSegmentDiff(lines[line].overlay, overlayTargets[index], lower: &spanLower, upper: &spanUpper)
+                    lines[line].overlay = overlayTargets[index]
+                }
+                if spanLower < spanUpper {
+                    let lineSpan = NSRange(location: lineStart + spanLower, length: spanUpper - spanLower)
+                    changed = changed.map { union($0, lineSpan) } ?? lineSpan
+                }
+            }
+            index += 1
+            lineStart = lineEnd
+        }
+        return .applied(changed)
+    }
+
+    /// Target line contents: old segments NOT intersecting `range` plus the
+    /// incoming segments, in the canonical per-line order.
+    private func makeTargets(
+        overlayPlane: Bool,
+        incoming: [ContiguousArray<PackedSegment>],
+        range: NSRange,
+        lineTable: HighlightLineTable,
+        lower: Int,
+        upper: Int
+    ) -> [ContiguousArray<PackedSegment>] {
+        var targets: [ContiguousArray<PackedSegment>] = []
+        targets.reserveCapacity(upper - lower)
+        var line = lower
+        var lineStart = lineTable.lineStartOffset(at: lower)
+        while line < upper {
+            let lineEnd = lineStart + lineTable.lineLength(at: line)
+            let old = overlayPlane ? lines[line].overlay : lines[line].base
+            var target: ContiguousArray<PackedSegment> = []
+            target.reserveCapacity(old.count + incoming[line - lower].count)
+            var index = 0
+            while index < old.count {
+                let segment = old[index]
+                let absoluteStart = lineStart + Int(segment.startCol)
+                let absoluteEnd = lineStart + Int(segment.endCol)
+                if !(absoluteStart < range.upperBound && absoluteEnd > range.location) {
+                    target.append(segment)
+                }
+                index += 1
+            }
+            target.append(contentsOf: incoming[line - lower])
+            if target.count > 1 {
+                sortSegments(&target)
+            }
+            targets.append(target)
+            line += 1
+            lineStart = lineEnd
+        }
+        return targets
+    }
+
+    /// Validates every chain seam adjacent to a changed line: the multiset of
+    /// continuing styles on each side must match (the same strength as the
+    /// queue matching used by severing and by materialization joining).
+    private func seamsReconcile(
+        targets: [ContiguousArray<PackedSegment>],
+        changedFlags: [Bool],
+        overlayPlane: Bool,
+        lower: Int,
+        upper: Int
+    ) -> Bool {
+        func existingSegments(_ line: Int) -> ContiguousArray<PackedSegment> {
+            overlayPlane ? lines[line].overlay : lines[line].base
+        }
+        func continuationCounts(_ segments: ContiguousArray<PackedSegment>, fromPrevious: Bool) -> [UInt16: Int] {
+            var counts: [UInt16: Int] = [:]
+            var index = 0
+            while index < segments.count {
+                let segment = segments[index]
+                if fromPrevious ? segment.continuesFromPrevious : segment.continuesToNext {
+                    counts[segment.styleID, default: 0] += 1
+                }
+                index += 1
+            }
+            return counts
+        }
+        // upSide(k) = continuesToNext of the line above seam k; downSide(k) =
+        // continuesFromPrevious below it. Seam k sits between absolute lines
+        // (lower + k - 1) and (lower + k), for k in 0...span.
+        let span = targets.count
+        var seam = 0
+        while seam <= span {
+            let aboveChanged = seam > 0 && changedFlags[seam - 1]
+            let belowChanged = seam < span && changedFlags[seam]
+            if aboveChanged || belowChanged {
+                let aboveLine = lower + seam - 1
+                let belowLine = lower + seam
+                let above: [UInt16: Int]
+                if seam > 0 {
+                    above = continuationCounts(targets[seam - 1], fromPrevious: false)
+                } else if aboveLine >= 0, aboveLine < lines.count {
+                    above = continuationCounts(existingSegments(aboveLine), fromPrevious: false)
+                } else {
+                    above = [:]
+                }
+                let below: [UInt16: Int]
+                if seam < span {
+                    below = continuationCounts(targets[seam], fromPrevious: true)
+                } else if belowLine < lines.count {
+                    below = continuationCounts(existingSegments(belowLine), fromPrevious: true)
+                } else {
+                    below = [:]
+                }
+                guard above == below else { return false }
+            }
+            seam += 1
+        }
+        return true
+    }
+
+    /// Severs neighbor chains left dangling at the patch boundaries: outside
+    /// segments claiming to continue into the patch whose final edge content
+    /// has no matching (style-counted) counterpart. Edits clear their lines
+    /// without walking base chains, so the replace that follows owns this.
+    private func repairBoundarySeams(
+        lower: Int,
+        upper: Int,
+        basePlane: Bool,
+        overlayPlane: Bool,
+        willTouch: (Int) -> Void
+    ) {
+        func repairPlane(overlay: Bool) {
+            if lower > 0, lower - 1 < lines.count {
+                let outside = overlay ? lines[lower - 1].overlay : lines[lower - 1].base
+                var available: [UInt16: Int] = [:]
+                if lower < lines.count {
+                    let edge = overlay ? lines[lower].overlay : lines[lower].base
+                    var index = 0
+                    while index < edge.count {
+                        if edge[index].continuesFromPrevious {
+                            available[edge[index].styleID, default: 0] += 1
+                        }
+                        index += 1
+                    }
+                }
+                var unmatched: [Int] = []
+                var index = 0
+                while index < outside.count {
+                    if outside[index].continuesToNext {
+                        if let remaining = available[outside[index].styleID], remaining > 0 {
+                            available[outside[index].styleID] = remaining - 1
+                        } else {
+                            unmatched.append(index)
+                        }
+                    }
+                    index += 1
+                }
+                if !unmatched.isEmpty {
+                    touchAndDrop(from: lower - 1, direction: -1, seeds: unmatched, overlayPlane: overlay, willTouch: willTouch)
+                }
+            }
+            if upper < lines.count, upper - 1 >= 0 {
+                let outside = overlay ? lines[upper].overlay : lines[upper].base
+                var available: [UInt16: Int] = [:]
+                let edge = overlay ? lines[upper - 1].overlay : lines[upper - 1].base
+                var index = 0
+                while index < edge.count {
+                    if edge[index].continuesToNext {
+                        available[edge[index].styleID, default: 0] += 1
+                    }
+                    index += 1
+                }
+                var unmatched: [Int] = []
+                index = 0
+                while index < outside.count {
+                    if outside[index].continuesFromPrevious {
+                        if let remaining = available[outside[index].styleID], remaining > 0 {
+                            available[outside[index].styleID] = remaining - 1
+                        } else {
+                            unmatched.append(index)
+                        }
+                    }
+                    index += 1
+                }
+                if !unmatched.isEmpty {
+                    touchAndDrop(from: upper, direction: 1, seeds: unmatched, overlayPlane: overlay, willTouch: willTouch)
+                }
+            }
+        }
+        if basePlane { repairPlane(overlay: false) }
+        if overlayPlane { repairPlane(overlay: true) }
+    }
+
+    /// Sub-line span of segments present on one side but not the other —
+    /// identical semantics to the severing path's per-line diff.
+    private func accumulateSegmentDiff(
+        _ before: ContiguousArray<PackedSegment>,
+        _ after: ContiguousArray<PackedSegment>,
+        lower: inout Int,
+        upper: inout Int
+    ) {
+        for segment in before where !after.contains(segment) {
+            lower = min(lower, Int(segment.startCol))
+            upper = max(upper, Int(segment.endCol))
+        }
+        for segment in after where !before.contains(segment) {
+            lower = min(lower, Int(segment.startCol))
+            upper = max(upper, Int(segment.endCol))
+        }
     }
 
     private func removeTokens(

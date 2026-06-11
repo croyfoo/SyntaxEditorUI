@@ -460,6 +460,15 @@ final class SwiftScopeIndex {
         rootNode: Node,
         source: NSString
     ) -> SubtreeUpdate? {
+        // An edit confined to a comment cannot add or remove declarations; the
+        // shifted index is already exact. Without this, typing in a top-level
+        // comment escalates the host search to the file root — a full index
+        // rebuild per keystroke.
+        if let covering = deepestNode(containing: envelope, from: rootNode),
+           covering.nodeType == "comment" || covering.nodeType == "multiline_comment" {
+            return SubtreeUpdate(boundedTargets: [], requiresFullPass: false)
+        }
+
         var path: [Scope] = []
         collectScopePath(containing: envelope, from: root, into: &path)
 
@@ -741,6 +750,33 @@ final class SwiftScopeIndex {
             }
             if !descended {
                 return current.range == range ? current : nil
+            }
+        }
+    }
+
+    /// Deepest node whose range contains `range` (byte-cursor descent).
+    private func deepestNode(containing range: NSRange, from rootNode: Node) -> Node? {
+        guard Self.range(rootNode.range, contains: range) else { return nil }
+        var current = rootNode
+        let startByte = UInt32(clamping: range.location << 1)
+        let cursor = rootNode.treeCursor
+        while true {
+            var descended = false
+            if cursor.goToFirstChild(for: startByte) {
+                while true {
+                    guard let child = cursor.currentNode else { break }
+                    if Self.range(child.range, contains: range) {
+                        current = child
+                        descended = true
+                        break
+                    }
+                    if child.range.location > range.location || !cursor.gotoNextSibling() {
+                        break
+                    }
+                }
+            }
+            if !descended {
+                return current
             }
         }
     }

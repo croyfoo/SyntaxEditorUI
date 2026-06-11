@@ -4308,6 +4308,49 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(reset.tokens, render))
     }
 
+    @Test("SyntaxHighlighterEngine keeps refreshes edit-local while typing inside a block comment")
+    func highlighterKeepsRefreshEditLocalInsideBlockComment() async throws {
+        // A multi-line token used to be dropped and re-inserted whole per edit,
+        // making the refresh (and the repaint) span the entire comment.
+        let commentBody = (0..<50).map { " * filler line \($0) with some words" }.joined(separator: "\n")
+        let source = "let before = 1\n/**\n\(commentBody)\n * MARKER\n\(commentBody)\n */\nlet after = 2\n"
+        let engine = SyntaxHighlighterEngine()
+        _ = await engine.reset(source: source, language: .swift, revision: 0)
+
+        let caret = (source as NSString).range(of: "MARKER").upperBound
+        var current = source
+        var revision = 1
+        for character in "typed words" {
+            let insertion = String(character)
+            let mutation = SyntaxHighlightMutation(
+                location: caret + revision - 1,
+                length: 0,
+                replacement: insertion
+            )
+            let next = (current as NSString).replacingCharacters(
+                in: NSRange(location: mutation.location, length: 0),
+                with: insertion
+            )
+            let result = await engine.update(
+                source: next,
+                language: .swift,
+                mutation: mutation,
+                revision: revision
+            )
+            #expect(
+                result.refreshRange.length < 200,
+                "refresh \(result.refreshRange) should stay near the edited line, not span the comment"
+            )
+            current = next
+            revision += 1
+        }
+
+        // The incremental store still matches a fresh full render.
+        let settled = await engine.currentTokensForTesting()
+        let fresh = await SyntaxHighlighterEngine().render(source: current, language: .swift)
+        #expect(highlightTokensMatch(settled, fresh))
+    }
+
     @Test(
         "SyntaxHighlighterEngine progressive reset matches the monolithic reset",
         arguments: [SyntaxLanguage.swift, .objectiveC]
