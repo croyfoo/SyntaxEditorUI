@@ -3,195 +3,13 @@ import SwiftTreeSitter
 
 // Provides Swift substring tokens that cannot be expressed by Tree-sitter
 // captures alone, such as MARK comments and URLs inside comments.
+/// Session state for the Swift semantic pass: the tree-derived scope index.
 struct SwiftSemanticOverlayState: SyntaxOverlayState {
-    fileprivate var index: SwiftFileSymbolIndex?
-    fileprivate var indexedSourceUTF16Length: Int
-    fileprivate var indexedDeclarationFingerprint: Int
-    fileprivate var lineSignatureIndex: SwiftSemanticLineSignatureIndex
+    var scopeIndex: SwiftScopeIndex?
+    var indexedSourceUTF16Length: Int
 }
 
 typealias SwiftSemanticOverlayResult = SyntaxOverlayResult
-
-fileprivate struct SwiftSemanticLineSignature {
-    let range: NSRange
-    let component: String?
-}
-
-fileprivate struct SwiftSemanticLineSignatureIndex {
-    let lines: [SwiftSemanticLineSignature]
-    let fingerprint: Int
-
-    init(source: NSString) {
-        var lines: [SwiftSemanticLineSignature] = []
-        lines.reserveCapacity(max(1, source.length / 48))
-
-        var location = 0
-        while location < source.length {
-            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
-            lines.append(Self.signature(for: lineRange, in: source))
-            let nextLocation = lineRange.upperBound
-            guard nextLocation > location else { break }
-            location = nextLocation
-        }
-
-        self.init(lines: lines)
-    }
-
-    private init(lines: [SwiftSemanticLineSignature]) {
-        self.lines = lines
-        self.fingerprint = Self.fingerprint(for: lines)
-    }
-
-    func applying(
-        _ mutation: SyntaxHighlightMutation,
-        to source: NSString
-    ) -> SwiftSemanticLineSignatureIndex? {
-        guard !lines.isEmpty else { return nil }
-        let replacementLength = mutation.replacement.utf16.count
-        let previousSourceLength = source.length - (replacementLength - mutation.length)
-        guard previousSourceLength >= 0,
-              mutation.location >= 0,
-              mutation.location <= previousSourceLength,
-              mutation.location + mutation.length <= previousSourceLength else {
-            return nil
-        }
-
-        let oldEnd = mutation.location + mutation.length
-        let insertsAfterLastSignature = insertsAtEOFAfterTrailingLineBreak(
-            mutation,
-            source: source,
-            previousSourceLength: previousSourceLength
-        )
-        let startIndex = insertsAfterLastSignature
-            ? lines.count
-            : lineIndex(containing: mutation.location, previousSourceLength: previousSourceLength)
-        let endIndex = insertsAfterLastSignature
-            ? lines.count - 1
-            : replacementEndLineIndex(
-                mutation: mutation,
-                oldEnd: oldEnd,
-                previousSourceLength: previousSourceLength
-            )
-        let changedLineSignatures = Self.signaturesForChangedLines(mutation, in: source)
-        guard !changedLineSignatures.isEmpty else { return nil }
-        let delta = replacementLength - mutation.length
-
-        var nextLines: [SwiftSemanticLineSignature] = []
-        nextLines.reserveCapacity(lines.count - (endIndex - startIndex + 1) + changedLineSignatures.count)
-        var insertedChangedLines = false
-        for index in lines.indices {
-            if index < startIndex {
-                nextLines.append(lines[index])
-            } else if index == startIndex {
-                nextLines.append(contentsOf: changedLineSignatures)
-                insertedChangedLines = true
-            } else if index <= endIndex {
-                continue
-            } else {
-                let line = lines[index]
-                nextLines.append(SwiftSemanticLineSignature(
-                    range: NSRange(location: line.range.location + delta, length: line.range.length),
-                    component: line.component
-                ))
-            }
-        }
-        if !insertedChangedLines {
-            nextLines.append(contentsOf: changedLineSignatures)
-        }
-        return SwiftSemanticLineSignatureIndex(lines: nextLines)
-    }
-
-    private func insertsAtEOFAfterTrailingLineBreak(
-        _ mutation: SyntaxHighlightMutation,
-        source: NSString,
-        previousSourceLength: Int
-    ) -> Bool {
-        guard mutation.length == 0,
-              mutation.location == previousSourceLength,
-              previousSourceLength > 0 else {
-            return false
-        }
-        return LineOffsetTable.containsLineBreak(
-            source.substring(with: NSRange(location: previousSourceLength - 1, length: 1))
-        )
-    }
-
-    private func lineIndex(containing location: Int, previousSourceLength: Int) -> Int {
-        let clampedLocation = min(max(0, location), max(0, previousSourceLength - 1))
-        var lower = 0
-        var upper = lines.count
-        while lower < upper {
-            let midpoint = (lower + upper) / 2
-            if lines[midpoint].range.upperBound <= clampedLocation {
-                lower = midpoint + 1
-            } else {
-                upper = midpoint
-            }
-        }
-        return min(lower, max(0, lines.count - 1))
-    }
-
-    private func replacementEndLineIndex(
-        mutation: SyntaxHighlightMutation,
-        oldEnd: Int,
-        previousSourceLength: Int
-    ) -> Int {
-        let endLookup = mutation.length == 0 ? mutation.location : max(mutation.location, oldEnd - 1)
-        let endIndex = lineIndex(containing: endLookup, previousSourceLength: previousSourceLength)
-        guard mutation.length > 0,
-              oldEnd < previousSourceLength,
-              endIndex + 1 < lines.count,
-              oldEnd == lines[endIndex].range.upperBound else {
-            return endIndex
-        }
-        return endIndex + 1
-    }
-
-    private static func signaturesForChangedLines(
-        _ mutation: SyntaxHighlightMutation,
-        in source: NSString
-    ) -> [SwiftSemanticLineSignature] {
-        guard source.length > 0 else { return [] }
-        let changedLineRange = SyntaxHighlightMutationLineRange.changedLineRange(for: mutation, in: source)
-        var signatures: [SwiftSemanticLineSignature] = []
-        var cursor = changedLineRange.location
-        while cursor < changedLineRange.upperBound {
-            let lineRange = source.lineRange(for: NSRange(location: cursor, length: 0))
-            signatures.append(signature(for: lineRange, in: source))
-            let next = lineRange.upperBound
-            guard next > cursor else { break }
-            cursor = next
-        }
-        return signatures
-    }
-
-    private static func signature(for lineRange: NSRange, in source: NSString) -> SwiftSemanticLineSignature {
-        SwiftSemanticLineSignature(
-            range: lineRange,
-            component: SwiftSyntaxOverlayTokenProvider.swiftSemanticIndexFingerprintComponent(
-                in: source.substring(with: lineRange)
-            )
-        )
-    }
-
-    private static func fingerprint(for lines: [SwiftSemanticLineSignature]) -> Int {
-        var hasher = Hasher()
-        for line in lines {
-            guard let component = line.component else { continue }
-            hasher.combine(component)
-        }
-        return hasher.finalize()
-    }
-}
-
-private struct SwiftOverlayPreparation {
-    let baseTokensForIndex: [SyntaxHighlightToken]
-    let outputBaseTokens: [SyntaxHighlightToken]
-    let tokenIndex: SwiftTokenIndex
-    let excludedPreprocessorRanges: [NSRange]
-    let partialMergeTargetRange: NSRange?
-    let partialMergeTokenRange: Range<Int>?
-}
 
 private struct SwiftIndexedToken {
     let range: NSRange
@@ -216,7 +34,7 @@ private struct SwiftTokenIndex {
                 continue
             }
 
-            let text = source.substring(with: token.range)
+            let text = source.nativeSubstring(with: token.range)
             guard SwiftSyntaxOverlayTokenProvider.isSwiftIdentifier(text) else {
                 continue
             }
@@ -264,156 +82,7 @@ private struct SwiftTokenIndex {
     }
 }
 
-enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
-    static func mergingOverlayTokens(
-        tokens: [SyntaxHighlightToken],
-        source: String,
-        rootNode: Node? = nil,
-        refreshRange: NSRange? = nil
-    ) -> [SyntaxHighlightToken] {
-        var state: SwiftSemanticOverlayState?
-        return mergingOverlayResult(
-            tokens: tokens,
-            source: source,
-            rootNode: rootNode,
-            refreshRange: refreshRange,
-            state: &state
-        ).tokens
-    }
-
-    static func mergingOverlayResult(
-        tokens: [SyntaxHighlightToken],
-        source: String,
-        rootNode: Node? = nil,
-        refreshRange: NSRange? = nil,
-        state: inout SwiftSemanticOverlayState?
-    ) -> SwiftSemanticOverlayResult {
-        mergingOverlayResult(
-            tokens: tokens,
-            source: source,
-            rootNode: rootNode,
-            refreshRange: refreshRange,
-            mutation: nil,
-            state: &state
-        )
-    }
-
-    static func mergingOverlayResult(
-        tokens: [SyntaxHighlightToken],
-        source: String,
-        rootNode: Node? = nil,
-        refreshRange: NSRange? = nil,
-        mutation: SyntaxHighlightMutation? = nil,
-        tokenPrefixMaxUpperBounds: [Int]? = nil,
-        state: inout SwiftSemanticOverlayState?
-    ) -> SwiftSemanticOverlayResult {
-        let nsSource = source as NSString
-        guard nsSource.length > 0 else {
-            state = nil
-            return SwiftSemanticOverlayResult(
-                tokens: preparedOverlayInput(from: tokens, source: nsSource, targetRange: nil).baseTokensForIndex,
-                refreshRangeOverride: nil,
-                isCancelled: false
-            )
-        }
-
-        let proposedTargetRange = refreshRange.map {
-            SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nsSource.length)
-        }
-        let previousState = state
-        let shiftedLineSignatureIndex = mutation.flatMap {
-            previousState?.lineSignatureIndex.applying($0, to: nsSource)
-        }
-        let lineSignatureIndex = shiftedLineSignatureIndex ?? SwiftSemanticLineSignatureIndex(source: nsSource)
-        let declarationFingerprint = lineSignatureIndex.fingerprint
-        let declarationFingerprintChanged = previousState.map {
-            $0.indexedDeclarationFingerprint != declarationFingerprint
-        } ?? true
-        let shiftedIndex = mutation.flatMap {
-            previousState?.index?.shifted(by: $0, sourceUTF16Length: nsSource.length)
-        }
-        let targetRange = proposedTargetRange == nil
-            || previousState?.index == nil
-            || declarationFingerprintChanged
-            ? nil
-            : proposedTargetRange
-        let preparation = preparedOverlayInput(
-            from: tokens,
-            source: nsSource,
-            targetRange: targetRange,
-            tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
-        )
-        let shouldRebuildIndex = proposedTargetRange == nil
-            || previousState?.index == nil
-            || declarationFingerprintChanged
-            || (previousState?.indexedSourceUTF16Length != nsSource.length && shiftedIndex == nil)
-        let index: SwiftFileSymbolIndex
-        if shouldRebuildIndex {
-            index = SwiftFileSymbolIndex(source: nsSource, tokens: preparation.baseTokensForIndex, rootNode: rootNode)
-            guard !index.isCancelled else {
-                return SwiftSemanticOverlayResult(
-                    tokens: tokens,
-                    refreshRangeOverride: nil,
-                    isCancelled: true
-                )
-            }
-        } else {
-            index = shiftedIndex ?? previousState!.index!
-        }
-        let nextState = SwiftSemanticOverlayState(
-            index: index,
-            indexedSourceUTF16Length: nsSource.length,
-            indexedDeclarationFingerprint: declarationFingerprint,
-            lineSignatureIndex: lineSignatureIndex
-        )
-
-        guard !Task.isCancelled else {
-            return SwiftSemanticOverlayResult(
-                tokens: tokens,
-                refreshRangeOverride: nil,
-                isCancelled: true
-            )
-        }
-
-        let overlayTokens =
-            tokensInCommentLines(
-                source: nsSource,
-                existingTokens: preparation.baseTokensForIndex,
-                targetRange: targetRange
-            ) +
-            tokensInPreprocessorLines(
-                source: nsSource,
-                excludedRanges: preparation.excludedPreprocessorRanges,
-                targetRange: targetRange
-            ) +
-            tokensInSemanticSymbolRanges(
-                source: nsSource,
-                tokenIndex: preparation.tokenIndex,
-                index: index,
-                targetRange: targetRange
-            )
-        state = nextState
-        if let partialMergeTargetRange = preparation.partialMergeTargetRange,
-           let partialMergeTokenRange = preparation.partialMergeTokenRange {
-            return SwiftSemanticOverlayResult(
-                tokens: partialMergedTokens(
-                    existingTokens: tokens,
-                    replacementOverlayTokens: overlayTokens,
-                    targetRange: partialMergeTargetRange,
-                    tokenRange: partialMergeTokenRange
-                ),
-                refreshRangeOverride: targetRange,
-                isCancelled: false
-            )
-        }
-
-        return SwiftSemanticOverlayResult(
-            tokens: deduplicated((preparation.outputBaseTokens + overlayTokens).sorted(by: SyntaxHighlightTokenOrdering.displayOrder)),
-            refreshRangeOverride: targetRange,
-            isCancelled: false
-        )
-    }
-
+enum SwiftSyntaxOverlayTokenProvider {
     private static func tokensInCommentLines(
         source: NSString,
         existingTokens: [SyntaxHighlightToken],
@@ -522,7 +191,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     private static func tokensInSemanticSymbolRanges(
         source: NSString,
         tokenIndex: SwiftTokenIndex,
-        index: SwiftFileSymbolIndex,
+        index: SwiftScopeIndex,
         targetRange: NSRange?
     ) -> [SyntaxHighlightToken] {
         guard source.length > 0 else {
@@ -530,6 +199,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         }
 
         var tokens: [SyntaxHighlightToken] = []
+        let resolution = index.makeResolutionContext()
 
         for token in tokenIndex.semanticTokens(intersecting: targetRange) {
             guard !isPreprocessorLine(containing: token.range, in: source)
@@ -541,7 +211,8 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                     for: token.text,
                     range: token.range,
                     in: source,
-                    index: index
+                    index: index,
+                    resolution: resolution
             )
             guard !overlays.isEmpty else {
                 continue
@@ -563,7 +234,8 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         for text: String,
         range: NSRange,
         in source: NSString,
-        index: SwiftFileSymbolIndex
+        index: SwiftScopeIndex,
+        resolution: SwiftScopeIndex.ResolutionContext
     ) -> [SemanticOverlay] {
         let context = SwiftSemanticTokenContext(source: source, range: range, text: text)
 
@@ -572,7 +244,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 named: text,
                 at: range,
                 allowedKinds: [.macro, .type]
-            ) != nil {
+            , context: resolution) != nil {
                 return []
             }
 
@@ -597,7 +269,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             named: text,
             at: range,
             allowedKinds: [.macro]
-           ) {
+           , context: resolution) {
             return syntaxIDForLocalEntry(localMacro).map {
                 [
                     SemanticOverlay(range: sigilRange, syntaxID: $0),
@@ -622,7 +294,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
         if context.isMemberAccess {
             if let receiverName = context.memberReceiverName,
-               let receiverType = index.declaredTypeName(forValueNamed: receiverName, at: range),
+               let receiverType = index.declaredTypeName(forValueNamed: receiverName, at: range, context: resolution),
                knownExternalMemberVariablesByReceiverType[receiverType]?.contains(text) == true {
                 return [SemanticOverlay(range: range, syntaxID: .identifierVariableSystem)]
             }
@@ -632,7 +304,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 at: range,
                 allowedKinds: [.function, .type, .variable],
                 allowedRoles: .member
-            ) {
+            , context: resolution) {
                 if localMember.kind == .type {
                     return syntaxIDForLocalEntry(localMember).map {
                         [SemanticOverlay(range: range, syntaxID: $0)]
@@ -668,7 +340,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 at: range,
                 allowedKinds: [.variable],
                 allowedRoles: .local
-               ) != nil {
+               , context: resolution) != nil {
                 return []
             }
 
@@ -686,7 +358,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             at: range,
             allowedKinds: [.variable],
             allowedRoles: .local
-        )
+        , context: resolution)
         let isTypeContext = context.isTypeContext
 
         if localValueEntry != nil, !isTypeContext {
@@ -699,7 +371,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             at: range,
             allowedKinds: [.variable],
             allowedRoles: [.file, .member]
-           ) {
+           , context: resolution) {
             return syntaxIDForLocalEntry(projectVariable).map {
                 [SemanticOverlay(range: range, syntaxID: $0)]
             } ?? []
@@ -711,7 +383,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             at: range,
             allowedKinds: [.variable],
             allowedRoles: [.file, .member]
-           ) {
+           , context: resolution) {
             return syntaxIDForLocalEntry(projectVariable).map {
                 [SemanticOverlay(range: range, syntaxID: $0)]
             } ?? []
@@ -723,7 +395,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 return []
             }
 
-            if index.isGenericParameter(named: text, at: range) {
+            if index.isGenericParameter(named: text, at: range, context: resolution) {
                 return []
             }
 
@@ -731,7 +403,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 named: text,
                 at: range,
                 allowedKinds: [.type]
-            ) {
+            , context: resolution) {
                 return syntaxIDForLocalEntry(localType).map {
                     [SemanticOverlay(range: range, syntaxID: $0)]
                 } ?? []
@@ -742,7 +414,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 named: text,
                 at: range,
                 allowedKinds: [.function]
-               ) {
+               , context: resolution) {
                 return syntaxIDForLocalEntry(localFunction).map {
                     [SemanticOverlay(range: range, syntaxID: $0)]
                 } ?? []
@@ -763,7 +435,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             at: range,
             allowedKinds: [.variable],
             allowedRoles: .member
-           ) != nil {
+           , context: resolution) != nil {
             return [SemanticOverlay(range: range, syntaxID: .identifierVariableSystem)]
         }
 
@@ -776,7 +448,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             at: range,
             allowedKinds: [.variable],
             allowedRoles: [.file, .member]
-        ) {
+        , context: resolution) {
             return syntaxIDForLocalEntry(local).map {
                 [SemanticOverlay(range: range, syntaxID: $0)]
             } ?? []
@@ -791,7 +463,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 named: text,
                 at: range,
                 allowedKinds: [.function]
-            ) else {
+            , context: resolution) else {
                 return [SemanticOverlay(range: range, syntaxID: .identifierFunctionSystem)]
             }
             if localFunction.role == .member {
@@ -815,7 +487,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return nil
     }
 
-    private static func syntaxIDForLocalEntry(_ entry: SwiftFileSymbolIndex.Entry?) -> EditorSourceSyntaxID? {
+    private static func syntaxIDForLocalEntry(_ entry: SwiftScopeIndex.Resolution?) -> EditorSourceSyntaxID? {
         guard let entry else {
             return nil
         }
@@ -909,150 +581,6 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return unique
     }
 
-    static func semanticTargetRange(
-        _ refreshRange: NSRange,
-        in source: NSString,
-        mutation: SyntaxHighlightMutation? = nil
-    ) -> NSRange? {
-        let targetRange = RefreshRangePolicy.lineEnvelope(containing: refreshRange, in: source)
-        guard targetRange.length > 0 else {
-            return nil
-        }
-        if let mutation,
-           swiftLocalEditCanKeepSemanticTarget(mutation, in: source) {
-            return source.lineRange(for: swiftMutationChangedRange(mutation, in: source))
-        }
-
-        let context = source.substring(with: targetRange)
-        let editedRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: source.length)
-        return swiftRefreshLooksStructural(context, editedRange: editedRange, lineRange: targetRange) ? nil : targetRange
-    }
-
-    private static func swiftLocalEditCanKeepSemanticTarget(
-        _ mutation: SyntaxHighlightMutation,
-        in source: NSString
-    ) -> Bool {
-        guard source.length > 0,
-              mutation.location >= 0,
-              mutation.location <= source.length else {
-            return false
-        }
-        let changedRange = swiftMutationChangedRange(mutation, in: source)
-        let lineRange = source.lineRange(for: changedRange)
-        return !swiftRefreshLooksStructural(
-            source.substring(with: lineRange),
-            editedRange: changedRange,
-            lineRange: lineRange
-        )
-    }
-
-    private static func swiftMutationChangedRange(
-        _ mutation: SyntaxHighlightMutation,
-        in source: NSString
-    ) -> NSRange {
-        let replacementLength = mutation.replacement.utf16.count
-        let changedLocation = min(max(0, mutation.location), source.length)
-        let changedStart = max(0, changedLocation - (mutation.length > 0 ? 1 : 0))
-        let changedEnd = min(source.length, max(changedLocation + max(1, replacementLength), changedStart + 1))
-        return NSRange(location: changedStart, length: changedEnd - changedStart)
-    }
-
-    private static func swiftRefreshLooksStructural(
-        _ text: String,
-        editedRange: NSRange,
-        lineRange: NSRange
-    ) -> Bool {
-        let nsText = text as NSString
-        let fullRange = NSRange(location: 0, length: nsText.length)
-        if structuralSwiftEditRegex.firstMatch(in: text, range: fullRange) != nil {
-            return true
-        }
-        if standaloneSwiftBraceRegex.firstMatch(in: text, range: fullRange) != nil {
-            return true
-        }
-        return swiftEditTouchesValueDeclarationHead(text, editedRange: editedRange, lineRange: lineRange)
-            || swiftEditTouchesPreInBindingHead(text, editedRange: editedRange, lineRange: lineRange)
-    }
-
-    private static func swiftEditTouchesValueDeclarationHead(
-        _ line: String,
-        editedRange: NSRange,
-        lineRange: NSRange
-    ) -> Bool {
-        let nsLine = line as NSString
-        let fullRange = NSRange(location: 0, length: nsLine.length)
-        guard valueDeclarationHeadRegex.firstMatch(in: line, range: fullRange) != nil else {
-            return false
-        }
-
-        let assignmentRange = nsLine.range(of: "=")
-        let safeValueStart: Int
-        if assignmentRange.location == NSNotFound {
-            safeValueStart = lineRange.upperBound
-        } else {
-            safeValueStart = lineRange.location + assignmentRange.upperBound
-        }
-        return editedRange.location < safeValueStart
-    }
-
-    private static func swiftEditTouchesPreInBindingHead(
-        _ line: String,
-        editedRange: NSRange,
-        lineRange: NSRange
-    ) -> Bool {
-        let nsLine = line as NSString
-        let fullRange = NSRange(location: 0, length: nsLine.length)
-        guard let inMatch = swiftPreInBindingKeywordRegex.firstMatch(in: line, range: fullRange) else {
-            return false
-        }
-        let headRange = NSRange(location: 0, length: inMatch.range.location)
-        guard swiftPreInBindingHeadRegex.firstMatch(in: line, range: headRange) != nil else {
-            return false
-        }
-        let editedStart = max(0, editedRange.location - lineRange.location)
-        return editedStart < inMatch.range.location
-    }
-
-    private static func semanticIndexFingerprint(in source: NSString) -> Int {
-        var hasher = Hasher()
-
-        var location = 0
-        while location < source.length {
-            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
-            let line = source.substring(with: lineRange)
-            if let component = swiftSemanticIndexFingerprintComponent(in: line) {
-                hasher.combine(component)
-            }
-            let nextLocation = lineRange.upperBound
-            guard nextLocation > location else { break }
-            location = nextLocation
-        }
-
-        return hasher.finalize()
-    }
-
-    fileprivate static func swiftSemanticIndexFingerprintComponent(in line: String) -> String? {
-        let nsLine = line as NSString
-        let fullRange = NSRange(location: 0, length: nsLine.length)
-        if valueDeclarationHeadRegex.firstMatch(in: line, range: fullRange) != nil {
-            let assignmentRange = nsLine.range(of: "=")
-            guard assignmentRange.location != NSNotFound else {
-                return line
-            }
-            return nsLine.substring(to: assignmentRange.location)
-        }
-        if let inMatch = swiftPreInBindingKeywordRegex.firstMatch(in: line, range: fullRange) {
-            let headRange = NSRange(location: 0, length: inMatch.range.location)
-            if swiftPreInBindingHeadRegex.firstMatch(in: line, range: headRange) != nil {
-                return nsLine.substring(to: inMatch.range.location)
-            }
-        }
-        if structuralSwiftEditRegex.firstMatch(in: line, range: fullRange) != nil {
-            return line
-        }
-        return nil
-    }
-
     private static func markTokenRange(from markerRange: NSRange, in source: NSString) -> NSRange {
         let lineRange = source.lineRange(for: markerRange)
         let rawRange = NSRange(
@@ -1079,27 +607,10 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         pattern: #"#[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*|&&|\|\||==|!=|>=|<=|[!<>()(),:]"#
     )
 
-    private static let structuralSwiftEditRegex = try! NSRegularExpression(
-        pattern: #"(^|\s)(@\w+|#if|#elseif|#else|#endif|#sourceLocation|class|struct|enum|actor|protocol|extension|func|init|deinit|subscript|typealias|associatedtype|case|macro|operator|precedencegroup|import)\b"#,
-        options: [.anchorsMatchLines]
-    )
 
-    private static let standaloneSwiftBraceRegex = try! NSRegularExpression(
-        pattern: #"^\s*[{}]\s*$"#,
-        options: [.anchorsMatchLines]
-    )
 
-    private static let valueDeclarationHeadRegex = try! NSRegularExpression(
-        pattern: #"^\s*(?:@\w+(?:\([^)]*\))?\s+|(?:open|public|package|internal|fileprivate|private|nonisolated)(?:\([^)]+\))?\s+|static\s+|class\s+|final\s+|lazy\s+|weak\s+|unowned\s+|isolated\s+)*(let|var)\s+[A-Za-z_][A-Za-z0-9_]*"#
-    )
 
-    private static let swiftPreInBindingKeywordRegex = try! NSRegularExpression(
-        pattern: #"\bin\b"#
-    )
 
-    private static let swiftPreInBindingHeadRegex = try! NSRegularExpression(
-        pattern: #"(?:(?:^|[{\[(,;=]\s*)|(?:^\s*for\s+))(?:case\s+)?(?:let\s+|var\s+)?[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*(?:let\s+|var\s+)?[A-Za-z_][A-Za-z0-9_]*)*\s*$"#
-    )
 
     private static func urlTokens(in source: String, lineRange: NSRange) -> [SyntaxHighlightToken] {
         urlRegex.matches(in: source, range: lineRange).map {
@@ -1154,7 +665,7 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         in source: NSString,
         to tokens: inout [SyntaxHighlightToken]
     ) {
-        let text = source.substring(with: range)
+        let text = source.nativeSubstring(with: range)
         if text == "#sourceLocation" {
             tokens.append(canonicalToken(range: NSRange(location: range.location, length: 1), syntaxID: .preprocessor))
             tokens.append(canonicalToken(range: NSRange(location: range.location + 1, length: range.length - 1), syntaxID: .preprocessor))
@@ -1171,10 +682,31 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             return false
         }
         let lineRange = source.lineRange(for: NSRange(location: min(range.location, max(0, source.length - 1)), length: 0))
-        return source.substring(with: lineRange)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .hasPrefix("#")
+        // Equivalent to trimming .whitespacesAndNewlines and testing
+        // hasPrefix("#"): only the first non-whitespace character decides, so
+        // scan units directly instead of materializing the line per token.
+        var index = lineRange.location
+        while index < lineRange.upperBound {
+            let unit = source.character(at: index)
+            if unit == 0x23 { // '#'
+                return true
+            }
+            if unit == 0x20 || (unit >= 0x09 && unit <= 0x0D) {
+                index += 1
+                continue
+            }
+            if unit > 0x7F,
+               let scalar = Unicode.Scalar(unit),
+               whitespaceAndNewlineSet.contains(scalar) {
+                index += 1
+                continue
+            }
+            return false
+        }
+        return false
     }
+
+    private static let whitespaceAndNewlineSet = CharacterSet.whitespacesAndNewlines
 
     fileprivate static func isSwiftIdentifier(_ text: String) -> Bool {
         var iterator = text.utf8.makeIterator()
@@ -1190,179 +722,6 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             }
         }
         return true
-    }
-
-    private static func preparedOverlayInput(
-        from tokens: [SyntaxHighlightToken],
-        source: NSString,
-        targetRange: NSRange?,
-        tokenPrefixMaxUpperBounds: [Int]? = nil
-    ) -> SwiftOverlayPreparation {
-        if let targetRange,
-           tokenPrefixMaxUpperBounds?.count == tokens.count,
-           tokens.contains(where: \.isSemanticOverlay) {
-            return preparedPartialOverlayInput(
-                from: tokens,
-                source: source,
-                targetRange: targetRange,
-                tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
-            )
-        }
-
-        let generatedMacroOverlayRangeKeys = generatedSystemMacroOverlayRangeKeys(from: tokens, source: source)
-        var baseTokensForIndex: [SyntaxHighlightToken] = []
-        var outputBaseTokens: [SyntaxHighlightToken] = []
-        baseTokensForIndex.reserveCapacity(tokens.count)
-        outputBaseTokens.reserveCapacity(tokens.count)
-
-        for token in tokens {
-            let stripsFromIndex = isSwiftSemanticOverlayToken(
-                token,
-                generatedSystemMacroOverlayRangeKeys: generatedMacroOverlayRangeKeys
-            )
-            if !stripsFromIndex {
-                baseTokensForIndex.append(token)
-            }
-
-            let stripsFromOutput = targetRange.map { stripRange in
-                rangesIntersect(token.range, stripRange) && stripsFromIndex
-            } ?? stripsFromIndex
-            if !stripsFromOutput {
-                outputBaseTokens.append(token)
-            }
-        }
-
-        return SwiftOverlayPreparation(
-            baseTokensForIndex: baseTokensForIndex,
-            outputBaseTokens: outputBaseTokens,
-            tokenIndex: SwiftTokenIndex(tokens: baseTokensForIndex, source: source, targetRange: targetRange),
-            excludedPreprocessorRanges: mergedExcludedPreprocessorRanges(existingTokens: baseTokensForIndex),
-            partialMergeTargetRange: nil,
-            partialMergeTokenRange: nil
-        )
-    }
-
-    private static func preparedPartialOverlayInput(
-        from tokens: [SyntaxHighlightToken],
-        source: NSString,
-        targetRange: NSRange,
-        tokenPrefixMaxUpperBounds: [Int]?
-    ) -> SwiftOverlayPreparation {
-        let clampedTargetRange = SyntaxEditorRangeUtilities.clampedRange(
-            targetRange,
-            utf16Length: source.length
-        )
-        let tokenRange = tokenIndexRangeForPartialMerge(
-            in: tokens,
-            targetRange: clampedTargetRange,
-            tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
-        )
-        var baseTokensForIndex: [SyntaxHighlightToken] = []
-        baseTokensForIndex.reserveCapacity(tokenRange.count)
-        for token in tokens[tokenRange] where !token.isSemanticOverlay {
-            guard rangesIntersect(token.range, clampedTargetRange) else { continue }
-            baseTokensForIndex.append(token)
-        }
-
-        return SwiftOverlayPreparation(
-            baseTokensForIndex: baseTokensForIndex,
-            outputBaseTokens: [],
-            tokenIndex: SwiftTokenIndex(tokens: baseTokensForIndex, source: source, targetRange: clampedTargetRange),
-            excludedPreprocessorRanges: mergedExcludedPreprocessorRanges(existingTokens: baseTokensForIndex),
-            partialMergeTargetRange: clampedTargetRange,
-            partialMergeTokenRange: tokenRange
-        )
-    }
-
-    private static func partialMergedTokens(
-        existingTokens: [SyntaxHighlightToken],
-        replacementOverlayTokens: [SyntaxHighlightToken],
-        targetRange: NSRange,
-        tokenRange: Range<Int>
-    ) -> [SyntaxHighlightToken] {
-        var segment: [SyntaxHighlightToken] = []
-        segment.reserveCapacity(tokenRange.count + replacementOverlayTokens.count)
-        for token in existingTokens[tokenRange] {
-            if token.isSemanticOverlay, rangesIntersect(token.range, targetRange) {
-                continue
-            }
-            segment.append(token)
-        }
-        segment.append(contentsOf: replacementOverlayTokens)
-        let mergedSegment = deduplicated(segment.sorted(by: SyntaxHighlightTokenOrdering.displayOrder))
-
-        var merged = existingTokens
-        merged.replaceSubrange(tokenRange, with: mergedSegment)
-        return merged
-    }
-
-    private static func tokenIndexRangeForPartialMerge(
-        in tokens: [SyntaxHighlightToken],
-        targetRange: NSRange,
-        tokenPrefixMaxUpperBounds: [Int]?
-    ) -> Range<Int> {
-        guard targetRange.length > 0 else { return 0..<0 }
-        let prefixMaxUpperBounds = if let tokenPrefixMaxUpperBounds,
-                                      tokenPrefixMaxUpperBounds.count == tokens.count {
-            tokenPrefixMaxUpperBounds
-        } else {
-            prefixMaxUpperBounds(for: tokens)
-        }
-        let startIndex = firstTokenIndex(
-            intersecting: targetRange,
-            prefixMaxUpperBounds: prefixMaxUpperBounds
-        )
-        var upperBound = lowerBoundForTokenLocation(targetRange.upperBound, in: tokens)
-        while upperBound < tokens.count,
-              tokens[upperBound].range.location < targetRange.upperBound {
-            upperBound += 1
-        }
-        return startIndex..<upperBound
-    }
-
-    private static func prefixMaxUpperBounds(for tokens: [SyntaxHighlightToken]) -> [Int] {
-        var prefixMaxUpperBounds: [Int] = []
-        prefixMaxUpperBounds.reserveCapacity(tokens.count)
-        var maxUpperBound = 0
-        for token in tokens {
-            maxUpperBound = max(maxUpperBound, token.range.upperBound)
-            prefixMaxUpperBounds.append(maxUpperBound)
-        }
-        return prefixMaxUpperBounds
-    }
-
-    private static func firstTokenIndex(
-        intersecting range: NSRange,
-        prefixMaxUpperBounds: [Int]
-    ) -> Int {
-        var lowerBound = 0
-        var upperBound = prefixMaxUpperBounds.count
-        while lowerBound < upperBound {
-            let middle = lowerBound + (upperBound - lowerBound) / 2
-            if prefixMaxUpperBounds[middle] <= range.location {
-                lowerBound = middle + 1
-            } else {
-                upperBound = middle
-            }
-        }
-        return lowerBound
-    }
-
-    private static func lowerBoundForTokenLocation(
-        _ location: Int,
-        in tokens: [SyntaxHighlightToken]
-    ) -> Int {
-        var lowerBound = 0
-        var upperBound = tokens.count
-        while lowerBound < upperBound {
-            let middle = lowerBound + (upperBound - lowerBound) / 2
-            if tokens[middle].range.location < location {
-                lowerBound = middle + 1
-            } else {
-                upperBound = middle
-            }
-        }
-        return lowerBound
     }
 
     private static func isSwiftSemanticOverlayToken(
@@ -1390,42 +749,6 @@ enum SwiftSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         default:
             return false
         }
-    }
-
-    private static func generatedSystemMacroOverlayRangeKeys(
-        from tokens: [SyntaxHighlightToken],
-        source: NSString
-    ) -> Set<SyntaxOverlayRangeKey> {
-        var macroNameRangesByLocation: [Int: [NSRange]] = [:]
-        var sigilRanges: [NSRange] = []
-
-        for token in tokens where token.syntaxID == .identifierMacroSystem {
-            guard token.language == .swift || token.language == nil,
-                  token.range.location >= 0,
-                  token.range.upperBound <= source.length
-            else {
-                continue
-            }
-
-            if token.range.length == 1,
-               source.substring(with: token.range) == "#" {
-                sigilRanges.append(token.range)
-            } else {
-                macroNameRangesByLocation[token.range.location, default: []].append(token.range)
-            }
-        }
-
-        var rangeKeys = Set<SyntaxOverlayRangeKey>()
-        for sigilRange in sigilRanges {
-            guard let nameRanges = macroNameRangesByLocation[sigilRange.upperBound] else {
-                continue
-            }
-            rangeKeys.insert(SyntaxOverlayRangeKey(sigilRange))
-            for nameRange in nameRanges {
-                rangeKeys.insert(SyntaxOverlayRangeKey(nameRange))
-            }
-        }
-        return rangeKeys
     }
 
     private static func isSwiftIdentifierStartByte(_ byte: UInt8) -> Bool {
@@ -1482,8 +805,12 @@ private struct SwiftSemanticTokenContext {
         let afterLocation = min(line.length, relativeLocation + range.length)
 
         self.line = line
-        self.before = line.substring(to: min(relativeLocation, line.length))
-        self.after = line.substring(from: afterLocation)
+        self.before = line.nativeSubstring(
+            with: NSRange(location: 0, length: min(relativeLocation, line.length))
+        )
+        self.after = line.nativeSubstring(
+            with: NSRange(location: afterLocation, length: line.length - afterLocation)
+        )
     }
 
     var startsLikeTypeName: Bool {
@@ -1605,7 +932,7 @@ private struct SwiftSemanticTokenContext {
             return nil
         }
 
-        return (receiverText as NSString).substring(with: match.range)
+        return (receiverText as NSString).nativeSubstring(with: match.range)
     }
 
     var isSelfMemberAccess: Bool {
@@ -1811,13 +1138,13 @@ private struct SwiftSemanticTokenContext {
         }
 
         let sigilRange = NSRange(location: range.location - sigilLength, length: sigilLength)
-        guard source.substring(with: sigilRange) == sigil else {
+        guard source.nativeSubstring(with: sigilRange) == sigil else {
             return nil
         }
 
         if sigilRange.location > 0 {
             let previousRange = NSRange(location: sigilRange.location - 1, length: 1)
-            let previous = source.substring(with: previousRange)
+            let previous = source.nativeSubstring(with: previousRange)
             guard previous.range(of: #"^[A-Za-z0-9_#@]$"#, options: .regularExpression) == nil else {
                 return nil
             }
@@ -1947,5 +1274,88 @@ enum SyntaxHighlightTokenOrdering {
             return 2
         }
         return 2
+    }
+}
+
+extension SwiftSyntaxOverlayTokenProvider {
+    /// Target-scoped overlay generation: comment MARK/URL tokens, preprocessor
+    /// tokens, and scope-resolved identifier overlays for `targetRange`. The
+    /// classification rules are the color specification and are untouched; only
+    /// their index moved to the tree-derived scope index.
+    static func overlayTokens(
+        in targetRange: NSRange,
+        baseTokens: [SyntaxHighlightToken],
+        source: String,
+        index: SwiftScopeIndex?
+    ) -> [SyntaxHighlightToken] {
+        let nsSource = source as NSString
+        let clamped = SyntaxEditorRangeUtilities.clampedRange(targetRange, utf16Length: nsSource.length)
+        guard clamped.length > 0 else { return [] }
+
+        var overlays = tokensInCommentLines(
+            source: nsSource,
+            existingTokens: baseTokens,
+            targetRange: clamped
+        )
+        overlays += tokensInPreprocessorLines(
+            source: nsSource,
+            excludedRanges: mergedExcludedPreprocessorRanges(existingTokens: baseTokens),
+            targetRange: clamped
+        )
+        if let index {
+            overlays += tokensInSemanticSymbolRanges(
+                source: nsSource,
+                tokenIndex: SwiftTokenIndex(tokens: baseTokens, source: nsSource, targetRange: clamped),
+                index: index,
+                targetRange: clamped
+            )
+        }
+        return deduplicated(overlays.sorted(by: SyntaxHighlightTokenOrdering.displayOrder))
+    }
+
+    /// Full-document merge over base tokens. Compat surface for tests and the
+    /// conservative engine path; cancellation returns the input unchanged with
+    /// `isCancelled` set and leaves `state` untouched.
+    static func mergingOverlayResult(
+        tokens: [SyntaxHighlightToken],
+        source: String,
+        rootNode: Node? = nil,
+        refreshRange: NSRange? = nil,
+        state: inout SwiftSemanticOverlayState?
+    ) -> SwiftSemanticOverlayResult {
+        _ = refreshRange
+        let nsSource = source as NSString
+        let baseTokens = tokens.filter { !$0.isSemanticOverlay }
+        guard nsSource.length > 0 else {
+            state = nil
+            return SwiftSemanticOverlayResult(tokens: baseTokens, refreshRangeOverride: nil, isCancelled: false)
+        }
+        guard !Task.isCancelled else {
+            return SwiftSemanticOverlayResult(tokens: tokens, refreshRangeOverride: nil, isCancelled: true)
+        }
+
+        var index: SwiftScopeIndex?
+        if let rootNode {
+            guard let built = SwiftScopeIndex(rootNode: rootNode, source: nsSource) else {
+                return SwiftSemanticOverlayResult(tokens: tokens, refreshRangeOverride: nil, isCancelled: true)
+            }
+            index = built
+            state = SwiftSemanticOverlayState(scopeIndex: built, indexedSourceUTF16Length: nsSource.length)
+        }
+
+        let overlays = overlayTokens(
+            in: NSRange(location: 0, length: nsSource.length),
+            baseTokens: baseTokens,
+            source: source,
+            index: index
+        )
+        guard !Task.isCancelled else {
+            return SwiftSemanticOverlayResult(tokens: tokens, refreshRangeOverride: nil, isCancelled: true)
+        }
+        return SwiftSemanticOverlayResult(
+            tokens: deduplicated((baseTokens + overlays).sorted(by: SyntaxHighlightTokenOrdering.displayOrder)),
+            refreshRangeOverride: nil,
+            isCancelled: false
+        )
     }
 }

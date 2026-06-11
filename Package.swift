@@ -85,6 +85,7 @@ let package = Package(
                 "SyntaxEditorCore",
             ],
             path: "Tools/HighlightBenchmark",
+            exclude: ["Fixtures"],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
                 .defaultIsolation(nil),

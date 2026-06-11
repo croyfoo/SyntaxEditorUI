@@ -907,16 +907,16 @@ struct SyntaxEditorCoreTests {
         #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == CGFloat(expected))
     }
 
-    @Test("HighlightLineTokenStore preserves later line tokens without suffix shifting")
-    func highlightLineTokenStorePreservesLaterLinesAcrossPrefixInsertion() {
+    @Test("LineTokenPlanes preserves later line tokens without suffix shifting")
+    func lineTokenPlanesPreservesLaterLinesAcrossPrefixInsertion() {
         let source = "first\nsecond\nthird"
         let updatedSource = "prefix\n" + source
         let mutation = SyntaxHighlightMutation(location: 0, length: 0, replacement: "prefix\n")
-        let lineIndex = SyntaxHighlightLineIndex()
-        lineIndex.reset(source: source)
-        let store = HighlightLineTokenStore()
+        let lineTable = HighlightLineTable()
+        lineTable.reset(source: source)
+        let planes = LineTokenPlanes(styles: HighlightStyleTable())
         let secondRange = (source as NSString).range(of: "second")
-        store.reset(
+        planes.reset(
             tokens: [
                 SyntaxHighlightToken(
                     range: secondRange,
@@ -925,25 +925,25 @@ struct SyntaxEditorCoreTests {
                     rawCaptureName: "editor.syntax.swift.plain"
                 ),
             ],
-            lineIndex: lineIndex
+            lineTable: lineTable
         )
 
-        store.applyEdit(mutation, previousSource: source, lineIndex: lineIndex)
-        lineIndex.apply(mutation: mutation, previousSource: source)
+        _ = planes.applyEdit(mutation, previousSource: source, lineTable: lineTable)
+        lineTable.apply(mutation: mutation, previousSource: source)
 
-        #expect(store.tokens(lineIndex: lineIndex).map(\.range) == [(updatedSource as NSString).range(of: "second")])
+        #expect(planes.tokens(lineTable: lineTable).map(\.range) == [(updatedSource as NSString).range(of: "second")])
     }
 
-    @Test("HighlightLineTokenStore materializes pushed prefix lines after replacement")
-    func highlightLineTokenStoreMaterializesPushedPrefixLines() {
+    @Test("LineTokenPlanes materializes pushed prefix lines after replacement")
+    func lineTokenPlanesMaterializesPushedPrefixLines() {
         let source = "first\nsecond\nthird"
         let prefix = "prefix\n"
         let updatedSource = prefix + source
         let mutation = SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
-        let lineIndex = SyntaxHighlightLineIndex()
-        lineIndex.reset(source: source)
-        let store = HighlightLineTokenStore()
-        store.reset(
+        let lineTable = HighlightLineTable()
+        lineTable.reset(source: source)
+        let planes = LineTokenPlanes(styles: HighlightStyleTable())
+        planes.reset(
             tokens: [
                 SyntaxHighlightToken(
                     range: (source as NSString).range(of: "second"),
@@ -952,15 +952,15 @@ struct SyntaxEditorCoreTests {
                     rawCaptureName: "editor.syntax.swift.plain"
                 ),
             ],
-            lineIndex: lineIndex
+            lineTable: lineTable
         )
 
-        store.applyEdit(mutation, previousSource: source, lineIndex: lineIndex)
-        lineIndex.apply(mutation: mutation, previousSource: source)
+        _ = planes.applyEdit(mutation, previousSource: source, lineTable: lineTable)
+        lineTable.apply(mutation: mutation, previousSource: source)
         let replacementRange = (updatedSource as NSString).lineRange(
             for: NSRange(location: 0, length: prefix.utf16.count + 1)
         )
-        store.replaceTokens(
+        _ = planes.replaceTokens(
             in: replacementRange,
             with: [
                 SyntaxHighlightToken(
@@ -970,24 +970,25 @@ struct SyntaxEditorCoreTests {
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
-            lineIndex: lineIndex
+            plane: .both,
+            lineTable: lineTable
         )
 
-        #expect(store.tokens(lineIndex: lineIndex).map(\.range) == [
+        #expect(planes.tokens(lineTable: lineTable).map(\.range) == [
             (updatedSource as NSString).range(of: "first"),
             (updatedSource as NSString).range(of: "second"),
         ])
     }
 
-    @Test("HighlightLineTokenStore returns full multi-line tokens for partial reads")
-    func highlightLineTokenStoreReturnsFullMultilineTokensForPartialReads() {
+    @Test("LineTokenPlanes returns full multi-line tokens for partial reads")
+    func lineTokenPlanesReturnsFullMultilineTokensForPartialReads() {
         let source = "let text = \"\"\"\nhello\n\"\"\"\nlet next = 1\n"
         let nsSource = source as NSString
-        let lineIndex = SyntaxHighlightLineIndex()
-        lineIndex.reset(source: source)
-        let store = HighlightLineTokenStore()
+        let lineTable = HighlightLineTable()
+        lineTable.reset(source: source)
+        let planes = LineTokenPlanes(styles: HighlightStyleTable())
         let multilineStringRange = nsSource.range(of: "\"\"\"\nhello\n\"\"\"")
-        store.reset(
+        planes.reset(
             tokens: [
                 SyntaxHighlightToken(
                     range: multilineStringRange,
@@ -996,12 +997,12 @@ struct SyntaxEditorCoreTests {
                     rawCaptureName: "editor.syntax.swift.string"
                 ),
             ],
-            lineIndex: lineIndex
+            lineTable: lineTable
         )
 
         let middleLineRange = nsSource.range(of: "hello")
 
-        #expect(store.tokens(in: middleLineRange, lineIndex: lineIndex).map(\.range) == [
+        #expect(planes.tokens(in: middleLineRange, lineTable: lineTable).map(\.range) == [
             multilineStringRange,
         ])
     }
@@ -6390,22 +6391,6 @@ struct SyntaxHighlighterEngineTests {
                 and: syntacticFastPass.refreshRange
             ) == syntacticFastPass.refreshRange
         )
-    }
-
-    @Test("SyntaxHighlighterEngine treats standalone Swift brace edits as structural")
-    func highlighterTreatsStandaloneSwiftBraceEditsAsStructural() {
-        let source = """
-        func render() -> Int
-        {
-            return 1
-        }
-        """
-        let nsSource = source as NSString
-        let openBraceRange = nsSource.range(of: "{")
-        let closeBraceRange = nsSource.range(of: "}", options: .backwards)
-
-        #expect(SwiftSyntaxOverlayTokenProvider.semanticTargetRange(openBraceRange, in: nsSource) == nil)
-        #expect(SwiftSyntaxOverlayTokenProvider.semanticTargetRange(closeBraceRange, in: nsSource) == nil)
     }
 
     @Test("SyntaxHighlighterEngine keeps Swift initializer edits local")
