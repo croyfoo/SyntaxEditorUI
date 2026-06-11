@@ -4351,6 +4351,43 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(settled, fresh))
     }
 
+    @Test("SyntaxHighlighterEngine rehighlights owner scopes when the first extension adds a member")
+    func highlighterRehighlightsOwnerScopesWhenFirstExtensionAddsMember() async throws {
+        // Adding a type's FIRST extension makes its members visible from the
+        // original type body; bounding the refresh to the new extension alone
+        // leaves the existing call site stale until some later full pass.
+        // Filler keeps the document large enough that the fan-out guard does
+        // not rescue the bounded-targets path.
+        let filler = (0..<200).map { "let filler\($0) = \($0)" }.joined(separator: "\n")
+        let source = "struct Foo {\n    func use() {\n        view.backgroundColor = nil\n    }\n}\n\(filler)\n"
+        let engine = SyntaxHighlighterEngine()
+        _ = await engine.reset(source: source, language: .swift, revision: 0)
+
+        let insertion = "extension Foo {\n    var view: UIView { UIView() }\n}\n"
+        let caret = (source as NSString).length
+        let next = source + insertion
+        _ = await engine.update(
+            source: next,
+            language: .swift,
+            mutation: SyntaxHighlightMutation(location: caret, length: 0, replacement: insertion),
+            revision: 1
+        )
+
+        let settled = await engine.currentTokensForTesting()
+        let fresh = await SyntaxHighlighterEngine().render(source: next, language: .swift)
+
+        // Sanity: the new extension member must actually change the call
+        // site's classification inside the original type body, otherwise this
+        // scenario cannot detect a missing recolor.
+        let bodyRange = NSRange(location: 0, length: ((source as NSString).length / 2))
+        let freshWithout = await SyntaxHighlighterEngine().render(source: source, language: .swift)
+        let bodyBefore = freshWithout.filter { $0.range.upperBound <= bodyRange.upperBound }
+        let bodyAfter = fresh.filter { $0.range.upperBound <= bodyRange.upperBound }
+        #expect(!highlightTokensMatch(bodyBefore, bodyAfter), "scenario must change body classification")
+
+        #expect(highlightTokensMatch(settled, fresh))
+    }
+
     @Test("SyntaxHighlighterEngine recovers from stale mutations beyond the edit neighborhood")
     func highlighterRecoversFromStaleMutationsBeyondEditNeighborhood() async throws {
         // The session is silently behind by a length-neutral change far from the

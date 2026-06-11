@@ -636,6 +636,23 @@ final class SwiftScopeIndex {
             }
             let enumCasesChanged = previousHostEnumCases != rebuiltEnumCases
 
+            // The declaration diff below consults the extension topology to
+            // decide whether a changed member is visible beyond the host. Fold
+            // the REBUILT subtree's extensions in first: an edit that adds a
+            // type's FIRST extension makes its members visible from every
+            // same-owner scope, which the pre-edit set cannot see. (The set
+            // only ever grows; an owner whose last extension disappeared stays
+            // conservatively wide.)
+            func registerRebuiltExtensionOwners(_ scope: Scope) {
+                if case .typeExtension(let name) = scope.kind {
+                    extensionOwnerNames.insert(name)
+                }
+                for child in scope.children {
+                    registerRebuiltExtensionOwners(child)
+                }
+            }
+            registerRebuiltExtensionOwners(replacement)
+
             var boundedTargets: [NSRange] = []
             var requiresFullPass = enumCasesChanged
 
