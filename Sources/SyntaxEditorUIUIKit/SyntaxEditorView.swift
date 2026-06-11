@@ -405,13 +405,29 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     internal func waitForPendingHighlightForTesting(
         timeoutNanoseconds: UInt64 = 5_000_000_000
     ) async -> Bool {
-        guard let highlightTask else { return true }
-
-        return await syntaxEditorWaitForTaskCompletionForTesting(
-            highlightTask,
-            timeoutNanoseconds: timeoutNanoseconds
-        ) {
-            highlightTask.cancel()
+        // A result that cannot apply yet (payload gating, revision races)
+        // reschedules and lets its task complete unapplied — waiting on one
+        // task reference is not enough. Follow reschedules by generation until
+        // a waited task finishes without scheduling a successor.
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while true {
+            guard let task = highlightTask else { return true }
+            let generation = nextScheduledHighlightRequestID
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < deadline else {
+                task.cancel()
+                return false
+            }
+            let completed = await syntaxEditorWaitForTaskCompletionForTesting(
+                task,
+                timeoutNanoseconds: deadline - now
+            ) {
+                task.cancel()
+            }
+            guard completed else { return false }
+            if nextScheduledHighlightRequestID == generation {
+                return true
+            }
         }
     }
 
