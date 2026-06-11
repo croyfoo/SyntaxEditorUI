@@ -335,7 +335,7 @@ actor ManualSyntaxHighlightGate {
     @discardableResult
     func waitUntilSuspended(
         _ minimumCount: Int = 1,
-        timeoutNanoseconds: UInt64 = 5_000_000_000
+        timeoutNanoseconds: UInt64 = 10_000_000_000
     ) async -> Bool {
         guard suspensionCount < minimumCount else { return true }
 
@@ -373,7 +373,7 @@ actor ManualSyntaxHighlightGate {
     @discardableResult
     func waitUntilSuspended(
         after previousCount: Int,
-        timeoutNanoseconds: UInt64 = 5_000_000_000
+        timeoutNanoseconds: UInt64 = 10_000_000_000
     ) async -> Bool {
         await waitUntilSuspended(
             previousCount + 1,

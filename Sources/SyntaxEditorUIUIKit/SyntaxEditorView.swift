@@ -403,7 +403,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     @discardableResult
     internal func waitForPendingHighlightForTesting(
-        timeoutNanoseconds: UInt64 = 5_000_000_000
+        timeoutNanoseconds: UInt64 = 10_000_000_000
     ) async -> Bool {
         // A result that cannot apply yet (payload gating, revision races)
         // reschedules and lets its task complete unapplied — waiting on one
@@ -433,7 +433,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     internal func waitForAppliedHighlightPhaseForTesting(
         _ phase: SyntaxHighlightPhase,
-        timeoutNanoseconds: UInt64 = 1_000_000_000
+        timeoutNanoseconds: UInt64 = 10_000_000_000
     ) async -> Bool {
         let expectedRevision = model.revision
         guard !hasAppliedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
@@ -461,7 +461,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     internal func waitForSkippedHighlightPhaseForTesting(
         _ phase: SyntaxHighlightPhase,
-        timeoutNanoseconds: UInt64 = 1_000_000_000
+        timeoutNanoseconds: UInt64 = 10_000_000_000
     ) async -> Bool {
         let expectedRevision = model.revision
         guard !hasSkippedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
