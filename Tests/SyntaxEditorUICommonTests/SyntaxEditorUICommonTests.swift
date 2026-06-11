@@ -416,6 +416,96 @@ struct SyntaxEditorUICommonTests {
         ])
     }
 
+    @Test("Materialized current runs splice through edits in place")
+    func materializedCurrentRunsSpliceThroughEditsInPlace() {
+        // Build a store in the partially-materialized state (snapshot + pending
+        // edit + partial refresh commit), then verify the per-keystroke splice:
+        // suffix shift, split-at-insertion, deletion shrink, and junction merge.
+        func makeStore() -> HighlightRenderSnapshotStore {
+            let store = HighlightRenderSnapshotStore()
+            store.commitSnapshot(
+                runSet: HighlightRunSet(colorRuns: [], fontRuns: []),
+                range: NSRange(location: 0, length: 100),
+                revision: 1,
+                language: .swift,
+                textLength: 100,
+                baseForeground: baseForeground,
+                baseFont: nil
+            )
+            // Pending edit so the next partial commit lands in current runs.
+            store.recordPendingEdit(
+                SyntaxHighlightMutation(location: 90, length: 0, replacement: "x"),
+                currentTextLength: 101
+            )
+            store.commitSnapshot(
+                runSet: HighlightRunSet(
+                    colorRuns: [
+                        HighlightColorRun(range: NSRange(location: 10, length: 10), color: redColor),
+                        HighlightColorRun(range: NSRange(location: 30, length: 10), color: blueColor),
+                    ],
+                    fontRuns: []
+                ),
+                range: NSRange(location: 0, length: 60),
+                revision: 1,
+                language: .swift,
+                textLength: 101,
+                baseForeground: baseForeground,
+                baseFont: nil
+            )
+            return store
+        }
+
+        // Insert before both runs: both shift right.
+        let shifted = makeStore()
+        shifted.recordPendingEdit(
+            SyntaxHighlightMutation(location: 0, length: 0, replacement: "ab"),
+            currentTextLength: 103
+        )
+        #expect(shifted.maintainsNormalizedRunInvariantForTesting)
+        #expect(shifted.colorRuns(in: NSRange(location: 0, length: 103)).map(\.range) == [
+            NSRange(location: 12, length: 10),
+            NSRange(location: 32, length: 10),
+        ])
+
+        // Insert inside the first run: it splits and the inserted text is bare.
+        let split = makeStore()
+        split.recordPendingEdit(
+            SyntaxHighlightMutation(location: 15, length: 0, replacement: "ab"),
+            currentTextLength: 103
+        )
+        #expect(split.maintainsNormalizedRunInvariantForTesting)
+        #expect(split.colorRuns(in: NSRange(location: 0, length: 103)).map(\.range) == [
+            NSRange(location: 10, length: 5),
+            NSRange(location: 17, length: 5),
+            NSRange(location: 32, length: 10),
+        ])
+
+        // Delete across the gap between the runs: different colors stay
+        // separate runs, now adjacent; the second run loses its head.
+        let bridged = makeStore()
+        bridged.recordPendingEdit(
+            SyntaxHighlightMutation(location: 18, length: 14, replacement: ""),
+            currentTextLength: 87
+        )
+        #expect(bridged.maintainsNormalizedRunInvariantForTesting)
+        #expect(bridged.colorRuns(in: NSRange(location: 0, length: 87)).map(\.range) == [
+            NSRange(location: 10, length: 8),
+            NSRange(location: 18, length: 8),
+        ])
+
+        // Delete inside one run: the two kept sides re-merge into one run.
+        let merged = makeStore()
+        merged.recordPendingEdit(
+            SyntaxHighlightMutation(location: 12, length: 4, replacement: ""),
+            currentTextLength: 97
+        )
+        #expect(merged.maintainsNormalizedRunInvariantForTesting)
+        #expect(merged.colorRuns(in: NSRange(location: 0, length: 97)).map(\.range) == [
+            NSRange(location: 10, length: 6),
+            NSRange(location: 26, length: 10),
+        ])
+    }
+
     @Test("Pending highlight edits self-checkpoint without changing resolution")
     func pendingHighlightEditsSelfCheckpointWithoutChangingResolution() {
         // Two identical edit sequences: the reference store never checkpoints

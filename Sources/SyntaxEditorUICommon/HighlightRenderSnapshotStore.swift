@@ -804,37 +804,43 @@ package final class HighlightRenderSnapshotStore {
         currentMaterializedRanges = []
     }
 
+    /// Shifts the partially materialized runs through one edit IN PLACE.
+    /// Progressive drains can leave a document's worth of runs here, and the
+    /// previous per-run flatMap (an array allocation per run, every keystroke)
+    /// dominated the main thread while typing during convergence. The splice
+    /// touches only the runs intersecting the edit plus one tail offset pass;
+    /// the mapping semantics mirror `PendingHighlightEditMap`'s single-edit
+    /// rules exactly (prefix kept, replaced region dropped, suffix shifted).
     private func shiftCurrentMaterializedRuns(
         for mutation: SyntaxHighlightMutation,
         currentTextLength nextTextLength: Int
     ) {
         guard !currentMaterializedRanges.isEmpty else { return }
 
-        var editMap = PendingHighlightEditMap()
-        editMap.recordPendingEdit(mutation, currentTextLength: nextTextLength)
-        currentColorRuns = HighlightRunUtilities.coalescedColorRuns(
-            HighlightRunUtilities.normalizedColorRuns(
-                currentColorRuns.flatMap { run in
-                    editMap.currentRanges(forSnapshotRange: run.range)
-                        .map { HighlightColorRun(range: $0, color: run.color) }
-                },
-                textLength: nextTextLength
-            )
+        // Same clamping as PendingHighlightEditMap.recordPendingEdit.
+        let replacementLength = mutation.replacement.utf16.count
+        let previousTextLength = max(0, nextTextLength - (replacementLength - mutation.length))
+        let editStart = min(max(0, mutation.location), previousTextLength)
+        let editLength = min(max(0, mutation.length), previousTextLength - editStart)
+        let editEnd = editStart + editLength
+        let delta = replacementLength - editLength
+        HighlightRunUtilities.spliceEditIntoColorRuns(
+            &currentColorRuns,
+            editStart: editStart,
+            editEnd: editEnd,
+            delta: delta
         )
-        currentFontRuns = HighlightRunUtilities.coalescedFontRuns(
-            HighlightRunUtilities.normalizedFontRuns(
-                currentFontRuns.flatMap { run in
-                    editMap.currentRanges(forSnapshotRange: run.range)
-                        .map { HighlightFontRun(range: $0, font: run.font) }
-                },
-                textLength: nextTextLength
-            )
+        HighlightRunUtilities.spliceEditIntoFontRuns(
+            &currentFontRuns,
+            editStart: editStart,
+            editEnd: editEnd,
+            delta: delta
         )
-        currentMaterializedRanges = HighlightRunUtilities.normalizedRanges(
-            currentMaterializedRanges.flatMap {
-                editMap.currentRanges(forSnapshotRange: $0)
-            },
-            textLength: nextTextLength
+        HighlightRunUtilities.spliceEditIntoRanges(
+            &currentMaterializedRanges,
+            editStart: editStart,
+            editEnd: editEnd,
+            delta: delta
         )
     }
 
@@ -1143,6 +1149,217 @@ fileprivate enum HighlightRunUtilities {
             guard intersection.length > 0 else { continue }
             body(HighlightFontRun(range: intersection, font: run.font))
         }
+    }
+
+    /// In-place single-edit splice over sorted, non-overlapping, coalesced
+    /// runs: the prefix is untouched, runs intersecting the replaced region
+    /// split into their kept outsides (the replaced region itself is dropped),
+    /// and the suffix shifts by `delta` with one tight pass. Equal-value runs
+    /// made adjacent at the junction re-coalesce locally, preserving the
+    /// `colorRunsAreNormalized` invariant without rebuilding the array.
+    static func spliceEditIntoColorRuns(
+        _ runs: inout [HighlightColorRun],
+        editStart: Int,
+        editEnd: Int,
+        delta: Int
+    ) {
+        guard !runs.isEmpty else { return }
+        let firstAffected = firstIndex(in: runs, whereUpperBoundExceeds: editStart) { $0.range }
+        var firstSuffix = firstAffected
+        while firstSuffix < runs.count, runs[firstSuffix].range.location < editEnd {
+            firstSuffix += 1
+        }
+
+        if delta != 0, firstSuffix < runs.count {
+            runs.withUnsafeMutableBufferPointer { buffer in
+                var index = firstSuffix
+                while index < buffer.count {
+                    buffer[index].range.location += delta
+                    index += 1
+                }
+            }
+        }
+
+        var pieces: [HighlightColorRun] = []
+        pieces.reserveCapacity((firstSuffix - firstAffected) * 2)
+        var index = firstAffected
+        while index < firstSuffix {
+            let run = runs[index]
+            if run.range.location < editStart {
+                pieces.append(HighlightColorRun(
+                    range: NSRange(location: run.range.location, length: editStart - run.range.location),
+                    color: run.color
+                ))
+            }
+            if run.range.upperBound > editEnd {
+                pieces.append(HighlightColorRun(
+                    range: NSRange(location: editEnd + delta, length: run.range.upperBound - editEnd),
+                    color: run.color
+                ))
+            }
+            index += 1
+        }
+        if firstAffected < firstSuffix || !pieces.isEmpty {
+            runs.replaceSubrange(firstAffected..<firstSuffix, with: pieces)
+        }
+
+        // Junction coalesce: only the window around the splice can have gained
+        // equal-color adjacency.
+        var cursor = max(0, firstAffected - 1)
+        var windowEnd = min(runs.count, firstAffected + pieces.count + 1)
+        while cursor + 1 < windowEnd {
+            let previous = runs[cursor]
+            let next = runs[cursor + 1]
+            if previous.color.isEqual(next.color), previous.range.upperBound >= next.range.location {
+                let lowerBound = min(previous.range.location, next.range.location)
+                let upperBound = max(previous.range.upperBound, next.range.upperBound)
+                runs[cursor].range = NSRange(location: lowerBound, length: upperBound - lowerBound)
+                runs.remove(at: cursor + 1)
+                windowEnd -= 1
+            } else {
+                cursor += 1
+            }
+        }
+    }
+
+    static func spliceEditIntoFontRuns(
+        _ runs: inout [HighlightFontRun],
+        editStart: Int,
+        editEnd: Int,
+        delta: Int
+    ) {
+        guard !runs.isEmpty else { return }
+        let firstAffected = firstIndex(in: runs, whereUpperBoundExceeds: editStart) { $0.range }
+        var firstSuffix = firstAffected
+        while firstSuffix < runs.count, runs[firstSuffix].range.location < editEnd {
+            firstSuffix += 1
+        }
+
+        if delta != 0, firstSuffix < runs.count {
+            runs.withUnsafeMutableBufferPointer { buffer in
+                var index = firstSuffix
+                while index < buffer.count {
+                    buffer[index].range.location += delta
+                    index += 1
+                }
+            }
+        }
+
+        var pieces: [HighlightFontRun] = []
+        pieces.reserveCapacity((firstSuffix - firstAffected) * 2)
+        var index = firstAffected
+        while index < firstSuffix {
+            let run = runs[index]
+            if run.range.location < editStart {
+                pieces.append(HighlightFontRun(
+                    range: NSRange(location: run.range.location, length: editStart - run.range.location),
+                    font: run.font
+                ))
+            }
+            if run.range.upperBound > editEnd {
+                pieces.append(HighlightFontRun(
+                    range: NSRange(location: editEnd + delta, length: run.range.upperBound - editEnd),
+                    font: run.font
+                ))
+            }
+            index += 1
+        }
+        if firstAffected < firstSuffix || !pieces.isEmpty {
+            runs.replaceSubrange(firstAffected..<firstSuffix, with: pieces)
+        }
+
+        var cursor = max(0, firstAffected - 1)
+        var windowEnd = min(runs.count, firstAffected + pieces.count + 1)
+        while cursor + 1 < windowEnd {
+            let previous = runs[cursor]
+            let next = runs[cursor + 1]
+            if previous.font == next.font, previous.range.upperBound >= next.range.location {
+                let lowerBound = min(previous.range.location, next.range.location)
+                let upperBound = max(previous.range.upperBound, next.range.upperBound)
+                runs[cursor].range = NSRange(location: lowerBound, length: upperBound - lowerBound)
+                runs.remove(at: cursor + 1)
+                windowEnd -= 1
+            } else {
+                cursor += 1
+            }
+        }
+    }
+
+    /// Same splice for plain coalesced ranges (`rangesAreNormalized`: strictly
+    /// ascending, non-touching — touching neighbors merge unconditionally).
+    static func spliceEditIntoRanges(
+        _ ranges: inout [NSRange],
+        editStart: Int,
+        editEnd: Int,
+        delta: Int
+    ) {
+        guard !ranges.isEmpty else { return }
+        let firstAffected = firstIndex(in: ranges, whereUpperBoundExceeds: editStart) { $0 }
+        var firstSuffix = firstAffected
+        while firstSuffix < ranges.count, ranges[firstSuffix].location < editEnd {
+            firstSuffix += 1
+        }
+
+        if delta != 0, firstSuffix < ranges.count {
+            ranges.withUnsafeMutableBufferPointer { buffer in
+                var index = firstSuffix
+                while index < buffer.count {
+                    buffer[index].location += delta
+                    index += 1
+                }
+            }
+        }
+
+        var pieces: [NSRange] = []
+        pieces.reserveCapacity((firstSuffix - firstAffected) * 2)
+        var index = firstAffected
+        while index < firstSuffix {
+            let range = ranges[index]
+            if range.location < editStart {
+                pieces.append(NSRange(location: range.location, length: editStart - range.location))
+            }
+            if range.upperBound > editEnd {
+                pieces.append(NSRange(location: editEnd + delta, length: range.upperBound - editEnd))
+            }
+            index += 1
+        }
+        if firstAffected < firstSuffix || !pieces.isEmpty {
+            ranges.replaceSubrange(firstAffected..<firstSuffix, with: pieces)
+        }
+
+        var cursor = max(0, firstAffected - 1)
+        var windowEnd = min(ranges.count, firstAffected + pieces.count + 1)
+        while cursor + 1 < windowEnd {
+            if ranges[cursor].upperBound >= ranges[cursor + 1].location {
+                let lowerBound = min(ranges[cursor].location, ranges[cursor + 1].location)
+                let upperBound = max(ranges[cursor].upperBound, ranges[cursor + 1].upperBound)
+                ranges[cursor] = NSRange(location: lowerBound, length: upperBound - lowerBound)
+                ranges.remove(at: cursor + 1)
+                windowEnd -= 1
+            } else {
+                cursor += 1
+            }
+        }
+    }
+
+    /// Binary search: first element whose range's upperBound exceeds `offset`
+    /// (sorted + non-overlapping ⇒ upperBound is monotonic).
+    private static func firstIndex<T>(
+        in items: [T],
+        whereUpperBoundExceeds offset: Int,
+        _ range: (T) -> NSRange
+    ) -> Int {
+        var lower = 0
+        var upper = items.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if range(items[middle]).upperBound <= offset {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        return lower
     }
 
     static func coalescedColorRuns(
