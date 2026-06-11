@@ -4351,6 +4351,60 @@ struct SyntaxHighlighterEngineTests {
         #expect(highlightTokensMatch(settled, fresh))
     }
 
+    @Test("SyntaxHighlighterEngine recovers from stale mutations beyond the edit neighborhood")
+    func highlighterRecoversFromStaleMutationsBeyondEditNeighborhood() async throws {
+        // The session is silently behind by a length-neutral change far from the
+        // reported mutation. Window-probe validation accepted this (total length
+        // and the edit's neighborhood both match) and committed a drifted base;
+        // exact splice validation must take the diff-recovery path instead.
+        let source = "let alpha = 1\nlet beta = 2\nlet gamma = 3\nlet delta = 4\nlet omega = 9\n"
+        let engine = SyntaxHighlighterEngine()
+        _ = await engine.reset(source: source, language: .swift, revision: 0)
+
+        let drifted = source.replacingOccurrences(of: "beta", with: "zeta")
+        let caret = (drifted as NSString).length
+        let mutation = SyntaxHighlightMutation(location: caret, length: 0, replacement: "x")
+        let next = drifted + "x"
+
+        let result = await engine.update(
+            source: next,
+            language: .swift,
+            mutation: mutation,
+            revision: 1
+        )
+        #expect(result.source == next)
+        let settled = await engine.currentTokensForTesting()
+        let fresh = await SyntaxHighlighterEngine().render(source: next, language: .swift)
+        #expect(highlightTokensMatch(settled, fresh))
+    }
+
+    @Test("SyntaxHighlighterEngine progressive reset never labels partial paints as full snapshots")
+    func highlighterProgressiveResetEmitsPartialPaintsAsReplacements() async throws {
+        let unit = try referenceSampleText(named: "Reference.swift")
+        let copies = max(1, 60_000 / max(1, unit.utf16.count) + 1)
+        let source = String(repeating: unit, count: copies)
+
+        HighlightSession.progressiveResetThresholdOverrideForTesting = 1024
+        defer { HighlightSession.progressiveResetThresholdOverrideForTesting = nil }
+
+        let engine = SyntaxHighlighterEngine()
+        var results: [SyntaxHighlightResult] = []
+        let phases = await engine.resetPhases(source: source, language: .swift, revision: 0)
+        for await result in phases {
+            results.append(result)
+        }
+
+        let final = try #require(results.last)
+        #expect(final.tokenPayload == .fullSnapshot)
+        // Every earlier emission is a partial paint and must say so: a consumer
+        // trusting .fullSnapshot as the revision's complete token list would
+        // otherwise replace its cache with one viewport chunk.
+        for partial in results.dropLast() {
+            #expect(partial.tokenPayload == .replacement)
+        }
+        #expect(results.count > 2)
+    }
+
     @Test(
         "SyntaxHighlighterEngine progressive reset matches the monolithic reset",
         arguments: [SyntaxLanguage.swift, .objectiveC]

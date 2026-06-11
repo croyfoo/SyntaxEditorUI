@@ -95,11 +95,13 @@ enum SyntacticPatcher {
         case mismatch
     }
 
-    /// Cheap mutation validation replacing the legacy per-keystroke O(N)
-    /// whole-document compares: length consistency, the replacement substring
-    /// at its claimed location, and 16-unit windows on both sides of the edit.
-    /// Mismatches (stale/coalesced mutations from the UI) fall back to a full
-    /// diff — same recovery behavior, paid only when actually needed.
+    /// Exact mutation validation: `previous` spliced with the mutation must
+    /// equal `next`. Boundary-window probes were tried here and are not sound —
+    /// a session that silently missed an earlier length-neutral edit farther
+    /// than the window still passed, and the parser buffer, line table, and
+    /// token planes then drifted from the document with no recovery signal.
+    /// The splice costs one buffer copy and a memcmp-class compare (~0.1ms at
+    /// 478KB), and mismatches keep falling back to the full-diff recovery.
     static func validateMutation(
         _ mutation: SyntaxHighlightMutation,
         previousSource: String,
@@ -115,31 +117,11 @@ enum SyntacticPatcher {
         else {
             return .mismatch
         }
-        if replacementLength > 0 {
-            guard next.substring(
-                with: NSRange(location: mutation.location, length: replacementLength)
-            ) == mutation.replacement else {
-                return .mismatch
-            }
-        }
-        let window = 16
-        let prefixStart = max(0, mutation.location - window)
-        if mutation.location > prefixStart {
-            let prefixRange = NSRange(location: prefixStart, length: mutation.location - prefixStart)
-            guard previous.substring(with: prefixRange) == next.substring(with: prefixRange) else {
-                return .mismatch
-            }
-        }
-        let oldEnd = mutation.location + mutation.length
-        let newEnd = mutation.location + replacementLength
-        let suffixLength = min(window, previous.length - oldEnd)
-        if suffixLength > 0 {
-            guard previous.substring(with: NSRange(location: oldEnd, length: suffixLength))
-                == next.substring(with: NSRange(location: newEnd, length: suffixLength)) else {
-                return .mismatch
-            }
-        }
-        return .valid
+        let expected = previous.replacingCharacters(
+            in: NSRange(location: mutation.location, length: mutation.length),
+            with: mutation.replacement
+        )
+        return next.isEqual(to: expected) ? .valid : .mismatch
     }
 
     static func union(_ lhs: NSRange, _ rhs: NSRange) -> NSRange {

@@ -377,12 +377,18 @@ final class HighlightSession {
             _ = planes.replaceTokens(in: target, with: tokens, plane: .base, lineTable: lineTable)
             if !emittedFirstPaint {
                 emittedFirstPaint = true
+                // .replacement, not .fullSnapshot: the payload contract says a
+                // full snapshot carries the revision's COMPLETE token list, and
+                // consumers may replace caches wholesale on that promise. The
+                // viewport chunk is a partial paint; reset-origin streams may
+                // apply replacements onto the fresh baseline (the view gates on
+                // the request's origin).
                 emitFastPassIfNeeded(
                     tokens: planes.tokens(in: target, lineTable: lineTable),
                     source: source,
                     revision: revision,
                     refreshRange: target,
-                    tokenPayload: .fullSnapshot,
+                    tokenPayload: .replacement,
                     emitFastPass: emitFastPass
                 )
             } else if let emitFastPass, !syntacticDebt.isEmpty {

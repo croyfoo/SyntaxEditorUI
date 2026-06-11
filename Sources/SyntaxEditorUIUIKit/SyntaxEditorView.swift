@@ -2075,7 +2075,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     ) async {
         guard !Task.isCancelled else { return }
         guard model.revision == result.revision else { return }
-        guard canApplyHighlightTokenPayload(for: result) else {
+        guard canApplyHighlightTokenPayload(for: result, mutation: mutation) else {
             recordSkippedHighlightPhaseForTesting(result.phase, revision: result.revision)
             scheduleHighlight(source: result.source, language: result.language, revision: result.revision)
             return
@@ -2149,8 +2149,17 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return result.refreshRange
     }
 
-    private func canApplyHighlightTokenPayload(for result: SyntaxHighlightResult) -> Bool {
+    private func canApplyHighlightTokenPayload(
+        for result: SyntaxHighlightResult,
+        mutation: SyntaxHighlightMutation?
+    ) -> Bool {
         guard result.tokenPayload == .replacement else {
+            return true
+        }
+        // Reset-origin streams paint progressively: the reset itself defines
+        // the (initially bare) baseline these replacements apply onto, so no
+        // prior materialization is required.
+        if mutation == nil {
             return true
         }
         guard materializedHighlightLanguage == result.language,
