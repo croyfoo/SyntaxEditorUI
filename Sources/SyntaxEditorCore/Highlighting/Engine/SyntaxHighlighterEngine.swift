@@ -182,6 +182,14 @@ final class HighlightSession {
     /// survives cancellation, so convergence is guaranteed by whichever update
     /// drains last. Stale overlays stay visible until their chunk lands.
     private var semanticDebt = EditedRangeSet()
+    /// Single-flight handle for the off-actor monolithic merge (passes without
+    /// chunk support). The actor never blocks behind the merge: drains await
+    /// the in-flight task (suspended, actor free) and re-validate against
+    /// `editGeneration` before committing.
+    private var monolithicMergeTask: Task<(tokens: [SyntaxHighlightToken], isCancelled: Bool), Never>?
+    /// Bumped at every committed edit and reset; a merge started under an older
+    /// generation is stale and its result is discarded.
+    private var editGeneration = 0
     private static let semanticDrainChunkBudget = 10_000
     /// Documents above this UTF-16 length open progressively (viewport chunk
     /// first); below it the monolithic reset keeps the historical two-phase
@@ -223,6 +231,9 @@ final class HighlightSession {
         semanticPass?.invalidate()
         refreshDebt.clear()
         semanticDebt.clear()
+        editGeneration += 1
+        monolithicMergeTask?.cancel()
+        monolithicMergeTask = nil
 
         guard !layeredSource.isEmpty else {
             layer = nil
@@ -282,38 +293,26 @@ final class HighlightSession {
             }
 
             if let semanticPass {
-                if semanticPass.supportsChunkedFullPass {
-                    // Chunked initial pass: same outcome as the monolithic merge,
-                    // but the actor stays responsive between chunks. A cancelled
-                    // reset is never installed, so leftover debt is irrelevant.
-                    var prepared = semanticPass.prepareFullPass(
+                // Initial semantic pass through the drain (chunked for passes
+                // that support it, one yielded monolithic merge otherwise): same
+                // outcome as running it inline, but the actor stays responsive.
+                // A cancelled reset is never installed, so leftover debt is
+                // irrelevant.
+                var prepared = !semanticPass.supportsChunkedFullPass
+                    || semanticPass.prepareFullPass(
                         source: layeredSource,
                         rootNode: semanticRootNodeSnapshot()
                     )
-                    if prepared {
-                        semanticDebt.insert(fullRange)
-                        _ = await drainSemanticDebt(revision: revision, emit: emitFastPass)
-                        prepared = semanticDebt.isEmpty
-                    }
-                    guard prepared, !Task.isCancelled else {
-                        layer = nil
-                        self.semanticPass?.invalidate()
-                        planes.clear(lineCount: lineTable.lineCount)
-                        return nil
-                    }
-                } else {
-                    let outcome = semanticPass.fullMerge(
-                        tokens: planes.tokens(lineTable: lineTable),
-                        source: layeredSource,
-                        rootNode: semanticRootNodeSnapshot()
-                    )
-                    guard !outcome.isCancelled, !Task.isCancelled else {
-                        layer = nil
-                        self.semanticPass?.invalidate()
-                        planes.clear(lineCount: lineTable.lineCount)
-                        return nil
-                    }
-                    planes.reset(tokens: outcome.tokens, lineTable: lineTable)
+                if prepared {
+                    semanticDebt.insert(fullRange)
+                    _ = await drainSemanticDebt(revision: revision, emit: emitFastPass)
+                    prepared = semanticDebt.isEmpty
+                }
+                guard prepared, !Task.isCancelled else {
+                    layer = nil
+                    self.semanticPass?.invalidate()
+                    planes.clear(lineCount: lineTable.lineCount)
+                    return nil
                 }
             } else if Task.isCancelled {
                 layer = nil
@@ -529,6 +528,10 @@ final class HighlightSession {
             newLength: layeredMutation.replacement.utf16.count,
             documentLength: nextLength
         )
+        // Any in-flight off-actor merge is now stale; cancel it so its polls
+        // abort the wasted work early.
+        editGeneration += 1
+        monolithicMergeTask?.cancel()
         // ---- End critical section. ----
 
         // The edited extent itself always refreshes (replacement + one unit so a
@@ -637,46 +640,30 @@ final class HighlightSession {
                 }
             }
             if runConservative {
-                if semanticPass.supportsChunkedFullPass {
-                    // Convert the document-sized pass into drainable debt: stale
-                    // overlays stay visible until their chunk lands, and a
-                    // cancelled drain leaves the remainder to the next update.
-                    if semanticPass.prepareFullPass(source: nextLayeredSource, rootNode: rootNode) {
-                        semanticDebt.insert(NSRange(location: 0, length: nextLength))
-                    } else {
-                        // Cancelled mid-build; the base patch below still needs
-                        // redelivery because this result is about to be dropped.
-                        refreshDebt.insert(resultRefresh)
-                    }
+                // Convert the document-sized pass into drainable debt: stale
+                // overlays stay visible until the drain lands, and a cancelled
+                // drain leaves the remainder to the next update.
+                if !semanticPass.supportsChunkedFullPass
+                    || semanticPass.prepareFullPass(source: nextLayeredSource, rootNode: rootNode) {
+                    semanticDebt.insert(NSRange(location: 0, length: nextLength))
                 } else {
-                    // Passes receive base-plane tokens only and re-derive every
-                    // overlay: feeding stale overlays back in tripped the ObjC
-                    // provider's preservation heuristics into keeping shifted
-                    // leftovers.
-                    let merged = semanticPass.fullMerge(
-                        tokens: planes.tokens(lineTable: lineTable).filter { !$0.isSemanticOverlay },
-                        source: nextLayeredSource,
-                        rootNode: rootNode
-                    )
-                    if merged.isCancelled || Task.isCancelled {
-                        semanticPass.invalidate()
-                        refreshDebt.insert(resultRefresh)
-                    } else {
-                        let fullRange = NSRange(location: 0, length: nextLength)
-                        if let semanticChanged = planes.replaceTokens(
-                            in: fullRange,
-                            with: merged.tokens,
-                            plane: .both,
-                            lineTable: lineTable
-                        ) {
-                            resultRefresh = SyntacticPatcher.union(resultRefresh, semanticChanged)
-                        }
-                    }
+                    // Cancelled mid-build; the base patch below still needs
+                    // redelivery because this result is about to be dropped.
+                    refreshDebt.insert(resultRefresh)
                 }
             }
         }
-        if let drained = await drainSemanticDebt(revision: revision, emit: emitFastPass) {
+        if let drained = await drainSemanticDebt(
+            revision: revision,
+            emit: emitFastPass,
+            priorityHint: layeredMutation.location
+        ) {
             resultRefresh = SyntacticPatcher.union(resultRefresh, drained)
+        }
+        if Task.isCancelled {
+            // The phase stream drops a cancelled task's result: keep the whole
+            // repaint duty (base patch included) for the successor.
+            refreshDebt.insert(resultRefresh)
         }
         resultRefresh = SyntaxEditorRangeUtilities.clampedRange(resultRefresh, utf16Length: nextSource.utf16.count)
 
@@ -711,9 +698,67 @@ final class HighlightSession {
     private func drainSemanticDebt(
         revision: Int,
         emit: ((SyntaxHighlightResult) -> Void)?,
+        priorityHint: Int? = nil,
         isolation: isolated (any Actor)? = #isolation
     ) async -> NSRange? {
-        guard let semanticPass, semanticPass.supportsChunkedFullPass else { return nil }
+        guard let semanticPass, !semanticDebt.isEmpty else { return nil }
+        // Update-initiated drains recolor outward from the edit (the text the
+        // user is looking at); opens spread from the viewport.
+        let chunkHint = priorityHint ?? visibleRangeHint?.location
+
+        // Passes without chunk support (ObjC's position-keyed classification,
+        // the CSS scanners) run their document pass OFF the actor: the drain
+        // suspends on the detached merge (actor free for the next keystroke),
+        // re-validates the edit generation on resume, and commits or retries.
+        // Single flight — interleaved drains await the same in-flight merge,
+        // so the pass state has exactly one writer at a time.
+        guard semanticPass.supportsChunkedFullPass else {
+            while !semanticDebt.isEmpty {
+                if Task.isCancelled {
+                    return nil
+                }
+                if let inFlight = monolithicMergeTask {
+                    _ = await inFlight.value
+                    continue
+                }
+                let startGeneration = editGeneration
+                let fullRange = NSRange(location: 0, length: (layeredSource as NSString).length)
+                // Passes receive base-plane tokens only and re-derive every
+                // overlay: feeding stale overlays back in tripped the ObjC
+                // provider's preservation heuristics into keeping shifted
+                // leftovers.
+                let inputTokens = planes.tokens(lineTable: lineTable).filter { !$0.isSemanticOverlay }
+                let mergeSource = layeredSource
+                // Safety: single flight gives the pass one writer at a time,
+                // and the root node comes from a private tree snapshot copy.
+                nonisolated(unsafe) let pass = semanticPass
+                nonisolated(unsafe) let rootNode = semanticRootNodeSnapshot()
+                let mergeTask = Task.detached(priority: .utility) {
+                    pass.fullMerge(tokens: inputTokens, source: mergeSource, rootNode: rootNode)
+                }
+                monolithicMergeTask = mergeTask
+                let merged = await mergeTask.value
+                monolithicMergeTask = nil
+                guard startGeneration == editGeneration else {
+                    // An edit landed mid-merge (it also cancelled the merge);
+                    // the result is stale — go around with the new text.
+                    continue
+                }
+                if merged.isCancelled || Task.isCancelled {
+                    semanticPass.invalidate()
+                    return nil
+                }
+                semanticDebt.clear()
+                return planes.replaceTokens(
+                    in: fullRange,
+                    with: merged.tokens,
+                    plane: .both,
+                    lineTable: lineTable
+                )
+            }
+            return nil
+        }
+
         var refresh: NSRange?
         while !semanticDebt.isEmpty {
             await Task.yield()
@@ -724,7 +769,7 @@ final class HighlightSession {
             let sourceLength = (layeredSource as NSString).length
             guard sourceLength > 0,
                   let chunk = semanticDebt.popChunk(
-                      near: visibleRangeHint?.location,
+                      near: chunkHint,
                       budget: Self.semanticDrainChunkBudget
                   )
             else {

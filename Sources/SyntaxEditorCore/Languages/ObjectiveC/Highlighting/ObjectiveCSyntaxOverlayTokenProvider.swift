@@ -650,12 +650,22 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             )
         }
 
-        let overlayTokens = semanticTokens(
+        // The per-token classification scan dominates the document pass; nil
+        // means it observed cancellation mid-scan — the engine actor must be
+        // released quickly once a newer keystroke cancels this merge.
+        guard let identifierOverlayTokens = semanticTokens(
             from: preparation.baseTokensForIndex,
             source: nsSource,
             index: semanticIndex.fileSymbols,
             targetRange: targetRange
-        )
+        ) else {
+            return ObjectiveCSemanticOverlayResult(
+                tokens: tokens,
+                refreshRangeOverride: nil,
+                isCancelled: true
+            )
+        }
+        let overlayTokens = identifierOverlayTokens
             + objectiveCMacroTokens(
                 in: nsSource,
                 nonCodeRanges: preparation.nonCodeRangeIndex.ranges,
@@ -696,16 +706,23 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         )
     }
 
+    /// Returns nil when cancellation was observed mid-scan (the caller reports
+    /// an isCancelled result; partial output is never committed).
     private static func semanticTokens(
         from tokens: [SyntaxHighlightToken],
         source: NSString,
         index: ObjectiveCFileSymbolIndex,
         targetRange: NSRange?
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxHighlightToken]? {
         var overlayTokens: [SyntaxHighlightToken] = []
         overlayTokens.reserveCapacity(tokens.count / 4)
 
+        var cancellationBudget = 0
         for token in tokens {
+            cancellationBudget += 1
+            if cancellationBudget & 0x3FF == 0, Task.isCancelled {
+                return nil
+            }
             guard token.language == .objectiveC || token.language == nil,
                   token.range.location >= 0,
                   token.range.length > 0,
@@ -716,7 +733,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
                 continue
             }
 
-            let text = source.substring(with: token.range)
+            let text = source.nativeSubstring(with: token.range)
 
             if token.syntaxID == .keyword, text == "Class" {
                 overlayTokens.append(canonicalToken(range: token.range, syntaxID: .plain))
