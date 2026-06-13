@@ -8,7 +8,7 @@ import UIKit
 final class MiniSplitViewController: UISplitViewController {
     private let model: MiniEditorSession
     private let presetListViewController: MiniPresetListViewController
-    private let modelObservations = ObservationScope()
+    private var modelObservation: PortableObservationTracking.Token?
     private var editorViewController: SyntaxEditorViewController?
     private var detailViewController: MiniEditorContainerViewController?
 
@@ -30,7 +30,7 @@ final class MiniSplitViewController: UISplitViewController {
     }
 
     isolated deinit {
-        modelObservations.cancelAll()
+        modelObservation?.cancel()
     }
 
     @available(*, unavailable)
@@ -39,16 +39,20 @@ final class MiniSplitViewController: UISplitViewController {
     }
 
     private func bindModel() {
-        modelObservations.observe(model) { [weak self] _, _ in
-            self?.renderDetail()
+        modelObservation?.cancel()
+        modelObservation = withPortableContinuousObservation { [weak self] _ in
+            guard let self else { return }
+
+            let editorModel = model.editorModel
+            let title = model.currentPreset.title
+            renderDetail(editorModel: editorModel, title: title)
         }
     }
 
-    private func renderDetail() {
-        let editorModel = model.editorModel
+    private func renderDetail(editorModel: SyntaxEditorModel, title: String) {
         if let editorViewController {
             editorViewController.update(model: editorModel)
-            detailViewController?.title = model.currentPreset.title
+            detailViewController?.title = title
             return
         }
 
@@ -58,7 +62,7 @@ final class MiniSplitViewController: UISplitViewController {
         let detailViewController = MiniEditorContainerViewController(
             editorViewController: editorViewController
         )
-        detailViewController.title = model.currentPreset.title
+        detailViewController.title = title
         detailViewController.navigationItem.additionalOverflowItems = makeOverflowItems()
 
         let navigationController = UINavigationController(rootViewController: detailViewController)
@@ -150,7 +154,7 @@ import AppKit
 final class MiniSplitViewController: NSSplitViewController {
     private let model: MiniEditorSession
     private let presetListViewController: MiniPresetListViewController
-    private let modelObservations = ObservationScope()
+    private var modelObservation: PortableObservationTracking.Token?
     private var editorViewController: SyntaxEditorViewController?
     private var detailSplitViewItem: NSSplitViewItem?
 
@@ -162,7 +166,7 @@ final class MiniSplitViewController: NSSplitViewController {
     }
 
     isolated deinit {
-        modelObservations.cancelAll()
+        modelObservation?.cancel()
     }
 
     @available(*, unavailable)
@@ -189,16 +193,20 @@ final class MiniSplitViewController: NSSplitViewController {
     }
 
     private func bindModel() {
-        modelObservations.observe(model) { [weak self] _, _ in
-            self?.renderDetail()
+        modelObservation?.cancel()
+        modelObservation = withPortableContinuousObservation { [weak self] _ in
+            guard let self else { return }
+
+            let editorModel = model.editorModel
+            let title = model.currentPreset.title
+            renderDetail(editorModel: editorModel, title: title)
         }
     }
 
-    private func renderDetail() {
-        let editorModel = model.editorModel
+    private func renderDetail(editorModel: SyntaxEditorModel, title: String) {
         if let editorViewController {
             editorViewController.update(model: editorModel)
-            editorViewController.title = model.currentPreset.title
+            editorViewController.title = title
             return
         }
 
@@ -209,7 +217,7 @@ final class MiniSplitViewController: NSSplitViewController {
         let editorViewController = SyntaxEditorViewController(
             model: editorModel
         )
-        editorViewController.title = model.currentPreset.title
+        editorViewController.title = title
         editorViewController.scrollView.automaticallyAdjustsContentInsets = true
 
         let detailItem = NSSplitViewItem(viewController: editorViewController)

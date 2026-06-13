@@ -6,7 +6,7 @@ import UIKit
 @MainActor
 final class MiniPresetListViewController: UICollectionViewController {
     private let model: MiniEditorSession
-    private let observations = ObservationScope()
+    private var observation: PortableObservationTracking.Token?
     private var dataSource: UICollectionViewDiffableDataSource<String, String>!
 
     init(model: MiniEditorSession) {
@@ -15,7 +15,7 @@ final class MiniPresetListViewController: UICollectionViewController {
     }
 
     isolated deinit {
-        observations.cancelAll()
+        observation?.cancel()
     }
 
     @available(*, unavailable)
@@ -43,8 +43,11 @@ final class MiniPresetListViewController: UICollectionViewController {
     }
 
     private func bindModel() {
-        observations.observe(model) { [weak self] _, _ in
-            self?.renderSelection()
+        observation?.cancel()
+        observation = withPortableContinuousObservation { [weak self] _ in
+            guard let self else { return }
+
+            renderSelection(selectedPresetID: model.selectedPresetID)
         }
     }
 
@@ -83,12 +86,12 @@ final class MiniPresetListViewController: UICollectionViewController {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
-    private func renderSelection() {
+    private func renderSelection(selectedPresetID: MiniPreviewPreset.ID) {
         collectionView.indexPathsForSelectedItems?.forEach {
             collectionView.deselectItem(at: $0, animated: false)
         }
 
-        guard let indexPath = dataSource.indexPath(for: model.selectedPresetID.rawValue) else {
+        guard let indexPath = dataSource.indexPath(for: selectedPresetID.rawValue) else {
             return
         }
 
@@ -113,7 +116,7 @@ import AppKit
 @MainActor
 final class MiniPresetListViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let model: MiniEditorSession
-    private let observations = ObservationScope()
+    private var observation: PortableObservationTracking.Token?
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
 
@@ -124,7 +127,7 @@ final class MiniPresetListViewController: NSViewController, NSTableViewDataSourc
     }
 
     isolated deinit {
-        observations.cancelAll()
+        observation?.cancel()
     }
 
     @available(*, unavailable)
@@ -206,13 +209,16 @@ final class MiniPresetListViewController: NSViewController, NSTableViewDataSourc
     }
 
     private func bindModel() {
-        observations.observe(model) { [weak self] _, _ in
-            self?.renderSelection()
+        observation?.cancel()
+        observation = withPortableContinuousObservation { [weak self] _ in
+            guard let self else { return }
+
+            renderSelection(selectedPresetID: model.selectedPresetID)
         }
     }
 
-    private func renderSelection() {
-        guard let selectedIndex = MiniPreviewPreset.all.firstIndex(where: { $0.id == model.selectedPresetID }) else {
+    private func renderSelection(selectedPresetID: MiniPreviewPreset.ID) {
+        guard let selectedIndex = MiniPreviewPreset.all.firstIndex(where: { $0.id == selectedPresetID }) else {
             tableView.deselectAll(nil)
             return
         }

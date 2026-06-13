@@ -19,6 +19,12 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 - iOS accessory controls for undo, redo, and keyboard dismissal.
 - Programmatic control over text, language, editability, line wrapping, theme, font size, and background drawing.
 
+## Requirements
+
+- Swift 6.3+
+- iOS 18+
+- macOS 15+
+
 ## Shortcuts
 
 - `Tab`: Insert spaces at the caret; indent selected lines in syntax-highlighted language modes

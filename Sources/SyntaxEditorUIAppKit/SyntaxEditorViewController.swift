@@ -228,9 +228,10 @@ public final class SyntaxEditorView: NSScrollView {
     private var lastAppliedThemeAppearance: SyntaxEditorThemeAppearance?
     private var lastAppliedFontSizeDelta: Int
     private var lastAppliedDocumentRevision = 0
-    private let modelObservations = ObservationScope()
-    var modelDeliveryForTesting: ObservationDelivery?
-    var modelConfigurationDeliveryForTesting: ObservationDelivery?
+    private var modelObservation: PortableObservationTracking.Token?
+    private var modelConfigurationObservation: PortableObservationTracking.Token?
+    var modelDeliveryForTesting: PortableObservationTracking.Token? { modelObservation }
+    var modelConfigurationDeliveryForTesting: PortableObservationTracking.Token? { modelConfigurationObservation }
     private var skippedHighlightPhaseRecordsForTesting: [HighlightPhaseRecord] = []
     private var skippedHighlightPhaseWaitersForTesting: [HighlightPhaseWaiter] = []
     private var nextHighlightPhaseWaiterID = 0
@@ -327,7 +328,7 @@ public final class SyntaxEditorView: NSScrollView {
     public func update(model nextModel: SyntaxEditorModel) {
         guard model !== nextModel else { return }
 
-        modelObservations.cancelAll()
+        cancelModelObservations()
         activeUndoManager?.removeAllActions()
         commandEngine.invalidateTransientState()
         clearHighlightCache()
@@ -456,9 +457,9 @@ public final class SyntaxEditorView: NSScrollView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    deinit {
+    isolated deinit {
         highlightTask?.cancel()
-        modelObservations.cancelAll()
+        cancelModelObservations()
     }
 
     public override func layout() {
@@ -825,40 +826,50 @@ public final class SyntaxEditorView: NSScrollView {
         schedulesInitialHighlight: Bool = true,
         skipsInitialModelDelivery: Bool = false
     ) {
-        modelConfigurationDeliveryForTesting = modelObservations.observe(model, tracking: { model in
-            _ = model.language
-            _ = model.isEditable
-            _ = model.lineWrappingEnabled
-            _ = model.theme
-            _ = model.drawsBackground
-            _ = model.fontSizeDelta
-        }) { [weak self] event, model in
+        let model = model
+        modelConfigurationObservation = withPortableContinuousObservation { [weak self, model] event in
             guard let self else { return }
+
+            let language = model.language
+            let isEditable = model.isEditable
+            let lineWrappingEnabled = model.lineWrappingEnabled
+            let theme = model.theme
+            let drawsBackground = model.drawsBackground
+            let fontSizeDelta = model.fontSizeDelta
+
             self.applyObservedConfiguration(
-                language: model.language,
-                isEditable: model.isEditable,
-                lineWrappingEnabled: model.lineWrappingEnabled,
-                theme: model.theme,
-                drawsBackground: model.drawsBackground,
-                fontSizeDelta: model.fontSizeDelta,
+                language: language,
+                isEditable: isEditable,
+                lineWrappingEnabled: lineWrappingEnabled,
+                theme: theme,
+                drawsBackground: drawsBackground,
+                fontSizeDelta: fontSizeDelta,
                 forceLanguageRefresh: event.kind == .initial,
                 schedulesHighlight: event.kind != .initial || schedulesInitialHighlight
             )
         }
 
-        modelDeliveryForTesting = modelObservations.observe(model, tracking: { model in
-            _ = model.text
-            _ = model.revision
-            _ = model.selectedRange
-        }) { [weak self] event, model in
+        modelObservation = withPortableContinuousObservation { [weak self, model] event in
             guard let self else { return }
+
+            _ = model.text
+            let revision = model.revision
+            let selectedRange = model.selectedRange
+
             guard !(skipsInitialModelDelivery && event.kind == .initial) else { return }
             self.applyObservedModelChange(
                 forceTextUpdate: event.kind == .initial,
-                observedRevision: model.revision
+                observedRevision: revision
             )
-            self.applyObservedSelection(model.selectedRange)
+            self.applyObservedSelection(selectedRange)
         }
+    }
+
+    private func cancelModelObservations() {
+        modelConfigurationObservation?.cancel()
+        modelConfigurationObservation = nil
+        modelObservation?.cancel()
+        modelObservation = nil
     }
 
     private func synchronizeReboundModel() {
@@ -978,20 +989,25 @@ public final class SyntaxEditorView: NSScrollView {
                 to: theme,
                 nextAppearance: appearance,
                 nextFontSizeDelta: fontSizeDelta,
-                language: language
+                language: language,
+                revision: lastAppliedDocumentRevision
             )
         } else {
             hasCachedSyntaxFontRunChanges = false
         }
         if themeChanged {
-            applyBaseForegroundColorChange(from: previousTheme, to: theme)
+            applyBaseForegroundColorChange(from: previousTheme, to: theme, language: language)
         }
         lastAppliedTheme = theme
         lastAppliedThemeAppearance = appearance
         lastAppliedFontSizeDelta = fontSizeDelta
         updateTextViewFontAndTypingAttributes()
         if baseFontChanged || hasCachedSyntaxFontRunChanges {
-            applyResolvedFontsToExistingText()
+            applyResolvedFontsToExistingText(
+                source: textView.string,
+                language: language,
+                revision: lastAppliedDocumentRevision
+            )
         }
         updateEditorBackgroundColor(drawsBackground: drawsBackground)
 
@@ -1008,20 +1024,26 @@ public final class SyntaxEditorView: NSScrollView {
             scheduleHighlight(
                 source: textView.string,
                 language: language,
-                revision: model.revision,
+                revision: lastAppliedDocumentRevision,
                 refreshStartUTF16: 0
             )
         } else if (themeChanged || fontSizeDeltaChanged) && schedulesHighlight {
-            reapplyCachedHighlight()
+            reapplyCachedHighlight(
+                source: textView.string,
+                language: language,
+                revision: lastAppliedDocumentRevision
+            )
         }
     }
 
     private func applyBaseForegroundColorChange(
         from _: SyntaxEditorTheme?,
-        to theme: SyntaxEditorTheme
+        to theme: SyntaxEditorTheme,
+        language: SyntaxLanguage? = nil
     ) {
+        let language = language ?? model.language
         let nextBaseForeground = theme
-            .resolved(for: model.language, appearance: currentThemeAppearance)
+            .resolved(for: language, appearance: currentThemeAppearance)
             .baseForeground
         textSystem.styleStore.updateBaseForeground(nextBaseForeground, textLength: textStorage.length)
         let fullRange = NSRange(location: 0, length: textStorage.length)
@@ -1550,25 +1572,32 @@ public final class SyntaxEditorView: NSScrollView {
         return materializedHighlightRevision <= result.revision
     }
 
-    private func reapplyCachedHighlight() {
-        if hasScheduledFullResetHighlight(language: model.language, revision: model.revision) {
+    private func reapplyCachedHighlight(
+        source: String? = nil,
+        language: SyntaxLanguage? = nil,
+        revision: Int? = nil
+    ) {
+        let source = source ?? textView.string
+        let language = language ?? model.language
+        let revision = revision ?? model.revision
+
+        if hasScheduledFullResetHighlight(language: language, revision: revision) {
             return
         }
-        let source = textView.string
         guard hasReusableRecordedHighlightSnapshot(
             source: source,
-            language: model.language,
-            revision: model.revision
+            language: language,
+            revision: revision
         ) else {
-            scheduleHighlight(source: source, language: model.language, revision: model.revision)
+            scheduleHighlight(source: source, language: language, revision: revision)
             return
         }
 
         applyHighlight(
             lastHighlightTokens,
-            expectedRevision: model.revision,
+            expectedRevision: revision,
             source: source,
-            language: model.language,
+            language: language,
             refreshRange: NSRange(location: 0, length: source.utf16.count),
             mutation: nil
         )
@@ -1639,6 +1668,18 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func applyResolvedFontsToExistingText() {
+        applyResolvedFontsToExistingText(
+            source: textView.string,
+            language: model.language,
+            revision: model.revision
+        )
+    }
+
+    private func applyResolvedFontsToExistingText(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) {
         let textRange = NSRange(location: 0, length: textStorage.length)
         let base = baseAttributes()
         guard textRange.length > 0,
@@ -1653,9 +1694,9 @@ public final class SyntaxEditorView: NSScrollView {
 
         var didRecomputeSyntaxFontRuns = false
         if hasReusableRecordedHighlightSnapshot(
-            source: textView.string,
-            language: model.language,
-            revision: model.revision
+            source: source,
+            language: language,
+            revision: revision
         ),
            let baseForeground = base[.foregroundColor] as? NSColor {
             var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: base)
@@ -1669,8 +1710,8 @@ public final class SyntaxEditorView: NSScrollView {
             textSystem.styleStore.commitSnapshot(
                 runSet: runSet,
                 range: textRange,
-                revision: model.revision,
-                language: model.language,
+                revision: revision,
+                language: language,
                 textLength: textStorage.length,
                 baseForeground: baseForeground,
                 baseFont: baseFont,
@@ -1700,24 +1741,28 @@ public final class SyntaxEditorView: NSScrollView {
         to nextTheme: SyntaxEditorTheme,
         nextAppearance: SyntaxEditorThemeAppearance,
         nextFontSizeDelta: Int,
-        language: SyntaxLanguage
+        language: SyntaxLanguage,
+        revision: Int? = nil
     ) -> Bool {
         let source = textView.string
         let textLength = textStorage.length
+        let revision = revision ?? model.revision
         guard let previousRuns = cachedSyntaxFontRuns(
             for: previousTheme,
             language: language,
             appearance: previousAppearance,
             fontSizeDelta: previousFontSizeDelta,
             source: source,
-            textLength: textLength
+            textLength: textLength,
+            revision: revision
         ), let nextRuns = cachedSyntaxFontRuns(
             for: nextTheme,
             language: language,
             appearance: nextAppearance,
             fontSizeDelta: nextFontSizeDelta,
             source: source,
-            textLength: textLength
+            textLength: textLength,
+            revision: revision
         ) else {
             return false
         }
@@ -1731,13 +1776,14 @@ public final class SyntaxEditorView: NSScrollView {
         appearance: SyntaxEditorThemeAppearance,
         fontSizeDelta: Int,
         source: String,
-        textLength: Int
+        textLength: Int,
+        revision: Int
     ) -> [HighlightFontRun]? {
         guard textLength > 0,
               hasReusableRecordedHighlightSnapshot(
                   source: source,
                   language: language,
-                  revision: model.revision
+                  revision: revision
               )
         else {
             return nil
