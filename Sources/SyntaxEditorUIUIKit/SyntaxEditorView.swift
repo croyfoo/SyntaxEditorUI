@@ -172,9 +172,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findHighlightUpdatePassCount = 0
     var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     var keyboardAccessoryView: UIView?
-    let modelObservations = ObservationScope()
-    var modelDeliveryForTesting: ObservationDelivery?
-    var modelConfigurationDeliveryForTesting: ObservationDelivery?
+    private var modelObservation: PortableObservationTracking.Token?
+    private var modelConfigurationObservation: PortableObservationTracking.Token?
+    var modelDeliveryForTesting: PortableObservationTracking.Token? { modelObservation }
+    var modelConfigurationDeliveryForTesting: PortableObservationTracking.Token? { modelConfigurationObservation }
     var storage: NSTextStorage {
         textSystem.textStorage
     }
@@ -360,16 +361,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         fatalError("init(coder:) has not been implemented")
     }
 
-    deinit {
+    isolated deinit {
         highlightTask?.cancel()
-        modelObservations.cancelAll()
+        cancelModelObservations()
         NotificationCenter.default.removeObserver(self)
     }
 
     public func update(model nextModel: SyntaxEditorModel) {
         guard model !== nextModel else { return }
 
-        modelObservations.cancelAll()
+        cancelModelObservations()
         activeUndoManager?.removeAllActions()
         commandEngine.invalidateTransientState()
         clearHighlightCache()
@@ -1028,40 +1029,50 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         schedulesInitialHighlight: Bool = true,
         skipsInitialModelDelivery: Bool = false
     ) {
-        modelConfigurationDeliveryForTesting = modelObservations.observe(model, tracking: { model in
-            _ = model.language
-            _ = model.isEditable
-            _ = model.lineWrappingEnabled
-            _ = model.theme
-            _ = model.drawsBackground
-            _ = model.fontSizeDelta
-        }) { [weak self] event, model in
+        let model = model
+        modelConfigurationObservation = withPortableContinuousObservation { [weak self, model] event in
             guard let self else { return }
+
+            let language = model.language
+            let isEditable = model.isEditable
+            let lineWrappingEnabled = model.lineWrappingEnabled
+            let theme = model.theme
+            let drawsBackground = model.drawsBackground
+            let fontSizeDelta = model.fontSizeDelta
+
             self.applyObservedConfiguration(
-                language: model.language,
-                isEditable: model.isEditable,
-                lineWrappingEnabled: model.lineWrappingEnabled,
-                theme: model.theme,
-                drawsBackground: model.drawsBackground,
-                fontSizeDelta: model.fontSizeDelta,
+                language: language,
+                isEditable: isEditable,
+                lineWrappingEnabled: lineWrappingEnabled,
+                theme: theme,
+                drawsBackground: drawsBackground,
+                fontSizeDelta: fontSizeDelta,
                 forceLanguageRefresh: event.kind == .initial,
                 schedulesHighlight: event.kind != .initial || schedulesInitialHighlight
             )
         }
 
-        modelDeliveryForTesting = modelObservations.observe(model, tracking: { model in
-            _ = model.text
-            _ = model.revision
-            _ = model.selectedRange
-        }) { [weak self] event, model in
+        modelObservation = withPortableContinuousObservation { [weak self, model] event in
             guard let self else { return }
+
+            _ = model.text
+            let revision = model.revision
+            let selectedRange = model.selectedRange
+
             guard !(skipsInitialModelDelivery && event.kind == .initial) else { return }
             self.applyObservedModelChange(
                 forceTextUpdate: event.kind == .initial,
-                observedRevision: model.revision
+                observedRevision: revision
             )
-            self.applyObservedSelection(model.selectedRange)
+            self.applyObservedSelection(selectedRange)
         }
+    }
+
+    private func cancelModelObservations() {
+        modelConfigurationObservation?.cancel()
+        modelConfigurationObservation = nil
+        modelObservation?.cancel()
+        modelObservation = nil
     }
 
     private func synchronizeReboundModel() {
@@ -1188,7 +1199,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             invalidateHorizontalMeasurement()
         }
         if themeChanged {
-            applyBaseForegroundColorChange(from: previousTheme, to: theme)
+            applyBaseForegroundColorChange(from: previousTheme, to: theme, language: language)
         }
         lastAppliedTheme = theme
         lastAppliedThemeAppearance = appearance
@@ -1208,17 +1219,25 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         updateTypingAttributes()
         if baseFontChanged {
-            applyResolvedFontsToExistingText()
+            applyResolvedFontsToExistingText(
+                source: storage.string,
+                language: language,
+                revision: lastAppliedDocumentRevision
+            )
         }
         if languageChanged && schedulesHighlight {
             scheduleHighlight(
-                source: text,
+                source: storage.string,
                 language: language,
-                revision: model.revision,
+                revision: lastAppliedDocumentRevision,
                 refreshStartUTF16: 0
             )
         } else if (themeChanged || fontSizeDeltaChanged) && schedulesHighlight {
-            reapplyCachedHighlight()
+            reapplyCachedHighlight(
+                source: storage.string,
+                language: language,
+                revision: lastAppliedDocumentRevision
+            )
         }
         refreshKeyboardAccessoryState()
         invalidateTextLayout()
@@ -1236,13 +1255,19 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         syncTextLayoutSelection()
     }
 
-    func applyResolvedFontsToExistingText() {
+    func applyResolvedFontsToExistingText(
+        source: String? = nil,
+        language: SyntaxLanguage? = nil,
+        revision: Int? = nil
+    ) {
         let fullRange = NSRange(location: 0, length: storage.length)
         guard fullRange.length > 0,
               let baseFont = baseAttributes()[.font] as? UIFont
         else { return }
 
-        let source = text
+        let source = source ?? text
+        let language = language ?? model.language
+        let revision = revision ?? model.revision
 
         TextEditingTransaction.perform(on: textContentStorage) { storage in
             storage.addAttribute(.font, value: baseFont, range: fullRange)
@@ -1250,8 +1275,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         var didRecomputeSyntaxFontRuns = false
         if hasReusableRecordedHighlightSnapshot(
             source: source,
-            language: model.language,
-            revision: model.revision
+            language: language,
+            revision: revision
         ),
            let baseForeground = baseAttributes()[.foregroundColor] as? UIColor {
             var resolver = makeSyntaxHighlightAttributeResolver(baseAttributes: baseAttributes())
@@ -1264,8 +1289,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             highlightStyleStore.commitSnapshot(
                 runSet: runSet,
                 range: fullRange,
-                revision: model.revision,
-                language: model.language,
+                revision: revision,
+                language: language,
                 textLength: storage.length,
                 baseForeground: baseForeground,
                 baseFont: baseFont,
@@ -1287,11 +1312,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func applyBaseForegroundColorChange(
         from _: SyntaxEditorTheme,
-        to theme: SyntaxEditorTheme
+        to theme: SyntaxEditorTheme,
+        language: SyntaxLanguage? = nil
     ) {
+        let language = language ?? model.language
         let nextBaseForeground = resolvedSyntaxColor(
             theme
-                .resolved(for: model.language, appearance: currentThemeAppearance)
+                .resolved(for: language, appearance: currentThemeAppearance)
                 .baseForeground
         )
         highlightStyleStore.updateBaseForeground(nextBaseForeground, textLength: storage.length)
@@ -2141,23 +2168,30 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return materializedHighlightRevision <= result.revision
     }
 
-    func reapplyCachedHighlight() {
-        if hasScheduledFullResetHighlight(language: model.language, revision: model.revision) {
+    func reapplyCachedHighlight(
+        source: String? = nil,
+        language: SyntaxLanguage? = nil,
+        revision: Int? = nil
+    ) {
+        let source = source ?? text
+        let language = language ?? model.language
+        let revision = revision ?? model.revision
+
+        if hasScheduledFullResetHighlight(language: language, revision: revision) {
             return
         }
-        let source = text
         guard hasReusableRecordedHighlightSnapshot(
             source: source,
-            language: model.language,
-            revision: model.revision
+            language: language,
+            revision: revision
         ) else {
-            scheduleHighlight(source: source, language: model.language, revision: model.revision)
+            scheduleHighlight(source: source, language: language, revision: revision)
             return
         }
 
         applyHighlight(
             lastHighlightTokens,
-            expectedRevision: model.revision,
+            expectedRevision: revision,
             source: source,
             refreshRange: NSRange(location: 0, length: source.utf16.count)
         )

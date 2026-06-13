@@ -234,8 +234,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     private let model: MiniEditorSession
     private let splitViewController: MiniSplitViewController
-    private let modelObservations = ObservationScope()
-    private let editorObservations = ObservationScope()
+    private var modelObservation: PortableObservationTracking.Token?
+    private var editorObservation: PortableObservationTracking.Token?
     private var lineWrappingItem: NSToolbarItemGroup?
     private var themePopUpButton: NSPopUpButton?
 
@@ -266,8 +266,8 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     }
 
     isolated deinit {
-        modelObservations.cancelAll()
-        editorObservations.cancelAll()
+        modelObservation?.cancel()
+        editorObservation?.cancel()
     }
 
     private func configureToolbar() {
@@ -280,23 +280,28 @@ final class MiniWindowController: NSWindowController, NSToolbarDelegate {
     }
 
     private func bindModel() {
-        modelObservations.observe(model) { [weak self] _, _ in
-            self?.renderWindowState()
+        modelObservation?.cancel()
+        modelObservation = withPortableContinuousObservation { [weak self] _ in
+            guard let self else { return }
+
+            renderWindowTitle(model.currentPreset.title)
         }
         bindEditorModel()
     }
 
     private func bindEditorModel() {
-        editorObservations.observe(model.editorModel) { [weak self] _, editorModel in
-            self?.updateLineWrappingItem(lineWrappingEnabled: editorModel.lineWrappingEnabled)
-            self?.updateThemeItem(selectedThemePreset: editorModel.theme.preset ?? .default)
+        let editorModel = model.editorModel
+        editorObservation?.cancel()
+        editorObservation = withPortableContinuousObservation { [weak self, editorModel] _ in
+            guard let self else { return }
+
+            updateLineWrappingItem(lineWrappingEnabled: editorModel.lineWrappingEnabled)
+            updateThemeItem(selectedThemePreset: editorModel.theme.preset ?? .default)
         }
     }
 
-    private func renderWindowState() {
-        window?.title = model.currentPreset.title
-        updateLineWrappingItem()
-        updateThemeItem()
+    private func renderWindowTitle(_ title: String) {
+        window?.title = title
     }
 
     private func updateLineWrappingItem(lineWrappingEnabled: Bool? = nil) {

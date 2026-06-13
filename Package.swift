@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.3
 
 import PackageDescription
 
@@ -24,7 +24,7 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-toml", exact: "0.7.0"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-xml", exact: "0.7.0"),
         .package(url: "https://github.com/lynnswap/tree-sitter-swift", exact: "0.1.0"),
-        .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.11.1"),
+        .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.12.0"),
     ],
     targets: [
         .target(
