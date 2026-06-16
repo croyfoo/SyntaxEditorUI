@@ -1455,15 +1455,25 @@ public final class SyntaxEditorView: NSScrollView {
             operation: operation,
             visibleRange: visibleRange
         )
-        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, request, mutation, requestID] in
+        let shouldYieldBeforeReplacingRequest = !source.isEmpty
+        highlightTask = Task.detached(priority: .utility) { [
+            weak self,
+            highlighter,
+            request,
+            mutation,
+            requestID,
+            shouldYieldBeforeReplacingRequest
+        ] in
             defer {
                 Task { @MainActor [weak self] in
                     self?.clearScheduledHighlightRequestIfCurrent(id: requestID)
                 }
             }
-            await Task.yield()
-            guard !Task.isCancelled else {
-                return
+            if shouldYieldBeforeReplacingRequest {
+                await Task.yield()
+                guard !Task.isCancelled else {
+                    return
+                }
             }
             let phases = await highlighter.replaceCurrentRequest(with: request)
             for await result in phases {
