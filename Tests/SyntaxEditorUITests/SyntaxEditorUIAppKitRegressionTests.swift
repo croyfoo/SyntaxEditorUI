@@ -2206,6 +2206,56 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
     }
 
+    @Test("SyntaxEditorView applies latest macOS highlight after model replacement")
+    @MainActor
+    func syntaxEditorViewMacAppliesLatestHighlightAfterModelReplacement() async {
+        let initialSource = "let"
+        let replacementSource = "\"x\""
+        let theme = syntaxEditorUITestTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0x345678),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let resetGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorLanguageAwareTestHighlighter(
+            swiftTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: initialSource.utf16.count),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            jsonTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: replacementSource.utf16.count),
+                    rawCaptureName: "editor.syntax.json.string"
+                ),
+            ],
+            resetGate: resetGate
+        )
+        let initialModel = SyntaxEditorTestContext(
+            text: initialSource,
+            language: SyntaxLanguage.swift,
+            theme: theme
+        )
+        let replacementModel = SyntaxEditorModel(
+            text: replacementSource,
+            language: SyntaxLanguage.json,
+            theme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: initialModel, highlighter: highlighter)
+        await resetGate.waitUntilSuspended()
+        let previousSuspensionCount = await resetGate.currentSuspensionCount()
+
+        editorView.update(model: replacementModel)
+        await resetGate.waitUntilSuspended(after: previousSuspensionCount)
+        await resetGate.resumeAll()
+        await editorView.waitForPendingHighlightForTesting()
+
+        #expect(editorView.model === replacementModel)
+        #expect(editorView.textView.string == replacementSource)
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.string))
+    }
+
     @Test("SyntaxEditorView fully repaints macOS syntax colors after dropping deferred highlights")
     @MainActor
     func syntaxEditorViewMacFullRepaintsAfterDroppingDeferredHighlight() async {

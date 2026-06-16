@@ -2199,6 +2199,59 @@ extension SyntaxEditorUITests {
         #expect(syntaxEditorUITestColorsEqual(iOSEditorLineFragmentForegroundColor(editorView, at: 0), theme.keyword))
     }
 
+    @Test("SyntaxEditorView applies latest iOS highlight after model replacement")
+    @MainActor
+    func syntaxEditorViewIOSAppliesLatestHighlightAfterModelReplacement() async {
+        let initialSource = "let"
+        let replacementSource = "\"x\""
+        let theme = syntaxEditorUITestTheme(
+            baseForeground: syntaxEditorUITestColor(hex: 0x123456),
+            string: syntaxEditorUITestColor(hex: 0x345678),
+            keyword: syntaxEditorUITestColor(hex: 0x654321)
+        )
+        let resetGate = ManualSyntaxHighlightGate()
+        let highlighter = SyntaxEditorLanguageAwareTestHighlighter(
+            swiftTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: initialSource.utf16.count),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ],
+            jsonTokens: [
+                SyntaxHighlightToken(
+                    range: NSRange(location: 0, length: replacementSource.utf16.count),
+                    rawCaptureName: "editor.syntax.json.string"
+                ),
+            ],
+            resetGate: resetGate
+        )
+        let initialModel = SyntaxEditorTestContext(
+            text: initialSource,
+            language: SyntaxLanguage.swift,
+            theme: theme
+        )
+        let replacementModel = SyntaxEditorModel(
+            text: replacementSource,
+            language: SyntaxLanguage.json,
+            theme: theme
+        )
+        let editorView = SyntaxEditorView(testContext: initialModel, highlighter: highlighter)
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+        await resetGate.waitUntilSuspended()
+        let previousSuspensionCount = await resetGate.currentSuspensionCount()
+
+        editorView.update(model: replacementModel)
+        await resetGate.waitUntilSuspended(after: previousSuspensionCount)
+        await resetGate.resumeAll()
+        await editorView.waitForPendingHighlightForTesting()
+        layoutIOSEditorView(editorView, width: 393, height: 658)
+
+        #expect(editorView.model === replacementModel)
+        #expect(editorView.text == replacementSource)
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.string))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorLineFragmentForegroundColor(editorView, at: 0), theme.string))
+    }
+
     @Test("SyntaxEditorView renders iOS pasted text before async highlight completes")
     @MainActor
     func syntaxEditorViewIOSRendersPastedTextBeforeAsyncHighlightCompletes() async {

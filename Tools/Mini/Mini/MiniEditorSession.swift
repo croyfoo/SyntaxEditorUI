@@ -38,8 +38,10 @@ final class MiniEditorSession {
         }
 
         selectedPresetID = presetID
-        editorModel.language = preset.language
-        editorModel.replaceText(text(for: preset))
+        editorModel.replaceContents(
+            text: text(for: preset),
+            language: preset.language
+        )
     }
 
     private func text(for preset: MiniPreviewPreset) -> String {
