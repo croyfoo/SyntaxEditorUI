@@ -2,7 +2,150 @@ import Foundation
 import SwiftTreeSitter
 import SwiftTreeSitterLayer
 
-/// The highlighting engine: one actor per editor document.
+package actor SyntaxHighlighterEngine: SyntaxHighlighting {
+    private let worker: HighlightRequestWorker
+    private var currentRequestTask: Task<Void, Never>?
+    private var currentRequestGeneration = 0
+
+    package init() {
+        worker = HighlightRequestWorker(registry: .shared)
+    }
+
+    // MARK: - SyntaxHighlighting
+
+    package func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+        await worker.reset(source: source, language: language, revision: revision)
+    }
+
+    package func resetPhases(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult> {
+        await worker.resetPhases(source: source, language: language, revision: revision)
+    }
+
+    package func update(
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation,
+        revision: Int
+    ) async -> SyntaxHighlightResult {
+        await worker.update(source: source, language: language, mutation: mutation, revision: revision)
+    }
+
+    package func updatePhases(
+        source: String,
+        language: SyntaxLanguage,
+        mutation: SyntaxHighlightMutation,
+        revision: Int
+    ) async -> AsyncStream<SyntaxHighlightResult> {
+        await worker.updatePhases(source: source, language: language, mutation: mutation, revision: revision)
+    }
+
+    package func replaceCurrentRequest(with request: SyntaxHighlightRequest) async -> AsyncStream<SyntaxHighlightResult> {
+        currentRequestGeneration += 1
+        let generation = currentRequestGeneration
+        currentRequestTask?.cancel()
+        currentRequestTask = nil
+        await worker.cancelOutstandingWork()
+        guard currentRequestGeneration == generation else {
+            return Self.finishedStream()
+        }
+        await worker.setVisibleRange(request.visibleRange)
+        guard currentRequestGeneration == generation else {
+            return Self.finishedStream()
+        }
+
+        let stream = AsyncStream<SyntaxHighlightResult>.makeStream()
+        let task = Task {
+            await runCurrentRequest(
+                request,
+                generation: generation,
+                continuation: stream.continuation
+            )
+        }
+        currentRequestTask = task
+        stream.continuation.onTermination = { @Sendable _ in
+            task.cancel()
+            Task {
+                await self.cancelCurrentRequestIfCurrent(generation: generation)
+            }
+        }
+        return stream.stream
+    }
+
+    package func cancelCurrentRequest() async {
+        currentRequestGeneration += 1
+        currentRequestTask?.cancel()
+        currentRequestTask = nil
+        await worker.cancelOutstandingWork()
+    }
+
+    package func setVisibleRange(_ range: NSRange?) async {
+        await worker.setVisibleRange(range)
+    }
+
+    package func render(source: String, language: SyntaxLanguage) async -> [SyntaxHighlightToken] {
+        await worker.render(source: source, language: language)
+    }
+
+    package func currentTokensForTesting() async -> [SyntaxHighlightToken] {
+        await worker.currentTokensForTesting()
+    }
+
+    // MARK: - Internals
+
+    private func runCurrentRequest(
+        _ request: SyntaxHighlightRequest,
+        generation: Int,
+        continuation: AsyncStream<SyntaxHighlightResult>.Continuation
+    ) async {
+        let result = await worker.perform(
+            request,
+            emitFastPass: { result in
+                guard !Task.isCancelled else { return }
+                continuation.yield(result)
+            }
+        )
+        guard !Task.isCancelled, isCurrentRequest(generation: generation) else {
+            continuation.finish()
+            return
+        }
+        continuation.yield(result)
+        clearCurrentRequestIfCurrent(generation: generation)
+        continuation.finish()
+    }
+
+    private func isCurrentRequest(generation: Int) -> Bool {
+        currentRequestGeneration == generation
+    }
+
+    private func clearCurrentRequestIfCurrent(generation: Int) {
+        guard currentRequestGeneration == generation else { return }
+        currentRequestTask = nil
+    }
+
+    private func cancelCurrentRequestIfCurrent(generation: Int) async {
+        guard currentRequestGeneration == generation,
+              currentRequestTask != nil
+        else {
+            return
+        }
+        currentRequestGeneration += 1
+        currentRequestTask?.cancel()
+        currentRequestTask = nil
+        await worker.cancelOutstandingWork()
+    }
+
+    private static func finishedStream() -> AsyncStream<SyntaxHighlightResult> {
+        AsyncStream { continuation in
+            continuation.finish()
+        }
+    }
+}
+
+/// The highlighting worker: one actor-confined session per editor document.
 ///
 /// Ground-up rebuild. The synchronous pipeline per edit is strictly edit-local:
 /// tree-sitter incremental reparse, an envelope-clipped capture query, a per-line
@@ -10,22 +153,20 @@ import SwiftTreeSitterLayer
 /// semantic pass. Stage S1 ships every language on the conservative semantic
 /// path (full-document merge per update — correct by construction); locality
 /// lands per-language in later stages behind the same seam.
-package actor SyntaxHighlighterEngine: SyntaxHighlighting {
+private actor HighlightRequestWorker {
     private var session: HighlightSession?
     private let registry: LanguageConfigurationRegistry
     private var visibleRangeHint: NSRange?
 
-    package init() {
-        registry = .shared
+    init(registry: LanguageConfigurationRegistry) {
+        self.registry = registry
     }
 
-    // MARK: - SyntaxHighlighting
-
-    package func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
         await reset(source: source, language: language, revision: revision, emitFastPass: nil)
     }
 
-    package func resetPhases(
+    func resetPhases(
         source: String,
         language: SyntaxLanguage,
         revision: Int
@@ -51,7 +192,7 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         }
     }
 
-    package func update(
+    func update(
         source: String,
         language: SyntaxLanguage,
         mutation: SyntaxHighlightMutation,
@@ -60,7 +201,7 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         await update(source: source, language: language, mutation: mutation, revision: revision, emitFastPass: nil)
     }
 
-    package func updatePhases(
+    func updatePhases(
         source: String,
         language: SyntaxLanguage,
         mutation: SyntaxHighlightMutation,
@@ -88,12 +229,44 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         }
     }
 
-    package func setVisibleRange(_ range: NSRange?) {
+    func cancelOutstandingWork() {
+        session?.cancelOutstandingWork()
+    }
+
+    func setVisibleRange(_ range: NSRange?) {
         visibleRangeHint = range
         session?.visibleRangeHint = range
     }
 
-    // MARK: - Internals
+    func perform(
+        _ request: SyntaxHighlightRequest,
+        emitFastPass: ((SyntaxHighlightResult) -> Void)?
+    ) async -> SyntaxHighlightResult {
+        await result(for: request, emitFastPass: emitFastPass)
+    }
+
+    private func result(
+        for request: SyntaxHighlightRequest,
+        emitFastPass: ((SyntaxHighlightResult) -> Void)?
+    ) async -> SyntaxHighlightResult {
+        switch request.operation {
+        case .reset:
+            return await reset(
+                source: request.source,
+                language: request.language,
+                revision: request.revision,
+                emitFastPass: emitFastPass
+            )
+        case .update(let mutation):
+            return await update(
+                source: request.source,
+                language: request.language,
+                mutation: mutation,
+                revision: request.revision,
+                emitFastPass: emitFastPass
+            )
+        }
+    }
 
     private func reset(
         source: String,
@@ -148,16 +321,16 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         return await reset(source: source, language: language, revision: revision, emitFastPass: emitFastPass)
     }
 
-    package func render(source: String, language: SyntaxLanguage) async -> [SyntaxHighlightToken] {
+    func render(source: String, language: SyntaxLanguage) async -> [SyntaxHighlightToken] {
         await reset(source: source, language: language, revision: 0).tokens
     }
 
-    package func currentTokensForTesting() -> [SyntaxHighlightToken] {
+    func currentTokensForTesting() -> [SyntaxHighlightToken] {
         session?.currentTokens() ?? []
     }
 }
 
-/// Per-document highlighting state. Confined to the engine actor; all methods
+/// Per-document highlighting state. Confined to the worker actor; all methods
 /// are synchronous (no suspension points inside an update).
 final class HighlightSession {
     let setup: HighlightingSetup
@@ -212,6 +385,12 @@ final class HighlightSession {
 
     func currentTokens() -> [SyntaxHighlightToken] {
         planes.tokens(lineTable: lineTable)
+    }
+
+    func cancelOutstandingWork() {
+        editGeneration += 1
+        monolithicMergeTask?.cancel()
+        monolithicMergeTask = nil
     }
 
     // MARK: - Reset

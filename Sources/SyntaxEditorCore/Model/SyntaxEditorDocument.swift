@@ -94,6 +94,16 @@ public final class SyntaxEditorModel {
         return change
     }
 
+    @discardableResult
+    public func replaceContents(
+        text: String,
+        language: SyntaxLanguage,
+        selectedRange: NSRange? = nil
+    ) -> SyntaxEditorTextChange? {
+        self.language = language
+        return replaceText(text, selectedRange: selectedRange)
+    }
+
     public func increaseFontSize() {
         fontSizeDelta = SyntaxEditorFontSize.increasedDelta(
             fontSizeDelta,

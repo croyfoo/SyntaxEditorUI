@@ -138,6 +138,33 @@ package struct SyntaxHighlightResult: Sendable {
     }
 }
 
+package struct SyntaxHighlightRequest: Equatable, Sendable {
+    package enum Operation: Equatable, Sendable {
+        case reset
+        case update(SyntaxHighlightMutation)
+    }
+
+    package let source: String
+    package let language: SyntaxLanguage
+    package let revision: Int
+    package let operation: Operation
+    package let visibleRange: NSRange?
+
+    package init(
+        source: String,
+        language: SyntaxLanguage,
+        revision: Int,
+        operation: Operation,
+        visibleRange: NSRange? = nil
+    ) {
+        self.source = source
+        self.language = language
+        self.revision = revision
+        self.operation = operation
+        self.visibleRange = visibleRange
+    }
+}
+
 package enum SyntaxHighlightInvalidation {
     // SwiftTreeSitter's LanguageLayer converts Tree-sitter byte ranges through
     // Range<UInt32>.range before returning an IndexSet, so these ranges are
@@ -191,10 +218,32 @@ package protocol SyntaxHighlighting: Sendable {
     /// the chunk nearest this range first. Purely an ordering hint — results
     /// and convergence are identical without it.
     func setVisibleRange(_ range: NSRange?) async
+    func replaceCurrentRequest(with request: SyntaxHighlightRequest) async -> AsyncStream<SyntaxHighlightResult>
+    func cancelCurrentRequest() async
 }
 
 package extension SyntaxHighlighting {
     func setVisibleRange(_ range: NSRange?) async {}
+    func cancelCurrentRequest() async {}
+
+    func replaceCurrentRequest(with request: SyntaxHighlightRequest) async -> AsyncStream<SyntaxHighlightResult> {
+        await setVisibleRange(request.visibleRange)
+        switch request.operation {
+        case .reset:
+            return await resetPhases(
+                source: request.source,
+                language: request.language,
+                revision: request.revision
+            )
+        case .update(let mutation):
+            return await updatePhases(
+                source: request.source,
+                language: request.language,
+                mutation: mutation,
+                revision: request.revision
+            )
+        }
+    }
 
     func resetPhases(
         source: String,

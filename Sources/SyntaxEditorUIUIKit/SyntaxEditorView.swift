@@ -2005,8 +2005,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         mutation: SyntaxHighlightMutation? = nil,
         refreshStartUTF16: Int = 0
     ) {
-        let expectedSource = source
-
         highlightTask?.cancel()
         let requestID = nextScheduledHighlightRequestID
         nextScheduledHighlightRequestID += 1
@@ -2028,7 +2026,19 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         // Viewport hint: progressive opens and background semantic drains
         // process the chunk nearest this range first (pure ordering hint).
         let visibleRange = visibleCharacterRangeForHighlightHint()
-        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, expectedSource, language, revision, mutation, requestID, visibleRange] in
+        let operation: SyntaxHighlightRequest.Operation = if let mutation {
+            .update(mutation)
+        } else {
+            .reset
+        }
+        let request = SyntaxHighlightRequest(
+            source: source,
+            language: language,
+            revision: revision,
+            operation: operation,
+            visibleRange: visibleRange
+        )
+        highlightTask = Task.detached(priority: .utility) { [weak self, highlighter, request, mutation, requestID] in
             defer {
                 Task { @MainActor [weak self] in
                     self?.clearScheduledHighlightRequestIfCurrent(id: requestID)
@@ -2038,23 +2048,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             guard !Task.isCancelled else {
                 return
             }
-            await highlighter.setVisibleRange(visibleRange)
-
-            let phases: AsyncStream<SyntaxHighlightResult>
-            if let mutation {
-                phases = await highlighter.updatePhases(
-                    source: expectedSource,
-                    language: language,
-                    mutation: mutation,
-                    revision: revision
-                )
-            } else {
-                phases = await highlighter.resetPhases(
-                    source: expectedSource,
-                    language: language,
-                    revision: revision
-                )
-            }
+            let phases = await highlighter.replaceCurrentRequest(with: request)
             for await result in phases {
                 guard !Task.isCancelled else { return }
                 await self?.applyHighlightResultFromScheduledTask(result, mutation: mutation)

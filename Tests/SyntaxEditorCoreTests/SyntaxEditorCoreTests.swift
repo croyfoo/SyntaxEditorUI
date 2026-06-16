@@ -376,8 +376,9 @@ private extension SyntaxHighlighterEngine {
         guard result.tokenPayload == .replacement else {
             return result
         }
+        let currentTokens = await currentTokensForTesting()
         return SyntaxHighlightResult(
-            tokens: currentTokensForTesting(),
+            tokens: currentTokens,
             source: result.source,
             language: result.language,
             revision: result.revision,
@@ -450,6 +451,50 @@ struct SyntaxEditorCoreTests {
 
         model.resetFontSize()
         #expect(model.fontSizeDelta == 0)
+    }
+
+    @Test("SyntaxEditorModel replaces text and language together")
+    @MainActor
+    func syntaxEditorModelReplacesContents() {
+        let model = SyntaxEditorModel(
+            text: "let",
+            language: SyntaxLanguage.swift,
+            selectedRange: NSRange(location: 1, length: 0)
+        )
+
+        let languageOnlyChange = model.replaceContents(
+            text: "let",
+            language: SyntaxLanguage.json,
+            selectedRange: NSRange(location: 2, length: 0)
+        )
+        #expect(languageOnlyChange == nil)
+        #expect(model.text == "let")
+        #expect(model.language == SyntaxLanguage.json)
+        #expect(model.selectedRange == NSRange(location: 2, length: 0))
+        #expect(model.revision == 0)
+        #expect(model.latestChange == nil)
+
+        let textChange = model.replaceContents(
+            text: "body { color: red; }",
+            language: SyntaxLanguage.css,
+            selectedRange: NSRange(location: 4, length: 0)
+        )
+        #expect(textChange?.kind == .replacement)
+        #expect(textChange?.revision == 1)
+        #expect(model.text == "body { color: red; }")
+        #expect(model.language == SyntaxLanguage.css)
+        #expect(model.selectedRange == NSRange(location: 4, length: 0))
+        #expect(model.revision == 1)
+        #expect(model.latestChange?.revision == 1)
+
+        let secondLanguageOnlyChange = model.replaceContents(
+            text: "body { color: red; }",
+            language: SyntaxLanguage.javascript
+        )
+        #expect(secondLanguageOnlyChange == nil)
+        #expect(model.language == SyntaxLanguage.javascript)
+        #expect(model.revision == 1)
+        #expect(model.latestChange?.revision == 1)
     }
 
     @Test("SyntaxEditorModel defaults to JavaScript")
@@ -8830,6 +8875,52 @@ struct SyntaxHighlighterEngineTests {
             .reset(source: updatedSource, language: SyntaxLanguage.swift, revision: 3)
 
         #expect(incremental.tokens == full.tokens)
+    }
+
+    @Test("SyntaxHighlighterEngine cancellation lets replacement request run immediately")
+    func highlighterCancellationLetsReplacementRequestRunImmediately() async throws {
+        let staleSource = String(
+            repeating: """
+            struct SupersededRequest {
+                func render(_ input: Int) -> Int {
+                    let value = input + 1
+                    return value
+                }
+            }
+
+            """,
+            count: 2_000
+        )
+        let freshSource = "let fresh = 1"
+        let engine = SyntaxHighlighterEngine()
+
+        let staleStream = await engine.replaceCurrentRequest(with: SyntaxHighlightRequest(
+            source: staleSource,
+            language: SyntaxLanguage.swift,
+            revision: 1,
+            operation: .reset
+        ))
+        var staleIterator = staleStream.makeAsyncIterator()
+        let staleFastPass = await staleIterator.next()
+        #expect(staleFastPass?.revision == 1)
+        #expect(staleFastPass?.phase == .syntacticFastPass)
+
+        let freshStream = await engine.replaceCurrentRequest(with: SyntaxHighlightRequest(
+            source: freshSource,
+            language: SyntaxLanguage.swift,
+            revision: 2,
+            operation: .reset
+        ))
+
+        let freshResults = await collectHighlightPhases(freshStream)
+        let freshComplete = try #require(freshResults.last)
+        #expect(freshResults.allSatisfy { $0.revision == 2 })
+        #expect(freshComplete.phase == .complete)
+        #expect(freshComplete.source == freshSource)
+        #expect(freshComplete.tokens.isEmpty == false)
+
+        let staleComplete = await staleIterator.next()
+        #expect(staleComplete == nil)
     }
 
     @Test("SyntaxHighlighterEngine rebuilds semantic state after cancelled incremental update")
