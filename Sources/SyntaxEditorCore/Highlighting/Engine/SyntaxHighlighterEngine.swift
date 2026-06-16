@@ -359,7 +359,11 @@ final class HighlightSession {
     /// chunk support). The actor never blocks behind the merge: drains await
     /// the in-flight task (suspended, actor free) and re-validate against
     /// `editGeneration` before committing.
-    private var monolithicMergeTask: Task<(tokens: [SyntaxHighlightToken], isCancelled: Bool), Never>?
+    private var monolithicMergeTask: (
+        id: Int,
+        task: Task<(tokens: [SyntaxHighlightToken], isCancelled: Bool), Never>
+    )?
+    private var nextMonolithicMergeTaskID = 0
     /// Bumped at every committed edit and reset; a merge started under an older
     /// generation is stale and its result is discarded.
     private var editGeneration = 0
@@ -389,8 +393,7 @@ final class HighlightSession {
 
     func cancelOutstandingWork() {
         editGeneration += 1
-        monolithicMergeTask?.cancel()
-        monolithicMergeTask = nil
+        monolithicMergeTask?.task.cancel()
     }
 
     // MARK: - Reset
@@ -411,7 +414,7 @@ final class HighlightSession {
         refreshDebt.clear()
         semanticDebt.clear()
         editGeneration += 1
-        monolithicMergeTask?.cancel()
+        monolithicMergeTask?.task.cancel()
         monolithicMergeTask = nil
 
         guard !layeredSource.isEmpty else {
@@ -716,7 +719,7 @@ final class HighlightSession {
         // Any in-flight off-actor merge is now stale; cancel it so its polls
         // abort the wasted work early.
         editGeneration += 1
-        monolithicMergeTask?.cancel()
+        monolithicMergeTask?.task.cancel()
         // ---- End critical section. ----
 
         // The edited extent itself always refreshes (replacement + one unit so a
@@ -903,10 +906,12 @@ final class HighlightSession {
                     return nil
                 }
                 if let inFlight = monolithicMergeTask {
-                    _ = await inFlight.value
+                    _ = await inFlight.task.value
                     continue
                 }
                 let startGeneration = editGeneration
+                let mergeTaskID = nextMonolithicMergeTaskID
+                nextMonolithicMergeTaskID += 1
                 let fullRange = NSRange(location: 0, length: (layeredSource as NSString).length)
                 // Passes receive base-plane tokens only and re-derive every
                 // overlay: feeding stale overlays back in tripped the ObjC
@@ -921,9 +926,11 @@ final class HighlightSession {
                 let mergeTask = Task.detached(priority: .utility) {
                     unsafe pass.fullMerge(tokens: inputTokens, source: mergeSource, rootNode: rootNode)
                 }
-                monolithicMergeTask = mergeTask
+                monolithicMergeTask = (id: mergeTaskID, task: mergeTask)
                 let merged = await mergeTask.value
-                monolithicMergeTask = nil
+                if monolithicMergeTask?.id == mergeTaskID {
+                    monolithicMergeTask = nil
+                }
                 guard startGeneration == editGeneration else {
                     // An edit landed mid-merge (it also cancelled the merge);
                     // the result is stale — go around with the new text.
