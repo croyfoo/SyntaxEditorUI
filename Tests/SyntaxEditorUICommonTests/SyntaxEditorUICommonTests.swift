@@ -224,8 +224,8 @@ struct SyntaxEditorUICommonTests {
         #expect(store.appliedColorRunsForTesting.last?.color.isEqual(redColor) == true)
     }
 
-    @Test("Pending highlight edit keeps snapshot unshifted and resolves visible insertion lazily")
-    func pendingHighlightEditKeepsSnapshotUnshiftedAndResolvesVisibleInsertionLazily() {
+    @Test("Pending highlight edit keeps snapshot unshifted and resolves visible insertion optimistically")
+    func pendingHighlightEditKeepsSnapshotUnshiftedAndResolvesVisibleInsertionOptimistically() {
         let store = HighlightRenderSnapshotStore()
         store.commitSnapshot(
             runSet:
@@ -250,8 +250,7 @@ struct SyntaxEditorUICommonTests {
             NSRange(location: 0, length: 10),
         ])
         #expect(store.colorRuns(in: NSRange(location: 0, length: 12)).map(\.range) == [
-            NSRange(location: 0, length: 5),
-            NSRange(location: 7, length: 5),
+            NSRange(location: 0, length: 12),
         ])
         #expect(store.pendingDirtyRangesForTesting == [NSRange(location: 5, length: 2)])
     }
@@ -370,8 +369,7 @@ struct SyntaxEditorUICommonTests {
         )
 
         #expect(store.colorRuns(in: NSRange(location: 0, length: 13)).map(\.range) == [
-            NSRange(location: 1, length: 5),
-            NSRange(location: 8, length: 5),
+            NSRange(location: 0, length: 13),
         ])
         #expect(store.pendingDirtyRangesForTesting == [
             NSRange(location: 0, length: 1),
@@ -412,8 +410,72 @@ struct SyntaxEditorUICommonTests {
         #expect(store.pendingEditCountForTesting == 1)
         #expect(store.pendingDirtyRangesForTesting == [NSRange(location: 5, length: 3)])
         #expect(store.colorRuns(in: NSRange(location: 0, length: 13)).map(\.range) == [
+            NSRange(location: 0, length: 13),
+        ])
+    }
+
+    @Test("Pending highlight edit leaves whitespace insertions unstyled")
+    func pendingHighlightEditLeavesWhitespaceInsertionsUnstyled() {
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet:
+            HighlightRunSet(
+                colorRuns: [HighlightColorRun(range: NSRange(location: 0, length: 10), color: redColor)],
+                fontRuns: []
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 5, length: 0, replacement: " "),
+            currentTextLength: 11
+        )
+
+        #expect(store.pendingDirtyRangesForTesting == [NSRange(location: 5, length: 1)])
+        #expect(store.colorRuns(in: NSRange(location: 0, length: 11)).map(\.range) == [
             NSRange(location: 0, length: 5),
-            NSRange(location: 8, length: 5),
+            NSRange(location: 6, length: 5),
+        ])
+    }
+
+    @Test("Pending highlight edit inherits font runs for visible insertions")
+    func pendingHighlightEditInheritsFontRunsForVisibleInsertions() throws {
+        #if canImport(UIKit)
+        let syntaxFont = UIFont.boldSystemFont(ofSize: 13)
+        #elseif canImport(AppKit)
+        let syntaxFont = NSFont.boldSystemFont(ofSize: 13)
+        #endif
+        let store = HighlightRenderSnapshotStore()
+        store.commitSnapshot(
+            runSet:
+            HighlightRunSet(
+                colorRuns: [],
+                fontRuns: [HighlightFontRun(range: NSRange(location: 0, length: 10), font: syntaxFont)]
+            ),
+            range: NSRange(location: 0, length: 10),
+            revision: 1,
+            language: .swift,
+            textLength: 10,
+            baseForeground: baseForeground,
+            baseFont: nil
+        )
+
+        store.recordPendingEdit(
+            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            currentTextLength: 12
+        )
+
+        let inheritedFont = try #require(store.font(at: 5))
+        #expect(inheritedFont.isEqual(syntaxFont))
+        #expect(store.resolveVisibleRuns(in: NSRange(location: 0, length: 12)).fontRuns.map(\.range) == [
+            NSRange(location: 5, length: 2),
+            NSRange(location: 0, length: 5),
+            NSRange(location: 7, length: 5),
         ])
     }
 
@@ -468,7 +530,8 @@ struct SyntaxEditorUICommonTests {
             NSRange(location: 32, length: 10),
         ])
 
-        // Insert inside the first run: it splits and the inserted text is bare.
+        // Insert inside the first run: the inserted text inherits that run
+        // until the next highlighter result replaces it.
         let split = makeStore()
         split.recordPendingEdit(
             SyntaxHighlightMutation(location: 15, length: 0, replacement: "ab"),
@@ -476,8 +539,7 @@ struct SyntaxEditorUICommonTests {
         )
         #expect(split.maintainsNormalizedRunInvariantForTesting)
         #expect(split.colorRuns(in: NSRange(location: 0, length: 103)).map(\.range) == [
-            NSRange(location: 10, length: 5),
-            NSRange(location: 17, length: 5),
+            NSRange(location: 10, length: 12),
             NSRange(location: 32, length: 10),
         ])
 
@@ -815,7 +877,7 @@ struct SyntaxEditorUICommonTests {
 
         let visibleRuns = store.colorRuns(in: NSRange(location: 0, length: 13))
         #expect(visibleRuns.map(\.range) == [
-            NSRange(location: 1, length: 5),
+            NSRange(location: 0, length: 6),
             NSRange(location: 6, length: 2),
             NSRange(location: 8, length: 5),
         ])

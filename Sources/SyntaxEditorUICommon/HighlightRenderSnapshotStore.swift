@@ -488,6 +488,12 @@ package struct HighlightResolvedVisibleRuns {
     package let fontRuns: [HighlightFontRun]
 }
 
+private struct OptimisticHighlightRunSet {
+    let range: NSRange
+    let color: SyntaxEditorColor?
+    let font: SyntaxEditorFont?
+}
+
 @MainActor
 package final class HighlightRenderSnapshotStore {
     package private(set) var generation = 0
@@ -758,20 +764,118 @@ package final class HighlightRenderSnapshotStore {
         currentTextLength nextTextLength: Int
     ) {
         let nextTextLength = max(0, nextTextLength)
-        shiftCurrentMaterializedRuns(for: mutation, currentTextLength: nextTextLength)
+        let optimisticRunSet = optimisticHighlightRunSet(
+            for: mutation,
+            currentTextLength: nextTextLength
+        )
+        shiftCurrentRuns(for: mutation, currentTextLength: nextTextLength)
         currentTextLength = nextTextLength
         pendingEditMap.recordPendingEdit(mutation, currentTextLength: currentTextLength)
+        applyOptimisticHighlightRunSet(optimisticRunSet)
         checkpointPendingEditsIfNeeded()
         generation += 1
     }
 
+    private func optimisticHighlightRunSet(
+        for mutation: SyntaxHighlightMutation,
+        currentTextLength nextTextLength: Int
+    ) -> OptimisticHighlightRunSet? {
+        let replacementLength = mutation.replacement.utf16.count
+        guard mutation.length == 0,
+              replacementLength > 0,
+              Self.canOptimisticallyStyleInsertedText(mutation.replacement)
+        else {
+            return nil
+        }
+
+        let previousTextLength = max(0, nextTextLength - replacementLength)
+        guard previousTextLength > 0 else { return nil }
+        let location = min(max(0, mutation.location), previousTextLength)
+        let color = inheritedForegroundColorForInsertion(
+            at: location,
+            previousTextLength: previousTextLength
+        )
+        let font = inheritedFontForInsertion(
+            at: location,
+            previousTextLength: previousTextLength
+        )
+        guard color != nil || font != nil else { return nil }
+
+        return OptimisticHighlightRunSet(
+            range: NSRange(location: location, length: replacementLength),
+            color: color,
+            font: font
+        )
+    }
+
+    private static func canOptimisticallyStyleInsertedText(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                return false
+            }
+        }
+        return !text.isEmpty
+    }
+
+    private func inheritedForegroundColorForInsertion(
+        at location: Int,
+        previousTextLength: Int
+    ) -> SyntaxEditorColor? {
+        if location > 0,
+           let color = foregroundColor(at: location - 1) {
+            return color
+        }
+        if location < previousTextLength {
+            return foregroundColor(at: location)
+        }
+        return nil
+    }
+
+    private func inheritedFontForInsertion(
+        at location: Int,
+        previousTextLength: Int
+    ) -> SyntaxEditorFont? {
+        if location > 0,
+           let font = font(at: location - 1) {
+            return font
+        }
+        if location < previousTextLength {
+            return font(at: location)
+        }
+        return nil
+    }
+
+    private func applyOptimisticHighlightRunSet(_ runSet: OptimisticHighlightRunSet?) {
+        guard let runSet else { return }
+        let range = SyntaxEditorRangeUtilities.clampedRange(
+            runSet.range,
+            utf16Length: currentTextLength
+        )
+        guard range.length > 0 else { return }
+
+        if let color = runSet.color {
+            HighlightRunUtilities.replaceColorRuns(
+                &currentColorRuns,
+                in: range,
+                with: [HighlightColorRun(range: range, color: color)]
+            )
+        }
+        if let font = runSet.font {
+            HighlightRunUtilities.replaceFontRuns(
+                &currentFontRuns,
+                in: range,
+                with: [HighlightFontRun(range: range, font: font)]
+            )
+        }
+    }
+
     /// Folds the snapshot, the pending-edit map, and the partially materialized
     /// runs into a fresh snapshot in CURRENT coordinates. The resolver's output
-    /// is identical before and after: regions the map marked dirty simply have
-    /// no runs in the folded snapshot (they repaint when the engine's refresh
-    /// debt covers them). Deferred while suppression ranges exist — lifting a
-    /// suppression (IME composition end) must re-expose the underlying colors,
-    /// which a fold would have baked away.
+    /// is identical before and after: dirty ranges keep only any current
+    /// overlays, such as optimistic insert runs or completed partial refreshes,
+    /// and repaint when the engine's refresh debt covers them. Deferred while
+    /// suppression ranges exist — lifting a suppression (IME composition end)
+    /// must re-expose the underlying colors, which a fold would have baked away.
     private func checkpointPendingEditsIfNeeded() {
         let threshold = unsafe Self.pendingEditCheckpointThresholdOverrideForTesting
             ?? Self.pendingEditCheckpointThreshold
@@ -804,18 +908,16 @@ package final class HighlightRenderSnapshotStore {
         currentMaterializedRanges = []
     }
 
-    /// Shifts the partially materialized runs through one edit IN PLACE.
-    /// Progressive drains can leave a document's worth of runs here, and the
-    /// previous per-run flatMap (an array allocation per run, every keystroke)
-    /// dominated the main thread while typing during convergence. The splice
-    /// touches only the runs intersecting the edit plus one tail offset pass;
-    /// the mapping semantics mirror `PendingHighlightEditMap`'s single-edit
-    /// rules exactly (prefix kept, replaced region dropped, suffix shifted).
-    private func shiftCurrentMaterializedRuns(
+    /// Shifts current overlay runs through one edit in place. These runs can be
+    /// completed progressive refreshes or short-lived optimistic insert runs.
+    /// The splice touches only the runs intersecting the edit plus one tail
+    /// offset pass; the mapping semantics mirror `PendingHighlightEditMap`'s
+    /// single-edit rules exactly.
+    private func shiftCurrentRuns(
         for mutation: SyntaxHighlightMutation,
         currentTextLength nextTextLength: Int
     ) {
-        guard !currentMaterializedRanges.isEmpty else { return }
+        guard !currentColorRuns.isEmpty || !currentFontRuns.isEmpty || !currentMaterializedRanges.isEmpty else { return }
 
         // Same clamping as PendingHighlightEditMap.recordPendingEdit.
         let replacementLength = mutation.replacement.utf16.count
