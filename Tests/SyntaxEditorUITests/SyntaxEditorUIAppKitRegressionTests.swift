@@ -1925,7 +1925,7 @@ extension SyntaxEditorUITests {
         editorView.textView.insertText("x", replacementRange: NSRange(location: 0, length: 0))
         await updateGate.waitUntilSuspended(after: previousSuspensionCount)
 
-        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.baseForeground))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 5), theme.keyword))
 
         await updateGate.resumeOne()
