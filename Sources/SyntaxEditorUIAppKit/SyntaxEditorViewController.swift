@@ -1471,9 +1471,9 @@ public final class SyntaxEditorView: NSScrollView {
             }
             if shouldYieldBeforeReplacingRequest {
                 await Task.yield()
-                guard !Task.isCancelled else {
-                    return
-                }
+            }
+            guard !Task.isCancelled else {
+                return
             }
             let phases = await highlighter.replaceCurrentRequest(with: request)
             for await result in phases {
