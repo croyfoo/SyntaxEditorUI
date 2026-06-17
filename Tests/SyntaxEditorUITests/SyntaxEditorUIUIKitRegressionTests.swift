@@ -4750,7 +4750,7 @@ extension SyntaxEditorUITests {
     @Test("SyntaxEditorMenu builds UIKit Editor menu commands")
     @MainActor
     func syntaxEditorMenuBuildsUIKitEditorMenuCommands() {
-        let menu = SyntaxEditorMenu.makeEditorMenu()
+        let menu = SyntaxEditorMenu.makeMenu()
         #expect(menu.title == "Editor")
         #expect(menu.identifier == SyntaxEditorMenu.editorMenuIdentifier)
 
@@ -4836,7 +4836,7 @@ extension SyntaxEditorUITests {
         ) as AnyObject?
         #expect(readOnlyIncreaseFontSizeActionTarget === editorView)
 
-        let editorMenu = SyntaxEditorMenu.makeEditorMenu()
+        let editorMenu = SyntaxEditorMenu.makeMenu()
         if let structureMenu = syntaxEditorChildMenu(editorMenu, title: "Structure"),
            let shiftRightCommand = syntaxEditorChildKeyCommand(structureMenu, title: "Shift Right") {
             editorView.validate(shiftRightCommand)

@@ -1084,7 +1084,7 @@ extension SyntaxEditorView {
         guard !isApplyingUndoRedo else { return }
 
         registerUndoAction(
-            restore: EditorUndoState(
+            restore: EditorCommandEngine.UndoState(
                 edits: SyntaxEditorModel.inverseReplacements(
                     for: [
                         SyntaxEditorTextChange.Replacement(
@@ -1097,7 +1097,7 @@ extension SyntaxEditorView {
                 selectedRange: restore.selectedRange,
                 refreshStartUTF16: restore.refreshStartUTF16
             ),
-            counterpart: EditorUndoState(
+            counterpart: EditorCommandEngine.UndoState(
                 edits: [
                     SyntaxEditorTextChange.Replacement(
                         range: NSRange(location: 0, length: restore.source.utf16.count),

@@ -125,7 +125,7 @@ final class InjectedLanguageProvider: @unchecked Sendable {
 
     func configuration(named rawName: String) -> LanguageConfiguration? {
         let alias = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard let language = SyntaxLanguage.named(alias) else {
+        guard let language = SyntaxLanguage(identifier: alias) else {
             return nil
         }
 
@@ -195,7 +195,7 @@ extension LanguageConfigurationResolver {
 
     func makeConfiguration(
         for language: SyntaxLanguage,
-        support: SyntaxTreeSitterSupport
+        support: SyntaxLanguage.TreeSitterSupport
     ) -> LanguageConfiguration? {
         let treeSitterLanguage = support.makeLanguage()
 
@@ -232,7 +232,7 @@ extension LanguageConfigurationResolver {
 
     func makeConfiguration(
         _ language: Language,
-        support: SyntaxTreeSitterSupport,
+        support: SyntaxLanguage.TreeSitterSupport,
         queriesURL: URL
     ) -> LanguageConfiguration? {
         let standardized = queriesURL.standardizedFileURL
@@ -250,7 +250,7 @@ extension LanguageConfigurationResolver {
     }
 
     func supportedInjectedAliases(
-        for support: SyntaxTreeSitterSupport,
+        for support: SyntaxLanguage.TreeSitterSupport,
         rootConfiguration: LanguageConfiguration
     ) -> Set<String>? {
         guard rootConfiguration.queries[.injections] != nil else {
@@ -270,14 +270,14 @@ extension LanguageConfigurationResolver {
         guard aliases.isEmpty == false else {
             return nil
         }
-        guard aliases.allSatisfy({ SyntaxLanguage.named($0) != nil }) else {
+        guard aliases.allSatisfy({ SyntaxLanguage(identifier: $0) != nil }) else {
             return nil
         }
 
         return aliases
     }
 
-    func injectionsQuerySource(for support: SyntaxTreeSitterSupport) -> String? {
+    func injectionsQuerySource(for support: SyntaxLanguage.TreeSitterSupport) -> String? {
         var candidates: [URL] = []
         var seenPaths = Set<String>()
         let bundleFilename = "\(support.bundleName).bundle"
@@ -383,7 +383,7 @@ extension LanguageConfigurationResolver {
 
     func queryDirectoryCandidates(
         for language: SyntaxLanguage?,
-        support: SyntaxTreeSitterSupport
+        support: SyntaxLanguage.TreeSitterSupport
     ) -> [URL] {
         lock.lock()
         defer { lock.unlock() }
@@ -399,7 +399,7 @@ extension LanguageConfigurationResolver {
         return candidates
     }
 
-    static func queryDirectoryCandidates(for support: SyntaxTreeSitterSupport) -> [URL] {
+    static func queryDirectoryCandidates(for support: SyntaxLanguage.TreeSitterSupport) -> [URL] {
         let bundleFilename = "\(support.bundleName).bundle"
         var roots: [URL] = []
         let fileManager = FileManager.default

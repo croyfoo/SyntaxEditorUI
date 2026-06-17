@@ -5,21 +5,21 @@ import Testing
 
 private func requireObservable<T: Observable>(_ value: T) {}
 
-private func applying(_ result: EditorCommandResult?, to source: String) -> String? {
+private func applying(_ result: EditorCommandEngine.Result?, to source: String) -> String? {
     guard let result else { return nil }
     return applyingIfValid(result.edits, to: source)
 }
 
-private func applying(_ result: EditorCommandResult, to source: String) -> String {
+private func applying(_ result: EditorCommandEngine.Result, to source: String) -> String {
     SyntaxEditorModel.applying(result.edits, to: source)
 }
 
-private func applying(_ edit: SyntaxLanguageEdit?, to source: String) -> String? {
+private func applying(_ edit: SyntaxLanguage.EditResult?, to source: String) -> String? {
     guard let edit else { return nil }
     return applyingIfValid(edit.edits, to: source)
 }
 
-private func applying(_ edit: SyntaxLanguageEdit, to source: String) -> String {
+private func applying(_ edit: SyntaxLanguage.EditResult, to source: String) -> String {
     SyntaxEditorModel.applying(edit.edits, to: source)
 }
 
@@ -391,31 +391,31 @@ private extension SyntaxHighlighterEngine {
 
 @Suite("SyntaxEditorCore")
 struct SyntaxEditorCoreTests {
-    @Test("SyntaxLanguage.named maps supported values")
-    func builtinSyntaxLanguagesNamed() {
-        #expect(SyntaxLanguage.named("plain")?.identifier == SyntaxLanguage.plainText.identifier)
-        #expect(SyntaxLanguage.named("plaintext")?.identifier == SyntaxLanguage.plainText.identifier)
-        #expect(SyntaxLanguage.named("plain-text")?.identifier == SyntaxLanguage.plainText.identifier)
-        #expect(SyntaxLanguage.named("text")?.identifier == SyntaxLanguage.plainText.identifier)
-        #expect(SyntaxLanguage.named("txt")?.identifier == SyntaxLanguage.plainText.identifier)
-        #expect(SyntaxLanguage.named("text/plain")?.identifier == SyntaxLanguage.plainText.identifier)
-        #expect(SyntaxLanguage.named("css")?.identifier == SyntaxLanguage.css.identifier)
-        #expect(SyntaxLanguage.named("html")?.identifier == SyntaxLanguage.html.identifier)
-        #expect(SyntaxLanguage.named("HTM")?.identifier == SyntaxLanguage.html.identifier)
-        #expect(SyntaxLanguage.named(" javascript ")?.identifier == SyntaxLanguage.javascript.identifier)
-        #expect(SyntaxLanguage.named("JS")?.identifier == SyntaxLanguage.javascript.identifier)
-        #expect(SyntaxLanguage.named("JSON")?.identifier == SyntaxLanguage.json.identifier)
-        #expect(SyntaxLanguage.named("objective-c")?.identifier == SyntaxLanguage.objectiveC.identifier)
-        #expect(SyntaxLanguage.named("objectivec")?.identifier == SyntaxLanguage.objectiveC.identifier)
-        #expect(SyntaxLanguage.named("objc")?.identifier == SyntaxLanguage.objectiveC.identifier)
-        #expect(SyntaxLanguage.named("Swift")?.identifier == SyntaxLanguage.swift.identifier)
-        #expect(SyntaxLanguage.named("toml")?.identifier == SyntaxLanguage.toml.identifier)
-        #expect(SyntaxLanguage.named("xml")?.identifier == SyntaxLanguage.xml.identifier)
+    @Test("SyntaxLanguage init(identifier:) maps supported values")
+    func syntaxLanguageIdentifierInitializerMapsSupportedValues() {
+        #expect(SyntaxLanguage(identifier: "plain")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage(identifier: "plaintext")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage(identifier: "plain-text")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage(identifier: "text")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage(identifier: "txt")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage(identifier: "text/plain")?.identifier == SyntaxLanguage.plainText.identifier)
+        #expect(SyntaxLanguage(identifier: "css")?.identifier == SyntaxLanguage.css.identifier)
+        #expect(SyntaxLanguage(identifier: "html")?.identifier == SyntaxLanguage.html.identifier)
+        #expect(SyntaxLanguage(identifier: "HTM")?.identifier == SyntaxLanguage.html.identifier)
+        #expect(SyntaxLanguage(identifier: " javascript ")?.identifier == SyntaxLanguage.javascript.identifier)
+        #expect(SyntaxLanguage(identifier: "JS")?.identifier == SyntaxLanguage.javascript.identifier)
+        #expect(SyntaxLanguage(identifier: "JSON")?.identifier == SyntaxLanguage.json.identifier)
+        #expect(SyntaxLanguage(identifier: "objective-c")?.identifier == SyntaxLanguage.objectiveC.identifier)
+        #expect(SyntaxLanguage(identifier: "objectivec")?.identifier == SyntaxLanguage.objectiveC.identifier)
+        #expect(SyntaxLanguage(identifier: "objc")?.identifier == SyntaxLanguage.objectiveC.identifier)
+        #expect(SyntaxLanguage(identifier: "Swift")?.identifier == SyntaxLanguage.swift.identifier)
+        #expect(SyntaxLanguage(identifier: "toml")?.identifier == SyntaxLanguage.toml.identifier)
+        #expect(SyntaxLanguage(identifier: "xml")?.identifier == SyntaxLanguage.xml.identifier)
     }
 
-    @Test("SyntaxLanguage.named rejects unsupported values")
-    func builtinSyntaxLanguagesRejectUnsupportedValue() {
-        #expect(SyntaxLanguage.named("yaml") == nil)
+    @Test("SyntaxLanguage init(identifier:) rejects unsupported values")
+    func syntaxLanguageIdentifierInitializerRejectsUnsupportedValue() {
+        #expect(SyntaxLanguage(identifier: "yaml") == nil)
     }
 
     @Test("SyntaxEditorModel stores and mutates editor state on MainActor")
@@ -503,7 +503,7 @@ struct SyntaxEditorCoreTests {
         let model = SyntaxEditorModel()
 
         #expect(model.language == .javascript)
-        #expect(SyntaxLanguage.all.contains(.plainText))
+        #expect(SyntaxLanguage.allCases.contains(.plainText))
         #expect(SyntaxLanguage.syntaxHighlightedCases.contains(.plainText) == false)
     }
 
@@ -4142,7 +4142,7 @@ struct SyntaxHighlighterEngineTests {
         await SyntaxEditorHighlighting.prepare(.html)
         await SyntaxEditorHighlighting.prepare([.swift, .html])
         await SyntaxEditorHighlighting.prepare(.html)
-        await SyntaxEditorHighlighting.prepare(SyntaxLanguage.all)
+        await SyntaxEditorHighlighting.prepare(SyntaxLanguage.allCases)
         await SyntaxEditorHighlighting.prepare(.swift)
         await SyntaxEditorHighlighting.prepare([.html, .swift, .html, .objectiveC])
 
@@ -4155,7 +4155,7 @@ struct SyntaxHighlighterEngineTests {
             [.html],
             [.swift, .html],
             [.html, .swift, .html],
-            SyntaxLanguage.all,
+            SyntaxLanguage.allCases,
             [.objectiveC, .swift, .objectiveC],
         ]
 
@@ -4182,7 +4182,7 @@ struct SyntaxHighlighterEngineTests {
     func highlightingPrepareHandlesAllLanguagePrepareRacingSpecificWork() async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
-                await SyntaxEditorHighlighting.prepare(SyntaxLanguage.all)
+                await SyntaxEditorHighlighting.prepare(SyntaxLanguage.allCases)
             }
             group.addTask {
                 await SyntaxEditorHighlighting.prepare(.swift)

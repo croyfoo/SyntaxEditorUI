@@ -7,8 +7,8 @@ struct CSSLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .css }
     var displayName: String { "CSS" }
-    var treeSitterSupport: SyntaxTreeSitterSupport? {
-        SyntaxTreeSitterSupport(
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? {
+        SyntaxLanguage.TreeSitterSupport(
             name: "CSS",
             bundleName: "TreeSitterCSS_TreeSitterCSS",
             queryDirectories: Self.queryDirectories,
@@ -16,7 +16,7 @@ struct CSSLanguage: SyntaxLanguageSupport {
         )
     }
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult? {
         SyntaxLanguageTextUtilities.toggleWrappedComment(
             source: source,
             selection: selection,

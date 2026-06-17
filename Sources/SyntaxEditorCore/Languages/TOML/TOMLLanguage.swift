@@ -7,8 +7,8 @@ struct TOMLLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .toml }
     var displayName: String { "TOML" }
-    var treeSitterSupport: SyntaxTreeSitterSupport? {
-        SyntaxTreeSitterSupport(
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? {
+        SyntaxLanguage.TreeSitterSupport(
             name: "TOML",
             bundleName: "TreeSitterTOML_TreeSitterTOML",
             queryDirectories: Self.queryDirectories,
@@ -16,7 +16,7 @@ struct TOMLLanguage: SyntaxLanguageSupport {
         )
     }
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult? {
         SyntaxLanguageTextUtilities.toggleLineComment(
             source: source,
             selection: selection,

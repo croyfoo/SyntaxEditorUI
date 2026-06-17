@@ -742,7 +742,7 @@ private enum EditorSpecTool {
                 rawCaptureName: token.rawCaptureName,
                 color: editorColorRecord(
                     syntaxID: token.syntaxID,
-                    language: SyntaxLanguage.named(token.language) ?? language,
+                    language: SyntaxLanguage(identifier: token.language) ?? language,
                     fallbackLanguage: language,
                     appearance: appearance
                 )
@@ -1828,7 +1828,7 @@ private struct Options: Sendable {
                 guard index < rawArguments.count else {
                     throw ToolError.missingArgument(argument)
                 }
-                guard let resolved = SyntaxLanguage.named(rawArguments[index]) else {
+                guard let resolved = SyntaxLanguage(identifier: rawArguments[index]) else {
                     throw ToolError.invalidLanguage(rawArguments[index])
                 }
                 language = resolved

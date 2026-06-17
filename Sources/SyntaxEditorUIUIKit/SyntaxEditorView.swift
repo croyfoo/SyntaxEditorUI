@@ -601,7 +601,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     public override func validate(_ command: UICommand) {
         super.validate(command)
 
-        guard let editorCommand = SyntaxEditorMenuCommand(selector: command.action) else {
+        guard let editorCommand = SyntaxEditorMenu.Command(selector: command.action) else {
             return
         }
 
@@ -938,7 +938,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func isEditorCommandAction(_ action: Selector) -> Bool {
-        if let command = SyntaxEditorMenuCommand(selector: action) {
+        if let command = SyntaxEditorMenu.Command(selector: action) {
             return command.isEditingCommand
         }
 
@@ -947,11 +947,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func isLineWrappingCommandAction(_ action: Selector) -> Bool {
-        SyntaxEditorMenuCommand(selector: action) == .wrapLines
+        SyntaxEditorMenu.Command(selector: action) == .wrapLines
     }
 
     func isFontSizeCommandAction(_ action: Selector) -> Bool {
-        switch SyntaxEditorMenuCommand(selector: action) {
+        switch SyntaxEditorMenu.Command(selector: action) {
         case .increaseFontSize, .decreaseFontSize, .resetFontSize:
             true
         case .shiftRight, .shiftLeft, .commentSelection, .wrapLines, nil:
@@ -1490,7 +1490,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         if registersUndo, !isApplyingUndoRedo {
             registerUndoAction(
-                restore: EditorUndoState(
+                restore: EditorCommandEngine.UndoState(
                     edits: SyntaxEditorModel.inverseReplacements(for: edits, in: previousText),
                     selectedRange: previousSelection,
                     refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
@@ -1498,7 +1498,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
                         around: refreshStartUTF16
                     )
                 ),
-                counterpart: EditorUndoState(
+                counterpart: EditorCommandEngine.UndoState(
                     edits: edits,
                     selectedRange: nextSelection,
                     refreshStartUTF16: refreshStartUTF16
@@ -1597,7 +1597,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         invalidateTextLayout()
     }
 
-    func applyCommandResult(_ result: EditorCommandResult) {
+    func applyCommandResult(_ result: EditorCommandEngine.Result) {
         guard model.isEditable else {
             refreshKeyboardAccessoryState()
             return
@@ -1611,7 +1611,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         )
     }
 
-    func registerUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
+    func registerUndoAction(restore: EditorCommandEngine.UndoState, counterpart: EditorCommandEngine.UndoState) {
         guard restore != counterpart else { return }
         guard let activeUndoManager else { return }
 
@@ -1619,8 +1619,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func registerUndoAction(
-        restore: EditorUndoState,
-        counterpart: EditorUndoState,
+        restore: EditorCommandEngine.UndoState,
+        counterpart: EditorCommandEngine.UndoState,
         in undoManager: UndoManager
     ) {
         guard restore != counterpart else { return }
@@ -1634,7 +1634,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
     }
 
-    func applyUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
+    func applyUndoAction(restore: EditorCommandEngine.UndoState, counterpart: EditorCommandEngine.UndoState) {
         guard model.isEditable else {
             return
         }
@@ -1643,7 +1643,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         isApplyingUndoRedo = true
         applyCommandResult(
-            EditorCommandResult(
+            EditorCommandEngine.Result(
                 edits: restore.edits,
                 selectedRange: restore.selectedRange,
                 refreshStartUTF16: restore.refreshStartUTF16

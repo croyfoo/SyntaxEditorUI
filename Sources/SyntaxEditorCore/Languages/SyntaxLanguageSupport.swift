@@ -4,12 +4,12 @@ protocol SyntaxLanguageSupport: Sendable {
     var language: SyntaxLanguage { get }
     var displayName: String { get }
     var aliases: Set<String> { get }
-    var treeSitterSupport: SyntaxTreeSitterSupport? { get }
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? { get }
     var supportsCodeEditingCommands: Bool { get }
 
     init()
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit?
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult?
     func isInsideLiteralOrComment(source: String, location: Int) -> Bool
 }
 

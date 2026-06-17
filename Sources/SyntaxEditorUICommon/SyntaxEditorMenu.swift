@@ -11,7 +11,8 @@ public enum SyntaxEditorMenu {
     private static let editorMenuTitle = "Editor"
 }
 
-package enum SyntaxEditorMenuCommand: CaseIterable {
+extension SyntaxEditorMenu {
+package enum Command: CaseIterable {
     case shiftRight
     case shiftLeft
     case commentSelection
@@ -75,12 +76,13 @@ package enum SyntaxEditorMenuCommand: CaseIterable {
         self = command
     }
 }
+}
 
 #if canImport(UIKit)
 extension SyntaxEditorMenu {
     public static let editorMenuIdentifier = UIMenu.Identifier("com.lynnswap.SyntaxEditorUI.editor")
 
-    public static func makeEditorMenu() -> UIMenu {
+    public static func makeMenu() -> UIMenu {
         UIMenu(
             title: editorMenuTitle,
             identifier: editorMenuIdentifier,
@@ -114,10 +116,10 @@ extension SyntaxEditorMenu {
         )
     }
 
-    public static func insertEditorMenu(into builder: any UIMenuBuilder) {
+    public static func insert(into builder: any UIMenuBuilder) {
         guard builder.system == UIMenuSystem.main else { return }
 
-        let editorMenu = makeEditorMenu()
+        let editorMenu = makeMenu()
         if builder.menu(for: .view) != nil {
             builder.insertSibling(editorMenu, afterMenu: .view)
         } else if builder.menu(for: .window) != nil {
@@ -128,7 +130,7 @@ extension SyntaxEditorMenu {
     }
 
     package static func makeKeyCommands(includeEditingCommands: Bool) -> [UIKeyCommand] {
-        SyntaxEditorMenuCommand.allCases.compactMap { command in
+        SyntaxEditorMenu.Command.allCases.compactMap { command in
             guard includeEditingCommands || !command.isEditingCommand else {
                 return nil
             }
@@ -136,7 +138,7 @@ extension SyntaxEditorMenu {
         }
     }
 
-    package static func makeKeyCommand(for command: SyntaxEditorMenuCommand) -> UIKeyCommand {
+    package static func makeKeyCommand(for command: SyntaxEditorMenu.Command) -> UIKeyCommand {
         let keyCommand = UIKeyCommand(
             title: command.title,
             image: nil,
@@ -154,7 +156,7 @@ extension SyntaxEditorMenu {
     }
 }
 
-private extension SyntaxEditorMenuCommand {
+private extension SyntaxEditorMenu.Command {
     var input: String {
         switch self {
         case .shiftRight:
@@ -191,15 +193,15 @@ private extension SyntaxEditorMenuCommand {
 extension SyntaxEditorMenu {
     private static let editorMenuItemIdentifier = NSUserInterfaceItemIdentifier("com.lynnswap.SyntaxEditorUI.editor")
 
-    public static func makeEditorMenuItem() -> NSMenuItem {
+    private static func makeMenuItem() -> NSMenuItem {
         let item = NSMenuItem(title: editorMenuTitle, action: nil, keyEquivalent: "")
         item.identifier = editorMenuItemIdentifier
-        item.submenu = makeEditorMenu()
+        item.submenu = makeMenu()
         return item
     }
 
-    public static func insertEditorMenuItem(into mainMenu: NSMenu) {
-        let item = makeEditorMenuItem()
+    public static func insert(into mainMenu: NSMenu) {
+        let item = makeMenuItem()
         if let existingIndex = mainMenu.items.firstIndex(where: { $0.identifier == editorMenuItemIdentifier }) {
             mainMenu.removeItem(at: existingIndex)
             mainMenu.insertItem(item, at: existingIndex)
@@ -217,7 +219,7 @@ extension SyntaxEditorMenu {
         }
     }
 
-    private static func makeEditorMenu() -> NSMenu {
+    public static func makeMenu() -> NSMenu {
         let menu = NSMenu(title: editorMenuTitle)
 
         let structureItem = NSMenuItem(title: "Structure", action: nil, keyEquivalent: "")
@@ -243,7 +245,7 @@ extension SyntaxEditorMenu {
         return menu
     }
 
-    package static func makeMenuItem(for command: SyntaxEditorMenuCommand) -> NSMenuItem {
+    package static func makeMenuItem(for command: SyntaxEditorMenu.Command) -> NSMenuItem {
         let item = NSMenuItem(
             title: command.title,
             action: command.selector,
@@ -255,7 +257,7 @@ extension SyntaxEditorMenu {
     }
 }
 
-private extension SyntaxEditorMenuCommand {
+private extension SyntaxEditorMenu.Command {
     var keyEquivalent: String {
         switch self {
         case .shiftRight:

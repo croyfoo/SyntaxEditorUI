@@ -7,8 +7,8 @@ struct SwiftLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .swift }
     var displayName: String { "Swift" }
-    var treeSitterSupport: SyntaxTreeSitterSupport? {
-        SyntaxTreeSitterSupport(
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? {
+        SyntaxLanguage.TreeSitterSupport(
             name: "Swift",
             bundleName: "TreeSitterSwift_TreeSitterSwift",
             queryDirectories: Self.queryDirectories,
@@ -16,7 +16,7 @@ struct SwiftLanguage: SyntaxLanguageSupport {
         )
     }
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult? {
         SyntaxLanguageTextUtilities.toggleLineComment(
             source: source,
             selection: selection,

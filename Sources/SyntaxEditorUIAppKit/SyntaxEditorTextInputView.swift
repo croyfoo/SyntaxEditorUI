@@ -317,7 +317,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         if item.action == #selector(selectAll(_:)) {
             return isSelectable
         }
-        if let command = SyntaxEditorMenuCommand(selector: item.action),
+        if let command = SyntaxEditorMenu.Command(selector: item.action),
            let action = EditorShortcutAction(command: command) {
             let canHandle = shortcutValidator?(action) ?? true
             if command == .wrapLines, let menuItem = item as? NSMenuItem {

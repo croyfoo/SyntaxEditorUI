@@ -15,7 +15,7 @@ enum EditorShortcutAction {
 }
 
 extension EditorShortcutAction {
-    init?(command: SyntaxEditorMenuCommand) {
+    init?(command: SyntaxEditorMenu.Command) {
         switch command {
         case .shiftRight:
             self = .indent
@@ -1055,7 +1055,7 @@ public final class SyntaxEditorView: NSScrollView {
         invalidateVisibleTextDisplay()
     }
 
-    private func applyCommandResult(_ result: EditorCommandResult) {
+    private func applyCommandResult(_ result: EditorCommandEngine.Result) {
         guard model.isEditable else {
             return
         }
@@ -1067,15 +1067,15 @@ public final class SyntaxEditorView: NSScrollView {
             ? SyntaxEditorModel.applying(result.edits, to: previousText)
             : previousText
 
-        let undoState: (restore: EditorUndoState, counterpart: EditorUndoState)? =
+        let undoState: (restore: EditorCommandEngine.UndoState, counterpart: EditorCommandEngine.UndoState)? =
             if textChanged, !isApplyingUndoRedo {
                 (
-                    EditorUndoState(
+                    EditorCommandEngine.UndoState(
                         edits: SyntaxEditorModel.inverseReplacements(for: result.edits, in: previousText),
                         selectedRange: previousSelection,
                         refreshStartUTF16: 0
                     ),
-                    EditorUndoState(
+                    EditorCommandEngine.UndoState(
                         edits: result.edits,
                         selectedRange: result.selectedRange,
                         refreshStartUTF16: result.refreshStartUTF16
@@ -1130,7 +1130,7 @@ public final class SyntaxEditorView: NSScrollView {
         }
     }
 
-    private func registerUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
+    private func registerUndoAction(restore: EditorCommandEngine.UndoState, counterpart: EditorCommandEngine.UndoState) {
         guard restore != counterpart else { return }
         guard let activeUndoManager = activeUndoManager else { return }
 
@@ -1171,12 +1171,12 @@ public final class SyntaxEditorView: NSScrollView {
         }
 
         registerUndoAction(
-            restore: EditorUndoState(
+            restore: EditorCommandEngine.UndoState(
                 edits: restoreEdits,
                 selectedRange: previousSelection ?? NSRange(location: 0, length: 0),
                 refreshStartUTF16: refreshStartUTF16
             ),
-            counterpart: EditorUndoState(
+            counterpart: EditorCommandEngine.UndoState(
                 edits: edits,
                 selectedRange: nextSelection,
                 refreshStartUTF16: refreshStartUTF16
@@ -1185,8 +1185,8 @@ public final class SyntaxEditorView: NSScrollView {
     }
 
     private func registerUndoAction(
-        restore: EditorUndoState,
-        counterpart: EditorUndoState,
+        restore: EditorCommandEngine.UndoState,
+        counterpart: EditorCommandEngine.UndoState,
         in undoManager: UndoManager
     ) {
         guard restore != counterpart else { return }
@@ -1200,7 +1200,7 @@ public final class SyntaxEditorView: NSScrollView {
         }
     }
 
-    private func applyUndoAction(restore: EditorUndoState, counterpart: EditorUndoState) {
+    private func applyUndoAction(restore: EditorCommandEngine.UndoState, counterpart: EditorCommandEngine.UndoState) {
         guard model.isEditable else {
             return
         }
@@ -1209,7 +1209,7 @@ public final class SyntaxEditorView: NSScrollView {
 
         isApplyingUndoRedo = true
         applyCommandResult(
-            EditorCommandResult(
+            EditorCommandEngine.Result(
                 edits: restore.edits,
                 selectedRange: restore.selectedRange,
                 refreshStartUTF16: restore.refreshStartUTF16

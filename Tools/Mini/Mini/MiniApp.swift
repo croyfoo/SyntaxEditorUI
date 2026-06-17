@@ -2,7 +2,7 @@ import SyntaxEditorUI
 
 private func prepareBundledSyntaxLanguages() {
     Task.detached {
-        await SyntaxEditorHighlighting.prepare(SyntaxLanguage.all)
+        await SyntaxEditorHighlighting.prepare(SyntaxLanguage.allCases)
     }
 }
 
@@ -20,7 +20,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 
         if #available(iOS 26.0, *) {
             UIMainMenuSystem.shared.setBuildConfiguration(UIMainMenuSystem.Configuration()) { builder in
-                SyntaxEditorMenu.insertEditorMenu(into: builder)
+                SyntaxEditorMenu.insert(into: builder)
             }
         }
         return true
@@ -189,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
-        SyntaxEditorMenu.insertEditorMenuItem(into: mainMenu)
+        SyntaxEditorMenu.insert(into: mainMenu)
 
         let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")

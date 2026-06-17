@@ -673,7 +673,7 @@ private struct BenchmarkArguments {
         case "xml":
             .xml
         default:
-            SyntaxLanguage.named(name)
+            SyntaxLanguage(identifier: name)
         }
     }
 

@@ -24,20 +24,21 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
         support.displayName
     }
 
-    public static var all: [SyntaxLanguage] {
-        allCases
-    }
-
-    public static func named(_ normalizedRawValue: String) -> SyntaxLanguage? {
-        let lowered = normalizedRawValue
+    public init?(identifier rawIdentifier: String) {
+        let lowered = rawIdentifier
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
-        return allCases.first { $0.support.aliases.contains(lowered) }
+        guard let language = Self.allCases.first(where: { $0.support.aliases.contains(lowered) }) else {
+            return nil
+        }
+
+        self = language
     }
 }
 
-struct SyntaxLanguageEdit {
+extension SyntaxLanguage {
+struct EditResult {
     let edits: [SyntaxEditorTextChange.Replacement]
     let selectedRange: NSRange
 
@@ -47,7 +48,7 @@ struct SyntaxLanguageEdit {
     }
 }
 
-struct SyntaxTreeSitterSupport: Sendable {
+struct TreeSitterSupport: Sendable {
     let name: String
     let bundleName: String
     let queryDirectories: [URL]
@@ -71,6 +72,7 @@ struct SyntaxTreeSitterSupport: Sendable {
     func makeLanguage() -> Language {
         makeLanguageBody()
     }
+}
 }
 
 extension SyntaxLanguage {
@@ -113,11 +115,11 @@ extension SyntaxLanguage {
         support.supportsCodeEditingCommands
     }
 
-    var treeSitterSupport: SyntaxTreeSitterSupport? {
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? {
         support.treeSitterSupport
     }
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult? {
         support.toggleComment(source: source, selection: selection)
     }
 
