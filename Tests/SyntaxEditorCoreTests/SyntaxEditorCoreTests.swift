@@ -35,19 +35,19 @@ private func applyingIfValid(_ edits: [SyntaxEditorTextChange.Replacement], to s
     return SyntaxEditorModel.applying(edits, to: source)
 }
 
-private func highlightTokensMatch(_ lhs: [SyntaxHighlightToken], _ rhs: [SyntaxHighlightToken]) -> Bool {
+private func highlightTokensMatch(_ lhs: [SyntaxEditorHighlighting.Token], _ rhs: [SyntaxEditorHighlighting.Token]) -> Bool {
     sortHighlightTokens(lhs) == sortHighlightTokens(rhs)
 }
 
-private func collectHighlightPhases(_ stream: AsyncStream<SyntaxHighlightResult>) async -> [SyntaxHighlightResult] {
-    var results: [SyntaxHighlightResult] = []
+private func collectHighlightPhases(_ stream: AsyncStream<SyntaxEditorHighlighting.Result>) async -> [SyntaxEditorHighlighting.Result] {
+    var results: [SyntaxEditorHighlighting.Result] = []
     for await result in stream {
         results.append(result)
     }
     return results
 }
 
-private func sortHighlightTokens(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHighlightToken] {
+private func sortHighlightTokens(_ tokens: [SyntaxEditorHighlighting.Token]) -> [SyntaxEditorHighlighting.Token] {
     tokens.sorted {
         if $0.range.location != $1.range.location {
             return $0.range.location < $1.range.location
@@ -60,9 +60,9 @@ private func sortHighlightTokens(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHig
 }
 
 private func tokenIntersects(
-    _ token: SyntaxHighlightToken,
+    _ token: SyntaxEditorHighlighting.Token,
     range: NSRange,
-    syntaxID: EditorSourceSyntaxID? = nil,
+    syntaxID: EditorSourceSyntax.ID? = nil,
     language: SyntaxLanguage? = nil
 ) -> Bool {
     if let syntaxID, token.syntaxID != syntaxID {
@@ -74,7 +74,7 @@ private func tokenIntersects(
     return SyntaxEditorRangeUtilities.intersection(of: token.range, and: range).length > 0
 }
 
-private func tokenIsInjectedKeyword(_ token: SyntaxHighlightToken, in range: NSRange) -> Bool {
+private func tokenIsInjectedKeyword(_ token: SyntaxEditorHighlighting.Token, in range: NSRange) -> Bool {
     (token.language == .javascript || token.language == .json)
         && token.syntaxID == .keyword
         && SyntaxEditorRangeUtilities.intersection(of: token.range, and: range).length > 0
@@ -83,7 +83,7 @@ private func tokenIsInjectedKeyword(_ token: SyntaxHighlightToken, in range: NSR
 private struct HighlightSemanticSnapshot {
     let text: String
     let rawCaptureName: String
-    let syntaxID: EditorSourceSyntaxID
+    let syntaxID: EditorSourceSyntax.ID
     let styleKeys: [String]
     let resolvedStyle: SyntaxEditorTheme.TextStyle
 }
@@ -242,10 +242,10 @@ private func captureNames(inQuerySource source: String) -> [String] {
 }
 
 private func semanticSnapshot(
-    in tokens: [SyntaxHighlightToken],
+    in tokens: [SyntaxEditorHighlighting.Token],
     source: String,
     text: String,
-    syntaxID: EditorSourceSyntaxID,
+    syntaxID: EditorSourceSyntax.ID,
     language: SyntaxLanguage,
     inOccurrenceOf containingText: String? = nil
 ) throws -> HighlightSemanticSnapshot {
@@ -294,11 +294,11 @@ private func semanticSnapshot(
 }
 
 private func syntaxIDs(
-    in tokens: [SyntaxHighlightToken],
+    in tokens: [SyntaxEditorHighlighting.Token],
     source: String,
     text: String,
     inOccurrenceOf containingText: String
-) -> [EditorSourceSyntaxID] {
+) -> [EditorSourceSyntax.ID] {
     let nsSource = source as NSString
     let searchRange = nsSource.range(of: containingText)
     #expect(searchRange.location != NSNotFound)
@@ -311,10 +311,10 @@ private func syntaxIDs(
 }
 
 private func effectiveSemanticSnapshot(
-    in tokens: [SyntaxHighlightToken],
+    in tokens: [SyntaxEditorHighlighting.Token],
     source: String,
     text: String,
-    syntaxID: EditorSourceSyntaxID,
+    syntaxID: EditorSourceSyntax.ID,
     language: SyntaxLanguage,
     inOccurrenceOf containingText: String
 ) throws -> HighlightSemanticSnapshot {
@@ -361,7 +361,7 @@ private func effectiveSemanticSnapshot(
 }
 
 private extension SyntaxHighlighterEngine {
-    func reset(source: String, language: SyntaxLanguage) async -> SyntaxHighlightResult {
+    func reset(source: String, language: SyntaxLanguage) async -> SyntaxEditorHighlighting.Result {
         await reset(source: source, language: language, revision: 0)
     }
 
@@ -369,15 +369,15 @@ private extension SyntaxHighlighterEngine {
         previousSource: String,
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation
-    ) async -> SyntaxHighlightResult {
+        mutation: SyntaxEditorTextChange.Replacement
+    ) async -> SyntaxEditorHighlighting.Result {
         _ = previousSource
         let result = await update(source: source, language: language, mutation: mutation, revision: 1)
         guard result.tokenPayload == .replacement else {
             return result
         }
         let currentTokens = await currentTokensForTesting()
-        return SyntaxHighlightResult(
+        return SyntaxEditorHighlighting.Result(
             tokens: currentTokens,
             source: result.source,
             language: result.language,
@@ -630,23 +630,23 @@ struct SyntaxEditorCoreTests {
         #expect(objectiveCStyle?.foreground == objectiveCResolved.baseForeground)
     }
 
-    @Test("EditorSyntaxCapture parses canonical captures and falls back for non-canonical names")
+    @Test("EditorSourceSyntax.Capture parses canonical captures and falls back for non-canonical names")
     func editorSyntaxCaptureParser() {
-        let swiftKeyword = EditorSyntaxCapture.parse(
+        let swiftKeyword = EditorSourceSyntax.Capture.parse(
             rawCaptureName: "editor.syntax.swift.keyword",
             rootLanguage: .html
         )
         #expect(swiftKeyword.syntaxID == .keyword)
         #expect(swiftKeyword.language == .swift)
 
-        let objectiveCType = EditorSyntaxCapture.parse(
+        let objectiveCType = EditorSourceSyntax.Capture.parse(
             rawCaptureName: "@editor.syntax.objectivec.identifier.type.system",
             rootLanguage: .swift
         )
         #expect(objectiveCType.syntaxID == .identifierTypeSystem)
         #expect(objectiveCType.language == .objectiveC)
 
-        let fallback = EditorSyntaxCapture.parse(rawCaptureName: "keyword", rootLanguage: .swift)
+        let fallback = EditorSourceSyntax.Capture.parse(rawCaptureName: "keyword", rootLanguage: .swift)
         #expect(fallback.syntaxID == .plain)
         #expect(fallback.language == .swift)
     }
@@ -661,7 +661,7 @@ struct SyntaxEditorCoreTests {
 
             for capture in captures {
                 #expect(capture.hasPrefix(prefix), "Non-canonical capture @\(capture) in \(language.rawValue)")
-                let classification = EditorSyntaxCapture.parse(
+                let classification = EditorSourceSyntax.Capture.parse(
                     rawCaptureName: capture,
                     rootLanguage: language
                 )
@@ -956,14 +956,14 @@ struct SyntaxEditorCoreTests {
     func lineTokenPlanesPreservesLaterLinesAcrossPrefixInsertion() {
         let source = "first\nsecond\nthird"
         let updatedSource = "prefix\n" + source
-        let mutation = SyntaxHighlightMutation(location: 0, length: 0, replacement: "prefix\n")
+        let mutation = SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: "prefix\n")
         let lineTable = HighlightLineTable()
         lineTable.reset(source: source)
         let planes = LineTokenPlanes(styles: HighlightStyleTable())
         let secondRange = (source as NSString).range(of: "second")
         planes.reset(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: secondRange,
                     syntaxID: .plain,
                     language: .swift,
@@ -984,13 +984,13 @@ struct SyntaxEditorCoreTests {
         let source = "first\nsecond\nthird"
         let prefix = "prefix\n"
         let updatedSource = prefix + source
-        let mutation = SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+        let mutation = SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: prefix)
         let lineTable = HighlightLineTable()
         lineTable.reset(source: source)
         let planes = LineTokenPlanes(styles: HighlightStyleTable())
         planes.reset(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: (source as NSString).range(of: "second"),
                     syntaxID: .plain,
                     language: .swift,
@@ -1008,7 +1008,7 @@ struct SyntaxEditorCoreTests {
         _ = planes.replaceTokens(
             in: replacementRange,
             with: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: (updatedSource as NSString).range(of: "first"),
                     syntaxID: .keyword,
                     language: .swift,
@@ -1035,7 +1035,7 @@ struct SyntaxEditorCoreTests {
         let multilineStringRange = nsSource.range(of: "\"\"\"\nhello\n\"\"\"")
         planes.reset(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: multilineStringRange,
                     syntaxID: .string,
                     language: .swift,
@@ -4107,7 +4107,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: source + "\n",
             language: .plainText,
-            mutation: SyntaxHighlightMutation(location: source.utf16.count, length: 0, replacement: "\n")
+            mutation: SyntaxEditorTextChange.Replacement(location: source.utf16.count, length: 0, replacement: "\n")
         )
         #expect(update.tokens.isEmpty)
         #expect(update.refreshRange == NSRange(location: 0, length: (source + "\n").utf16.count))
@@ -4343,7 +4343,7 @@ struct SyntaxHighlighterEngineTests {
         let update = await engine.update(
             source: updatedSource,
             language: .swift,
-            mutation: SyntaxHighlightMutation(mutation),
+            mutation: mutation,
             revision: 1
         )
         let render = await engine.render(source: source, language: .swift)
@@ -4367,7 +4367,7 @@ struct SyntaxHighlighterEngineTests {
         var revision = 1
         for character in "typed words" {
             let insertion = String(character)
-            let mutation = SyntaxHighlightMutation(
+            let mutation = SyntaxEditorTextChange.Replacement(
                 location: caret + revision - 1,
                 length: 0,
                 replacement: insertion
@@ -4414,7 +4414,7 @@ struct SyntaxHighlighterEngineTests {
         _ = await engine.update(
             source: next,
             language: .swift,
-            mutation: SyntaxHighlightMutation(location: caret, length: 0, replacement: insertion),
+            mutation: SyntaxEditorTextChange.Replacement(location: caret, length: 0, replacement: insertion),
             revision: 1
         )
 
@@ -4445,7 +4445,7 @@ struct SyntaxHighlighterEngineTests {
 
         let drifted = source.replacingOccurrences(of: "beta", with: "zeta")
         let caret = (drifted as NSString).length
-        let mutation = SyntaxHighlightMutation(location: caret, length: 0, replacement: "x")
+        let mutation = SyntaxEditorTextChange.Replacement(location: caret, length: 0, replacement: "x")
         let next = drifted + "x"
 
         let result = await engine.update(
@@ -4470,7 +4470,7 @@ struct SyntaxHighlighterEngineTests {
         defer { HighlightSession.progressiveResetThresholdOverrideForTesting = nil }
 
         let engine = SyntaxHighlighterEngine()
-        var results: [SyntaxHighlightResult] = []
+        var results: [SyntaxEditorHighlighting.Result] = []
         let phases = await engine.resetPhases(source: source, language: .swift, revision: 0)
         for await result in phases {
             results.append(result)
@@ -4557,7 +4557,7 @@ struct SyntaxHighlighterEngineTests {
         let source = try referenceSampleText(named: "Reference.swift")
         let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
 
-        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+        let expectations: [(text: String, syntaxID: EditorSourceSyntax.ID, styleKey: String, occurrence: String)] = [
             ("MARK:", "mark", "editor.syntax.mark", "// MARK: - Reference highlighting surface"),
             ("Foundation", "plain", "editor.syntax.plain", "import Foundation"),
             ("Observation", "plain", "editor.syntax.plain", "import Observation"),
@@ -4631,7 +4631,7 @@ struct SyntaxHighlighterEngineTests {
             #expect(snapshot.styleKeys.first == expectation.styleKey)
         }
 
-        let effectiveExpectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+        let effectiveExpectations: [(text: String, syntaxID: EditorSourceSyntax.ID, styleKey: String, occurrence: String)] = [
             ("isolated", "keyword", "editor.syntax.keyword", "isolated deinit"),
             ("defer", "keyword", "editor.syntax.keyword", "defer { state = .ready }"),
             ("#if", "preprocessor", "editor.syntax.preprocessor", "#if os(iOS)"),
@@ -4710,7 +4710,7 @@ struct SyntaxHighlighterEngineTests {
         """
         let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
 
-        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+        let expectations: [(text: String, syntaxID: EditorSourceSyntax.ID, styleKey: String, occurrence: String)] = [
             ("attached", "keyword", "editor.syntax.keyword", "@attached(member"),
             ("freestanding", "keyword", "editor.syntax.keyword", "@freestanding(expression)"),
             ("@", "plain", "editor.syntax.plain", "@LocalAttribute"),
@@ -4752,7 +4752,7 @@ struct SyntaxHighlighterEngineTests {
         """
         let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
 
-        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+        let expectations: [(text: String, syntaxID: EditorSourceSyntax.ID, styleKey: String, occurrence: String)] = [
             ("externalMacro", "keyword", "editor.syntax.keyword", "#externalMacro(module:"),
             ("sourceLocation", "preprocessor", "editor.syntax.preprocessor", "#sourceLocation(file:"),
             ("FixtureMacro", "identifier.macro", "editor.syntax.identifier.macro", "#FixtureMacro()"),
@@ -4812,7 +4812,7 @@ struct SyntaxHighlighterEngineTests {
         """
         let tokens = await SyntaxHighlighterEngine().render(source: source, language: .swift)
 
-        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+        let expectations: [(text: String, syntaxID: EditorSourceSyntax.ID, styleKey: String, occurrence: String)] = [
             ("LocalModel", "identifier.type", "editor.syntax.identifier.type", "_ model: LocalModel"),
             ("Int", "identifier.type.system", "editor.syntax.identifier.type.system", "value: Int"),
             ("String", "identifier.type.system", "editor.syntax.identifier.type.system", "title: String"),
@@ -5341,7 +5341,7 @@ struct SyntaxHighlighterEngineTests {
         """
         let tokens = await engine.render(source: source, language: SyntaxLanguage.swift)
 
-        let expectations: [(text: String, syntaxID: EditorSourceSyntaxID, styleKey: String, occurrence: String)] = [
+        let expectations: [(text: String, syntaxID: EditorSourceSyntax.ID, styleKey: String, occurrence: String)] = [
             ("#if", "preprocessor", "editor.syntax.preprocessor", "#if !DEBUG"),
             ("!", "preprocessor", "editor.syntax.preprocessor", "#if !DEBUG"),
             ("DEBUG", "preprocessor", "editor.syntax.preprocessor", "#if !DEBUG"),
@@ -6452,7 +6452,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6480,7 +6480,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6520,7 +6520,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6545,7 +6545,7 @@ struct SyntaxHighlighterEngineTests {
         let update = await engine.update(
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation),
+            mutation: mutation,
             revision: 1
         )
         let currentTokens = await engine.currentTokensForTesting()
@@ -6576,7 +6576,7 @@ struct SyntaxHighlighterEngineTests {
         let phases = await engine.updatePhases(
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation),
+            mutation: mutation,
             revision: 1
         )
         var iterator = phases.makeAsyncIterator()
@@ -6612,7 +6612,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6639,7 +6639,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6659,7 +6659,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
         let keywordRange = (updatedSource as NSString).range(of: "true")
@@ -6691,13 +6691,13 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: prefixedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+            mutation: SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: prefix)
         )
         let incremental = await incrementalEngine.update(
             previousSource: prefixedSource,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(referenceMutation)
+            mutation: referenceMutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6723,7 +6723,7 @@ struct SyntaxHighlighterEngineTests {
         """
         let appendedSource = source + appendedText
         let updatedSource = appendedSource.replacingOccurrences(of: "return item", with: "return item + 1")
-        let appendMutation = SyntaxHighlightMutation(
+        let appendMutation = SyntaxEditorTextChange.Replacement(
             location: source.utf16.count,
             length: 0,
             replacement: appendedText
@@ -6743,7 +6743,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: appendedSource,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(referenceMutation)
+            mutation: referenceMutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6777,7 +6777,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
         let nsSource = updatedSource as NSString
@@ -6805,7 +6805,7 @@ struct SyntaxHighlighterEngineTests {
         let deletedLineBreakLocation = try #require(
             deletedLineBreakRange.location == NSNotFound ? nil : deletedLineBreakRange.location
         )
-        let mutation = SyntaxHighlightMutation(
+        let mutation = SyntaxEditorTextChange.Replacement(
             location: deletedLineBreakLocation,
             length: 1,
             replacement: ""
@@ -6852,7 +6852,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6878,7 +6878,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6913,7 +6913,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
@@ -6955,7 +6955,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
         let nsUpdatedSource = updatedSource as NSString
@@ -6988,7 +6988,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
         let nsUpdatedSource = updatedSource as NSString
@@ -7012,7 +7012,7 @@ struct SyntaxHighlighterEngineTests {
 
         """
         let updatedSource = prefix + source
-        let mutation = SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+        let mutation = SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: prefix)
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8123,7 +8123,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.css,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.css)
 
@@ -8260,7 +8260,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
@@ -8281,7 +8281,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
@@ -8302,7 +8302,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
         let nsSource = updatedSource as NSString
@@ -8337,7 +8337,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
         let oldCommentExtent = (updatedSource as NSString).range(of: "* comment */")
@@ -8367,7 +8367,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
@@ -8394,7 +8394,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.html,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.html)
         let nsSource = updatedSource as NSString
@@ -8423,7 +8423,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.html,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.html)
 
@@ -8452,7 +8452,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
         let sourceLength = updatedSource.utf16.count
@@ -8480,13 +8480,13 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: mergedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(deleteLineBreak)
+            mutation: deleteLineBreak
         )
         let incremental = await incrementalEngine.update(
             previousSource: mergedSource,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(editMergedLine)
+            mutation: editMergedLine
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
@@ -8508,13 +8508,13 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: mergedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(deleteLineBreak)
+            mutation: deleteLineBreak
         )
         let incremental = await incrementalEngine.update(
             previousSource: mergedSource,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(editMergedLine)
+            mutation: editMergedLine
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
@@ -8536,13 +8536,13 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: splitSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(insertLineBreak)
+            mutation: insertLineBreak
         )
         let incremental = await incrementalEngine.update(
             previousSource: splitSource,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(editSplitLine)
+            mutation: editSplitLine
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
@@ -8557,7 +8557,7 @@ struct SyntaxHighlighterEngineTests {
         let nsSource = updatedSource as NSString
 
         let changedLineRange = SyntaxHighlightMutationLineRange.changedLineRange(
-            for: SyntaxHighlightMutation(mutation),
+            for: mutation,
             in: nsSource
         )
 
@@ -8572,7 +8572,7 @@ struct SyntaxHighlighterEngineTests {
         let nsSource = updatedSource as NSString
 
         let changedLineRange = SyntaxHighlightMutationLineRange.changedLineRange(
-            for: SyntaxHighlightMutation(mutation),
+            for: mutation,
             in: nsSource
         )
 
@@ -8594,13 +8594,13 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: mergedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(deleteLineBreak)
+            mutation: deleteLineBreak
         )
         let incremental = await incrementalEngine.update(
             previousSource: mergedSource,
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(appendStatement)
+            mutation: appendStatement
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
@@ -8622,13 +8622,13 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedAfterCR,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(editAfterCR)
+            mutation: editAfterCR
         )
         let incremental = await incrementalEngine.update(
             previousSource: updatedAfterCR,
             source: finalSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(editBeforeCR)
+            mutation: editBeforeCR
         )
         let full = await fullEngine.reset(source: finalSource, language: SyntaxLanguage.javascript)
 
@@ -8639,9 +8639,9 @@ struct SyntaxHighlighterEngineTests {
     func highlighterUsesUTF16InvalidationQueryRanges() {
         var invalidatedSet = IndexSet()
         invalidatedSet.insert(integersIn: 120..<150)
-        let queryRange = SyntaxHighlightInvalidation.queryRange(
+        let queryRange = SyntaxEditorHighlighting.Invalidation.queryRange(
             invalidatedSet: invalidatedSet,
-            mutation: SyntaxHighlightMutation(location: 180, length: 0, replacement: ""),
+            mutation: SyntaxEditorTextChange.Replacement(location: 180, length: 0, replacement: ""),
             sourceUTF16Length: 240
         )
         #expect(queryRange == NSRange(location: 120, length: 60))
@@ -8649,9 +8649,9 @@ struct SyntaxHighlighterEngineTests {
         invalidatedSet = IndexSet()
         invalidatedSet.insert(integersIn: 241..<280)
         #expect(
-            SyntaxHighlightInvalidation.queryRange(
+            SyntaxEditorHighlighting.Invalidation.queryRange(
                 invalidatedSet: invalidatedSet,
-                mutation: SyntaxHighlightMutation(location: 180, length: 0, replacement: ""),
+                mutation: SyntaxEditorTextChange.Replacement(location: 180, length: 0, replacement: ""),
                 sourceUTF16Length: 240
             ) == NSRange(location: 180, length: 60)
         )
@@ -8669,7 +8669,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: "stale",
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let fullJavaScript = await SyntaxHighlighterEngine()
             .reset(source: updatedSource, language: SyntaxLanguage.javascript)
@@ -8682,7 +8682,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: updatedSource,
             source: jsonSource,
             language: SyntaxLanguage.json,
-            mutation: SyntaxHighlightMutation(location: 0, length: updatedSource.utf16.count, replacement: jsonSource)
+            mutation: SyntaxEditorTextChange.Replacement(location: 0, length: updatedSource.utf16.count, replacement: jsonSource)
         )
         let fullJSON = await SyntaxHighlighterEngine()
             .reset(source: jsonSource, language: SyntaxLanguage.json)
@@ -8703,7 +8703,7 @@ struct SyntaxHighlighterEngineTests {
         let staleUpdate = await engine.update(
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(staleMutation),
+            mutation: staleMutation,
             revision: 2
         )
         let full = await SyntaxHighlighterEngine()
@@ -8725,7 +8725,7 @@ struct SyntaxHighlighterEngineTests {
                 repeating: "    let value\(index) = max(1, 2)\n",
                 count: 80
             )
-            let mutation = SyntaxHighlightMutation(
+            let mutation = SyntaxEditorTextChange.Replacement(
                 location: source.utf16.count,
                 length: 0,
                 replacement: insertion
@@ -8745,7 +8745,7 @@ struct SyntaxHighlighterEngineTests {
         result = await engine.update(
             source: source,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(location: source.utf16.count - 2, length: 0, replacement: "}\n"),
+            mutation: SyntaxEditorTextChange.Replacement(location: source.utf16.count - 2, length: 0, replacement: "}\n"),
             revision: 20
         )
         let full = await SyntaxHighlighterEngine()
@@ -8781,7 +8781,7 @@ struct SyntaxHighlighterEngineTests {
                 """
             }.joined()
             let insertionLocation = (source as NSString).range(of: "        default:").location
-            let mutation = SyntaxHighlightMutation(
+            let mutation = SyntaxEditorTextChange.Replacement(
                 location: insertionLocation,
                 length: 0,
                 replacement: insertion
@@ -8868,7 +8868,7 @@ struct SyntaxHighlighterEngineTests {
         let incremental = await engine.update(
             source: updatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(mutation),
+            mutation: mutation,
             revision: 2
         )
         let full = await SyntaxHighlighterEngine()
@@ -8894,7 +8894,7 @@ struct SyntaxHighlighterEngineTests {
         let freshSource = "let fresh = 1"
         let engine = SyntaxHighlighterEngine()
 
-        let staleStream = await engine.replaceCurrentRequest(with: SyntaxHighlightRequest(
+        let staleStream = await engine.replaceCurrentRequest(with: SyntaxEditorHighlighting.Request(
             source: staleSource,
             language: SyntaxLanguage.swift,
             revision: 1,
@@ -8905,7 +8905,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(staleFastPass?.revision == 1)
         #expect(staleFastPass?.phase == .syntacticFastPass)
 
-        let freshStream = await engine.replaceCurrentRequest(with: SyntaxHighlightRequest(
+        let freshStream = await engine.replaceCurrentRequest(with: SyntaxEditorHighlighting.Request(
             source: freshSource,
             language: SyntaxLanguage.swift,
             revision: 2,
@@ -8947,7 +8947,7 @@ struct SyntaxHighlighterEngineTests {
             let phases = await engine.updatePhases(
                 source: firstUpdatedSource,
                 language: SyntaxLanguage.swift,
-                mutation: SyntaxHighlightMutation(firstMutation),
+                mutation: firstMutation,
                 revision: 2
             )
             var iterator = phases.makeAsyncIterator()
@@ -8961,7 +8961,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: firstUpdatedSource,
             source: secondUpdatedSource,
             language: SyntaxLanguage.swift,
-            mutation: SyntaxHighlightMutation(secondMutation)
+            mutation: secondMutation
         )
         let full = await SyntaxHighlighterEngine().reset(
             source: secondUpdatedSource,
@@ -8996,7 +8996,7 @@ struct SyntaxHighlighterEngineTests {
         let incremental = await engine.update(
             source: updatedSource,
             language: SyntaxLanguage.javascript,
-            mutation: SyntaxHighlightMutation(mutation),
+            mutation: mutation,
             revision: 3
         )
 
@@ -10933,7 +10933,7 @@ struct SyntaxHighlighterEngineTests {
         """
         let removedDeclaration = "int LocalFunction(void);\n\n"
         let updatedSource = source.replacingOccurrences(of: removedDeclaration, with: "")
-        let mutation = SyntaxHighlightMutation(
+        let mutation = SyntaxEditorTextChange.Replacement(
             location: 0,
             length: (removedDeclaration as NSString).length,
             replacement: ""
@@ -10984,7 +10984,7 @@ struct SyntaxHighlighterEngineTests {
         """
         let removedProperty = "@property(nonatomic, copy) NSString *name;\n"
         let updatedSource = source.replacingOccurrences(of: removedProperty, with: "")
-        let mutation = SyntaxHighlightMutation(
+        let mutation = SyntaxEditorTextChange.Replacement(
             location: (source as NSString).range(of: removedProperty).location,
             length: (removedProperty as NSString).length,
             replacement: ""
@@ -11034,7 +11034,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11071,7 +11071,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11108,7 +11108,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11145,7 +11145,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11182,7 +11182,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11221,13 +11221,13 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: insertedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(insertionMutation)
+            mutation: insertionMutation
         )
         let incremental = await incrementalEngine.update(
             previousSource: insertedSource,
             source: finalSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(deletionMutation)
+            mutation: deletionMutation
         )
         let full = await fullEngine.reset(source: finalSource, language: SyntaxLanguage.objectiveC)
 
@@ -11264,7 +11264,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11291,7 +11291,7 @@ struct SyntaxHighlighterEngineTests {
             in: NSRange(location: semicolonLocation, length: 1),
             with: ""
         )
-        let mutation = SyntaxHighlightMutation(
+        let mutation = SyntaxEditorTextChange.Replacement(
             location: semicolonLocation,
             length: 1,
             replacement: ""
@@ -11331,7 +11331,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11367,7 +11367,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11409,7 +11409,7 @@ struct SyntaxHighlighterEngineTests {
         let declarationRange = nsSource.range(of: "@property(nonatomic) NSInteger foo;")
         let declarationNameRange = nsSource.range(of: "foo", options: [], range: declarationRange)
         let updatedSource = nsSource.replacingCharacters(in: declarationNameRange, with: "bar")
-        let mutation = SyntaxHighlightMutation(location: declarationNameRange.location, length: declarationNameRange.length, replacement: "bar")
+        let mutation = SyntaxEditorTextChange.Replacement(location: declarationNameRange.location, length: declarationNameRange.length, replacement: "bar")
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11449,7 +11449,7 @@ struct SyntaxHighlighterEngineTests {
         let keywordRange = (source as NSString).range(of: "@property")
         let mutationRange = NSRange(location: keywordRange.location + 1, length: 1)
         let updatedSource = (source as NSString).replacingCharacters(in: mutationRange, with: "x")
-        let mutation = SyntaxHighlightMutation(
+        let mutation = SyntaxEditorTextChange.Replacement(
             location: mutationRange.location,
             length: mutationRange.length,
             replacement: "x"
@@ -11495,7 +11495,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11514,7 +11514,7 @@ struct SyntaxHighlighterEngineTests {
         """
         for prefix in ["// ", "/* ", "\""] {
             let updatedSource = prefix + source
-            let mutation = SyntaxHighlightMutation(
+            let mutation = SyntaxEditorTextChange.Replacement(
                 location: 0,
                 length: 0,
                 replacement: prefix
@@ -11552,7 +11552,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = "/\(source)"
-        let mutation = SyntaxHighlightMutation(
+        let mutation = SyntaxEditorTextChange.Replacement(
             location: 0,
             length: 0,
             replacement: "/"
@@ -11601,7 +11601,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11629,7 +11629,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11690,7 +11690,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11728,7 +11728,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11774,7 +11774,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11807,7 +11807,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11843,7 +11843,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -11892,13 +11892,13 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: insertedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(insertionMutation)
+            mutation: insertionMutation
         )
         let incremental = await incrementalEngine.update(
             previousSource: insertedSource,
             source: finalSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(macroMutation)
+            mutation: macroMutation
         )
         let full = await fullEngine.reset(source: finalSource, language: SyntaxLanguage.objectiveC)
 
@@ -11995,7 +11995,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12031,7 +12031,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12069,7 +12069,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12104,7 +12104,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12148,7 +12148,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12181,7 +12181,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12214,7 +12214,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12611,13 +12611,13 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: prefixedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(location: 0, length: 0, replacement: prefix)
+            mutation: SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: prefix)
         )
         let incremental = await incrementalEngine.update(
             previousSource: prefixedSource,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(referenceMutation)
+            mutation: referenceMutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12660,7 +12660,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
         let nsSource = updatedSource as NSString
@@ -12693,7 +12693,7 @@ struct SyntaxHighlighterEngineTests {
         let deletedLineBreakLocation = try #require(
             deletedLineBreakRange.location == NSNotFound ? nil : deletedLineBreakRange.location
         )
-        let mutation = SyntaxHighlightMutation(
+        let mutation = SyntaxEditorTextChange.Replacement(
             location: deletedLineBreakLocation,
             length: 1,
             replacement: ""
@@ -12740,7 +12740,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12777,7 +12777,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12811,7 +12811,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12845,7 +12845,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12878,7 +12878,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12909,7 +12909,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12940,7 +12940,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -12964,7 +12964,7 @@ struct SyntaxHighlighterEngineTests {
 
         """
         let updatedSource = source.replacingOccurrences(of: removedDeclaration, with: "")
-        let mutation = SyntaxHighlightMutation(
+        let mutation = SyntaxEditorTextChange.Replacement(
             location: 0,
             length: (removedDeclaration as NSString).length,
             replacement: ""
@@ -13013,7 +13013,7 @@ struct SyntaxHighlighterEngineTests {
             previousSource: source,
             source: updatedSource,
             language: SyntaxLanguage.objectiveC,
-            mutation: SyntaxHighlightMutation(mutation)
+            mutation: mutation
         )
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
@@ -13042,7 +13042,7 @@ struct SyntaxHighlighterEngineTests {
         let keywordRange = (source as NSString).range(of: "@interface")
         let mutationRange = NSRange(location: keywordRange.location + 1, length: 1)
         let updatedSource = (source as NSString).replacingCharacters(in: mutationRange, with: "x")
-        let mutation = SyntaxHighlightMutation(
+        let mutation = SyntaxEditorTextChange.Replacement(
             location: mutationRange.location,
             length: mutationRange.length,
             replacement: "x"

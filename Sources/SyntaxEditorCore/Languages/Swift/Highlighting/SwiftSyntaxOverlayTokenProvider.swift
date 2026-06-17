@@ -19,7 +19,7 @@ private struct SwiftIndexedToken {
 private struct SwiftTokenIndex {
     private let semanticCandidateTokens: [SwiftIndexedToken]
 
-    init(tokens: [SyntaxHighlightToken], source: NSString, targetRange: NSRange?) {
+    init(tokens: [SyntaxEditorHighlighting.Token], source: NSString, targetRange: NSRange?) {
         var semanticCandidateTokens: [SwiftIndexedToken] = []
         semanticCandidateTokens.reserveCapacity(tokens.count / 3)
 
@@ -85,9 +85,9 @@ private struct SwiftTokenIndex {
 enum SwiftSyntaxOverlayTokenProvider {
     private static func tokensInCommentLines(
         source: NSString,
-        existingTokens: [SyntaxHighlightToken],
+        existingTokens: [SyntaxEditorHighlighting.Token],
         targetRange: NSRange?
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         let fullRange = NSRange(location: 0, length: source.length)
         let searchRange = targetRange.map {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: source.length)
@@ -105,7 +105,7 @@ enum SwiftSyntaxOverlayTokenProvider {
         }
 
         let sourceString = source as String
-        var tokens: [SyntaxHighlightToken] = []
+        var tokens: [SyntaxEditorHighlighting.Token] = []
         var commentRangeIndex = 0
         var location = searchRange.location
         while location < searchRange.upperBound {
@@ -145,7 +145,7 @@ enum SwiftSyntaxOverlayTokenProvider {
         source: NSString,
         excludedRanges: [NSRange],
         targetRange: NSRange?
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         let fullRange = NSRange(location: 0, length: source.length)
         let searchRange = targetRange.map {
             SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: source.length)
@@ -155,7 +155,7 @@ enum SwiftSyntaxOverlayTokenProvider {
         }
 
         let sourceString = source as String
-        var tokens: [SyntaxHighlightToken] = []
+        var tokens: [SyntaxEditorHighlighting.Token] = []
         var location = searchRange.location
         while location < searchRange.upperBound {
             let remainingRange = NSRange(location: location, length: searchRange.upperBound - location)
@@ -193,12 +193,12 @@ enum SwiftSyntaxOverlayTokenProvider {
         tokenIndex: SwiftTokenIndex,
         index: SwiftScopeIndex,
         targetRange: NSRange?
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         guard source.length > 0 else {
             return []
         }
 
-        var tokens: [SyntaxHighlightToken] = []
+        var tokens: [SyntaxEditorHighlighting.Token] = []
         let resolution = index.makeResolutionContext()
 
         for token in tokenIndex.semanticTokens(intersecting: targetRange) {
@@ -227,7 +227,7 @@ enum SwiftSyntaxOverlayTokenProvider {
 
     private struct SemanticOverlay {
         let range: NSRange
-        let syntaxID: EditorSourceSyntaxID
+        let syntaxID: EditorSourceSyntax.ID
     }
 
     private static func semanticOverlays(
@@ -315,7 +315,7 @@ enum SwiftSyntaxOverlayTokenProvider {
                     return [SemanticOverlay(range: range, syntaxID: .identifierConstantSystem)]
                 }
 
-                let syntaxID: EditorSourceSyntaxID = localMember.kind == .function
+                let syntaxID: EditorSourceSyntax.ID = localMember.kind == .function
                     ? .identifierFunctionSystem
                     : .identifierVariableSystem
                 return [SemanticOverlay(range: range, syntaxID: syntaxID)]
@@ -477,7 +477,7 @@ enum SwiftSyntaxOverlayTokenProvider {
         return []
     }
 
-    private static func syntaxIDForKnownExternalType(named name: String) -> EditorSourceSyntaxID? {
+    private static func syntaxIDForKnownExternalType(named name: String) -> EditorSourceSyntax.ID? {
         if knownExternalClassNames.contains(name) {
             return .identifierClassSystem
         }
@@ -487,7 +487,7 @@ enum SwiftSyntaxOverlayTokenProvider {
         return nil
     }
 
-    private static func syntaxIDForLocalEntry(_ entry: SwiftScopeIndex.Resolution?) -> EditorSourceSyntaxID? {
+    private static func syntaxIDForLocalEntry(_ entry: SwiftScopeIndex.Resolution?) -> EditorSourceSyntax.ID? {
         guard let entry else {
             return nil
         }
@@ -507,20 +507,20 @@ enum SwiftSyntaxOverlayTokenProvider {
 
     private static func canonicalToken(
         range: NSRange,
-        syntaxID: EditorSourceSyntaxID
-    ) -> SyntaxHighlightToken {
-        SyntaxHighlightToken(
+        syntaxID: EditorSourceSyntax.ID
+    ) -> SyntaxEditorHighlighting.Token {
+        SyntaxEditorHighlighting.Token(
             range: range,
             syntaxID: syntaxID,
             language: .swift,
-            rawCaptureName: EditorSyntaxCapture.rawCaptureName(syntaxID: syntaxID, language: .swift),
+            rawCaptureName: EditorSourceSyntax.Capture.rawCaptureName(syntaxID: syntaxID, language: .swift),
             isSemanticOverlay: true
         )
     }
 
     private static func commentTokenRanges(
         overlapping targetRange: NSRange,
-        existingTokens: [SyntaxHighlightToken]
+        existingTokens: [SyntaxEditorHighlighting.Token]
     ) -> [NSRange] {
         let ranges = existingTokens.compactMap { token -> NSRange? in
             guard token.language == .swift || token.language == nil,
@@ -567,9 +567,9 @@ enum SwiftSyntaxOverlayTokenProvider {
         max(lhs.location, rhs.location) < min(lhs.upperBound, rhs.upperBound)
     }
 
-    private static func deduplicated(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHighlightToken] {
+    private static func deduplicated(_ tokens: [SyntaxEditorHighlighting.Token]) -> [SyntaxEditorHighlighting.Token] {
         var seen = Set<SyntaxOverlayTokenKey>()
-        var unique: [SyntaxHighlightToken] = []
+        var unique: [SyntaxEditorHighlighting.Token] = []
         unique.reserveCapacity(tokens.count)
 
         for token in tokens {
@@ -612,13 +612,13 @@ enum SwiftSyntaxOverlayTokenProvider {
 
 
 
-    private static func urlTokens(in source: String, lineRange: NSRange) -> [SyntaxHighlightToken] {
+    private static func urlTokens(in source: String, lineRange: NSRange) -> [SyntaxEditorHighlighting.Token] {
         urlRegex.matches(in: source, range: lineRange).map {
             canonicalToken(range: $0.range, syntaxID: .url)
         }
     }
 
-    private static func mergedExcludedPreprocessorRanges(existingTokens: [SyntaxHighlightToken]) -> [NSRange] {
+    private static func mergedExcludedPreprocessorRanges(existingTokens: [SyntaxEditorHighlighting.Token]) -> [NSRange] {
         let ranges: [NSRange] = existingTokens.compactMap { token -> NSRange? in
             guard token.language == .swift || token.language == nil else {
                 return nil
@@ -663,7 +663,7 @@ enum SwiftSyntaxOverlayTokenProvider {
     private static func appendPreprocessorTokens(
         for range: NSRange,
         in source: NSString,
-        to tokens: inout [SyntaxHighlightToken]
+        to tokens: inout [SyntaxEditorHighlighting.Token]
     ) {
         let text = source.nativeSubstring(with: range)
         if text == "#sourceLocation" {
@@ -725,7 +725,7 @@ enum SwiftSyntaxOverlayTokenProvider {
     }
 
     private static func isSwiftSemanticOverlayToken(
-        _ token: SyntaxHighlightToken,
+        _ token: SyntaxEditorHighlighting.Token,
         generatedSystemMacroOverlayRangeKeys: Set<SyntaxOverlayRangeKey>
     ) -> Bool {
         guard token.language == .swift || token.language == nil else {
@@ -1223,7 +1223,7 @@ private struct NestingDepth: Equatable {
 }
 
 enum SyntaxHighlightTokenOrdering {
-    static func displayOrder(_ lhs: SyntaxHighlightToken, _ rhs: SyntaxHighlightToken) -> Bool {
+    static func displayOrder(_ lhs: SyntaxEditorHighlighting.Token, _ rhs: SyntaxEditorHighlighting.Token) -> Bool {
         if lhs.range.location != rhs.range.location {
             return lhs.range.location < rhs.range.location
         }
@@ -1247,7 +1247,7 @@ enum SyntaxHighlightTokenOrdering {
         return lhs.rawCaptureName < rhs.rawCaptureName
     }
 
-    private static func renderPriority(_ token: SyntaxHighlightToken) -> Int {
+    private static func renderPriority(_ token: SyntaxEditorHighlighting.Token) -> Int {
         let value = token.syntaxID.rawValue
         if value == "plain" {
             return 0
@@ -1284,10 +1284,10 @@ extension SwiftSyntaxOverlayTokenProvider {
     /// their index moved to the tree-derived scope index.
     static func overlayTokens(
         in targetRange: NSRange,
-        baseTokens: [SyntaxHighlightToken],
+        baseTokens: [SyntaxEditorHighlighting.Token],
         source: String,
         index: SwiftScopeIndex?
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         let nsSource = source as NSString
         let clamped = SyntaxEditorRangeUtilities.clampedRange(targetRange, utf16Length: nsSource.length)
         guard clamped.length > 0 else { return [] }
@@ -1317,7 +1317,7 @@ extension SwiftSyntaxOverlayTokenProvider {
     /// conservative engine path; cancellation returns the input unchanged with
     /// `isCancelled` set and leaves `state` untouched.
     static func mergingOverlayResult(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         rootNode: Node? = nil,
         refreshRange: NSRange? = nil,

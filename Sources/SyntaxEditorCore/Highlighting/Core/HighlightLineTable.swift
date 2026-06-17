@@ -174,7 +174,7 @@ package final class HighlightLineTable {
     /// (token planes, name maps) can splice parallel structures identically.
     @discardableResult
     package func apply(
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         previousSource: String
     ) -> (replacedLines: Range<Int>, replacementLineCount: Int) {
         let nsSource = previousSource as NSString

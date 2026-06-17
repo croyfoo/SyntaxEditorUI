@@ -51,7 +51,7 @@ fileprivate struct ObjectiveCSemanticLineSignatureIndex {
     }
 
     func applying(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         to source: NSString
     ) -> ObjectiveCSemanticLineSignatureIndex? {
         guard !lines.isEmpty else {
@@ -119,7 +119,7 @@ fileprivate struct ObjectiveCSemanticLineSignatureIndex {
     }
 
     private func insertsAtEOFAfterTrailingLineBreak(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         source: NSString,
         previousSourceLength: Int
     ) -> Bool {
@@ -149,7 +149,7 @@ fileprivate struct ObjectiveCSemanticLineSignatureIndex {
     }
 
     private func replacementEndLineIndex(
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         oldEnd: Int,
         previousSourceLength: Int
     ) -> Int {
@@ -165,7 +165,7 @@ fileprivate struct ObjectiveCSemanticLineSignatureIndex {
     }
 
     static func signaturesForChangedLines(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         in source: NSString
     ) -> [ObjectiveCSemanticLineSignature] {
         guard source.length > 0 else { return [] }
@@ -217,9 +217,9 @@ fileprivate struct ObjectiveCSemanticLineSignatureIndex {
 }
 
 private struct ObjectiveCOverlayPreparation {
-    let baseTokensForIndex: [SyntaxHighlightToken]
-    let outputBaseTokens: [SyntaxHighlightToken]
-    let preservedOverlayTokens: [SyntaxHighlightToken]
+    let baseTokensForIndex: [SyntaxEditorHighlighting.Token]
+    let outputBaseTokens: [SyntaxEditorHighlighting.Token]
+    let preservedOverlayTokens: [SyntaxEditorHighlighting.Token]
     let nonCodeRangeIndex: ObjectiveCNonCodeRangeIndex
     let tokenIndex: ObjectiveCTokenIndex
     let partialMergeTargetRange: NSRange?
@@ -234,7 +234,7 @@ private struct ObjectiveCSemanticIndex {
     let lineSignatureIndex: ObjectiveCSemanticLineSignatureIndex
 
     func shifted(
-        by mutation: SyntaxHighlightMutation,
+        by mutation: SyntaxEditorTextChange.Replacement,
         source nextSource: NSString
     ) -> ObjectiveCSemanticIndex? {
         guard let shiftedSymbols = fileSymbols.shifted(
@@ -263,7 +263,7 @@ private struct ObjectiveCSemanticIndex {
 
     private static func shiftedRanges(
         _ ranges: [NSRange],
-        by mutation: SyntaxHighlightMutation,
+        by mutation: SyntaxEditorTextChange.Replacement,
         sourceUTF16Length nextSourceUTF16Length: Int
     ) -> [NSRange]? {
         var shiftedRanges: [NSRange] = []
@@ -283,7 +283,7 @@ private struct ObjectiveCSemanticIndex {
 
     private static func shiftedRange(
         _ range: NSRange,
-        by mutation: SyntaxHighlightMutation,
+        by mutation: SyntaxEditorTextChange.Replacement,
         sourceUTF16Length nextSourceUTF16Length: Int
     ) -> NSRange? {
         let replacementLength = mutation.replacement.utf16.count
@@ -322,7 +322,7 @@ private struct ObjectiveCNonCodeRangeIndex {
         self.ranges = Self.normalized(ranges)
     }
 
-    init(tokens: [SyntaxHighlightToken], sourceLength: Int) {
+    init(tokens: [SyntaxEditorHighlighting.Token], sourceLength: Int) {
         self.init(ranges: tokens.compactMap { token -> NSRange? in
             guard token.language == .objectiveC || token.language == nil else {
                 return nil
@@ -401,7 +401,7 @@ private struct ObjectiveCNonCodeRangeIndex {
 
 private struct ObjectiveCIndexedToken {
     let range: NSRange
-    let syntaxID: EditorSourceSyntaxID
+    let syntaxID: EditorSourceSyntax.ID
 }
 
 private struct ObjectiveCTokenIndex {
@@ -410,7 +410,7 @@ private struct ObjectiveCTokenIndex {
     private let propertyKeywordRangeKeys: Set<ObjectiveCRangeKey>
     private let identifierRangeKeys: Set<ObjectiveCRangeKey>
 
-    init(tokens: [SyntaxHighlightToken], source: NSString) {
+    init(tokens: [SyntaxEditorHighlighting.Token], source: NSString) {
         var identifierTokens: [ObjectiveCIndexedToken] = []
         var declarationOtherIdentifierRanges: [NSRange] = []
         var propertyKeywordRangeKeys = Set<ObjectiveCRangeKey>()
@@ -494,11 +494,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     private static let objectiveCSemanticStructuralCharacters = CharacterSet(charactersIn: "#@{}();")
 
     static func mergingOverlayTokens(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         rootNode: Node? = nil,
         refreshRange: NSRange? = nil
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         var state: ObjectiveCSemanticOverlayState?
         return mergingOverlayResult(
             tokens: tokens,
@@ -510,7 +510,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     static func mergingOverlayResult(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         rootNode: Node? = nil,
         refreshRange: NSRange? = nil,
@@ -527,11 +527,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     static func mergingOverlayResult(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         rootNode: Node? = nil,
         refreshRange: NSRange? = nil,
-        mutation: SyntaxHighlightMutation?,
+        mutation: SyntaxEditorTextChange.Replacement?,
         tokenPrefixMaxUpperBounds: [Int]? = nil,
         state: inout ObjectiveCSemanticOverlayState?
     ) -> ObjectiveCSemanticOverlayResult {
@@ -709,12 +709,12 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     /// Returns nil when cancellation was observed mid-scan (the caller reports
     /// an isCancelled result; partial output is never committed).
     private static func semanticTokens(
-        from tokens: [SyntaxHighlightToken],
+        from tokens: [SyntaxEditorHighlighting.Token],
         source: NSString,
         index: ObjectiveCFileSymbolIndex,
         targetRange: NSRange?
-    ) -> [SyntaxHighlightToken]? {
-        var overlayTokens: [SyntaxHighlightToken] = []
+    ) -> [SyntaxEditorHighlighting.Token]? {
+        var overlayTokens: [SyntaxEditorHighlighting.Token] = []
         overlayTokens.reserveCapacity(tokens.count / 4)
 
         var cancellationBudget = 0
@@ -842,11 +842,11 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static func preprocessorStringTokens(
         in source: NSString,
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         targetRange: NSRange?
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         let string = source as String
-        var overlayTokens: [SyntaxHighlightToken] = []
+        var overlayTokens: [SyntaxEditorHighlighting.Token] = []
         for token in tokens where (token.language == .objectiveC || token.language == nil)
             && token.syntaxID == .preprocessor
             && token.range.location >= 0
@@ -881,10 +881,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         in source: NSString,
         nonCodeRanges: [NSRange],
         targetRange: NSRange?
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         let string = source as String
         let searchRange = targetRange ?? NSRange(location: 0, length: source.length)
-        var tokens: [SyntaxHighlightToken] = []
+        var tokens: [SyntaxEditorHighlighting.Token] = []
 
         for match in preprocessorObjectiveCMacroRegex.matches(in: string, range: searchRange) {
             let range = match.range
@@ -920,8 +920,8 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         in source: NSString,
         nonCodeRanges: [NSRange],
         targetRange: NSRange?
-    ) -> [SyntaxHighlightToken] {
-        var tokens: [SyntaxHighlightToken] = []
+    ) -> [SyntaxEditorHighlighting.Token] {
+        var tokens: [SyntaxEditorHighlighting.Token] = []
         var searchLocation = 0
         while searchLocation < source.length {
             let searchRange = NSRange(location: searchLocation, length: source.length - searchLocation)
@@ -962,10 +962,10 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         in source: NSString,
         nonCodeRanges: [NSRange],
         targetRange: NSRange?
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         let string = source as String
         let searchRange = targetRange ?? NSRange(location: 0, length: source.length)
-        return boxedBooleanLiteralRegex.matches(in: string, range: searchRange).flatMap { match -> [SyntaxHighlightToken] in
+        return boxedBooleanLiteralRegex.matches(in: string, range: searchRange).flatMap { match -> [SyntaxEditorHighlighting.Token] in
             let range = match.range
             guard range.location != NSNotFound,
                   range.length > 0,
@@ -982,7 +982,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func nonCodeRanges(
-        from tokens: [SyntaxHighlightToken],
+        from tokens: [SyntaxEditorHighlighting.Token],
         sourceLength: Int
     ) -> [NSRange] {
         tokens.compactMap { token -> NSRange? in
@@ -1027,7 +1027,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     static func semanticTargetRange(
         _ refreshRange: NSRange,
         in source: NSString,
-        mutation: SyntaxHighlightMutation? = nil
+        mutation: SyntaxEditorTextChange.Replacement? = nil
     ) -> NSRange? {
         let clamped = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: source.length)
         guard clamped.length > 0 else {
@@ -1077,7 +1077,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func objectiveCMutationChangedRange(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         in source: NSString
     ) -> NSRange {
         let replacementLength = mutation.replacement.utf16.count
@@ -1088,7 +1088,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func objectiveCLocalEditCanKeepSemanticTarget(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         in source: NSString
     ) -> Bool {
         guard source.length > 0,
@@ -1119,7 +1119,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func objectiveCInsertedTextCanKeepSemanticTarget(
-        _ mutation: SyntaxHighlightMutation
+        _ mutation: SyntaxEditorTextChange.Replacement
     ) -> Bool {
         guard mutation.length == 0,
               !mutation.replacement.isEmpty else {
@@ -1231,7 +1231,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func objectiveCMutationReplacesPreviousStructuralSignatureText(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         previousIndex: ObjectiveCSemanticIndex?
     ) -> Bool {
         guard mutation.length > 0,
@@ -1375,7 +1375,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func objectiveCMutationMovesPreviousStructuralSignatureIntoNonCode(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         in source: NSString,
         previousIndex: ObjectiveCSemanticIndex?
     ) -> Bool {
@@ -1428,7 +1428,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func objectiveCMutationPrefixesLineSignatureWithNonWhitespace(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         lineRange: NSRange,
         shiftedSignatureLocation: Int,
         in source: NSString
@@ -1454,7 +1454,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func objectiveCMutationRequiresSemanticIndexRebuild(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         in source: NSString,
         previousIndex: ObjectiveCSemanticIndex?
     ) -> Bool {
@@ -1483,7 +1483,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func objectiveCMutationCanChangeSemanticSignature(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         in source: NSString,
         previousIndex: ObjectiveCSemanticIndex?
     ) -> Bool {
@@ -1537,7 +1537,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func objectiveCLocalStructuralRefreshRange(
-        for mutation: SyntaxHighlightMutation,
+        for mutation: SyntaxEditorTextChange.Replacement,
         in source: NSString,
         previousIndex: ObjectiveCSemanticIndex?
     ) -> NSRange? {
@@ -2731,19 +2731,19 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static func canonicalToken(
         range: NSRange,
-        syntaxID: EditorSourceSyntaxID
-    ) -> SyntaxHighlightToken {
-        SyntaxHighlightToken(
+        syntaxID: EditorSourceSyntax.ID
+    ) -> SyntaxEditorHighlighting.Token {
+        SyntaxEditorHighlighting.Token(
             range: range,
             syntaxID: syntaxID,
             language: .objectiveC,
-            rawCaptureName: EditorSyntaxCapture.rawCaptureName(syntaxID: syntaxID, language: .objectiveC),
+            rawCaptureName: EditorSourceSyntax.Capture.rawCaptureName(syntaxID: syntaxID, language: .objectiveC),
             isSemanticOverlay: true
         )
     }
 
     private static func preparedOverlayInput(
-        from tokens: [SyntaxHighlightToken],
+        from tokens: [SyntaxEditorHighlighting.Token],
         source: NSString,
         targetRange: NSRange?,
         tokenPrefixMaxUpperBounds: [Int]? = nil,
@@ -2782,9 +2782,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             return token.range
         }
 
-        var baseTokensForIndex: [SyntaxHighlightToken] = []
-        var outputBaseTokens: [SyntaxHighlightToken] = []
-        var preservedOverlayTokens: [SyntaxHighlightToken] = []
+        var baseTokensForIndex: [SyntaxEditorHighlighting.Token] = []
+        var outputBaseTokens: [SyntaxEditorHighlighting.Token] = []
+        var preservedOverlayTokens: [SyntaxEditorHighlighting.Token] = []
         baseTokensForIndex.reserveCapacity(preparesFullIndex ? tokens.count : 256)
         outputBaseTokens.reserveCapacity(tokens.count)
         preservedOverlayTokens.reserveCapacity(tokens.count / 4)
@@ -2838,7 +2838,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func preparedTaggedOverlayInput(
-        from tokens: [SyntaxHighlightToken],
+        from tokens: [SyntaxEditorHighlighting.Token],
         source: NSString,
         targetRange: NSRange?,
         tokenPrefixMaxUpperBounds: [Int]?,
@@ -2854,9 +2854,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         }
 
         let indexRange = preparesFullIndex ? nil : targetRange
-        var baseTokensForIndex: [SyntaxHighlightToken] = []
-        var outputBaseTokens: [SyntaxHighlightToken] = []
-        var preservedOverlayTokens: [SyntaxHighlightToken] = []
+        var baseTokensForIndex: [SyntaxEditorHighlighting.Token] = []
+        var outputBaseTokens: [SyntaxEditorHighlighting.Token] = []
+        var preservedOverlayTokens: [SyntaxEditorHighlighting.Token] = []
         baseTokensForIndex.reserveCapacity(preparesFullIndex ? tokens.count : 256)
         outputBaseTokens.reserveCapacity(tokens.count)
         preservedOverlayTokens.reserveCapacity(tokens.count / 4)
@@ -2897,7 +2897,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func preparedPartialTaggedOverlayInput(
-        from tokens: [SyntaxHighlightToken],
+        from tokens: [SyntaxEditorHighlighting.Token],
         source: NSString,
         targetRange: NSRange,
         tokenPrefixMaxUpperBounds: [Int]?
@@ -2911,7 +2911,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
             targetRange: clampedTargetRange,
             tokenPrefixMaxUpperBounds: tokenPrefixMaxUpperBounds
         )
-        var baseTokensForIndex: [SyntaxHighlightToken] = []
+        var baseTokensForIndex: [SyntaxEditorHighlighting.Token] = []
         baseTokensForIndex.reserveCapacity(tokenRange.count)
 
         for token in tokens[tokenRange] where !token.isSemanticOverlay {
@@ -2934,9 +2934,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func mergedTokens(
-        baseTokens: [SyntaxHighlightToken],
-        overlayTokens: [SyntaxHighlightToken]
-    ) -> [SyntaxHighlightToken] {
+        baseTokens: [SyntaxEditorHighlighting.Token],
+        overlayTokens: [SyntaxEditorHighlighting.Token]
+    ) -> [SyntaxEditorHighlighting.Token] {
         let annotatedTokens = baseTokens.map { (token: $0, isOverlay: false) }
             + overlayTokens.map { (token: $0, isOverlay: true) }
 
@@ -2955,13 +2955,13 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func partialMergedTokens(
-        existingTokens: [SyntaxHighlightToken],
-        replacementOverlayTokens: [SyntaxHighlightToken],
+        existingTokens: [SyntaxEditorHighlighting.Token],
+        replacementOverlayTokens: [SyntaxEditorHighlighting.Token],
         targetRange: NSRange,
         tokenRange: Range<Int>
-    ) -> [SyntaxHighlightToken] {
-        var baseSegment: [SyntaxHighlightToken] = []
-        var overlaySegment: [SyntaxHighlightToken] = []
+    ) -> [SyntaxEditorHighlighting.Token] {
+        var baseSegment: [SyntaxEditorHighlighting.Token] = []
+        var overlaySegment: [SyntaxEditorHighlighting.Token] = []
         baseSegment.reserveCapacity(tokenRange.count)
         overlaySegment.reserveCapacity(tokenRange.count + replacementOverlayTokens.count)
         for token in existingTokens[tokenRange] {
@@ -2983,7 +2983,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func tokenIndexRangeForPartialMerge(
-        in tokens: [SyntaxHighlightToken],
+        in tokens: [SyntaxEditorHighlighting.Token],
         targetRange: NSRange,
         tokenPrefixMaxUpperBounds: [Int]?
     ) -> Range<Int> {
@@ -3007,7 +3007,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         return startIndex..<upperBound
     }
 
-    private static func prefixMaxUpperBounds(for tokens: [SyntaxHighlightToken]) -> [Int] {
+    private static func prefixMaxUpperBounds(for tokens: [SyntaxEditorHighlighting.Token]) -> [Int] {
         var prefixMaxUpperBounds: [Int] = []
         prefixMaxUpperBounds.reserveCapacity(tokens.count)
         var maxUpperBound = 0
@@ -3037,7 +3037,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
 
     private static func lowerBoundForTokenLocation(
         _ location: Int,
-        in tokens: [SyntaxHighlightToken]
+        in tokens: [SyntaxEditorHighlighting.Token]
     ) -> Int {
         var lowerBound = 0
         var upperBound = tokens.count
@@ -3053,7 +3053,7 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
     }
 
     private static func isObjectiveCSemanticOverlayToken(
-        _ token: SyntaxHighlightToken,
+        _ token: SyntaxEditorHighlighting.Token,
         syntaxIDsAtSameRange: ObjectiveCSyntaxIDMask,
         source: NSString,
         preprocessorRanges: [NSRange],
@@ -3360,9 +3360,9 @@ enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {
         isObjectiveCIdentifierStart(unit) || (zeroCodeUnit...nineCodeUnit).contains(unit)
     }
 
-    private static func deduplicated(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHighlightToken] {
+    private static func deduplicated(_ tokens: [SyntaxEditorHighlighting.Token]) -> [SyntaxEditorHighlighting.Token] {
         var seen = Set<ObjectiveCTokenKey>()
-        var unique: [SyntaxHighlightToken] = []
+        var unique: [SyntaxEditorHighlighting.Token] = []
         unique.reserveCapacity(tokens.count)
 
         for token in tokens {
@@ -3703,7 +3703,7 @@ private struct ObjectiveCFileSymbolIndex {
     }
 
     func shifted(
-        by mutation: SyntaxHighlightMutation,
+        by mutation: SyntaxEditorTextChange.Replacement,
         sourceUTF16Length nextSourceUTF16Length: Int
     ) -> ObjectiveCFileSymbolIndex? {
         guard let shiftedTypeDeclarationNameRangeKeys = Self.shiftedRangeKeys(
@@ -3808,7 +3808,7 @@ private struct ObjectiveCFileSymbolIndex {
         selfChainMemberNameRangeKeys.contains(ObjectiveCRangeKey(range))
     }
 
-    func mutationTouchesSelfMemberAccessOperator(_ mutation: SyntaxHighlightMutation) -> Bool {
+    func mutationTouchesSelfMemberAccessOperator(_ mutation: SyntaxEditorTextChange.Replacement) -> Bool {
         guard mutation.length > 0 else {
             return false
         }
@@ -3841,7 +3841,7 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static func shiftedRangeKeys(
         _ keys: Set<ObjectiveCRangeKey>,
-        by mutation: SyntaxHighlightMutation,
+        by mutation: SyntaxEditorTextChange.Replacement,
         sourceUTF16Length nextSourceUTF16Length: Int
     ) -> Set<ObjectiveCRangeKey>? {
         var shifted = Set<ObjectiveCRangeKey>()
@@ -3881,7 +3881,7 @@ private struct ObjectiveCFileSymbolIndex {
 
     private static func shiftedRange(
         _ range: NSRange,
-        by mutation: SyntaxHighlightMutation,
+        by mutation: SyntaxEditorTextChange.Replacement,
         sourceUTF16Length nextSourceUTF16Length: Int
     ) -> NSRange? {
         let replacementLength = mutation.replacement.utf16.count

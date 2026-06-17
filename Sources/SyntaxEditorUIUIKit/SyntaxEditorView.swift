@@ -11,7 +11,7 @@ struct SyntaxEditorMarkedTextUndoAnchor {
 }
 
 private struct SyntaxHighlightAttributeKey: Hashable {
-    let syntaxID: EditorSourceSyntaxID
+    let syntaxID: EditorSourceSyntax.ID
     let language: SyntaxLanguage
 }
 
@@ -25,18 +25,18 @@ private struct ScheduledHighlightRequest {
     let model: SyntaxEditorModel
     let language: SyntaxLanguage
     let revision: Int
-    let mutation: SyntaxHighlightMutation?
+    let mutation: SyntaxEditorTextChange.Replacement?
 }
 
 private struct HighlightPhaseRecord: Equatable {
     let revision: Int
-    let phase: SyntaxHighlightPhase
+    let phase: SyntaxEditorHighlighting.Result.Phase
 }
 
 private struct HighlightPhaseWaiter {
     let id: Int
     let revision: Int
-    let phase: SyntaxHighlightPhase
+    let phase: SyntaxEditorHighlighting.Result.Phase
     let continuation: CheckedContinuation<Bool, Never>
 }
 
@@ -66,7 +66,7 @@ private struct SyntaxHighlightAttributeResolver {
     }
 
     mutating func style(
-        for syntaxID: EditorSourceSyntaxID,
+        for syntaxID: EditorSourceSyntax.ID,
         language: SyntaxLanguage?
     ) -> (key: SyntaxHighlightAttributeKey, style: SyntaxHighlightStyle)? {
         let effectiveLanguage = language ?? defaultLanguage
@@ -123,16 +123,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findCoordinator: SyntaxEditorFindCoordinator?
     static let estimatedTabColumnWidth = 4
 
-    let highlighter: any SyntaxHighlighting
+    let highlighter: any SyntaxEditorHighlighting.Engine
     let commandEngine = EditorCommandEngine()
     var highlightTask: Task<Void, Never>?
     private var scheduledHighlightRequest: ScheduledHighlightRequest?
     private var nextScheduledHighlightRequestID = 0
-    var lastHighlightTokens: [SyntaxHighlightToken] = []
+    var lastHighlightTokens: [SyntaxEditorHighlighting.Token] = []
     var lastHighlightSource: String?
     var lastHighlightRevision: Int?
     var lastHighlightLanguage: SyntaxLanguage?
-    private var materializedHighlightPhase: SyntaxHighlightPhase?
+    private var materializedHighlightPhase: SyntaxEditorHighlighting.Result.Phase?
     private var materializedHighlightRevision: Int?
     private var materializedHighlightLanguage: SyntaxLanguage?
     private var appliedHighlightPhaseRecordsForTesting: [HighlightPhaseRecord] = []
@@ -336,7 +336,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     package init(
         model: SyntaxEditorModel,
-        highlighter: any SyntaxHighlighting
+        highlighter: any SyntaxEditorHighlighting.Engine
     ) {
         self.model = model
         self.highlighter = highlighter
@@ -420,7 +420,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     internal func waitForAppliedHighlightPhaseForTesting(
-        _ phase: SyntaxHighlightPhase
+        _ phase: SyntaxEditorHighlighting.Result.Phase
     ) async -> Bool {
         let expectedRevision = model.textRevision
         guard !hasAppliedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
@@ -442,7 +442,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     internal func waitForSkippedHighlightPhaseForTesting(
-        _ phase: SyntaxHighlightPhase
+        _ phase: SyntaxEditorHighlighting.Result.Phase
     ) async -> Bool {
         let expectedRevision = model.textRevision
         guard !hasSkippedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
@@ -1134,7 +1134,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             updateTypingAttributes()
             updateTextContainerForCurrentWrappingMode()
             invalidateTextLayout()
-            let highlightMutation: SyntaxHighlightMutation? = if model.latestTextChange?.kind == .wholeDocumentReplacement {
+            let highlightMutation: SyntaxEditorTextChange.Replacement? = if model.latestTextChange?.kind == .wholeDocumentReplacement {
                 nil
             } else {
                 model.latestTextChange.flatMap(Self.highlightMutation)
@@ -1882,7 +1882,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func hasAppliedHighlightPhaseForTesting(
-        _ phase: SyntaxHighlightPhase,
+        _ phase: SyntaxEditorHighlighting.Result.Phase,
         revision: Int
     ) -> Bool {
         appliedHighlightPhaseRecordsForTesting.contains {
@@ -1891,7 +1891,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func recordAppliedHighlightPhaseForTesting(
-        _ phase: SyntaxHighlightPhase,
+        _ phase: SyntaxEditorHighlighting.Result.Phase,
         revision: Int
     ) {
         appliedHighlightPhaseRecordsForTesting.append(
@@ -1911,7 +1911,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func hasSkippedHighlightPhaseForTesting(
-        _ phase: SyntaxHighlightPhase,
+        _ phase: SyntaxEditorHighlighting.Result.Phase,
         revision: Int
     ) -> Bool {
         skippedHighlightPhaseRecordsForTesting.contains {
@@ -1920,7 +1920,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func recordSkippedHighlightPhaseForTesting(
-        _ phase: SyntaxHighlightPhase,
+        _ phase: SyntaxEditorHighlighting.Result.Phase,
         revision: Int
     ) {
         skippedHighlightPhaseRecordsForTesting.append(
@@ -1949,7 +1949,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     private func resumeAppliedHighlightPhaseWaitersForTesting(
         revision: Int? = nil,
-        phase: SyntaxHighlightPhase? = nil,
+        phase: SyntaxEditorHighlighting.Result.Phase? = nil,
         result: Bool
     ) {
         var matchedWaiters: [HighlightPhaseWaiter] = []
@@ -1979,7 +1979,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     private func resumeSkippedHighlightPhaseWaitersForTesting(
         revision: Int? = nil,
-        phase: SyntaxHighlightPhase? = nil,
+        phase: SyntaxEditorHighlighting.Result.Phase? = nil,
         result: Bool
     ) {
         var matchedWaiters: [HighlightPhaseWaiter] = []
@@ -2002,7 +2002,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         source: String,
         language: SyntaxLanguage,
         revision: Int,
-        mutation: SyntaxHighlightMutation? = nil,
+        mutation: SyntaxEditorTextChange.Replacement? = nil,
         refreshStartUTF16: Int = 0
     ) {
         highlightTask?.cancel()
@@ -2026,12 +2026,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         // Viewport hint: progressive opens and background semantic drains
         // process the chunk nearest this range first (pure ordering hint).
         let visibleRange = visibleCharacterRangeForHighlightHint()
-        let operation: SyntaxHighlightRequest.Operation = if let mutation {
+        let operation: SyntaxEditorHighlighting.Request.Operation = if let mutation {
             .update(mutation)
         } else {
             .reset
         }
-        let request = SyntaxHighlightRequest(
+        let request = SyntaxEditorHighlighting.Request(
             source: source,
             language: language,
             revision: revision,
@@ -2072,8 +2072,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func applyHighlightResultFromScheduledTask(
-        _ result: SyntaxHighlightResult,
-        mutation: SyntaxHighlightMutation?
+        _ result: SyntaxEditorHighlighting.Result,
+        mutation: SyntaxEditorTextChange.Replacement?
     ) async {
         guard !Task.isCancelled else { return }
         guard model.textRevision == result.revision else { return }
@@ -2117,8 +2117,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func shouldMaterializeHighlightResult(
-        _ result: SyntaxHighlightResult,
-        mutation: SyntaxHighlightMutation?
+        _ result: SyntaxEditorHighlighting.Result,
+        mutation: SyntaxEditorTextChange.Replacement?
     ) -> Bool {
         guard mutation != nil,
               result.phase == .syntacticFastPass
@@ -2129,7 +2129,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return !hasMaterializedCompletedHighlightToAvoidDowngrade(for: result)
     }
 
-    private func hasMaterializedCompletedHighlightToAvoidDowngrade(for result: SyntaxHighlightResult) -> Bool {
+    private func hasMaterializedCompletedHighlightToAvoidDowngrade(for result: SyntaxEditorHighlighting.Result) -> Bool {
         guard materializedHighlightPhase == .complete,
               materializedHighlightLanguage == result.language,
               highlightStyleStore.hasMaterializedRuns,
@@ -2142,8 +2142,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func highlightApplicationRefreshRange(
-        for result: SyntaxHighlightResult,
-        mutation: SyntaxHighlightMutation?
+        for result: SyntaxEditorHighlighting.Result,
+        mutation: SyntaxEditorTextChange.Replacement?
     ) -> NSRange {
         guard mutation != nil else {
             return result.refreshRange
@@ -2152,8 +2152,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func canApplyHighlightTokenPayload(
-        for result: SyntaxHighlightResult,
-        mutation: SyntaxHighlightMutation?
+        for result: SyntaxEditorHighlighting.Result,
+        mutation: SyntaxEditorTextChange.Replacement?
     ) -> Bool {
         guard result.tokenPayload == .replacement else {
             return true
@@ -2239,7 +2239,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func recordMaterializedHighlight(
-        phase: SyntaxHighlightPhase,
+        phase: SyntaxEditorHighlighting.Result.Phase,
         revision: Int,
         language: SyntaxLanguage
     ) {
@@ -2254,9 +2254,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         materializedHighlightLanguage = nil
     }
 
-    static func highlightMutation(_ change: SyntaxEditorTextChange) -> SyntaxHighlightMutation? {
+    static func highlightMutation(_ change: SyntaxEditorTextChange) -> SyntaxEditorTextChange.Replacement? {
         guard change.replacements.count == 1, let edit = change.replacements.first else { return nil }
-        return SyntaxHighlightMutation(
+        return SyntaxEditorTextChange.Replacement(
             location: edit.range.location,
             length: edit.range.length,
             replacement: edit.replacement
@@ -2264,7 +2264,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func applyHighlight(
-        _ tokens: [SyntaxHighlightToken],
+        _ tokens: [SyntaxEditorHighlighting.Token],
         expectedRevision: Int,
         source expectedSource: String,
         refreshRange: NSRange
@@ -2302,13 +2302,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func applyHighlightFromScheduledTask(
-        _ tokens: [SyntaxHighlightToken],
+        _ tokens: [SyntaxEditorHighlighting.Token],
         expectedRevision: Int,
         source expectedSource: String,
         language expectedLanguage: SyntaxLanguage,
         refreshRange: NSRange,
-        mutation: SyntaxHighlightMutation?,
-        tokenPayload _: SyntaxHighlightTokenPayload = .fullSnapshot
+        mutation: SyntaxEditorTextChange.Replacement?,
+        tokenPayload _: SyntaxEditorHighlighting.Result.Payload = .fullSnapshot
     ) async -> Bool {
         guard model.textRevision == expectedRevision else { return false }
         guard model.language == expectedLanguage,
@@ -2344,11 +2344,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func recordAppliedHighlightTokenSnapshot(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         revision: Int,
         language: SyntaxLanguage,
-        tokenPayload: SyntaxHighlightTokenPayload
+        tokenPayload: SyntaxEditorHighlighting.Result.Payload
     ) {
         guard tokenPayload == .fullSnapshot else {
             clearRecordedHighlightTokenSnapshot()
@@ -2382,7 +2382,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func syntaxHighlightRunSet(
-        for tokens: [SyntaxHighlightToken],
+        for tokens: [SyntaxEditorHighlighting.Token],
         renderRange: NSRange,
         textLength: Int,
         resolver: inout SyntaxHighlightAttributeResolver
@@ -2641,7 +2641,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func commitSyntaxHighlightSnapshot(
-        for tokens: [SyntaxHighlightToken],
+        for tokens: [SyntaxEditorHighlighting.Token],
         targetRange: NSRange,
         baseAttributes: [NSAttributedString.Key: Any],
         textLength: Int,
@@ -2676,7 +2676,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func prepareSyntaxHighlightRenderingForPendingHighlight(
-        mutation: SyntaxHighlightMutation?,
+        mutation: SyntaxEditorTextChange.Replacement?,
         source: String,
         refreshStartUTF16 _: Int
     ) {
@@ -2713,7 +2713,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     private func pendingTextReplacementRange(
         in source: String,
-        mutation: SyntaxHighlightMutation
+        mutation: SyntaxEditorTextChange.Replacement
     ) -> NSRange {
         let textLength = source.utf16.count
         let location = min(max(0, mutation.location), textLength)
@@ -2729,7 +2729,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     private func commitSyntaxHighlightSnapshotFromScheduledTask(
-        for tokens: [SyntaxHighlightToken],
+        for tokens: [SyntaxEditorHighlighting.Token],
         targetRange: NSRange,
         baseAttributes: [NSAttributedString.Key: Any],
         textLength: Int,

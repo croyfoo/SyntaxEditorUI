@@ -2,7 +2,7 @@ import Foundation
 import SwiftTreeSitter
 import SwiftTreeSitterLayer
 
-package actor SyntaxHighlighterEngine: SyntaxHighlighting {
+package actor SyntaxHighlighterEngine: SyntaxEditorHighlighting.Engine {
     private let worker: HighlightRequestWorker
     private var currentRequestTask: Task<Void, Never>?
     private var currentRequestGeneration = 0
@@ -11,9 +11,9 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         worker = HighlightRequestWorker(registry: .shared)
     }
 
-    // MARK: - SyntaxHighlighting
+    // MARK: - SyntaxEditorHighlighting.Engine
 
-    package func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+    package func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxEditorHighlighting.Result {
         await worker.reset(source: source, language: language, revision: revision)
     }
 
@@ -21,29 +21,29 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         source: String,
         language: SyntaxLanguage,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult> {
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         await worker.resetPhases(source: source, language: language, revision: revision)
     }
 
     package func update(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> SyntaxHighlightResult {
+    ) async -> SyntaxEditorHighlighting.Result {
         await worker.update(source: source, language: language, mutation: mutation, revision: revision)
     }
 
     package func updatePhases(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult> {
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         await worker.updatePhases(source: source, language: language, mutation: mutation, revision: revision)
     }
 
-    package func replaceCurrentRequest(with request: SyntaxHighlightRequest) async -> AsyncStream<SyntaxHighlightResult> {
+    package func replaceCurrentRequest(with request: SyntaxEditorHighlighting.Request) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         currentRequestGeneration += 1
         let generation = currentRequestGeneration
         currentRequestTask?.cancel()
@@ -57,7 +57,7 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
             return Self.finishedStream()
         }
 
-        let stream = AsyncStream<SyntaxHighlightResult>.makeStream()
+        let stream = AsyncStream<SyntaxEditorHighlighting.Result>.makeStream()
         let task = Task {
             await runCurrentRequest(
                 request,
@@ -86,20 +86,20 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         await worker.setVisibleRange(range)
     }
 
-    package func render(source: String, language: SyntaxLanguage) async -> [SyntaxHighlightToken] {
+    package func render(source: String, language: SyntaxLanguage) async -> [SyntaxEditorHighlighting.Token] {
         await worker.render(source: source, language: language)
     }
 
-    package func currentTokensForTesting() async -> [SyntaxHighlightToken] {
+    package func currentTokensForTesting() async -> [SyntaxEditorHighlighting.Token] {
         await worker.currentTokensForTesting()
     }
 
     // MARK: - Internals
 
     private func runCurrentRequest(
-        _ request: SyntaxHighlightRequest,
+        _ request: SyntaxEditorHighlighting.Request,
         generation: Int,
-        continuation: AsyncStream<SyntaxHighlightResult>.Continuation
+        continuation: AsyncStream<SyntaxEditorHighlighting.Result>.Continuation
     ) async {
         let result = await worker.perform(
             request,
@@ -138,7 +138,7 @@ package actor SyntaxHighlighterEngine: SyntaxHighlighting {
         await worker.cancelOutstandingWork()
     }
 
-    private static func finishedStream() -> AsyncStream<SyntaxHighlightResult> {
+    private static func finishedStream() -> AsyncStream<SyntaxEditorHighlighting.Result> {
         AsyncStream { continuation in
             continuation.finish()
         }
@@ -162,7 +162,7 @@ private actor HighlightRequestWorker {
         self.registry = registry
     }
 
-    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxEditorHighlighting.Result {
         await reset(source: source, language: language, revision: revision, emitFastPass: nil)
     }
 
@@ -170,7 +170,7 @@ private actor HighlightRequestWorker {
         source: String,
         language: SyntaxLanguage,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult> {
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         AsyncStream { continuation in
             let task = Task {
                 let result = await self.reset(
@@ -195,18 +195,18 @@ private actor HighlightRequestWorker {
     func update(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> SyntaxHighlightResult {
+    ) async -> SyntaxEditorHighlighting.Result {
         await update(source: source, language: language, mutation: mutation, revision: revision, emitFastPass: nil)
     }
 
     func updatePhases(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult> {
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         AsyncStream { continuation in
             let task = Task {
                 let result = await self.update(
@@ -239,16 +239,16 @@ private actor HighlightRequestWorker {
     }
 
     func perform(
-        _ request: SyntaxHighlightRequest,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?
-    ) async -> SyntaxHighlightResult {
+        _ request: SyntaxEditorHighlighting.Request,
+        emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?
+    ) async -> SyntaxEditorHighlighting.Result {
         await result(for: request, emitFastPass: emitFastPass)
     }
 
     private func result(
-        for request: SyntaxHighlightRequest,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?
-    ) async -> SyntaxHighlightResult {
+        for request: SyntaxEditorHighlighting.Request,
+        emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?
+    ) async -> SyntaxEditorHighlighting.Result {
         switch request.operation {
         case .reset:
             return await reset(
@@ -272,15 +272,15 @@ private actor HighlightRequestWorker {
         source: String,
         language: SyntaxLanguage,
         revision: Int,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?
-    ) async -> SyntaxHighlightResult {
+        emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?
+    ) async -> SyntaxEditorHighlighting.Result {
         let setup = await registry.highlightingSetup(for: language)
         guard !Task.isCancelled else {
-            return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
+            return SyntaxEditorHighlighting.Result.empty(source: source, language: language, revision: revision)
         }
         guard let setup else {
             session = nil
-            return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
+            return SyntaxEditorHighlighting.Result.empty(source: source, language: language, revision: revision)
         }
 
         // Always a fresh session: a half-built one is never installed (a cancelled
@@ -289,7 +289,7 @@ private actor HighlightRequestWorker {
         nextSession.visibleRangeHint = visibleRangeHint
         let result = await nextSession.reset(source: source, revision: revision, emitFastPass: emitFastPass)
         guard !Task.isCancelled, let result else {
-            return SyntaxHighlightResult(
+            return SyntaxEditorHighlighting.Result(
                 tokens: [],
                 source: source,
                 language: language,
@@ -304,10 +304,10 @@ private actor HighlightRequestWorker {
     private func update(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?
-    ) async -> SyntaxHighlightResult {
+        emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?
+    ) async -> SyntaxEditorHighlighting.Result {
         if let session,
            let result = await session.update(
                source: source,
@@ -321,11 +321,11 @@ private actor HighlightRequestWorker {
         return await reset(source: source, language: language, revision: revision, emitFastPass: emitFastPass)
     }
 
-    func render(source: String, language: SyntaxLanguage) async -> [SyntaxHighlightToken] {
+    func render(source: String, language: SyntaxLanguage) async -> [SyntaxEditorHighlighting.Token] {
         await reset(source: source, language: language, revision: 0).tokens
     }
 
-    func currentTokensForTesting() -> [SyntaxHighlightToken] {
+    func currentTokensForTesting() -> [SyntaxEditorHighlighting.Token] {
         session?.currentTokens() ?? []
     }
 }
@@ -361,7 +361,7 @@ final class HighlightSession {
     /// `editGeneration` before committing.
     private var monolithicMergeTask: (
         id: Int,
-        task: Task<(tokens: [SyntaxHighlightToken], isCancelled: Bool), Never>
+        task: Task<(tokens: [SyntaxEditorHighlighting.Token], isCancelled: Bool), Never>
     )?
     private var nextMonolithicMergeTaskID = 0
     /// Bumped at every committed edit and reset; a merge started under an older
@@ -387,7 +387,7 @@ final class HighlightSession {
         semanticPass = SemanticPassFactory.make(language: language)
     }
 
-    func currentTokens() -> [SyntaxHighlightToken] {
+    func currentTokens() -> [SyntaxEditorHighlighting.Token] {
         planes.tokens(lineTable: lineTable)
     }
 
@@ -403,9 +403,9 @@ final class HighlightSession {
     func reset(
         source: String,
         revision: Int,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?,
+        emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?,
         isolation: isolated (any Actor)? = #isolation
-    ) async -> SyntaxHighlightResult? {
+    ) async -> SyntaxEditorHighlighting.Result? {
         self.source = source
         layeredSource = SyntacticPatcher.layeredSource(for: source, setup: setup)
         sourceBuffer.reset(layeredSource)
@@ -420,7 +420,7 @@ final class HighlightSession {
         guard !layeredSource.isEmpty else {
             layer = nil
             planes.clear(lineCount: lineTable.lineCount)
-            return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
+            return SyntaxEditorHighlighting.Result.empty(source: source, language: language, revision: revision)
         }
 
         do {
@@ -428,7 +428,7 @@ final class HighlightSession {
             guard let fullEdit = SyntacticPatcher.fullReplacementInputEdit(for: layeredSource) else {
                 layer = nil
                 planes.clear(lineCount: lineTable.lineCount)
-                return SyntaxHighlightResult.empty(source: source, language: language, revision: revision)
+                return SyntaxEditorHighlighting.Result.empty(source: source, language: language, revision: revision)
             }
             _ = nextLayer.didChangeContent(
                 SyntacticPatcher.layerContent(buffer: sourceBuffer, source: layeredSource),
@@ -506,7 +506,7 @@ final class HighlightSession {
             planes.clear(lineCount: lineTable.lineCount)
         }
 
-        return SyntaxHighlightResult(
+        return SyntaxEditorHighlighting.Result(
             tokens: planes.tokens(lineTable: lineTable),
             source: source,
             language: language,
@@ -525,7 +525,7 @@ final class HighlightSession {
         layer: LanguageLayer,
         fullRange: NSRange,
         revision: Int,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?,
+        emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?,
         isolation: isolated (any Actor)? = #isolation
     ) async -> Bool {
         planes.clear(lineCount: lineTable.lineCount)
@@ -574,7 +574,7 @@ final class HighlightSession {
                     emitFastPass: emitFastPass
                 )
             } else if let emitFastPass, !syntacticDebt.isEmpty {
-                emitFastPass(SyntaxHighlightResult(
+                emitFastPass(SyntaxEditorHighlighting.Result(
                     tokens: resultTokens(
                         from: planes.tokens(in: target, lineTable: lineTable),
                         refreshRange: target,
@@ -599,11 +599,11 @@ final class HighlightSession {
     func update(
         source nextSource: String,
         language nextLanguage: SyntaxLanguage,
-        mutation originalMutation: SyntaxHighlightMutation,
+        mutation originalMutation: SyntaxEditorTextChange.Replacement,
         revision: Int,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?,
+        emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?,
         isolation: isolated (any Actor)? = #isolation
-    ) async -> SyntaxHighlightResult? {
+    ) async -> SyntaxEditorHighlighting.Result? {
         guard nextLanguage == language, let layer else {
             return nil
         }
@@ -611,7 +611,7 @@ final class HighlightSession {
         // Mutation validation: cheap probes (length consistency, replacement
         // match, boundary windows); a mismatch coalesces via full diff — the
         // legacy recovery behavior without its per-keystroke O(N) compares.
-        let effectiveMutation: SyntaxHighlightMutation
+        let effectiveMutation: SyntaxEditorTextChange.Replacement
         switch SyntacticPatcher.validateMutation(originalMutation, previousSource: source, nextSource: nextSource) {
         case .valid:
             effectiveMutation = originalMutation
@@ -619,16 +619,16 @@ final class HighlightSession {
             guard let coalesced = SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: nextSource) else {
                 return nil
             }
-            effectiveMutation = SyntaxHighlightMutation(coalesced)
+            effectiveMutation = coalesced
         }
 
         let nextLayeredSource = SyntacticPatcher.layeredSource(for: nextSource, setup: setup)
-        let layeredMutation: SyntaxHighlightMutation
+        let layeredMutation: SyntaxEditorTextChange.Replacement
         if setup.usesHTMLPreprocessing {
             guard let masked = SyntaxEditorTextChange.Replacement.singleReplacement(from: layeredSource, to: nextLayeredSource) else {
                 return nil
             }
-            layeredMutation = SyntaxHighlightMutation(masked)
+            layeredMutation = masked
         } else {
             layeredMutation = effectiveMutation
         }
@@ -855,7 +855,7 @@ final class HighlightSession {
         }
         resultRefresh = SyntaxEditorRangeUtilities.clampedRange(resultRefresh, utf16Length: nextSource.utf16.count)
 
-        return SyntaxHighlightResult(
+        return SyntaxEditorHighlighting.Result(
             tokens: resultTokens(
                 from: planes.tokens(in: resultRefresh, lineTable: lineTable),
                 refreshRange: resultRefresh,
@@ -885,7 +885,7 @@ final class HighlightSession {
     /// historical one-complete-per-update observable behavior.
     private func drainSemanticDebt(
         revision: Int,
-        emit: ((SyntaxHighlightResult) -> Void)?,
+        emit: ((SyntaxEditorHighlighting.Result) -> Void)?,
         priorityHint: Int? = nil,
         isolation: isolated (any Actor)? = #isolation
     ) async -> NSRange? {
@@ -991,7 +991,7 @@ final class HighlightSession {
             ) {
                 refresh = refresh.map { SyntacticPatcher.union($0, diff) } ?? diff
                 if let emit, !semanticDebt.isEmpty {
-                    emit(SyntaxHighlightResult(
+                    emit(SyntaxEditorHighlighting.Result(
                         tokens: resultTokens(
                             from: planes.tokens(in: diff, lineTable: lineTable),
                             refreshRange: diff,
@@ -1040,16 +1040,16 @@ final class HighlightSession {
     }
 
     private func emitFastPassIfNeeded(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         revision: Int,
         refreshRange: NSRange,
-        tokenPayload: SyntaxHighlightTokenPayload,
-        emitFastPass: ((SyntaxHighlightResult) -> Void)?
+        tokenPayload: SyntaxEditorHighlighting.Result.Payload,
+        emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?
     ) {
         guard usesDeferredSemanticHighlighting, let emitFastPass else { return }
         emitFastPass(
-            SyntaxHighlightResult(
+            SyntaxEditorHighlighting.Result(
                 tokens: resultTokens(from: tokens, refreshRange: refreshRange, tokenPayload: tokenPayload),
                 source: source,
                 language: language,
@@ -1062,10 +1062,10 @@ final class HighlightSession {
     }
 
     private func resultTokens(
-        from tokens: [SyntaxHighlightToken],
+        from tokens: [SyntaxEditorHighlighting.Token],
         refreshRange: NSRange,
-        tokenPayload: SyntaxHighlightTokenPayload
-    ) -> [SyntaxHighlightToken] {
+        tokenPayload: SyntaxEditorHighlighting.Result.Payload
+    ) -> [SyntaxEditorHighlighting.Token] {
         switch tokenPayload {
         case .fullSnapshot:
             return tokens
@@ -1078,8 +1078,8 @@ final class HighlightSession {
 
     /// Cancelled results are dropped before the phase streams yield them; carry
     /// no tokens and a no-op refresh range (never materialize the store here).
-    private func cancelledResult(revision: Int) -> SyntaxHighlightResult {
-        SyntaxHighlightResult(
+    private func cancelledResult(revision: Int) -> SyntaxEditorHighlighting.Result {
+        SyntaxEditorHighlighting.Result(
             tokens: [],
             source: source,
             language: language,

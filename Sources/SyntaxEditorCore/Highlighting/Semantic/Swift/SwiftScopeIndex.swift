@@ -430,7 +430,7 @@ final class SwiftScopeIndex {
     /// index is session-owned). Returns false when a range partially overlaps the
     /// replaced region; the index is then stale and must be rebuilt — partial
     /// mutation of an abandoned index is harmless because the caller discards it.
-    func shiftInPlace(by mutation: SyntaxHighlightMutation, sourceUTF16Length newLength: Int) -> Bool {
+    func shiftInPlace(by mutation: SyntaxEditorTextChange.Replacement, sourceUTF16Length newLength: Int) -> Bool {
         let delta = mutation.replacement.utf16.count - mutation.length
         let oldEnd = mutation.location + mutation.length
 

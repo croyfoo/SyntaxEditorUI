@@ -122,7 +122,7 @@ package struct PendingHighlightEditMap {
     }
 
     package mutating func recordPendingEdit(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         currentTextLength: Int
     ) {
         let currentTextLength = max(0, currentTextLength)
@@ -760,7 +760,7 @@ package final class HighlightRenderSnapshotStore {
     nonisolated(unsafe) package static var pendingEditCheckpointThresholdOverrideForTesting: Int?
 
     package func recordPendingEdit(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         currentTextLength nextTextLength: Int
     ) {
         let nextTextLength = max(0, nextTextLength)
@@ -777,7 +777,7 @@ package final class HighlightRenderSnapshotStore {
     }
 
     private func optimisticHighlightRunSet(
-        for mutation: SyntaxHighlightMutation,
+        for mutation: SyntaxEditorTextChange.Replacement,
         currentTextLength nextTextLength: Int
     ) -> OptimisticHighlightRunSet? {
         let replacementLength = mutation.replacement.utf16.count
@@ -914,7 +914,7 @@ package final class HighlightRenderSnapshotStore {
     /// offset pass; the mapping semantics mirror `PendingHighlightEditMap`'s
     /// single-edit rules exactly.
     private func shiftCurrentRuns(
-        for mutation: SyntaxHighlightMutation,
+        for mutation: SyntaxEditorTextChange.Replacement,
         currentTextLength nextTextLength: Int
     ) {
         guard !currentColorRuns.isEmpty || !currentFontRuns.isEmpty || !currentMaterializedRanges.isEmpty else { return }

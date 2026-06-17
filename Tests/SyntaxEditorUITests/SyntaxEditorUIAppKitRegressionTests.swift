@@ -312,11 +312,11 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.javascript.string"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 3, length: 5),
                     rawCaptureName: "editor.syntax.javascript.plain"
                 ),
@@ -346,15 +346,15 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 10),
                     rawCaptureName: "editor.syntax.javascript.keyword"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 2, length: 6),
                     rawCaptureName: "editor.syntax.javascript.string"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 4, length: 2),
                     rawCaptureName: "editor.syntax.javascript.plain"
                 ),
@@ -386,15 +386,15 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.javascript.string"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 3, length: 4),
                     rawCaptureName: "editor.syntax.javascript.plain"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 6, length: 4),
                     rawCaptureName: "editor.syntax.javascript.string"
                 ),
@@ -423,15 +423,15 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.javascript.string"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 4, length: 2),
                     rawCaptureName: "editor.syntax.javascript.plain"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 4, length: 1),
                     rawCaptureName: "editor.syntax.javascript.string"
                 ),
@@ -465,7 +465,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -510,7 +510,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -586,7 +586,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -621,7 +621,7 @@ extension SyntaxEditorUITests {
         let source = "let value = 1"
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -653,7 +653,7 @@ extension SyntaxEditorUITests {
         let source = "/// doc"
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.comment.doc"
                 ),
@@ -687,7 +687,7 @@ extension SyntaxEditorUITests {
         let source = "let value = 1"
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -733,7 +733,7 @@ extension SyntaxEditorUITests {
         let source = "let value = 1"
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.comment.doc"
                 ),
@@ -779,7 +779,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -822,7 +822,7 @@ extension SyntaxEditorUITests {
         let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -859,13 +859,13 @@ extension SyntaxEditorUITests {
         let completeGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             completeTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.string"
                 ),
@@ -917,19 +917,19 @@ extension SyntaxEditorUITests {
         let completeGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             updateFastTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.string"
                 ),
             ],
             completeTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -978,24 +978,24 @@ extension SyntaxEditorUITests {
         let completeGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             updateFastTokens: [],
             completeTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             updateCompleteTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.string"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: insertedRange,
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1049,7 +1049,7 @@ extension SyntaxEditorUITests {
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [],
             updateFastTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 1),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1093,13 +1093,13 @@ extension SyntaxEditorUITests {
         let completeGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             completeTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.string"
                 ),
@@ -1122,7 +1122,7 @@ extension SyntaxEditorUITests {
         editorView.textView.setSelectedRange(insertionRange)
         editorView.textView.insertText("x", replacementRange: insertionRange)
 
-        let skippedFastPass = await editorView.waitForSkippedHighlightPhaseForTesting(SyntaxHighlightPhase.syntacticFastPass)
+        let skippedFastPass = await editorView.waitForSkippedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass)
         #expect(skippedFastPass)
         #expect(editorView.textView.string == "\(source)x")
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.string))
@@ -1146,13 +1146,13 @@ extension SyntaxEditorUITests {
         let completeGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             completeTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.string"
                 ),
@@ -1177,7 +1177,7 @@ extension SyntaxEditorUITests {
         editorView.textView.insertText("x", replacementRange: firstInsertionRange)
 
         await completeGate.waitUntilSuspended(after: firstSuspensionCount)
-        #expect(await editorView.waitForSkippedHighlightPhaseForTesting(SyntaxHighlightPhase.syntacticFastPass))
+        #expect(await editorView.waitForSkippedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
         #expect(editorView.textView.string == "x\(source)")
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 1), theme.string))
 
@@ -1187,7 +1187,7 @@ extension SyntaxEditorUITests {
         editorView.textView.insertText("y", replacementRange: secondInsertionRange)
 
         await completeGate.waitUntilSuspended(after: secondSuspensionCount)
-        #expect(await editorView.waitForSkippedHighlightPhaseForTesting(SyntaxHighlightPhase.syntacticFastPass))
+        #expect(await editorView.waitForSkippedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
         #expect(editorView.textView.string == "x\(source)y")
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 1), theme.string))
 
@@ -1208,7 +1208,7 @@ extension SyntaxEditorUITests {
         let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1251,7 +1251,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1282,7 +1282,7 @@ extension SyntaxEditorUITests {
         let source = "let value = 1"
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1309,7 +1309,7 @@ extension SyntaxEditorUITests {
         let source = "let value = 1"
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1337,7 +1337,7 @@ extension SyntaxEditorUITests {
         let source = "let value = 1"
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1372,7 +1372,7 @@ extension SyntaxEditorUITests {
         let source = "let value = 1"
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1422,7 +1422,7 @@ extension SyntaxEditorUITests {
         let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1458,7 +1458,7 @@ extension SyntaxEditorUITests {
         let source = "let value = 1"
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.comment.doc"
                 ),
@@ -1488,7 +1488,7 @@ extension SyntaxEditorUITests {
         let insertedPrefix = "// "
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.comment.doc"
                 ),
@@ -1599,7 +1599,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1645,7 +1645,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1686,7 +1686,7 @@ extension SyntaxEditorUITests {
         let source = String(repeating: repeatedToken, count: repeatCount)
         let tokenStride = repeatedToken.utf16.count
         let tokens = (0..<repeatCount).map { index in
-            SyntaxHighlightToken(
+            SyntaxEditorHighlighting.Token(
                 range: NSRange(location: index * tokenStride, length: 3),
                 rawCaptureName: "editor.syntax.swift.keyword"
             )
@@ -1776,7 +1776,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1815,7 +1815,7 @@ extension SyntaxEditorUITests {
         let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1854,7 +1854,7 @@ extension SyntaxEditorUITests {
         let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 9),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1894,17 +1894,17 @@ extension SyntaxEditorUITests {
         let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 4, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             updateTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 5, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -1944,13 +1944,13 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorLanguageAwareTestHighlighter(
             swiftTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             jsonTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.json.string"
                 ),
@@ -1985,7 +1985,7 @@ extension SyntaxEditorUITests {
             defer {
                 lineStart += line.utf16.count + 1
             }
-            return SyntaxHighlightToken(
+            return SyntaxEditorHighlighting.Token(
                 range: NSRange(location: lineStart, length: 3),
                 rawCaptureName: "editor.syntax.swift.keyword"
             )
@@ -1993,7 +1993,7 @@ extension SyntaxEditorUITests {
         let highlighter = SyntaxEditorLanguageAwareTestHighlighter(
             swiftTokens: swiftTokens,
             jsonTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: source.utf16.count),
                     rawCaptureName: "editor.syntax.json.string"
                 ),
@@ -2027,7 +2027,7 @@ extension SyntaxEditorUITests {
         let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -2117,7 +2117,7 @@ extension SyntaxEditorUITests {
         let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 3, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -2167,7 +2167,7 @@ extension SyntaxEditorUITests {
         let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorLanguageAwareTestHighlighter(
             swiftTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -2219,13 +2219,13 @@ extension SyntaxEditorUITests {
         let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorLanguageAwareTestHighlighter(
             swiftTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: initialSource.utf16.count),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
             ],
             jsonTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: replacementSource.utf16.count),
                     rawCaptureName: "editor.syntax.json.string"
                 ),
@@ -2268,7 +2268,7 @@ extension SyntaxEditorUITests {
         let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 4, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -2314,7 +2314,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -2375,7 +2375,7 @@ extension SyntaxEditorUITests {
         let highlighter = SyntaxEditorPhasedTestHighlighter(
             fastTokens: [],
             completeTokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 1),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -2471,7 +2471,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -2581,7 +2581,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -2627,7 +2627,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(range: NSRange(location: 0, length: 3), rawCaptureName: "editor.syntax.swift.keyword"),
+                SyntaxEditorHighlighting.Token(range: NSRange(location: 0, length: 3), rawCaptureName: "editor.syntax.swift.keyword"),
             ],
             updateRefreshRange: NSRange(location: source.utf16.count, length: appendedText.utf16.count)
         )
@@ -2670,11 +2670,11 @@ extension SyntaxEditorUITests {
         let updateGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: firstPaste.utf16.count, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -2780,7 +2780,7 @@ extension SyntaxEditorUITests {
         )
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),

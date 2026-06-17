@@ -1,6 +1,7 @@
 import Foundation
 
-package struct EditorSourceSyntaxID: RawRepresentable, Hashable, Sendable, ExpressibleByStringLiteral {
+package enum EditorSourceSyntax {
+package struct ID: RawRepresentable, Hashable, Sendable, ExpressibleByStringLiteral {
     package let rawValue: String
 
     package init(rawValue: String) {
@@ -30,8 +31,9 @@ package struct EditorSourceSyntaxID: RawRepresentable, Hashable, Sendable, Expre
         return lowered
     }
 }
+}
 
-package extension EditorSourceSyntaxID {
+package extension EditorSourceSyntax.ID {
     static let plain: Self = "plain"
     static let comment: Self = "comment"
     static let documentationComment: Self = "comment.doc"
@@ -68,31 +70,32 @@ package extension EditorSourceSyntaxID {
     static let identifierVariableSystem: Self = "identifier.variable.system"
 }
 
-package struct EditorSourceSyntaxClassification: Equatable, Sendable {
-    package let syntaxID: EditorSourceSyntaxID
+extension EditorSourceSyntax {
+package struct Classification: Equatable, Sendable {
+    package let syntaxID: EditorSourceSyntax.ID
     package let language: SyntaxLanguage?
 
-    package init(syntaxID: EditorSourceSyntaxID, language: SyntaxLanguage?) {
+    package init(syntaxID: EditorSourceSyntax.ID, language: SyntaxLanguage?) {
         self.syntaxID = syntaxID
         self.language = language
     }
 }
 
-package enum EditorSyntaxCapture {
+package enum Capture {
     private static let canonicalPrefix = "editor.syntax."
 
     package static func parse(
         rawCaptureName: String,
         rootLanguage: SyntaxLanguage
-    ) -> EditorSourceSyntaxClassification {
+    ) -> EditorSourceSyntax.Classification {
         let normalized = normalizedCaptureName(rawCaptureName)
         guard normalized.hasPrefix(canonicalPrefix) else {
-            return EditorSourceSyntaxClassification(syntaxID: .plain, language: rootLanguage)
+            return EditorSourceSyntax.Classification(syntaxID: .plain, language: rootLanguage)
         }
 
         let payload = normalized.dropFirst(canonicalPrefix.count)
         guard let separator = payload.firstIndex(of: ".") else {
-            return EditorSourceSyntaxClassification(syntaxID: .plain, language: rootLanguage)
+            return EditorSourceSyntax.Classification(syntaxID: .plain, language: rootLanguage)
         }
 
         let languageName = String(payload[..<separator])
@@ -100,17 +103,17 @@ package enum EditorSyntaxCapture {
         guard syntaxID.isEmpty == false,
               let language = SyntaxLanguage.editorSyntaxCaptureLanguage(named: languageName)
         else {
-            return EditorSourceSyntaxClassification(syntaxID: .plain, language: rootLanguage)
+            return EditorSourceSyntax.Classification(syntaxID: .plain, language: rootLanguage)
         }
 
-        return EditorSourceSyntaxClassification(
-            syntaxID: EditorSourceSyntaxID(syntaxID),
+        return EditorSourceSyntax.Classification(
+            syntaxID: EditorSourceSyntax.ID(syntaxID),
             language: language
         )
     }
 
     package static func rawCaptureName(
-        syntaxID: EditorSourceSyntaxID,
+        syntaxID: EditorSourceSyntax.ID,
         language: SyntaxLanguage
     ) -> String {
         "\(canonicalPrefix)\(language.editorSyntaxCaptureIdentifier).\(syntaxID.rawValue)"
@@ -125,6 +128,7 @@ package enum EditorSyntaxCapture {
         }
         return name
     }
+}
 }
 
 private extension SyntaxLanguage {
@@ -177,7 +181,8 @@ private extension SyntaxLanguage {
     }
 }
 
-package enum EditorSourceSyntaxCategory {
+extension EditorSourceSyntax {
+package enum Category {
     case comment
     case string
     case keyword
@@ -188,7 +193,7 @@ package enum EditorSourceSyntaxCategory {
     case variable
     case punctuation
 
-    package static func category(for syntaxID: EditorSourceSyntaxID) -> Self? {
+    package static func category(for syntaxID: EditorSourceSyntax.ID) -> Self? {
         let value = syntaxID.rawValue
         if value == "comment" || value.hasPrefix("comment.") || value == "mark" {
             return .comment
@@ -225,4 +230,5 @@ package enum EditorSourceSyntaxCategory {
         }
         return nil
     }
+}
 }

@@ -2,14 +2,10 @@ import Foundation
 import SwiftTreeSitter
 import SwiftTreeSitterLayer
 
-// Public highlighting types and the SyntaxHighlighting protocol, relocated
-// verbatim from the previous engine file during the ground-up rebuild. The
-// observable contracts (field semantics, phase ordering, payload rules) are
-// pinned by the UI layers and the test suite.
-
-package struct SyntaxHighlightToken: Equatable, Sendable {
+public enum SyntaxEditorHighlighting {
+package struct Token: Equatable, Sendable {
     package let range: NSRange
-    package let syntaxID: EditorSourceSyntaxID
+    package let syntaxID: EditorSourceSyntax.ID
     package let language: SyntaxLanguage?
     package let rawCaptureName: String
     package let isSemanticOverlay: Bool
@@ -33,7 +29,7 @@ package struct SyntaxHighlightToken: Equatable, Sendable {
         language: SyntaxLanguage,
         isSemanticOverlay: Bool
     ) {
-        let classification = EditorSyntaxCapture.parse(
+        let classification = EditorSourceSyntax.Capture.parse(
             rawCaptureName: rawCaptureName,
             rootLanguage: language
         )
@@ -48,7 +44,7 @@ package struct SyntaxHighlightToken: Equatable, Sendable {
 
     package init(
         range: NSRange,
-        syntaxID: EditorSourceSyntaxID,
+        syntaxID: EditorSourceSyntax.ID,
         language: SyntaxLanguage?,
         rawCaptureName: String
     ) {
@@ -63,7 +59,7 @@ package struct SyntaxHighlightToken: Equatable, Sendable {
 
     package init(
         range: NSRange,
-        syntaxID: EditorSourceSyntaxID,
+        syntaxID: EditorSourceSyntax.ID,
         language: SyntaxLanguage?,
         rawCaptureName: String,
         isSemanticOverlay: Bool
@@ -76,57 +72,37 @@ package struct SyntaxHighlightToken: Equatable, Sendable {
     }
 }
 
-package struct SyntaxHighlightMutation: Equatable, Sendable {
-    package let location: Int
-    package let length: Int
-    package let replacement: String
-
-    package init(location: Int, length: Int, replacement: String) {
-        self.location = location
-        self.length = length
-        self.replacement = replacement
+package struct Result: Sendable {
+    package enum Phase: Equatable, Sendable {
+        case syntacticFastPass
+        case complete
     }
 
-    package init(_ mutation: SyntaxEditorTextChange.Replacement) {
-        self.init(
-            location: mutation.range.location,
-            length: mutation.range.length,
-            replacement: mutation.replacement
-        )
+    package enum Payload: Equatable, Sendable {
+        case fullSnapshot
+        case replacement
     }
-}
 
-package enum SyntaxHighlightPhase: Equatable, Sendable {
-    case syntacticFastPass
-    case complete
-}
-
-package enum SyntaxHighlightTokenPayload: Equatable, Sendable {
-    case fullSnapshot
-    case replacement
-}
-
-package struct SyntaxHighlightResult: Sendable {
-    package let tokens: [SyntaxHighlightToken]
+    package let tokens: [SyntaxEditorHighlighting.Token]
     package let source: String
     package let language: SyntaxLanguage
     package let revision: Int
     package let refreshRange: NSRange
-    package let phase: SyntaxHighlightPhase
-    package let tokenPayload: SyntaxHighlightTokenPayload
+    package let phase: SyntaxEditorHighlighting.Result.Phase
+    package let tokenPayload: SyntaxEditorHighlighting.Result.Payload
 
     package var containsCompleteTokenSnapshot: Bool {
         tokenPayload == .fullSnapshot
     }
 
     package init(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         language: SyntaxLanguage,
         revision: Int,
         refreshRange: NSRange,
-        phase: SyntaxHighlightPhase = .complete,
-        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot
+        phase: SyntaxEditorHighlighting.Result.Phase = .complete,
+        tokenPayload: SyntaxEditorHighlighting.Result.Payload = .fullSnapshot
     ) {
         self.tokens = tokens
         self.source = source
@@ -138,10 +114,10 @@ package struct SyntaxHighlightResult: Sendable {
     }
 }
 
-package struct SyntaxHighlightRequest: Equatable, Sendable {
+package struct Request: Equatable, Sendable {
     package enum Operation: Equatable, Sendable {
         case reset
-        case update(SyntaxHighlightMutation)
+        case update(SyntaxEditorTextChange.Replacement)
     }
 
     package let source: String
@@ -165,13 +141,13 @@ package struct SyntaxHighlightRequest: Equatable, Sendable {
     }
 }
 
-package enum SyntaxHighlightInvalidation {
+package enum Invalidation {
     // SwiftTreeSitter's LanguageLayer converts Tree-sitter byte ranges through
     // Range<UInt32>.range before returning an IndexSet, so these ranges are
     // already in NSRange/UTF-16 coordinates.
     package static func queryRange(
         invalidatedSet: IndexSet,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         sourceUTF16Length: Int
     ) -> NSRange {
         let replacementLength = mutation.replacement.utf16.count
@@ -195,38 +171,39 @@ package enum SyntaxHighlightInvalidation {
     }
 }
 
-package protocol SyntaxHighlighting: Sendable {
-    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult
+package protocol Engine: Sendable {
+    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxEditorHighlighting.Result
     func resetPhases(
         source: String,
         language: SyntaxLanguage,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult>
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result>
     func update(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> SyntaxHighlightResult
+    ) async -> SyntaxEditorHighlighting.Result
     func updatePhases(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult>
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result>
     /// Viewport hint: progressive opens and background semantic drains process
     /// the chunk nearest this range first. Purely an ordering hint — results
     /// and convergence are identical without it.
     func setVisibleRange(_ range: NSRange?) async
-    func replaceCurrentRequest(with request: SyntaxHighlightRequest) async -> AsyncStream<SyntaxHighlightResult>
+    func replaceCurrentRequest(with request: SyntaxEditorHighlighting.Request) async -> AsyncStream<SyntaxEditorHighlighting.Result>
     func cancelCurrentRequest() async
 }
+}
 
-package extension SyntaxHighlighting {
+package extension SyntaxEditorHighlighting.Engine {
     func setVisibleRange(_ range: NSRange?) async {}
     func cancelCurrentRequest() async {}
 
-    func replaceCurrentRequest(with request: SyntaxHighlightRequest) async -> AsyncStream<SyntaxHighlightResult> {
+    func replaceCurrentRequest(with request: SyntaxEditorHighlighting.Request) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         await setVisibleRange(request.visibleRange)
         switch request.operation {
         case .reset:
@@ -249,7 +226,7 @@ package extension SyntaxHighlighting {
         source: String,
         language: SyntaxLanguage,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult> {
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         AsyncStream { continuation in
             let task = Task {
                 let result = await reset(source: source, language: language, revision: revision)
@@ -269,9 +246,9 @@ package extension SyntaxHighlighting {
     func updatePhases(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult> {
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         AsyncStream { continuation in
             let task = Task {
                 let result = await update(
@@ -294,7 +271,7 @@ package extension SyntaxHighlighting {
     }
 }
 
-public enum SyntaxEditorHighlighting {
+extension SyntaxEditorHighlighting {
     public static func prepare(_ language: SyntaxLanguage) async {
         _ = await LanguageConfigurationRegistry.shared.highlightingSetup(for: language)
     }
@@ -320,9 +297,9 @@ public enum SyntaxEditorHighlighting {
     }
 }
 
-extension SyntaxHighlightResult {
-    static func empty(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxHighlightResult {
-        SyntaxHighlightResult(
+extension SyntaxEditorHighlighting.Result {
+    static func empty(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxEditorHighlighting.Result {
+        SyntaxEditorHighlighting.Result(
             tokens: [],
             source: source,
             language: language,

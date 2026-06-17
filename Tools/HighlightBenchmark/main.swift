@@ -16,7 +16,7 @@ struct HighlightBenchmark {
         )
 
         let updatedSource = incrementalEditSource(from: benchmarkSource)
-        let mutation = SyntaxEditorTextChange.Replacement.singleReplacement(from: benchmarkSource, to: updatedSource).map(SyntaxHighlightMutation.init)
+        let mutation = SyntaxEditorTextChange.Replacement.singleReplacement(from: benchmarkSource, to: updatedSource)
 
         let fullSamples = await measureFullReset(
             source: benchmarkSource,
@@ -138,7 +138,7 @@ struct HighlightBenchmark {
         for _ in 0..<repeats {
             for character in typeText {
                 let insertion = String(character)
-                let mutation = SyntaxHighlightMutation(location: caret, length: 0, replacement: insertion)
+                let mutation = SyntaxEditorTextChange.Replacement(location: caret, length: 0, replacement: insertion)
                 let next = (current as NSString).replacingCharacters(
                     in: NSRange(location: caret, length: 0),
                     with: insertion
@@ -178,7 +178,7 @@ struct HighlightBenchmark {
         let settled = await engine.update(
             source: current,
             language: language,
-            mutation: SyntaxHighlightMutation(location: 0, length: 0, replacement: ""),
+            mutation: SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: ""),
             revision: revision
         )
         _ = settled
@@ -226,7 +226,7 @@ struct HighlightBenchmark {
         var revision = 1
         for character in typeText {
             let insertion = String(character)
-            let mutation = SyntaxHighlightMutation(location: caret, length: 0, replacement: insertion)
+            let mutation = SyntaxEditorTextChange.Replacement(location: caret, length: 0, replacement: insertion)
             let next = (current as NSString).replacingCharacters(
                 in: NSRange(location: caret, length: 0),
                 with: insertion
@@ -270,7 +270,7 @@ struct HighlightBenchmark {
         var completeDurations: [Double] = []
         syntacticFastPassDurations.reserveCapacity(iterations)
         completeDurations.reserveCapacity(iterations)
-        var lastCompleteResult: SyntaxHighlightResult?
+        var lastCompleteResult: SyntaxEditorHighlighting.Result?
 
         for _ in 0..<iterations {
             let engine = SyntaxHighlighterEngine()
@@ -300,7 +300,7 @@ struct HighlightBenchmark {
     private static func measurePhasedIncrementalUpdate(
         source: String,
         updatedSource: String,
-        mutation: SyntaxHighlightMutation?,
+        mutation: SyntaxEditorTextChange.Replacement?,
         language: SyntaxLanguage,
         iterations: Int
     ) async -> PhasedBenchmarkSamples {
@@ -308,14 +308,14 @@ struct HighlightBenchmark {
         var completeDurations: [Double] = []
         syntacticFastPassDurations.reserveCapacity(iterations)
         completeDurations.reserveCapacity(iterations)
-        var lastCompleteResult: SyntaxHighlightResult?
+        var lastCompleteResult: SyntaxEditorHighlighting.Result?
 
         for _ in 0..<iterations {
             let engine = SyntaxHighlighterEngine()
             _ = await engine.reset(source: source, language: language, revision: 0)
 
             let start = DispatchTime.now().uptimeNanoseconds
-            let phases: AsyncStream<SyntaxHighlightResult>
+            let phases: AsyncStream<SyntaxEditorHighlighting.Result>
             if let mutation {
                 phases = await engine.updatePhases(
                     source: updatedSource,
@@ -361,20 +361,20 @@ struct HighlightBenchmark {
     private static func measureIncrementalUpdate(
         source: String,
         updatedSource: String,
-        mutation: SyntaxHighlightMutation?,
+        mutation: SyntaxEditorTextChange.Replacement?,
         language: SyntaxLanguage,
         iterations: Int
     ) async -> BenchmarkSamples {
         var durations: [Double] = []
         durations.reserveCapacity(iterations)
-        var lastResult: SyntaxHighlightResult?
+        var lastResult: SyntaxEditorHighlighting.Result?
 
         for _ in 0..<iterations {
             let engine = SyntaxHighlighterEngine()
             _ = await engine.reset(source: source, language: language, revision: 0)
 
             let start = DispatchTime.now().uptimeNanoseconds
-            let result: SyntaxHighlightResult
+            let result: SyntaxEditorHighlighting.Result
             if let mutation {
                 result = await engine.update(
                     source: updatedSource,
@@ -413,9 +413,9 @@ struct HighlightBenchmark {
         for editIndex in 0..<editCount {
             let updatedSource = typingEditSource(from: currentSource)
             let mutation = SyntaxEditorTextChange.Replacement.singleReplacement(from: currentSource, to: updatedSource)
-                .map(SyntaxHighlightMutation.init)
+
             let start = DispatchTime.now().uptimeNanoseconds
-            let result: SyntaxHighlightResult
+            let result: SyntaxEditorHighlighting.Result
             if let mutation {
                 result = await engine.update(
                     source: updatedSource,
@@ -446,11 +446,11 @@ struct HighlightBenchmark {
     @MainActor
     private static func measure(
         iterations: Int,
-        operation: () async -> SyntaxHighlightResult
+        operation: () async -> SyntaxEditorHighlighting.Result
     ) async -> BenchmarkSamples {
         var durations: [Double] = []
         durations.reserveCapacity(iterations)
-        var lastResult: SyntaxHighlightResult?
+        var lastResult: SyntaxEditorHighlighting.Result?
 
         for _ in 0..<iterations {
             let start = DispatchTime.now().uptimeNanoseconds

@@ -1542,7 +1542,7 @@ private enum EditorSpecTool {
             text: (try? utf16Slice(source, range: range)) ?? "",
             syntaxID: "plain",
             language: language.identifier,
-            rawCaptureName: EditorSyntaxCapture.rawCaptureName(syntaxID: .plain, language: language),
+            rawCaptureName: EditorSourceSyntax.Capture.rawCaptureName(syntaxID: .plain, language: language),
             color: editorColorRecord(
                 syntaxID: "plain",
                 language: language,

@@ -5,7 +5,7 @@ import SyntaxEditorCore
 package struct HighlightTokenRangeIndex {
     private let prefixMaxUpperBounds: [Int]
 
-    package init(tokens: [SyntaxHighlightToken]) {
+    package init(tokens: [SyntaxEditorHighlighting.Token]) {
         var maxUpperBound = 0
         prefixMaxUpperBounds = tokens.map { token in
             maxUpperBound = max(maxUpperBound, token.range.upperBound)

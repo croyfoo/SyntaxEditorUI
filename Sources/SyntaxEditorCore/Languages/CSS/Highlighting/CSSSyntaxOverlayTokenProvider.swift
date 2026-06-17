@@ -2,10 +2,10 @@ import Foundation
 
 enum CSSSyntaxOverlayTokenProvider {
     static func mergingOverlayTokens(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         scanningRanges requestedScanningRanges: [NSRange]? = nil
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         let nsSource = source as NSString
         let scanningRanges = normalizedScanningRanges(
             requestedScanningRanges,
@@ -580,7 +580,7 @@ enum CSSSyntaxOverlayTokenProvider {
         in range: NSRange,
         source: NSString,
         names: Set<String>,
-        syntaxID: EditorSourceSyntaxID,
+        syntaxID: EditorSourceSyntax.ID,
         skippingWhenAfterTopLevelNot: Bool = false
     ) -> [SourceLocalOverlayToken] {
         let upperBound = min(range.upperBound, source.length)
@@ -1003,7 +1003,7 @@ enum CSSSyntaxOverlayTokenProvider {
     }
 
     private static func isConditionalAtRuleSelectorDeclarationToken(
-        _ token: SyntaxHighlightToken,
+        _ token: SyntaxEditorHighlighting.Token,
         nestedSelectorRanges: [NSRange],
         sourceUTF16Length: Int
     ) -> Bool {
@@ -1020,7 +1020,7 @@ enum CSSSyntaxOverlayTokenProvider {
     }
 
     private static func isCSSSourceLocalOverlayToken(
-        _ token: SyntaxHighlightToken
+        _ token: SyntaxEditorHighlighting.Token
     ) -> Bool {
         token.language == .css
             && sourceLocalOverlaySyntaxIDs.contains(token.syntaxID)
@@ -1038,7 +1038,7 @@ enum CSSSyntaxOverlayTokenProvider {
     }
 
     private static func isBasePlainTokenCoveredBySourceLocalOverlay(
-        _ token: SyntaxHighlightToken,
+        _ token: SyntaxEditorHighlighting.Token,
         overlayTokens: [SourceLocalOverlayToken]
     ) -> Bool {
         guard token.syntaxID == .plain,
@@ -1052,7 +1052,7 @@ enum CSSSyntaxOverlayTokenProvider {
     }
 
     private static func isPseudoClassArgumentDeclarationToken(
-        _ token: SyntaxHighlightToken,
+        _ token: SyntaxEditorHighlighting.Token,
         argumentRanges: [NSRange]
     ) -> Bool {
         guard token.syntaxID == .declarationOther,
@@ -1352,9 +1352,9 @@ enum CSSSyntaxOverlayTokenProvider {
 
     private static func canonicalToken(
         range: NSRange,
-        syntaxID: EditorSourceSyntaxID
-    ) -> SyntaxHighlightToken {
-        SyntaxHighlightToken(
+        syntaxID: EditorSourceSyntax.ID
+    ) -> SyntaxEditorHighlighting.Token {
+        SyntaxEditorHighlighting.Token(
             range: range,
             syntaxID: syntaxID,
             language: .css,
@@ -1363,11 +1363,11 @@ enum CSSSyntaxOverlayTokenProvider {
         )
     }
 
-    private static func sourceLocalOverlayRawCaptureName(syntaxID: EditorSourceSyntaxID) -> String {
-        "\(EditorSyntaxCapture.rawCaptureName(syntaxID: syntaxID, language: .css)).source-local"
+    private static func sourceLocalOverlayRawCaptureName(syntaxID: EditorSourceSyntax.ID) -> String {
+        "\(EditorSourceSyntax.Capture.rawCaptureName(syntaxID: syntaxID, language: .css)).source-local"
     }
 
-    private static func deduplicated(_ tokens: [SyntaxHighlightToken]) -> [SyntaxHighlightToken] {
+    private static func deduplicated(_ tokens: [SyntaxEditorHighlighting.Token]) -> [SyntaxEditorHighlighting.Token] {
         var seen = Set<TokenKey>()
         return tokens.filter {
             seen.insert(TokenKey($0)).inserted
@@ -1378,7 +1378,7 @@ enum CSSSyntaxOverlayTokenProvider {
         unichar(String(character).utf16.first ?? 0)
     }
 
-    private static let sourceLocalOverlaySyntaxIDs: Set<EditorSourceSyntaxID> = [
+    private static let sourceLocalOverlaySyntaxIDs: Set<EditorSourceSyntax.ID> = [
         .declarationOther,
         .keyword,
         .number,
@@ -1457,12 +1457,12 @@ enum CSSSyntaxOverlayTokenProvider {
 
     private struct SourceLocalOverlayToken {
         let range: NSRange
-        let syntaxID: EditorSourceSyntaxID
+        let syntaxID: EditorSourceSyntax.ID
         let suppressWhenKeywordTokenExists: Bool
 
         init(
             range: NSRange,
-            syntaxID: EditorSourceSyntaxID,
+            syntaxID: EditorSourceSyntax.ID,
             suppressWhenKeywordTokenExists: Bool = false
         ) {
             self.range = range
@@ -1480,11 +1480,11 @@ enum CSSSyntaxOverlayTokenProvider {
     private struct TokenKey: Hashable {
         let location: Int
         let length: Int
-        let syntaxID: EditorSourceSyntaxID
+        let syntaxID: EditorSourceSyntax.ID
         let language: SyntaxLanguage?
         let rawCaptureName: String
 
-        init(_ token: SyntaxHighlightToken) {
+        init(_ token: SyntaxEditorHighlighting.Token) {
             location = token.range.location
             length = token.range.length
             syntaxID = token.syntaxID

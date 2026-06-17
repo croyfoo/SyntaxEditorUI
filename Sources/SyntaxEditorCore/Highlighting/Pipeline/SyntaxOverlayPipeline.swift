@@ -4,7 +4,7 @@ import SwiftTreeSitter
 protocol SyntaxOverlayState {}
 
 struct SyntaxOverlayResult {
-    let tokens: [SyntaxHighlightToken]
+    let tokens: [SyntaxEditorHighlighting.Token]
     let refreshRangeOverride: NSRange?
     let isCancelled: Bool
 }
@@ -13,7 +13,7 @@ protocol SyntaxOverlayProvider {
     associatedtype State: SyntaxOverlayState
 
     static func mergingOverlayResult(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         rootNode: Node?,
         refreshRange: NSRange?,
@@ -35,7 +35,7 @@ struct SyntaxOverlayTokenKey: Hashable {
     let range: SyntaxOverlayRangeKey
     let rawCaptureName: String
 
-    init(_ token: SyntaxHighlightToken) {
+    init(_ token: SyntaxEditorHighlighting.Token) {
         range = SyntaxOverlayRangeKey(token.range)
         rawCaptureName = token.rawCaptureName
     }
@@ -58,7 +58,7 @@ struct SyntaxOverlaySyntaxIDMask: OptionSet {
         self.rawValue = rawValue
     }
 
-    init(syntaxID: EditorSourceSyntaxID) {
+    init(syntaxID: EditorSourceSyntax.ID) {
         switch syntaxID {
         case .identifier:
             self = .identifier
