@@ -86,6 +86,7 @@ let notesModel = SyntaxEditorModel(text: "Notes", language: .plainText)
 ```
 
 Supported languages are available through `SyntaxLanguage`: Plain Text, CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
+Use `SyntaxLanguage(identifier:)` when resolving user input or file metadata, and `SyntaxLanguage.allCases` when presenting every built-in language.
 
 To move first-use highlighting setup out of the editor load path, prepare the languages your app expects to show:
 
@@ -102,7 +103,7 @@ Use `SyntaxEditorMenu` when an app wants to expose editor shortcuts in an `Edito
 ```swift
 if #available(iOS 26.0, *) {
     UIMainMenuSystem.shared.setBuildConfiguration(UIMainMenuSystem.Configuration()) { builder in
-        SyntaxEditorMenu.insertEditorMenu(into: builder)
+        SyntaxEditorMenu.insert(into: builder)
     }
 }
 ```
@@ -112,7 +113,7 @@ On iPadOS, first-responder key commands can also appear under Help > Other Keybo
 On macOS, insert the menu item into the app's main menu:
 
 ```swift
-SyntaxEditorMenu.insertEditorMenuItem(into: NSApp.mainMenu!)
+SyntaxEditorMenu.insert(into: NSApp.mainMenu!)
 ```
 
 ### iPad Pointer Input
@@ -134,6 +135,21 @@ GitHub Actions runs `swift test` on macOS for package-wide coverage, then runs `
 
 ## Migration
 
+### Unreleased
+
+These notes apply when upgrading from `v0.13.x` or earlier.
+
+- `SyntaxEditorTextEdit` has been replaced by `SyntaxEditorTextChange.Replacement`.
+- `SyntaxEditorTextChange.edits` has been renamed to `replacements`.
+- `SyntaxEditorTextChange.revision` has been renamed to `textRevision`.
+- `SyntaxEditorModel.latestChange` has been renamed to `latestTextChange`.
+- `SyntaxEditorTextChange.Kind.replacement` has been renamed to `wholeDocumentReplacement`.
+- Platform color and font aliases now live under `SyntaxEditorTheme` as `SyntaxEditorTheme.Color` and `SyntaxEditorTheme.Font`.
+- `SyntaxEditorMenu.makeEditorMenu()` and `SyntaxEditorMenu.makeEditorMenuItem()` have been replaced by `SyntaxEditorMenu.makeMenu()`.
+- `SyntaxEditorMenu.insertEditorMenu(into:)` and `SyntaxEditorMenu.insertEditorMenuItem(into:)` have been replaced by `SyntaxEditorMenu.insert(into:)`.
+- `SyntaxLanguage.named(_:)` has been replaced by `SyntaxLanguage.init?(identifier:)`.
+- `SyntaxLanguage.all` has been removed. Use `SyntaxLanguage.allCases`.
+
 ### v0.12.0
 
 These notes apply when upgrading from `v0.11.x` or earlier to `v0.12.0`.
@@ -151,7 +167,7 @@ These notes apply when upgrading from `v0.10.x` or earlier to `v0.11.0`.
 - `textSnapshot()` has been removed. Read, write, and observe `model.text` directly. Use `model.replaceText(_:selectedRange:)` when replacement and selection should be updated together.
 - Replace `SyntaxEditor(document:configuration:)` with `SyntaxEditor(model)`.
 - Replace `SyntaxEditorView(document:configuration:)` and `SyntaxEditorViewController(document:configuration:)` with `SyntaxEditorView(model:)` and `SyntaxEditorViewController(model:)`.
-- `SyntaxEditorDocumentChange` has been renamed to `SyntaxEditorTextChange`. Use `change.kind == .incremental` or `change.kind == .replacement` instead of `isWholeDocumentReplacement`.
+- `SyntaxEditorDocumentChange` has been renamed to `SyntaxEditorTextChange`. Use `change.kind == .incremental` or `change.kind == .wholeDocumentReplacement` instead of `isWholeDocumentReplacement`.
 - UIKit and AppKit `text`, `selectedRange`, and `isEditable` properties remain available and now proxy to the view's `model`.
 - On macOS, `SyntaxEditorView` no longer exposes the underlying editor as `NSTextView`. The editor surface is implemented directly with TextKit 2, matching the iOS architecture. Use `SyntaxEditorView.text`, `SyntaxEditorView.selectedRange`, `SyntaxEditorView.isEditable`, and `SyntaxEditorView.model` instead of reaching through `textView`.
 - This is a breaking macOS API change: there is no replacement public `NSTextView` accessor. Code that previously customized `editorView.textView` should move editor state to `SyntaxEditorModel` or drive the editor through the public `SyntaxEditorView` properties above.
@@ -179,7 +195,7 @@ These notes apply when upgrading from `v0.6.x` or earlier to `v0.7.0`.
 - Store editor settings in `SyntaxEditorConfiguration`: `language`, `isEditable`, `lineWrappingEnabled`, and `colorTheme`.
 - Replace `SyntaxEditor(model:)` with `SyntaxEditor(document:configuration:)`. `SyntaxEditor()` is also available when the default document and configuration are enough.
 - Replace `SyntaxEditorView(model:)` and `SyntaxEditorViewController(model:)` with `SyntaxEditorView(document:configuration:)` and `SyntaxEditorViewController(document:configuration:)`.
-- If your app observed `SyntaxEditorModel`, observe `SyntaxEditorDocument` for text changes and `SyntaxEditorConfiguration` for configuration changes. `SyntaxEditorDocument` exposes `revision` and `latestChange` for tracking committed edits.
+- If your app observed `SyntaxEditorModel`, observe `SyntaxEditorDocument` for text changes and `SyntaxEditorConfiguration` for configuration changes. `SyntaxEditorDocument` exposes `textRevision` and `latestTextChange` for tracking committed text changes.
 - `SyntaxEditorModel` and the model-based initializers have been removed without a compatibility shim.
 
 ### v0.5.0
@@ -190,7 +206,7 @@ These notes apply when upgrading from `v0.4.x` or earlier to `v0.5.0`.
 - In `v0.5.0`, `SyntaxEditorModel`, `SyntaxLanguage`, and related non-UI APIs remained available from `SyntaxEditorUI` via module re-export. `SyntaxEditorModel` was removed in `v0.7.0`; see the `v0.7.0` notes above.
 - `SyntaxLanguage` is now a concrete enum of supported languages. Use `SyntaxLanguage.javascript` or shorthand `.javascript` instead of `BuiltinSyntaxLanguages.javascript`.
 - `BuiltinSyntaxLanguages` has been removed without a compatibility shim.
-- Custom `SyntaxLanguage` conformers are no longer supported. `SyntaxTreeSitterSupport`, custom query directories, and custom highlight cache keys are no longer public API.
+- Custom `SyntaxLanguage` conformers are no longer supported. `SyntaxLanguage.TreeSitterSupport`, custom query directories, and custom highlight cache keys are no longer public API.
 - HTML embedded JavaScript/CSS highlighting remains supported through `SyntaxLanguage.html`.
 - Up to `v0.4.x` on iOS, `SyntaxEditorView` embedded a `UITextView` that was exposed through `SyntaxEditorView.textView` and `SyntaxEditorViewController.textView`.
 - Starting with `v0.5.0` on iOS, `SyntaxEditorView` is the single native text input and scroll view. Use `SyntaxEditorView` / `SyntaxEditorViewController.editorView` directly for text, selection, editability, wrapping, and scrolling.

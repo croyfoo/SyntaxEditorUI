@@ -2,9 +2,9 @@ import Foundation
 import SwiftTreeSitter
 import SwiftTreeSitterLayer
 
-// Language configuration resolution (query discovery, injected-language support,
-// HTML preprocessing detection) relocated verbatim from the previous engine file.
-// Cold path: results are cached per language for the process lifetime.
+// Language configuration resolution owns query discovery, injected-language
+// support, and HTML preprocessing detection. Cold path results are cached per
+// language for the process lifetime.
 
 struct HighlightingSetup: Sendable {
     let rootConfiguration: LanguageConfiguration

@@ -4,9 +4,9 @@ import SwiftTreeSitterLayer
 
 /// Syntactic-layer plumbing for the highlighting session: layer construction,
 /// content readers, input edits, envelope computation, capture queries with
-/// envelope clipping, and mutation validation. Mechanical helpers are ported
-/// verbatim from the previous engine; the two NEW behaviors are documented at
-/// `patchEnvelope` and `validateMutation`.
+/// envelope clipping, and mutation validation. `patchEnvelope` and
+/// `validateMutation` define the edit-boundary contracts shared by reset and
+/// incremental highlighting paths.
 enum SyntacticPatcher {
     static func layeredSource(for source: String, setup: HighlightingSetup) -> String {
         setup.usesHTMLPreprocessing
