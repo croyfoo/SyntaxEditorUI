@@ -43,18 +43,18 @@ private struct HighlightPhaseWaiter {
 private struct SyntaxHighlightAttributeResolver {
     let theme: SyntaxEditorTheme
     let defaultLanguage: SyntaxLanguage
-    let appearance: SyntaxEditorThemeAppearance
+    let appearance: SyntaxEditorTheme.Appearance
     let fontSizeDelta: Int
     let resolveColor: (UIColor) -> UIColor
 
     private var styleCache: [SyntaxHighlightAttributeKey: SyntaxHighlightStyle] = [:]
     private var missingAttributeKeys: Set<SyntaxHighlightAttributeKey> = []
-    private var fontCache: [SyntaxEditorFontDescriptor: UIFont] = [:]
+    private var fontCache: [SyntaxEditorTheme.FontDescriptor: UIFont] = [:]
 
     init(
         theme: SyntaxEditorTheme,
         defaultLanguage: SyntaxLanguage,
-        appearance: SyntaxEditorThemeAppearance,
+        appearance: SyntaxEditorTheme.Appearance,
         fontSizeDelta: Int,
         resolveColor: @escaping (UIColor) -> UIColor
     ) {
@@ -97,7 +97,7 @@ private struct SyntaxHighlightAttributeResolver {
         return (key, resolvedStyle)
     }
 
-    private mutating func platformFont(for descriptor: SyntaxEditorFontDescriptor) -> UIFont {
+    private mutating func platformFont(for descriptor: SyntaxEditorTheme.FontDescriptor) -> UIFont {
         if let cached = fontCache[descriptor] {
             return cached
         }
@@ -148,7 +148,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var matchedBracketRanges: [NSRange] = []
     var lastAppliedLineWrappingEnabled: Bool
     var lastAppliedTheme: SyntaxEditorTheme
-    var lastAppliedThemeAppearance: SyntaxEditorThemeAppearance?
+    var lastAppliedThemeAppearance: SyntaxEditorTheme.Appearance?
     var lastAppliedFontSizeDelta: Int
     var isApplyingEditorOwnedScroll = false
     var isIgnoringTextInteractionHorizontalOffsetPreservation = false
@@ -2833,12 +2833,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         baseAttributes()
     }
 
-    func resolvedBaseFont(for theme: SyntaxEditorResolvedTheme? = nil) -> UIFont {
+    func resolvedBaseFont(for theme: SyntaxEditorTheme.Resolved? = nil) -> UIFont {
         resolvedBaseFont(for: theme, fontSizeDelta: model.fontSizeDelta)
     }
 
     func resolvedBaseFont(
-        for theme: SyntaxEditorResolvedTheme? = nil,
+        for theme: SyntaxEditorTheme.Resolved? = nil,
         fontSizeDelta: Int
     ) -> UIFont {
         let theme = theme ?? resolvedTheme()
@@ -2880,11 +2880,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         color.resolvedColor(with: traitCollection)
     }
 
-    var currentThemeAppearance: SyntaxEditorThemeAppearance {
+    var currentThemeAppearance: SyntaxEditorTheme.Appearance {
         traitCollection.userInterfaceStyle == .dark ? .dark : .light
     }
 
-    func resolvedTheme() -> SyntaxEditorResolvedTheme {
+    func resolvedTheme() -> SyntaxEditorTheme.Resolved {
         lastAppliedTheme.resolved(
             for: model.language,
             appearance: currentThemeAppearance
@@ -3600,7 +3600,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
 private extension UIFont {
     func syntaxEditorFontSizeAdjusted(by delta: Int) -> UIFont {
-        withSize(SyntaxEditorFontSize.pointSize(pointSize, applying: delta))
+        withSize(SyntaxEditorTheme.FontSize.pointSize(pointSize, applying: delta))
     }
 }
 #endif

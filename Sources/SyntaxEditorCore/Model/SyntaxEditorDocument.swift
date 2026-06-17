@@ -105,14 +105,14 @@ public final class SyntaxEditorModel {
     }
 
     public func increaseFontSize() {
-        fontSizeDelta = SyntaxEditorFontSize.increasedDelta(
+        fontSizeDelta = SyntaxEditorTheme.FontSize.increasedDelta(
             fontSizeDelta,
             forBasePointSize: fontSizeCommandBasePointSize
         )
     }
 
     public func decreaseFontSize() {
-        fontSizeDelta = SyntaxEditorFontSize.decreasedDelta(
+        fontSizeDelta = SyntaxEditorTheme.FontSize.decreasedDelta(
             fontSizeDelta,
             forBasePointSize: fontSizeCommandBasePointSize
         )

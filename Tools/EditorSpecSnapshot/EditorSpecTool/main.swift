@@ -731,7 +731,7 @@ private enum EditorSpecTool {
     private static func editorRenderedTokens(
         source: String,
         language: SyntaxLanguage,
-        appearance: SyntaxEditorThemeAppearance
+        appearance: SyntaxEditorTheme.Appearance
     ) async throws -> [EditorRenderedTokenRecord] {
         try await editorTokens(source: source, language: language).map { token in
             EditorRenderedTokenRecord(
@@ -1532,7 +1532,7 @@ private enum EditorSpecTool {
         covering range: SnapshotRange,
         source: String,
         language: SyntaxLanguage,
-        appearance: SyntaxEditorThemeAppearance
+        appearance: SyntaxEditorTheme.Appearance
     ) -> EditorRenderedTokenRecord {
         if let token = tokens.last(where: { $0.range.contains(range) }) {
             return token
@@ -1632,7 +1632,7 @@ private enum EditorSpecTool {
         syntaxID: String,
         language: SyntaxLanguage,
         fallbackLanguage: SyntaxLanguage,
-        appearance: SyntaxEditorThemeAppearance
+        appearance: SyntaxEditorTheme.Appearance
     ) -> RenderedColorRecord {
         let theme = SyntaxEditorTheme.default
         let resolvedTheme = theme.resolved(for: fallbackLanguage, appearance: appearance)
@@ -1742,7 +1742,7 @@ private enum EditorSpecTool {
         )
     }
 
-    private static func renderedColorRecord(from color: SyntaxEditorColor) -> RenderedColorRecord {
+    private static func renderedColorRecord(from color: SyntaxEditorTheme.Color) -> RenderedColorRecord {
 #if canImport(AppKit)
         let converted = color.usingColorSpace(.genericRGB) ?? color.usingColorSpace(.sRGB) ?? color
         let red = Double(converted.redComponent)
@@ -1796,7 +1796,7 @@ private struct Options: Sendable {
     let xcodePath: String
     let semanticDepth: SemanticDepth
     let xcodeThemeName: String
-    let appearance: SyntaxEditorThemeAppearance
+    let appearance: SyntaxEditorTheme.Appearance
     let appearanceName: String
     let pretty: Bool
     let includeText: Bool

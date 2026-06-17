@@ -8,7 +8,7 @@ import UIKit
 import AppKit
 #endif
 
-private func syntaxEditorTestColor(hex: UInt32) -> SyntaxEditorColor {
+private func syntaxEditorTestColor(hex: UInt32) -> SyntaxEditorTheme.Color {
     let red = CGFloat((hex >> 16) & 0xFF) / 255.0
     let green = CGFloat((hex >> 8) & 0xFF) / 255.0
     let blue = CGFloat(hex & 0xFF) / 255.0
@@ -33,11 +33,11 @@ private func customTheme() -> SyntaxEditorTheme {
         constant: syntaxEditorTestColor(hex: 0x909192),
         variable: syntaxEditorTestColor(hex: 0xA0A1A2),
         punctuation: syntaxEditorTestColor(hex: 0xB0B1B2),
-        font: SyntaxEditorFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        font: SyntaxEditorTheme.Font.monospacedSystemFont(ofSize: 12, weight: .regular)
     )
 }
 
-private func syntaxEditorColor(_ color: SyntaxEditorColor, matchesLight light: UInt32, dark: UInt32) -> Bool {
+private func syntaxEditorColor(_ color: SyntaxEditorTheme.Color, matchesLight light: UInt32, dark: UInt32) -> Bool {
 #if canImport(UIKit)
     syntaxEditorColor(color, matches: light, style: .light)
         && syntaxEditorColor(color, matches: dark, style: .dark)
@@ -49,7 +49,7 @@ private func syntaxEditorColor(_ color: SyntaxEditorColor, matchesLight light: U
 
 #if canImport(UIKit)
 private func syntaxEditorColor(
-    _ color: SyntaxEditorColor,
+    _ color: SyntaxEditorTheme.Color,
     matches hex: UInt32,
     style: UIUserInterfaceStyle
 ) -> Bool {
@@ -65,7 +65,7 @@ private func syntaxEditorColor(
 }
 #elseif canImport(AppKit)
 private func syntaxEditorColor(
-    _ color: SyntaxEditorColor,
+    _ color: SyntaxEditorTheme.Color,
     matches hex: UInt32,
     appearanceName: NSAppearance.Name
 ) -> Bool {
@@ -170,18 +170,18 @@ struct SyntaxEditorCorePlatformTests {
         #expect(SyntaxEditorHighlightTheme.color(for: .plain, in: theme) == nil)
     }
 
-    @Test("SyntaxEditorFontDescriptor resolves system monospaced font when family is absent")
+    @Test("SyntaxEditorTheme.FontDescriptor resolves system monospaced font when family is absent")
     func syntaxEditorFontDescriptorResolvesSystemMonospacedFontWhenFamilyIsAbsent() {
-        let descriptor = SyntaxEditorFontDescriptor(family: nil, size: 13, weight: .bold)
+        let descriptor = SyntaxEditorTheme.FontDescriptor(family: nil, size: 13, weight: .bold)
 
         let font = descriptor.platformFont()
 
         #expect(abs(font.pointSize - 13) < 0.01)
     }
 
-    @Test("SyntaxEditorFontDescriptor applies font size delta with clamp")
+    @Test("SyntaxEditorTheme.FontDescriptor applies font size delta with clamp")
     func syntaxEditorFontDescriptorAppliesFontSizeDeltaWithClamp() {
-        let descriptor = SyntaxEditorFontDescriptor(family: nil, size: 13, weight: .regular)
+        let descriptor = SyntaxEditorTheme.FontDescriptor(family: nil, size: 13, weight: .regular)
 
         let increasedFont = descriptor.platformFont(fontSizeDelta: 4)
         let minimumFont = descriptor.platformFont(fontSizeDelta: -20)

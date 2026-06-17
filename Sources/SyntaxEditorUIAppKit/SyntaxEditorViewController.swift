@@ -91,17 +91,17 @@ private struct HighlightPhaseWaiter {
 private struct SyntaxHighlightAttributeResolver {
     let theme: SyntaxEditorTheme
     let defaultLanguage: SyntaxLanguage
-    let appearance: SyntaxEditorThemeAppearance
+    let appearance: SyntaxEditorTheme.Appearance
     let fontSizeDelta: Int
 
     private var styleCache: [SyntaxHighlightAttributeKey: SyntaxHighlightStyle] = [:]
     private var missingAttributeKeys: Set<SyntaxHighlightAttributeKey> = []
-    private var fontCache: [SyntaxEditorFontDescriptor: NSFont] = [:]
+    private var fontCache: [SyntaxEditorTheme.FontDescriptor: NSFont] = [:]
 
     init(
         theme: SyntaxEditorTheme,
         defaultLanguage: SyntaxLanguage,
-        appearance: SyntaxEditorThemeAppearance,
+        appearance: SyntaxEditorTheme.Appearance,
         fontSizeDelta: Int
     ) {
         self.theme = theme
@@ -142,7 +142,7 @@ private struct SyntaxHighlightAttributeResolver {
         return (key, resolvedStyle)
     }
 
-    private mutating func platformFont(for descriptor: SyntaxEditorFontDescriptor) -> NSFont {
+    private mutating func platformFont(for descriptor: SyntaxEditorTheme.FontDescriptor) -> NSFont {
         if let cached = fontCache[descriptor] {
             return cached
         }
@@ -225,7 +225,7 @@ public final class SyntaxEditorView: NSScrollView {
     private var isApplyingLineWrappingConfiguration = false
     private var isScrollViewConfigured = false
     private var lastAppliedTheme: SyntaxEditorTheme?
-    private var lastAppliedThemeAppearance: SyntaxEditorThemeAppearance?
+    private var lastAppliedThemeAppearance: SyntaxEditorTheme.Appearance?
     private var lastAppliedFontSizeDelta: Int
     private var lastAppliedDocumentRevision = 0
     private var modelObservation: PortableObservationTracking.Token?
@@ -1740,10 +1740,10 @@ public final class SyntaxEditorView: NSScrollView {
 
     private func cachedSyntaxFontRunsChanged(
         from previousTheme: SyntaxEditorTheme,
-        previousAppearance: SyntaxEditorThemeAppearance,
+        previousAppearance: SyntaxEditorTheme.Appearance,
         previousFontSizeDelta: Int,
         to nextTheme: SyntaxEditorTheme,
-        nextAppearance: SyntaxEditorThemeAppearance,
+        nextAppearance: SyntaxEditorTheme.Appearance,
         nextFontSizeDelta: Int,
         language: SyntaxLanguage,
         revision: Int? = nil
@@ -1777,7 +1777,7 @@ public final class SyntaxEditorView: NSScrollView {
     private func cachedSyntaxFontRuns(
         for theme: SyntaxEditorTheme,
         language: SyntaxLanguage,
-        appearance: SyntaxEditorThemeAppearance,
+        appearance: SyntaxEditorTheme.Appearance,
         fontSizeDelta: Int,
         source: String,
         textLength: Int,
@@ -2038,7 +2038,7 @@ public final class SyntaxEditorView: NSScrollView {
     private func makeSyntaxHighlightAttributeResolver(
         theme: SyntaxEditorTheme,
         language: SyntaxLanguage,
-        appearance: SyntaxEditorThemeAppearance,
+        appearance: SyntaxEditorTheme.Appearance,
         fontSizeDelta: Int
     ) -> SyntaxHighlightAttributeResolver {
         SyntaxHighlightAttributeResolver(
@@ -2404,23 +2404,23 @@ public final class SyntaxEditorView: NSScrollView {
         baseAttributes()
     }
 
-    private func resolvedBaseFont(for theme: SyntaxEditorResolvedTheme? = nil) -> NSFont {
+    private func resolvedBaseFont(for theme: SyntaxEditorTheme.Resolved? = nil) -> NSFont {
         resolvedBaseFont(for: theme, fontSizeDelta: model.fontSizeDelta)
     }
 
     private func resolvedBaseFont(
-        for theme: SyntaxEditorResolvedTheme? = nil,
+        for theme: SyntaxEditorTheme.Resolved? = nil,
         fontSizeDelta: Int
     ) -> NSFont {
         let theme = theme ?? resolvedTheme()
         return theme.base.font.platformFont(fontSizeDelta: fontSizeDelta)
     }
 
-    private var currentThemeAppearance: SyntaxEditorThemeAppearance {
+    private var currentThemeAppearance: SyntaxEditorTheme.Appearance {
         effectiveAppearance.syntaxEditorThemeAppearance
     }
 
-    func resolvedTheme() -> SyntaxEditorResolvedTheme {
+    func resolvedTheme() -> SyntaxEditorTheme.Resolved {
         (lastAppliedTheme ?? model.theme).resolved(
             for: model.language,
             appearance: currentThemeAppearance
@@ -2783,7 +2783,7 @@ extension NSColor {
 }
 
 private extension NSAppearance {
-    var syntaxEditorThemeAppearance: SyntaxEditorThemeAppearance {
+    var syntaxEditorThemeAppearance: SyntaxEditorTheme.Appearance {
         let match = bestMatch(from: [
             .darkAqua,
             .accessibilityHighContrastDarkAqua,
@@ -2805,7 +2805,7 @@ private extension NSAppearance {
 
 private extension NSFont {
     func syntaxEditorFontSizeAdjusted(by delta: Int) -> NSFont {
-        withSize(SyntaxEditorFontSize.pointSize(pointSize, applying: delta))
+        withSize(SyntaxEditorTheme.FontSize.pointSize(pointSize, applying: delta))
     }
 }
 

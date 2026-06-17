@@ -85,7 +85,7 @@ private struct HighlightSemanticSnapshot {
     let rawCaptureName: String
     let syntaxID: EditorSourceSyntaxID
     let styleKeys: [String]
-    let resolvedStyle: SyntaxEditorResolvedTextStyle
+    let resolvedStyle: SyntaxEditorTheme.TextStyle
 }
 
 private func referenceSampleText(named filename: String) throws -> String {
@@ -512,8 +512,8 @@ struct SyntaxEditorCoreTests {
     func syntaxEditorModelFontSizeCommandsClampAtRenderedBounds() {
         let model = SyntaxEditorModel(theme: .presentationLarge)
         let basePointSize = model.theme.resolved(for: model.language).base.font.size
-        let minimumDelta = Int(ceil(SyntaxEditorFontSize.minimum - basePointSize))
-        let maximumDelta = Int(floor(SyntaxEditorFontSize.maximum - basePointSize))
+        let minimumDelta = Int(ceil(SyntaxEditorTheme.FontSize.minimum - basePointSize))
+        let maximumDelta = Int(floor(SyntaxEditorTheme.FontSize.maximum - basePointSize))
 
         for _ in 0..<100 {
             model.increaseFontSize()
@@ -543,8 +543,8 @@ struct SyntaxEditorCoreTests {
     func syntaxEditorModelFontSizeCommandsRecoverFromExplicitOvershoot() {
         let model = SyntaxEditorModel(theme: .presentationLarge, fontSizeDelta: 100)
         let basePointSize = model.theme.resolved(for: model.language).base.font.size
-        let minimumDelta = Int(ceil(SyntaxEditorFontSize.minimum - basePointSize))
-        let maximumDelta = Int(floor(SyntaxEditorFontSize.maximum - basePointSize))
+        let minimumDelta = Int(ceil(SyntaxEditorTheme.FontSize.minimum - basePointSize))
+        let maximumDelta = Int(floor(SyntaxEditorTheme.FontSize.maximum - basePointSize))
 
         model.decreaseFontSize()
         #expect(model.fontSizeDelta == maximumDelta - 1)
@@ -589,7 +589,7 @@ struct SyntaxEditorCoreTests {
             constant: .syntaxEditorColor(.init(red: 0.7, green: 0.7, blue: 0.7, alpha: 1)),
             variable: .syntaxEditorColor(.init(red: 0.8, green: 0.8, blue: 0.8, alpha: 1)),
             punctuation: .syntaxEditorColor(.init(red: 0.9, green: 0.9, blue: 0.9, alpha: 1)),
-            font: SyntaxEditorFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+            font: SyntaxEditorTheme.Font.monospacedSystemFont(ofSize: 12, weight: .regular)
         )
         let customResolved = custom.resolved(for: .swift, appearance: .light)
 
@@ -773,7 +773,7 @@ struct SyntaxEditorCoreTests {
             appearance: .light
         )
         #expect(lightComment?.font.family == "HelveticaNeue")
-        #expect(lightComment?.font.size == 12 + SyntaxEditorFontSize.platformThemePointSizeAdjustment)
+        #expect(lightComment?.font.size == 12 + SyntaxEditorTheme.FontSize.platformThemePointSizeAdjustment)
 
         let darkKeyword = SyntaxEditorHighlightTheme.style(
             for: "keyword.control",

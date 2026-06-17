@@ -153,7 +153,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
 
-        #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorColor)?.isEqual(baseForeground) == true)
+        #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorTheme.Color)?.isEqual(baseForeground) == true)
         #expect(system.styleStore.foregroundColor(at: 0)?.isEqual(redColor) == true)
     }
 
@@ -946,7 +946,7 @@ struct SyntaxEditorUICommonTests {
     }
 }
 
-private var baseForeground: SyntaxEditorColor {
+private var baseForeground: SyntaxEditorTheme.Color {
 #if canImport(UIKit)
     .label
 #elseif canImport(AppKit)
@@ -954,7 +954,7 @@ private var baseForeground: SyntaxEditorColor {
 #endif
 }
 
-private var redColor: SyntaxEditorColor {
+private var redColor: SyntaxEditorTheme.Color {
 #if canImport(UIKit)
     .red
 #elseif canImport(AppKit)
@@ -962,7 +962,7 @@ private var redColor: SyntaxEditorColor {
 #endif
 }
 
-private var blueColor: SyntaxEditorColor {
+private var blueColor: SyntaxEditorTheme.Color {
 #if canImport(UIKit)
     .blue
 #elseif canImport(AppKit)

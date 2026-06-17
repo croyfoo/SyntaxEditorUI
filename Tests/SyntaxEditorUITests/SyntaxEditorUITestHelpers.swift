@@ -188,7 +188,7 @@ extension SyntaxEditorViewController {
     }
 }
 
-func syntaxEditorUITestColor(hex: UInt32) -> SyntaxEditorColor {
+func syntaxEditorUITestColor(hex: UInt32) -> SyntaxEditorTheme.Color {
     let red = CGFloat((hex >> 16) & 0xFF) / 255.0
     let green = CGFloat((hex >> 8) & 0xFF) / 255.0
     let blue = CGFloat(hex & 0xFF) / 255.0
@@ -201,19 +201,19 @@ func syntaxEditorUITestColor(hex: UInt32) -> SyntaxEditorColor {
 }
 
 func syntaxEditorUITestTheme(
-    baseForeground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x101112),
-    bracketBackground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x202122),
-    comment: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x303132),
-    string: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x404142),
-    keyword: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x505152),
-    number: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x606162),
-    function: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x707172),
-    type: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x808182),
-    constant: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x909192),
-    variable: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xA0A1A2),
-    punctuation: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xB0B1B2),
-    font: SyntaxEditorFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-    background: SyntaxEditorColor = .clear
+    baseForeground: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x101112),
+    bracketBackground: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x202122),
+    comment: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x303132),
+    string: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x404142),
+    keyword: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x505152),
+    number: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x606162),
+    function: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x707172),
+    type: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x808182),
+    constant: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x909192),
+    variable: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0xA0A1A2),
+    punctuation: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0xB0B1B2),
+    font: SyntaxEditorTheme.Font = SyntaxEditorTheme.Font.monospacedSystemFont(ofSize: 12, weight: .regular),
+    background: SyntaxEditorTheme.Color = .clear
 ) -> SyntaxEditorTheme {
     SyntaxEditorTheme(
         baseForeground: baseForeground,
@@ -232,7 +232,7 @@ func syntaxEditorUITestTheme(
     )
 }
 
-func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: SyntaxEditorColor) -> Bool {
+func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorTheme.Color?, _ rhs: SyntaxEditorTheme.Color) -> Bool {
     guard let lhs else { return false }
 
 #if canImport(UIKit)
@@ -275,8 +275,8 @@ func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: SyntaxEdito
 
 @MainActor
 func syntaxEditorWaitForColor(
-    _ currentColor: @MainActor () -> SyntaxEditorColor?,
-    equals expectedColor: SyntaxEditorColor,
+    _ currentColor: @MainActor () -> SyntaxEditorTheme.Color?,
+    equals expectedColor: SyntaxEditorTheme.Color,
     attempts: Int = 20
 ) async -> Bool {
     for _ in 0..<attempts {
@@ -756,7 +756,7 @@ func syntaxEditorDenseHighlightCaptureName(at index: Int) -> String {
 func syntaxEditorDenseHighlightColor(
     in theme: SyntaxEditorTheme,
     at index: Int
-) -> SyntaxEditorColor {
+) -> SyntaxEditorTheme.Color {
     switch index % 3 {
     case 0: theme.keyword
     case 1: theme.string
