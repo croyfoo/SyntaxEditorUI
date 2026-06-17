@@ -185,7 +185,7 @@ package final class HighlightLineTable {
             // Out-of-bounds mutations degrade to a full reset against the post-edit
             // text (legacy behavior: survivable, never throws).
             let next = SyntaxEditorModel.applying([
-                SyntaxEditorTextEdit(
+                SyntaxEditorTextChange.Replacement(
                     range: NSRange(
                         location: min(max(0, mutation.location), nsSource.length),
                         length: 0
@@ -221,7 +221,7 @@ package final class HighlightLineTable {
         let affectedRange = NSRange(location: lowerOffset, length: upperOffset - lowerOffset)
         let oldSegment = nsSource.substring(with: affectedRange)
         let newSegment = SyntaxEditorModel.applying([
-            SyntaxEditorTextEdit(
+            SyntaxEditorTextChange.Replacement(
                 range: NSRange(
                     location: mutation.location - affectedRange.location,
                     length: mutation.length

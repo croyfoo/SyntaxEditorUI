@@ -148,7 +148,7 @@ private extension HTMLLanguage {
         }
 
         let edits = embeddedEdit.edits.map {
-            SyntaxEditorTextEdit(
+            SyntaxEditorTextChange.Replacement(
                 range: NSRange(
                     location: context.range.location + $0.range.location,
                     length: $0.range.length

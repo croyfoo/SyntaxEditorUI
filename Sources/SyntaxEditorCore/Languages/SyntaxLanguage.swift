@@ -38,10 +38,10 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
 }
 
 struct SyntaxLanguageEdit {
-    let edits: [SyntaxEditorTextEdit]
+    let edits: [SyntaxEditorTextChange.Replacement]
     let selectedRange: NSRange
 
-    init(edits: [SyntaxEditorTextEdit], selectedRange: NSRange) {
+    init(edits: [SyntaxEditorTextChange.Replacement], selectedRange: NSRange) {
         self.edits = edits
         self.selectedRange = selectedRange
     }

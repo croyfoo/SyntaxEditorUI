@@ -121,8 +121,8 @@ extension SyntaxEditorView {
 
         inputDelegate?.textWillChange(self)
         inputDelegate?.selectionWillChange(self)
-        commitEdits(
-            [SyntaxEditorTextEdit(range: clampedRange, replacement: replacement)],
+        commitTextReplacements(
+            [SyntaxEditorTextChange.Replacement(range: clampedRange, replacement: replacement)],
             selectedRange: nextSelection,
             refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                 in: source,
@@ -168,8 +168,8 @@ extension SyntaxEditorView {
 
         let nextSelection = NSRange(location: clampedRange.location + replacement.utf16.count, length: 0)
 
-        commitEdits(
-            [SyntaxEditorTextEdit(range: clampedRange, replacement: replacement)],
+        commitTextReplacements(
+            [SyntaxEditorTextChange.Replacement(range: clampedRange, replacement: replacement)],
             selectedRange: nextSelection,
             refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                 in: source,
@@ -1085,9 +1085,9 @@ extension SyntaxEditorView {
 
         registerUndoAction(
             restore: EditorUndoState(
-                edits: SyntaxEditorModel.inverseEdits(
+                edits: SyntaxEditorModel.inverseReplacements(
                     for: [
-                        SyntaxEditorTextEdit(
+                        SyntaxEditorTextChange.Replacement(
                             range: NSRange(location: 0, length: restore.source.utf16.count),
                             replacement: finalText
                         ),
@@ -1099,7 +1099,7 @@ extension SyntaxEditorView {
             ),
             counterpart: EditorUndoState(
                 edits: [
-                    SyntaxEditorTextEdit(
+                    SyntaxEditorTextChange.Replacement(
                         range: NSRange(location: 0, length: restore.source.utf16.count),
                         replacement: finalText
                     ),

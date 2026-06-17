@@ -23,7 +23,7 @@ private func applying(_ edit: SyntaxLanguageEdit, to source: String) -> String {
     SyntaxEditorModel.applying(edit.edits, to: source)
 }
 
-private func applyingIfValid(_ edits: [SyntaxEditorTextEdit], to source: String) -> String? {
+private func applyingIfValid(_ edits: [SyntaxEditorTextChange.Replacement], to source: String) -> String? {
     let length = source.utf16.count
     guard edits.allSatisfy({ edit in
         edit.range.location >= 0
@@ -441,7 +441,7 @@ struct SyntaxEditorCoreTests {
         model.decreaseFontSize()
 
         #expect(model.text == "body { color: red; }")
-        #expect(model.revision == 1)
+        #expect(model.textRevision == 1)
         #expect(model.language.identifier == SyntaxLanguage.css.identifier)
         #expect(model.isEditable == false)
         #expect(model.lineWrappingEnabled == true)
@@ -471,21 +471,21 @@ struct SyntaxEditorCoreTests {
         #expect(model.text == "let")
         #expect(model.language == SyntaxLanguage.json)
         #expect(model.selectedRange == NSRange(location: 2, length: 0))
-        #expect(model.revision == 0)
-        #expect(model.latestChange == nil)
+        #expect(model.textRevision == 0)
+        #expect(model.latestTextChange == nil)
 
         let textChange = model.replaceContents(
             text: "body { color: red; }",
             language: SyntaxLanguage.css,
             selectedRange: NSRange(location: 4, length: 0)
         )
-        #expect(textChange?.kind == .replacement)
-        #expect(textChange?.revision == 1)
+        #expect(textChange?.kind == .wholeDocumentReplacement)
+        #expect(textChange?.textRevision == 1)
         #expect(model.text == "body { color: red; }")
         #expect(model.language == SyntaxLanguage.css)
         #expect(model.selectedRange == NSRange(location: 4, length: 0))
-        #expect(model.revision == 1)
-        #expect(model.latestChange?.revision == 1)
+        #expect(model.textRevision == 1)
+        #expect(model.latestTextChange?.textRevision == 1)
 
         let secondLanguageOnlyChange = model.replaceContents(
             text: "body { color: red; }",
@@ -493,8 +493,8 @@ struct SyntaxEditorCoreTests {
         )
         #expect(secondLanguageOnlyChange == nil)
         #expect(model.language == SyntaxLanguage.javascript)
-        #expect(model.revision == 1)
-        #expect(model.latestChange?.revision == 1)
+        #expect(model.textRevision == 1)
+        #expect(model.latestTextChange?.textRevision == 1)
     }
 
     @Test("SyntaxEditorModel defaults to JavaScript")
@@ -799,21 +799,21 @@ struct SyntaxEditorCoreTests {
         #expect(lineStart == 2)
     }
 
-    @Test("TextMutation returns nil when text does not change")
+    @Test("SyntaxEditorTextChange.Replacement returns nil when text does not change")
     func textMutationNoChange() {
-        #expect(TextMutation.diff(from: "body {}", to: "body {}") == nil)
+        #expect(SyntaxEditorTextChange.Replacement.singleReplacement(from: "body {}", to: "body {}") == nil)
     }
 
-    @Test("TextMutation computes insertion range for newline")
+    @Test("SyntaxEditorTextChange.Replacement computes insertion range for newline")
     func textMutationInsertionRange() {
-        let mutation = TextMutation.diff(from: "a\nb", to: "a\n\nb")
+        let mutation = SyntaxEditorTextChange.Replacement.singleReplacement(from: "a\nb", to: "a\n\nb")
         #expect(mutation?.range == NSRange(location: 2, length: 0))
         #expect(mutation?.replacement == "\n")
     }
 
-    @Test("TextMutation computes replacement range for comment toggle")
+    @Test("SyntaxEditorTextChange.Replacement computes replacement range for comment toggle")
     func textMutationReplacementRange() {
-        let mutation = TextMutation.diff(
+        let mutation = SyntaxEditorTextChange.Replacement.singleReplacement(
             from: "let value = 1;\n",
             to: "// let value = 1;\n"
         )
@@ -821,11 +821,11 @@ struct SyntaxEditorCoreTests {
         #expect(mutation?.replacement == "// ")
     }
 
-    @Test("TextMutation keeps prefix attributes when applying mutation")
+    @Test("SyntaxEditorTextChange.Replacement keeps prefix attributes when applying mutation")
     func textMutationPreservesPrefixAttributes() {
         let oldText = "/* comment */\nbody {\n}"
         let newText = "/* comment */\nbody {\n    \n}"
-        guard let mutation = TextMutation.diff(from: oldText, to: newText) else {
+        guard let mutation = SyntaxEditorTextChange.Replacement.singleReplacement(from: oldText, to: newText) else {
             Issue.record("Mutation should exist for changed text")
             return
         }
@@ -862,26 +862,26 @@ struct SyntaxEditorCoreTests {
         let index = LineMetricsIndex(source: source, tabWidth: 4)
         let initialRebuildCount = index.fullRebuildCount
 
-        func apply(_ edit: SyntaxEditorTextEdit) {
+        func apply(_ edit: SyntaxEditorTextChange.Replacement) {
             index.apply(edits: [edit], previousSource: source)
             source = SyntaxEditorModel.applying([edit], to: source)
         }
 
         #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 6)
 
-        apply(SyntaxEditorTextEdit(range: NSRange(location: 1, length: 0), replacement: "Z"))
+        apply(SyntaxEditorTextChange.Replacement(range: NSRange(location: 1, length: 0), replacement: "Z"))
         #expect(source == "aZbc\nabcdef")
         #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 6)
 
-        apply(SyntaxEditorTextEdit(range: NSRange(location: 4, length: 0), replacement: "\nwide-line"))
+        apply(SyntaxEditorTextChange.Replacement(range: NSRange(location: 4, length: 0), replacement: "\nwide-line"))
         #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 9)
 
         let maxLineRange = (source as NSString).range(of: "wide-line")
-        apply(SyntaxEditorTextEdit(range: maxLineRange, replacement: "w"))
+        apply(SyntaxEditorTextChange.Replacement(range: maxLineRange, replacement: "w"))
         #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 6)
 
         let pasteLocation = source.utf16.count
-        apply(SyntaxEditorTextEdit(range: NSRange(location: pasteLocation, length: 0), replacement: "\n1234567890"))
+        apply(SyntaxEditorTextChange.Replacement(range: NSRange(location: pasteLocation, length: 0), replacement: "\n1234567890"))
         #expect(index.horizontalDocumentWidth(columnWidth: 1, textContainerInset: 0, lineFragmentPadding: 0) == 10)
         #expect(index.fullRebuildCount == initialRebuildCount)
     }
@@ -893,7 +893,7 @@ struct SyntaxEditorCoreTests {
 
         for iteration in 0..<100 {
             let replacement = iteration.isMultiple(of: 2) ? "b" : "a"
-            let edit = SyntaxEditorTextEdit(
+            let edit = SyntaxEditorTextChange.Replacement(
                 range: NSRange(location: 0, length: 1),
                 replacement: replacement
             )
@@ -913,7 +913,7 @@ struct SyntaxEditorCoreTests {
         for width in 1...80 {
             let lineBreakRange = (source as NSString).range(of: "\n")
             let lineStart = lineBreakRange.location + lineBreakRange.length
-            let edit = SyntaxEditorTextEdit(
+            let edit = SyntaxEditorTextChange.Replacement(
                 range: NSRange(location: lineStart, length: source.utf16.count - lineStart),
                 replacement: String(repeating: "y", count: width)
             )
@@ -930,7 +930,7 @@ struct SyntaxEditorCoreTests {
     func lineMetricsIndexHandlesFinalNewlineDeletion() {
         var source = "abc\n"
         let index = LineMetricsIndex(source: source, tabWidth: 4)
-        let edit = SyntaxEditorTextEdit(
+        let edit = SyntaxEditorTextChange.Replacement(
             range: NSRange(location: source.utf16.count - 1, length: 1),
             replacement: ""
         )
@@ -4336,7 +4336,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterFinalAPIsKeepReturningCompleteResults() async throws {
         let source = "let value: Int = 1\n"
         let updatedSource = "let value: String = \"text\"\n"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let engine = SyntaxHighlighterEngine()
 
         let reset = await engine.reset(source: source, language: .swift, revision: 0)
@@ -6443,7 +6443,7 @@ struct SyntaxHighlighterEngineTests {
             of: "Reference highlighting surface",
             with: "Reference highlighting surface updated"
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6471,7 +6471,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "item + 1", with: "item + 2")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6511,7 +6511,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "let local = 1", with: "let local = 12")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6538,7 +6538,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "return value", with: "return value + 1")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let engine = SyntaxHighlighterEngine()
 
         let reset = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 0)
@@ -6569,7 +6569,7 @@ struct SyntaxHighlighterEngineTests {
         let tail = 1
         """
         let updatedSource = source.replacingOccurrences(of: "first", with: "first!")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let engine = SyntaxHighlighterEngine()
 
         _ = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 0)
@@ -6603,7 +6603,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "let item = 1", with: "let item = 2")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6630,7 +6630,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "foo", with: "sin")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6650,7 +6650,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterRequeriesSwiftIdentifiersThatBecomeKeywords() async throws {
         let source = "let value = tru\n"
         let updatedSource = "let value = true\n"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6682,7 +6682,7 @@ struct SyntaxHighlighterEngineTests {
         let prefix = "// inserted comment\n"
         let prefixedSource = prefix + source
         let updatedSource = prefixedSource.replacingOccurrences(of: "item + 1", with: "item + 2")
-        let referenceMutation = try #require(TextMutation.diff(from: prefixedSource, to: updatedSource))
+        let referenceMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: prefixedSource, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6728,7 +6728,7 @@ struct SyntaxHighlighterEngineTests {
             length: 0,
             replacement: appendedText
         )
-        let referenceMutation = try #require(TextMutation.diff(from: appendedSource, to: updatedSource))
+        let referenceMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: appendedSource, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6768,7 +6768,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "let item = 1", with: "item = 1")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6843,7 +6843,7 @@ struct SyntaxHighlighterEngineTests {
         let third = 3
         """
         let updatedSource = source.replacingOccurrences(of: "let second = 2", with: "/* let second = 2")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6869,7 +6869,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "return item", with: "return items")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6904,7 +6904,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "item", with: "value")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6946,7 +6946,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "let item", with: "let value")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -6979,7 +6979,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "private let item", with: "private let value")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8114,7 +8114,7 @@ struct SyntaxHighlighterEngineTests {
             .grid { display: grid; }
         }
         """
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8251,7 +8251,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterIncrementallyUpdatesJavaScript() async throws {
         let source = "const value = 42;\nconst message = 'ok';"
         let updatedSource = "const value = 42;\nlet message = 'ok';"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8272,7 +8272,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterIncrementallyRefreshesPartialTokenEdits() async throws {
         let source = "const value = 42;\nconst message = value;"
         let updatedSource = "const label = 42;\nconst message = value;"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8293,7 +8293,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterIncrementallyRefreshesExpandedTemplateCoverage() async throws {
         let source = "const message = `${first}-${second}-${third}`;"
         let updatedSource = "const message = `${first}-${secondValue}-${third}`;"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8328,7 +8328,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterRepaintsDroppedCommentCaptureExtents() async throws {
         let source = "/* comment */\nconst value = 1;"
         let updatedSource = "* comment */\nconst value = 1;"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8358,7 +8358,7 @@ struct SyntaxHighlighterEngineTests {
             .joined(separator: "\n")
         let source = "\(prefix)\nconst tail = 1;"
         let updatedSource = "\(prefix)\nlet tail = 2;"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8385,7 +8385,7 @@ struct SyntaxHighlighterEngineTests {
         <style>body { color: red; }</style>
         <script>let answer = 43;</script>
         """
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8414,7 +8414,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterResetsForHTMLInjectionBoundaryEdits() async throws {
         let source = "<script>const answer = 42;</script>"
         let updatedSource = "<style>const answer = 42;</script>"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8443,7 +8443,7 @@ struct SyntaxHighlighterEngineTests {
         let newer = 2;
         const done = true;
         """
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8470,8 +8470,8 @@ struct SyntaxHighlighterEngineTests {
         let source = "const first = 1;\nconst second = 2;\nconst third = 3;"
         let mergedSource = "const first = 1;const second = 2;\nconst third = 3;"
         let updatedSource = "const first = 1;let second = 2;\nconst third = 3;"
-        let deleteLineBreak = try #require(TextMutation.diff(from: source, to: mergedSource))
-        let editMergedLine = try #require(TextMutation.diff(from: mergedSource, to: updatedSource))
+        let deleteLineBreak = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: mergedSource))
+        let editMergedLine = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: mergedSource, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8498,8 +8498,8 @@ struct SyntaxHighlighterEngineTests {
         let source = "const first = 1;\rconst second = 2;\rconst third = 3;"
         let mergedSource = "const first = 1;const second = 2;\rconst third = 3;"
         let updatedSource = "const first = 1;let second = 2;\rconst third = 3;"
-        let deleteLineBreak = try #require(TextMutation.diff(from: source, to: mergedSource))
-        let editMergedLine = try #require(TextMutation.diff(from: mergedSource, to: updatedSource))
+        let deleteLineBreak = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: mergedSource))
+        let editMergedLine = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: mergedSource, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8526,8 +8526,8 @@ struct SyntaxHighlighterEngineTests {
         let source = "const first = 1;const second = 2;\rconst third = 3;"
         let splitSource = "const first = 1;\rconst second = 2;\rconst third = 3;"
         let updatedSource = "const first = 1;\rlet second = 2;\rconst third = 3;"
-        let insertLineBreak = try #require(TextMutation.diff(from: source, to: splitSource))
-        let editSplitLine = try #require(TextMutation.diff(from: splitSource, to: updatedSource))
+        let insertLineBreak = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: splitSource))
+        let editSplitLine = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: splitSource, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8553,7 +8553,7 @@ struct SyntaxHighlighterEngineTests {
     func syntaxHighlightMutationLineRangeIncludesInsertedNewlineLine() throws {
         let source = "let first = 1let second = 2"
         let updatedSource = "let first = 1\nlet second = 2"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let nsSource = updatedSource as NSString
 
         let changedLineRange = SyntaxHighlightMutationLineRange.changedLineRange(
@@ -8568,7 +8568,7 @@ struct SyntaxHighlighterEngineTests {
     func syntaxHighlightMutationLineRangeIncludesInsertedCarriageReturnLine() throws {
         let source = "let first = 1let second = 2"
         let updatedSource = "let first = 1\rlet second = 2"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let nsSource = updatedSource as NSString
 
         let changedLineRange = SyntaxHighlightMutationLineRange.changedLineRange(
@@ -8584,8 +8584,8 @@ struct SyntaxHighlighterEngineTests {
         let source = "const first = 1;\n"
         let mergedSource = "const first = 1;"
         let updatedSource = "const first = 1; const second = 2;"
-        let deleteLineBreak = try #require(TextMutation.diff(from: source, to: mergedSource))
-        let appendStatement = try #require(TextMutation.diff(from: mergedSource, to: updatedSource))
+        let deleteLineBreak = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: mergedSource))
+        let appendStatement = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: mergedSource, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8612,8 +8612,8 @@ struct SyntaxHighlighterEngineTests {
         let source = "const first = 1;\rconst second = 2;"
         let updatedAfterCR = "const first = 1;\rlet second = 2;"
         let finalSource = "let first = 1;\rlet second = 2;"
-        let editAfterCR = try #require(TextMutation.diff(from: source, to: updatedAfterCR))
-        let editBeforeCR = try #require(TextMutation.diff(from: updatedAfterCR, to: finalSource))
+        let editAfterCR = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedAfterCR))
+        let editBeforeCR = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: updatedAfterCR, to: finalSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -8661,7 +8661,7 @@ struct SyntaxHighlighterEngineTests {
     func highlighterFallsBackToFullResetWhenIncrementalStateDoesNotMatch() async throws {
         let source = "const value = 42;"
         let updatedSource = "let value = 42;"
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let engine = SyntaxHighlighterEngine()
 
         _ = await engine.reset(source: source, language: SyntaxLanguage.javascript)
@@ -8696,7 +8696,7 @@ struct SyntaxHighlighterEngineTests {
         let sessionSource = "const value = 1;\nconst other = 2;"
         let stalePreviousSource = "const value = 2;\nconst other = 2;"
         let updatedSource = "const value = 3;\nconst other = 2;"
-        let staleMutation = try #require(TextMutation.diff(from: stalePreviousSource, to: updatedSource))
+        let staleMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: stalePreviousSource, to: updatedSource))
         let engine = SyntaxHighlighterEngine()
 
         _ = await engine.reset(source: sessionSource, language: SyntaxLanguage.javascript)
@@ -8864,7 +8864,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(cancelled.tokens.isEmpty)
 
         let updatedSource = source.replacingOccurrences(of: "input + 1", with: "input + 2")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incremental = await engine.update(
             source: updatedSource,
             language: SyntaxLanguage.swift,
@@ -8937,9 +8937,9 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let firstUpdatedSource = source.replacingOccurrences(of: "let item = 1", with: "let renamed = 1")
-        let firstMutation = try #require(TextMutation.diff(from: source, to: firstUpdatedSource))
+        let firstMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: firstUpdatedSource))
         let secondUpdatedSource = firstUpdatedSource.replacingOccurrences(of: "return item", with: "return renamed")
-        let secondMutation = try #require(TextMutation.diff(from: firstUpdatedSource, to: secondUpdatedSource))
+        let secondMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: firstUpdatedSource, to: secondUpdatedSource))
         let engine = SyntaxHighlighterEngine()
 
         _ = await engine.reset(source: source, language: SyntaxLanguage.swift, revision: 1)
@@ -8992,7 +8992,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(cancelled.tokens.isEmpty)
 
         let updatedSource = source.replacingOccurrences(of: "second = 2", with: "second = 3")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incremental = await engine.update(
             source: updatedSource,
             language: SyntaxLanguage.javascript,
@@ -11025,7 +11025,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
         let updatedSource = source.replacingOccurrences(of: "self.name.length", with: "other.name.length")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11062,7 +11062,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
         let updatedSource = source.replacingOccurrences(of: "self.name.length", with: ".name.length")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11099,7 +11099,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
         let updatedSource = source.replacingOccurrences(of: "self.name.length", with: "self name.length")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11136,7 +11136,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
         let updatedSource = source.replacingOccurrences(of: "self.   name.length", with: "self   name.length")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11173,7 +11173,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
         let updatedSource = source.replacingOccurrences(of: "self.name length", with: "self.name.length")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11211,8 +11211,8 @@ struct SyntaxHighlighterEngineTests {
         """
         let insertedSource = source.replacingOccurrences(of: "self.name.length", with: "self.nxame.length")
         let finalSource = insertedSource.replacingOccurrences(of: "self.nxame.length", with: "self.nxam.length")
-        let insertionMutation = try #require(TextMutation.diff(from: source, to: insertedSource))
-        let deletionMutation = try #require(TextMutation.diff(from: insertedSource, to: finalSource))
+        let insertionMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: insertedSource))
+        let deletionMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: insertedSource, to: finalSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11255,7 +11255,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
         let updatedSource = source.replacingOccurrences(of: "self.name.length", with: "self.name.lexngth")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11322,7 +11322,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "value = 1", with: "value = 2")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11358,7 +11358,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
         let updatedSource = source.replacingOccurrences(of: "self.name42.length + 1", with: "self.name42.length + 2")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11486,7 +11486,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "Foo = @\"value\"", with: "Bar = @\"value\"")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11592,7 +11592,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
         let updatedSource = source.replacingOccurrences(of: "BOOL foo;", with: "BOOL bar;")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11620,7 +11620,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "Other", with: "Token")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11681,7 +11681,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "Other", with: "Token")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11719,7 +11719,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "Other", with: "Token")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11765,7 +11765,7 @@ struct SyntaxHighlighterEngineTests {
             of: "#define ReferenceLog(format, ...) NSLog(format, ##__VA_ARGS__)\n\n",
             with: ""
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11798,7 +11798,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "ReferenceLog(", with: "ReferenceLog ")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11834,7 +11834,7 @@ struct SyntaxHighlighterEngineTests {
             of: "#define ReferenceLog",
             with: "define ReferenceLog"
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11882,8 +11882,8 @@ struct SyntaxHighlighterEngineTests {
             of: "#define ReferenceLog",
             with: "define ReferenceLog"
         )
-        let insertionMutation = try #require(TextMutation.diff(from: source, to: insertedSource))
-        let macroMutation = try #require(TextMutation.diff(from: insertedSource, to: finalSource))
+        let insertionMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: insertedSource))
+        let macroMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: insertedSource, to: finalSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -11986,7 +11986,7 @@ struct SyntaxHighlighterEngineTests {
             of: "static NSString *Token;",
             with: "static NSString *Token"
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12022,7 +12022,7 @@ struct SyntaxHighlighterEngineTests {
             of: "static NSString *Token;",
             with: "extern NSString *Token;"
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12060,7 +12060,7 @@ struct SyntaxHighlighterEngineTests {
             of: "NSInteger local = 1;",
             with: "NSInteger local = 2;"
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12095,7 +12095,7 @@ struct SyntaxHighlighterEngineTests {
             of: "NSInteger local = 1;",
             with: "NSInteger local = 2;"
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12139,7 +12139,7 @@ struct SyntaxHighlighterEngineTests {
                 return ((NSInteger (*)(id, SEL))objc_msgSend)(object, NSSelectorFromString(selectorName));
             """
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12172,7 +12172,7 @@ struct SyntaxHighlighterEngineTests {
             of: "LOG_VALUE(local);",
             with: "LOG_VALUE(local + 1);"
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12205,7 +12205,7 @@ struct SyntaxHighlighterEngineTests {
         @end
         """
         let updatedSource = source.replacingOccurrences(of: "self.foo", with: "self.bar")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12602,7 +12602,7 @@ struct SyntaxHighlighterEngineTests {
         let prefix = "// inserted comment\n"
         let prefixedSource = prefix + source
         let updatedSource = prefixedSource.replacingOccurrences(of: "self.name.length + 1", with: "self.name.length + 2")
-        let referenceMutation = try #require(TextMutation.diff(from: prefixedSource, to: updatedSource))
+        let referenceMutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: prefixedSource, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12651,7 +12651,7 @@ struct SyntaxHighlighterEngineTests {
             of: "@property(nonatomic, copy) NSString *name;\n",
             with: ""
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12731,7 +12731,7 @@ struct SyntaxHighlighterEngineTests {
         int third = 3;
         """
         let updatedSource = source.replacingOccurrences(of: "int second = 2;", with: "/* int second = 2;")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12768,7 +12768,7 @@ struct SyntaxHighlighterEngineTests {
             options: [],
             range: source.range(of: "self.name.length")
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12802,7 +12802,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "return ;", with: "return @YES;")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12836,7 +12836,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "return @(", with: "return (")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12869,7 +12869,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "return @(", with: "return @")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12900,7 +12900,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "@YES", with: "flag")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -12931,7 +12931,7 @@ struct SyntaxHighlighterEngineTests {
             options: [],
             range: source.range(of: "ReferenceTokenBase + 1")
         )
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 
@@ -13004,7 +13004,7 @@ struct SyntaxHighlighterEngineTests {
         }
         """
         let updatedSource = source.replacingOccurrences(of: "@interface NSString", with: "@interface NSStringShadow")
-        let mutation = try #require(TextMutation.diff(from: source, to: updatedSource))
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
         let incrementalEngine = SyntaxHighlighterEngine()
         let fullEngine = SyntaxHighlighterEngine()
 

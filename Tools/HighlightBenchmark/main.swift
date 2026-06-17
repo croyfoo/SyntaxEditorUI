@@ -16,7 +16,7 @@ struct HighlightBenchmark {
         )
 
         let updatedSource = incrementalEditSource(from: benchmarkSource)
-        let mutation = TextMutation.diff(from: benchmarkSource, to: updatedSource).map(SyntaxHighlightMutation.init)
+        let mutation = SyntaxEditorTextChange.Replacement.singleReplacement(from: benchmarkSource, to: updatedSource).map(SyntaxHighlightMutation.init)
 
         let fullSamples = await measureFullReset(
             source: benchmarkSource,
@@ -412,7 +412,7 @@ struct HighlightBenchmark {
 
         for editIndex in 0..<editCount {
             let updatedSource = typingEditSource(from: currentSource)
-            let mutation = TextMutation.diff(from: currentSource, to: updatedSource)
+            let mutation = SyntaxEditorTextChange.Replacement.singleReplacement(from: currentSource, to: updatedSource)
                 .map(SyntaxHighlightMutation.init)
             let start = DispatchTime.now().uptimeNanoseconds
             let result: SyntaxHighlightResult

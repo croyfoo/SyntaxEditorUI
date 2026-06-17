@@ -87,7 +87,7 @@ package struct SyntaxHighlightMutation: Equatable, Sendable {
         self.replacement = replacement
     }
 
-    package init(_ mutation: TextMutation) {
+    package init(_ mutation: SyntaxEditorTextChange.Replacement) {
         self.init(
             location: mutation.range.location,
             length: mutation.range.length,

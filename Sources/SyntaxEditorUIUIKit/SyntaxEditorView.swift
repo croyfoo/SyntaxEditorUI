@@ -344,7 +344,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         self.lastAppliedTheme = model.theme
         self.lastAppliedThemeAppearance = nil
         self.lastAppliedFontSizeDelta = model.fontSizeDelta
-        self.lastAppliedDocumentRevision = model.revision
+        self.lastAppliedDocumentRevision = model.textRevision
         self.lastAppliedLanguageIdentifier = model.language.syntaxHighlightCacheKey
 
         super.init(frame: .zero)
@@ -422,7 +422,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     internal func waitForAppliedHighlightPhaseForTesting(
         _ phase: SyntaxHighlightPhase
     ) async -> Bool {
-        let expectedRevision = model.revision
+        let expectedRevision = model.textRevision
         guard !hasAppliedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
             return true
         }
@@ -444,7 +444,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     internal func waitForSkippedHighlightPhaseForTesting(
         _ phase: SyntaxHighlightPhase
     ) async -> Bool {
-        let expectedRevision = model.revision
+        let expectedRevision = model.textRevision
         guard !hasSkippedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
             return true
         }
@@ -1056,7 +1056,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             guard let self else { return }
 
             _ = model.text
-            let revision = model.revision
+            let revision = model.textRevision
             let selectedRange = model.selectedRange
 
             guard !(skipsInitialModelDelivery && event.kind == .initial) else { return }
@@ -1086,12 +1086,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             forceLanguageRefresh: true,
             schedulesHighlight: false
         )
-        applyObservedModelChange(forceTextUpdate: true, observedRevision: model.revision)
+        applyObservedModelChange(forceTextUpdate: true, observedRevision: model.textRevision)
         applyObservedSelection(model.selectedRange)
     }
 
     func applyObservedModelChange(forceTextUpdate: Bool = false, observedRevision: Int? = nil) {
-        let revision = observedRevision ?? model.revision
+        let revision = observedRevision ?? model.textRevision
         guard forceTextUpdate || revision != lastAppliedDocumentRevision else { return }
 
         isApplyingModel = true
@@ -1105,22 +1105,22 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         if textNeedsUpdate {
             commandEngine.invalidateTransientState()
-            let change = model.latestChange
-            if change?.kind == .replacement {
+            let change = model.latestTextChange
+            if change?.kind == .wholeDocumentReplacement {
                 activeUndoManager?.removeAllActions()
             }
             let previousSelection = selectedRange
             if let change,
-               change.revision == revision,
+               change.textRevision == revision,
                change.kind == .incremental,
                !forceTextUpdate,
                lastAppliedDocumentRevision == revision - 1 {
-                performRawEdits(change.edits, previousText: previousText)
+                performRawEdits(change.replacements, previousText: previousText)
             } else {
                 replaceEntireStorageText(nextText)
             }
             let nextSelection: NSRange
-            if change?.kind == .replacement,
+            if change?.kind == .wholeDocumentReplacement,
                change?.selectedRange == NSRange(location: 0, length: 0) {
                 nextSelection = previousSelection
             } else {
@@ -1134,10 +1134,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             updateTypingAttributes()
             updateTextContainerForCurrentWrappingMode()
             invalidateTextLayout()
-            let highlightMutation: SyntaxHighlightMutation? = if model.latestChange?.kind == .replacement {
+            let highlightMutation: SyntaxHighlightMutation? = if model.latestTextChange?.kind == .wholeDocumentReplacement {
                 nil
             } else {
-                model.latestChange.flatMap(Self.highlightMutation)
+                model.latestTextChange.flatMap(Self.highlightMutation)
             }
             scheduleHighlight(
                 source: nextText,
@@ -1267,7 +1267,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         let source = source ?? text
         let language = language ?? model.language
-        let revision = revision ?? model.revision
+        let revision = revision ?? model.textRevision
 
         TextEditingTransaction.perform(on: textContentStorage) { storage in
             storage.addAttribute(.font, value: baseFont, range: fullRange)
@@ -1363,8 +1363,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             length: 0
         )
 
-        commitEdits(
-            [SyntaxEditorTextEdit(range: clampedRange, replacement: replacement)],
+        commitTextReplacements(
+            [SyntaxEditorTextChange.Replacement(range: clampedRange, replacement: replacement)],
             selectedRange: nextSelection,
             refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                 in: source,
@@ -1401,7 +1401,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guard let firstRange = ranges.first else { return false }
 
         let edits = ranges.map {
-            SyntaxEditorTextEdit(range: $0, replacement: replacement)
+            SyntaxEditorTextChange.Replacement(range: $0, replacement: replacement)
         }
         let nextTextLength = source.utf16.count + ranges.reduce(0) { total, range in
             total + replacement.utf16.count - range.length
@@ -1415,7 +1415,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             in: source,
             around: selectionLocation
         )
-        commitEdits(
+        commitTextReplacements(
             edits,
             selectedRange: NSRange(location: selectionLocation, length: 0),
             refreshStartUTF16: refreshStartUTF16
@@ -1445,7 +1445,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             updateTypingAttributes()
             return
         }
-        lastAppliedDocumentRevision = change.revision
+        lastAppliedDocumentRevision = change.textRevision
         currentSelectedRange = change.selectedRange
         replaceEntireStorageText(nextText)
         updateTypingAttributes()
@@ -1454,14 +1454,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         scheduleHighlight(
             source: nextText,
             language: model.language,
-            revision: change.revision,
+            revision: change.textRevision,
             refreshStartUTF16: 0
         )
         refreshKeyboardAccessoryState()
     }
 
-    func commitEdits(
-        _ edits: [SyntaxEditorTextEdit],
+    func commitTextReplacements(
+        _ edits: [SyntaxEditorTextChange.Replacement],
         selectedRange nextSelection: NSRange,
         refreshStartUTF16: Int,
         registersUndo: Bool = true,
@@ -1491,7 +1491,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         if registersUndo, !isApplyingUndoRedo {
             registerUndoAction(
                 restore: EditorUndoState(
-                    edits: SyntaxEditorModel.inverseEdits(for: edits, in: previousText),
+                    edits: SyntaxEditorModel.inverseReplacements(for: edits, in: previousText),
                     selectedRange: previousSelection,
                     refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                         in: previousText,
@@ -1521,7 +1521,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
         let shouldDeferSelectionGeometry = shouldDeferSelectionGeometryForTextInputEdits(edits)
 
-        let change = model.commitEdits(
+        let change = model.commitTextReplacements(
             edits,
             selectedRange: nextSelection
         )
@@ -1530,7 +1530,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             refreshKeyboardAccessoryState()
             return
         }
-        lastAppliedDocumentRevision = change.revision
+        lastAppliedDocumentRevision = change.textRevision
         let nextText = model.text
         currentSelectedRange = clampedTextRange(nextSelection, in: nextText)
         syncTextLayoutSelection()
@@ -1550,7 +1550,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         scheduleHighlight(
             source: nextText,
             language: model.language,
-            revision: change.revision,
+            revision: change.textRevision,
             mutation: Self.highlightMutation(change),
             refreshStartUTF16: refreshStart
         )
@@ -1563,14 +1563,14 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         refreshKeyboardAccessoryState()
     }
 
-    private func shouldDeferSelectionGeometryForTextInputEdits(_ edits: [SyntaxEditorTextEdit]) -> Bool {
+    private func shouldDeferSelectionGeometryForTextInputEdits(_ edits: [SyntaxEditorTextChange.Replacement]) -> Bool {
         edits.contains { edit in
             edit.range.length > 4_096 || edit.replacement.utf16.count > 4_096
         }
     }
 
     func performRawEdits(
-        _ edits: [SyntaxEditorTextEdit],
+        _ edits: [SyntaxEditorTextChange.Replacement],
         previousText: String,
         preservesMarkedTextUndoAnchor: Bool = false
     ) {
@@ -1603,7 +1603,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return
         }
 
-        commitEdits(
+        commitTextReplacements(
             result.edits,
             selectedRange: result.selectedRange,
             refreshStartUTF16: result.refreshStartUTF16,
@@ -1724,11 +1724,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         work()
     }
 
-    func applyTextMutation(
+    func applyTextReplacement(
         previousText: String,
         nextText: String
-    ) -> TextMutation? {
-        guard let mutation = TextMutation.diff(from: previousText, to: nextText) else {
+    ) -> SyntaxEditorTextChange.Replacement? {
+        guard let mutation = SyntaxEditorTextChange.Replacement.singleReplacement(from: previousText, to: nextText) else {
             return nil
         }
 
@@ -1739,7 +1739,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         performRawEdits(
-            [SyntaxEditorTextEdit(range: mutation.range, replacement: mutation.replacement)],
+            [SyntaxEditorTextChange.Replacement(range: mutation.range, replacement: mutation.replacement)],
             previousText: previousText
         )
         return mutation
@@ -2076,7 +2076,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         mutation: SyntaxHighlightMutation?
     ) async {
         guard !Task.isCancelled else { return }
-        guard model.revision == result.revision else { return }
+        guard model.textRevision == result.revision else { return }
         guard canApplyHighlightTokenPayload(for: result, mutation: mutation) else {
             recordSkippedHighlightPhaseForTesting(result.phase, revision: result.revision)
             scheduleHighlight(source: result.source, language: result.language, revision: result.revision)
@@ -2179,7 +2179,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     ) {
         let source = source ?? text
         let language = language ?? model.language
-        let revision = revision ?? model.revision
+        let revision = revision ?? model.textRevision
 
         if hasScheduledFullResetHighlight(language: language, revision: revision) {
             return
@@ -2255,7 +2255,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     static func highlightMutation(_ change: SyntaxEditorTextChange) -> SyntaxHighlightMutation? {
-        guard change.edits.count == 1, let edit = change.edits.first else { return nil }
+        guard change.replacements.count == 1, let edit = change.replacements.first else { return nil }
         return SyntaxHighlightMutation(
             location: edit.range.location,
             length: edit.range.length,
@@ -2269,7 +2269,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         source expectedSource: String,
         refreshRange: NSRange
     ) {
-        guard model.revision == expectedRevision else { return }
+        guard model.textRevision == expectedRevision else { return }
 
         let textLength = expectedSource.utf16.count
         let targetRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
@@ -2310,7 +2310,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         mutation: SyntaxHighlightMutation?,
         tokenPayload _: SyntaxHighlightTokenPayload = .fullSnapshot
     ) async -> Bool {
-        guard model.revision == expectedRevision else { return false }
+        guard model.textRevision == expectedRevision else { return false }
         guard model.language == expectedLanguage,
               text == expectedSource
         else {
@@ -2686,7 +2686,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             return
         }
 
-        let invalidatedRange = pendingTextMutationReplacementRange(in: source, mutation: mutation)
+        let invalidatedRange = pendingTextReplacementRange(in: source, mutation: mutation)
         highlightStyleStore.recordPendingEdit(mutation, currentTextLength: textLength)
         invalidateSyntaxRenderingAttributes(for: [invalidatedRange])
         guard invalidatedRange.length > 0 else { return }
@@ -2711,7 +2711,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         clearMaterializedHighlightState()
     }
 
-    private func pendingTextMutationReplacementRange(
+    private func pendingTextReplacementRange(
         in source: String,
         mutation: SyntaxHighlightMutation
     ) -> NSRange {
@@ -2736,7 +2736,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         revision: Int,
         language: SyntaxLanguage
     ) async -> Bool {
-        guard !Task.isCancelled, model.revision == revision else {
+        guard !Task.isCancelled, model.textRevision == revision else {
             return false
         }
         isApplyingHighlight = true
@@ -2750,7 +2750,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             language: language
         )
         await Task.yield()
-        return !Task.isCancelled && model.revision == revision
+        return !Task.isCancelled && model.textRevision == revision
     }
 
     func reapplyTextAttributes(in range: NSRange) {
@@ -2761,11 +2761,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         if hasReusableRecordedHighlightSnapshot(
             source: text,
             language: model.language,
-            revision: model.revision
+            revision: model.textRevision
         ) {
             applyHighlight(
                 lastHighlightTokens,
-                expectedRevision: model.revision,
+                expectedRevision: model.textRevision,
                 source: text,
                 refreshRange: targetRange
             )

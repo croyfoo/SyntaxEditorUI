@@ -105,13 +105,13 @@ extension SyntaxEditorUITests {
         #expect(editorView.textView.selectedRange() == NSRange(location: replacement.utf16.count, length: 0))
 
         editorView.selectedRange = NSRange(location: 2, length: 0)
-        let revision = model.model.revision
-        let latestChange = model.model.latestChange
+        let revision = model.model.textRevision
+        let latestTextChange = model.model.latestTextChange
 
         editorView.text = replacement
 
-        #expect(model.model.revision == revision)
-        #expect(model.model.latestChange == latestChange)
+        #expect(model.model.textRevision == revision)
+        #expect(model.model.latestTextChange == latestTextChange)
         #expect(model.model.selectedRange == NSRange(location: 2, length: 0))
         #expect(editorView.textView.selectedRange() == NSRange(location: 2, length: 0))
     }
@@ -2641,9 +2641,9 @@ extension SyntaxEditorUITests {
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
-        _ = model.model.commitEdits(
+        _ = model.model.commitTextReplacements(
             [
-                SyntaxEditorTextEdit(
+                SyntaxEditorTextChange.Replacement(
                     range: NSRange(location: source.utf16.count, length: 0),
                     replacement: appendedText
                 ),

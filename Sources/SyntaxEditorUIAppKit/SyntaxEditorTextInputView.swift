@@ -1377,7 +1377,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             storage.replaceCharacters(in: range, with: attributedReplacement)
         }
         lineMetrics.apply(
-            edits: [SyntaxEditorTextEdit(range: range, replacement: replacement)],
+            edits: [SyntaxEditorTextChange.Replacement(range: range, replacement: replacement)],
             previousSource: previousSource
         )
         setSelectedRange(selectedRange)

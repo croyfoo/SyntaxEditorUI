@@ -1,6 +1,6 @@
 import Foundation
 
-typealias SyntaxLanguageTextEdit = SyntaxEditorTextEdit
+typealias SyntaxLanguageTextEdit = SyntaxEditorTextChange.Replacement
 
 enum SyntaxLanguageSelectionBoundaryAffinity {
     case forward

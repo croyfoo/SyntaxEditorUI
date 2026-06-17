@@ -616,7 +616,7 @@ final class HighlightSession {
         case .valid:
             effectiveMutation = originalMutation
         case .mismatch:
-            guard let coalesced = TextMutation.diff(from: source, to: nextSource) else {
+            guard let coalesced = SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: nextSource) else {
                 return nil
             }
             effectiveMutation = SyntaxHighlightMutation(coalesced)
@@ -625,7 +625,7 @@ final class HighlightSession {
         let nextLayeredSource = SyntacticPatcher.layeredSource(for: nextSource, setup: setup)
         let layeredMutation: SyntaxHighlightMutation
         if setup.usesHTMLPreprocessing {
-            guard let masked = TextMutation.diff(from: layeredSource, to: nextLayeredSource) else {
+            guard let masked = SyntaxEditorTextChange.Replacement.singleReplacement(from: layeredSource, to: nextLayeredSource) else {
                 return nil
             }
             layeredMutation = SyntaxHighlightMutation(masked)

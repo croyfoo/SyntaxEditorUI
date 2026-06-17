@@ -111,7 +111,7 @@ package final class LineTokenPlanes {
         let affectedRange = NSRange(location: lowerOffset, length: max(0, upperOffset - lowerOffset))
         let oldSegment = nsSource.substring(with: affectedRange)
         let newSegment = SyntaxEditorModel.applying([
-            SyntaxEditorTextEdit(
+            SyntaxEditorTextChange.Replacement(
                 range: NSRange(
                     location: mutation.location - affectedRange.location,
                     length: mutation.length

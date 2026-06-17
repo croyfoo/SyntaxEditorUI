@@ -871,7 +871,7 @@ extension SyntaxEditorUITests {
 
         #expect(editorView.text == "x")
         #expect(editorView.selectedRange == NSRange(location: 1, length: 0))
-        #expect(editorView.model.latestChange?.selectedRange == NSRange(location: 1, length: 0))
+        #expect(editorView.model.latestTextChange?.selectedRange == NSRange(location: 1, length: 0))
     }
 
     @Test("SyntaxEditorView clamps iOS horizontal offset after observed text replacement")
