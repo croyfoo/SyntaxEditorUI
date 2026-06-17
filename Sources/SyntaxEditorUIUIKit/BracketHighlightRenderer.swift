@@ -8,7 +8,7 @@ struct BracketHighlightRenderer {
     static func apply(
         rects: [CGRect],
         color: CGColor?,
-        to fragmentView: SyntaxEditorTextLayoutFragmentView
+        to fragmentView: SyntaxEditorView.TextLayoutFragmentView
     ) {
         let colorChanged = !SyntaxEditorView.optionalColorsEqual(fragmentView.bracketHighlightColor, color)
         let rectsChanged = fragmentView.bracketHighlightRects != rects
@@ -61,13 +61,13 @@ extension SyntaxEditorView {
     }
 
     func updateBracketHighlightFragmentViews() {
-        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+        for case let fragmentView as SyntaxEditorView.TextLayoutFragmentView in textContentView.subviews {
             configureBracketHighlights(for: fragmentView, layoutFragmentFrame: fragmentView.layoutFragment.layoutFragmentFrame)
         }
     }
 
     func configureBracketHighlights(
-        for fragmentView: SyntaxEditorTextLayoutFragmentView,
+        for fragmentView: SyntaxEditorView.TextLayoutFragmentView,
         layoutFragmentFrame: CGRect
     ) {
         let rects: [CGRect]

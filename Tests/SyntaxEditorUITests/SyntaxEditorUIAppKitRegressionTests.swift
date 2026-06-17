@@ -1663,7 +1663,7 @@ extension SyntaxEditorUITests {
 
         await editorView.waitForPendingHighlightForTesting()
         let fragmentView = try #require(macEditorVisibleFragmentViews(editorView).first)
-        let layoutFragment = try #require(fragmentView.layoutFragment as? SyntaxEditorTextLayoutFragment)
+        let layoutFragment = try #require(fragmentView.layoutFragment as? SyntaxEditorTextInputView.TextLayoutFragment)
         #expect(layoutFragment.textLineFragments.count > 3)
 
         let initialDrawCount = layoutFragment.lineFragmentDrawCountForTesting

@@ -10,7 +10,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     weak var editorView: SyntaxEditorView?
     lazy var findInteraction = UIFindInteraction(sessionDelegate: self)
     private var activeResultAggregator: UITextSearchAggregator<Int>?
-    private var activeSearchCancellation: FindSearchCancellation?
+    private var activeSearchCancellation: SyntaxEditorFindCoordinator.SearchCancellation?
     private var activeSearchIdentifier: Int?
     private var nextSearchIdentifier = 0
 
@@ -76,13 +76,13 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         }
 
         cancelActiveSearch()
-        let cancellation = FindSearchCancellation()
+        let cancellation = SyntaxEditorFindCoordinator.SearchCancellation()
         let searchIdentifier = nextSearchIdentifier
         nextSearchIdentifier += 1
         activeSearchCancellation = cancellation
         activeSearchIdentifier = searchIdentifier
         activeResultAggregator = resultAggregator
-        let search = FindSearchRequest(
+        let search = SyntaxEditorFindCoordinator.SearchRequest(
             identifier: searchIdentifier,
             source: editorView.text,
             queryString: queryString,
@@ -114,7 +114,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
                     for range in ranges {
                         guard !search.cancellation.isCancelled else { return false }
                         search.resultAggregator.foundRange(
-                            SyntaxEditorTextRange(nsRange: range, findSearchIdentifier: search.identifier),
+                            SyntaxEditorView.TextRange(nsRange: range, findSearchIdentifier: search.identifier),
                             searchString: search.queryString,
                             document: search.documentIdentifier
                         )
@@ -246,7 +246,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
         resultAggregator?.invalidate()
     }
 
-    private func finishTextSearch(cancellation: FindSearchCancellation) {
+    private func finishTextSearch(cancellation: SyntaxEditorFindCoordinator.SearchCancellation) {
         if cancellation.finishAndClaimDecorationBatch() {
             editorView?.endFindDecorationBatch()
         }
@@ -256,7 +256,7 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     }
 
     private func isCurrentFindTextRange(_ textRange: UITextRange) -> Bool {
-        guard let findSearchIdentifier = (textRange as? SyntaxEditorTextRange)?.findSearchIdentifier else {
+        guard let findSearchIdentifier = (textRange as? SyntaxEditorView.TextRange)?.findSearchIdentifier else {
             return true
         }
         return findSearchIdentifier == activeSearchIdentifier
@@ -408,7 +408,8 @@ final class SyntaxEditorFindCoordinator: NSObject, @MainActor UIFindInteractionD
     }
 }
 
-private struct FindSearchRequest: @unchecked Sendable {
+extension SyntaxEditorFindCoordinator {
+private struct SearchRequest: @unchecked Sendable {
     let identifier: Int
     let source: String
     let queryString: String
@@ -416,10 +417,10 @@ private struct FindSearchRequest: @unchecked Sendable {
     let wordMatchMethod: UITextSearchOptions.WordMatchMethod
     let documentIdentifier: Int
     let resultAggregator: UITextSearchAggregator<Int>
-    let cancellation: FindSearchCancellation
+    let cancellation: SyntaxEditorFindCoordinator.SearchCancellation
 }
 
-private final class FindSearchCancellation: @unchecked Sendable {
+private final class SearchCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
     private var decorationBatchActive = false
@@ -452,5 +453,6 @@ private final class FindSearchCancellation: @unchecked Sendable {
         lock.unlock()
         return shouldEndDecorationBatch
     }
+}
 }
 #endif

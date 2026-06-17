@@ -117,7 +117,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var layoutManager: NSTextLayoutManager { textSystem.layoutManager }
     var container: NSTextContainer { textSystem.container }
     var highlightStyleStore: HighlightRenderSnapshotStore { textSystem.styleStore }
-    let textContentView = SyntaxEditorTextContentView()
+    let textContentView = SyntaxEditorView.TextContentView()
     let editableTextInteraction = UITextInteraction(for: .editable)
     let nonEditableTextInteraction = UITextInteraction(for: .nonEditable)
     var findCoordinator: SyntaxEditorFindCoordinator?
@@ -158,8 +158,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var lastAppliedDocumentRevision = 0
     var isLayingOutText = false
     var needsTextRelayout = false
-    var fragmentViewMap = NSMapTable<NSTextLayoutFragment, SyntaxEditorTextLayoutFragmentView>.weakToWeakObjects()
-    var lastUsedFragmentViews: Set<SyntaxEditorTextLayoutFragmentView> = []
+    var fragmentViewMap = NSMapTable<NSTextLayoutFragment, SyntaxEditorView.TextLayoutFragmentView>.weakToWeakObjects()
+    var lastUsedFragmentViews: Set<SyntaxEditorView.TextLayoutFragmentView> = []
     var postLayoutAction: (() -> Void)?
     var markedRange: NSRange?
     var markedTextUndoAnchor: SyntaxEditorMarkedTextUndoAnchor?
@@ -308,7 +308,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         if let tokenizerStorage {
             return tokenizerStorage
         }
-        let tokenizer = SyntaxEditorTextInputTokenizer(textInput: self)
+        let tokenizer = SyntaxEditorView.TextInputTokenizer(textInput: self)
         tokenizerStorage = tokenizer
         return tokenizer
     }
@@ -3009,13 +3009,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func updateFindHighlightFragmentViews() {
         findHighlightUpdatePassCount += 1
-        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+        for case let fragmentView as SyntaxEditorView.TextLayoutFragmentView in textContentView.subviews {
             configureFindHighlights(for: fragmentView, layoutFragmentFrame: fragmentView.layoutFragment.layoutFragmentFrame)
         }
     }
 
     func configureFindHighlights(
-        for fragmentView: SyntaxEditorTextLayoutFragmentView,
+        for fragmentView: SyntaxEditorView.TextLayoutFragmentView,
         layoutFragmentFrame: CGRect
     ) {
         let foundRects: [CGRect]
@@ -3211,7 +3211,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func setNeedsDisplayForVisibleTextFragments() {
-        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+        for case let fragmentView as SyntaxEditorView.TextLayoutFragmentView in textContentView.subviews {
             fragmentView.setNeedsDisplay()
         }
     }
@@ -3241,7 +3241,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         // viewport — only freshly scrolled-in fragments would run the
         // validator. Mirrors the AppKit input view.
         var didInvalidateFragment = false
-        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+        for case let fragmentView as SyntaxEditorView.TextLayoutFragmentView in textContentView.subviews {
             let fragmentRange = textRange(for: fragmentView.layoutFragment)
             guard !TextLayoutGeometry.ranges(invalidatedRanges, intersecting: fragmentRange).isEmpty else {
                 continue
@@ -3259,7 +3259,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guard !ranges.isEmpty else { return }
 
         var didInvalidateFragment = false
-        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+        for case let fragmentView as SyntaxEditorView.TextLayoutFragmentView in textContentView.subviews {
             let fragmentRange = textRange(for: fragmentView.layoutFragment)
             guard !TextLayoutGeometry.ranges(ranges, intersecting: fragmentRange).isEmpty else {
                 continue
@@ -3273,7 +3273,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func invalidateTextFragmentViews(intersecting rect: CGRect) {
-        for case let fragmentView as SyntaxEditorTextLayoutFragmentView in textContentView.subviews {
+        for case let fragmentView as SyntaxEditorView.TextLayoutFragmentView in textContentView.subviews {
             guard fragmentView.frame.intersects(rect) else { continue }
             fragmentView.setNeedsDisplay(rect.offsetBy(dx: -fragmentView.frame.minX, dy: -fragmentView.frame.minY))
         }
@@ -3337,7 +3337,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func contentRectForScrollRange(_ range: NSRange) -> CGRect? {
         if range.length > 0 {
-            let firstTextRect = firstRect(for: SyntaxEditorTextRange(nsRange: range))
+            let firstTextRect = firstRect(for: SyntaxEditorView.TextRange(nsRange: range))
             if firstTextRect.origin.x.isFinite,
                firstTextRect.origin.y.isFinite,
                firstTextRect.size.width.isFinite,
@@ -3352,7 +3352,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func contentCaretRectForTextLocation(_ location: Int) -> CGRect? {
-        var targetRect = caretRect(for: SyntaxEditorTextPosition(offset: location))
+        var targetRect = caretRect(for: SyntaxEditorView.TextPosition(offset: location))
         guard targetRect.origin.x.isFinite,
               targetRect.origin.y.isFinite,
               targetRect.size.width.isFinite,
@@ -3502,7 +3502,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     public func textViewportLayoutControllerWillLayout(_ textViewportLayoutController: NSTextViewportLayoutController) {
         lastUsedFragmentViews = Set(
-            fragmentViewMap.objectEnumerator()?.allObjects as? [SyntaxEditorTextLayoutFragmentView] ?? []
+            fragmentViewMap.objectEnumerator()?.allObjects as? [SyntaxEditorView.TextLayoutFragmentView] ?? []
         )
     }
 
@@ -3511,12 +3511,12 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         configureRenderingSurfaceFor textLayoutFragment: NSTextLayoutFragment
     ) {
         let layoutFragmentFrame = textLayoutFragment.layoutFragmentFrame
-        let fragmentView: SyntaxEditorTextLayoutFragmentView
+        let fragmentView: SyntaxEditorView.TextLayoutFragmentView
         if let cachedFragmentView = fragmentViewMap.object(forKey: textLayoutFragment) {
             fragmentView = cachedFragmentView
             lastUsedFragmentViews.remove(cachedFragmentView)
         } else {
-            fragmentView = SyntaxEditorTextLayoutFragmentView(
+            fragmentView = SyntaxEditorView.TextLayoutFragmentView(
                 layoutFragment: textLayoutFragment,
                 frame: layoutFragmentFrame
             )
@@ -3593,7 +3593,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func offset(for position: UITextPosition) -> Int? {
-        guard let position = position as? SyntaxEditorTextPosition else { return nil }
+        guard let position = position as? SyntaxEditorView.TextPosition else { return nil }
         return min(max(0, position.offset), text.utf16.count)
     }
 }

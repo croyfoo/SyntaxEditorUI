@@ -1280,14 +1280,14 @@ func macEditorTextStorageBackgroundColor(_ editorView: SyntaxEditorView, at loca
 }
 
 @MainActor
-func macEditorVisibleFragmentViews(_ editorView: SyntaxEditorView) -> [SyntaxEditorTextLayoutFragmentView] {
+func macEditorVisibleFragmentViews(_ editorView: SyntaxEditorView) -> [SyntaxEditorTextInputView.TextLayoutFragmentView] {
     editorView.textView.layoutVisibleViewport()
-    return editorView.textView.textContentView.subviews.compactMap { $0 as? SyntaxEditorTextLayoutFragmentView }
+    return editorView.textView.textContentView.subviews.compactMap { $0 as? SyntaxEditorTextInputView.TextLayoutFragmentView }
 }
 
 @MainActor
 func macEditorRenderedFragmentContainsDominantColor(
-    _ fragmentView: SyntaxEditorTextLayoutFragmentView,
+    _ fragmentView: SyntaxEditorTextInputView.TextLayoutFragmentView,
     targetColor: NSColor,
     backgroundColor: NSColor,
     minimumPixelCount: Int = 8
@@ -1338,7 +1338,7 @@ func macEditorRenderedFragmentContainsDominantColor(
 
 @MainActor
 func macEditorDrawFragment(
-    _ fragmentView: SyntaxEditorTextLayoutFragmentView,
+    _ fragmentView: SyntaxEditorTextInputView.TextLayoutFragmentView,
     dirtyRect: NSRect,
     backgroundColor: NSColor
 ) {

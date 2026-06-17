@@ -252,7 +252,7 @@ extension SyntaxEditorUITests {
         let targetRange = NSRange(location: targetLocation, length: 5)
 
         editorView.findCoordinator?.willHighlight(
-            foundTextRange: SyntaxEditorTextRange(nsRange: targetRange),
+            foundTextRange: SyntaxEditorView.TextRange(nsRange: targetRange),
             document: 0
         )
 
@@ -397,7 +397,7 @@ extension SyntaxEditorUITests {
         var observedMarkedRange: NSRange?
         inputDelegate.textDidChangeHandler = { textInput in
             guard let editorView = textInput as? SyntaxEditorView,
-                  let markedRange = editorView.markedTextRange as? SyntaxEditorTextRange
+                  let markedRange = editorView.markedTextRange as? SyntaxEditorView.TextRange
             else {
                 return
             }
@@ -771,7 +771,7 @@ extension SyntaxEditorUITests {
               let emojiRange = editorView.characterRange(byExtending: afterA, in: .right),
               let previousEmojiRange = editorView.characterRange(byExtending: afterEmoji, in: .left),
               let combiningRange = editorView.characterRange(
-                  byExtending: SyntaxEditorTextPosition(offset: beforeCombiningCharacterOffset),
+                  byExtending: SyntaxEditorView.TextPosition(offset: beforeCombiningCharacterOffset),
                   in: .right
               )
         else {
@@ -3519,7 +3519,7 @@ extension SyntaxEditorUITests {
         let editedLineRect = editorView.caretRect(for: editedLinePosition)
         editorView.selectedRange = NSRange(location: insertionOffset, length: 0)
 
-        var previousCaretX = editorView.caretRect(for: SyntaxEditorTextPosition(offset: insertionOffset)).midX
+        var previousCaretX = editorView.caretRect(for: SyntaxEditorView.TextPosition(offset: insertionOffset)).midX
         for insertedSpaceCount in 1...12 {
             let previousSuspensionCount = await updateGate.currentSuspensionCount()
             editorView.insertText(" ")
