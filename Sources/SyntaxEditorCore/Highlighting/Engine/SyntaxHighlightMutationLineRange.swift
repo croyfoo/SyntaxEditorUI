@@ -2,14 +2,14 @@ import Foundation
 
 package enum SyntaxHighlightMutationLineRange {
     package static func changedLineRange(
-        for mutation: SyntaxHighlightMutation,
+        for mutation: SyntaxEditorTextChange.Replacement,
         in source: NSString
     ) -> NSRange {
         source.lineRange(for: changedRange(for: mutation, in: source))
     }
 
     package static func changedRange(
-        for mutation: SyntaxHighlightMutation,
+        for mutation: SyntaxEditorTextChange.Replacement,
         in source: NSString
     ) -> NSRange {
         guard source.length > 0 else { return NSRange(location: 0, length: 0) }

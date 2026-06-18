@@ -40,7 +40,7 @@ import SwiftTreeSitter
     /// Splices the edit through (pre-edit coordinates, same contract as the
     /// line table). Out-of-bounds coordinates clamp; the session validates
     /// mutations before committing, so clamping is never observed in practice.
-    func apply(mutation: SyntaxHighlightMutation) {
+    func apply(mutation: SyntaxEditorTextChange.Replacement) {
         let location = min(max(0, mutation.location), count)
         let removed = min(max(0, mutation.length), count - location)
         let replacement = mutation.replacement.utf16

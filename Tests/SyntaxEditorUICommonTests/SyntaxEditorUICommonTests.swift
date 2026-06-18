@@ -81,19 +81,19 @@ struct SyntaxEditorUICommonTests {
     @Test("Highlight token range index includes long tokens that start before the refresh range")
     func highlightTokenRangeIndexIncludesLongTokensBeforeRefreshRange() {
         let tokens = [
-            SyntaxHighlightToken(
+            SyntaxEditorHighlighting.Token(
                 range: NSRange(location: 0, length: 80),
                 rawCaptureName: "editor.syntax.swift.comment"
             ),
-            SyntaxHighlightToken(
+            SyntaxEditorHighlighting.Token(
                 range: NSRange(location: 10, length: 2),
                 rawCaptureName: "editor.syntax.swift.keyword"
             ),
-            SyntaxHighlightToken(
+            SyntaxEditorHighlighting.Token(
                 range: NSRange(location: 20, length: 2),
                 rawCaptureName: "editor.syntax.swift.string"
             ),
-            SyntaxHighlightToken(
+            SyntaxEditorHighlighting.Token(
                 range: NSRange(location: 30, length: 2),
                 rawCaptureName: "editor.syntax.swift.keyword"
             ),
@@ -153,7 +153,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
 
-        #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorColor)?.isEqual(baseForeground) == true)
+        #expect((system.textStorage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? SyntaxEditorTheme.Color)?.isEqual(baseForeground) == true)
         #expect(system.styleStore.foregroundColor(at: 0)?.isEqual(redColor) == true)
     }
 
@@ -242,7 +242,7 @@ struct SyntaxEditorUICommonTests {
         )
 
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            SyntaxEditorTextChange.Replacement(location: 5, length: 0, replacement: "xx"),
             currentTextLength: 12
         )
 
@@ -272,7 +272,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
         deletionStore.recordPendingEdit(
-            SyntaxHighlightMutation(location: 3, length: 2, replacement: ""),
+            SyntaxEditorTextChange.Replacement(location: 3, length: 2, replacement: ""),
             currentTextLength: 8
         )
         #expect(deletionStore.colorRuns(in: NSRange(location: 0, length: 8)).map(\.range) == [
@@ -295,7 +295,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
         replacementStore.recordPendingEdit(
-            SyntaxHighlightMutation(location: 2, length: 3, replacement: "XY"),
+            SyntaxEditorTextChange.Replacement(location: 2, length: 3, replacement: "XY"),
             currentTextLength: 9
         )
         #expect(replacementStore.colorRuns(in: NSRange(location: 0, length: 9)).map(\.range) == [
@@ -328,7 +328,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: baseFont
         )
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 0, length: 1, replacement: ""),
+            SyntaxEditorTextChange.Replacement(location: 0, length: 1, replacement: ""),
             currentTextLength: 9
         )
 
@@ -360,11 +360,11 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            SyntaxEditorTextChange.Replacement(location: 5, length: 0, replacement: "xx"),
             currentTextLength: 12
         )
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 0, length: 0, replacement: "y"),
+            SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: "y"),
             currentTextLength: 13
         )
 
@@ -395,15 +395,15 @@ struct SyntaxEditorUICommonTests {
         )
 
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 5, length: 0, replacement: "x"),
+            SyntaxEditorTextChange.Replacement(location: 5, length: 0, replacement: "x"),
             currentTextLength: 11
         )
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 6, length: 0, replacement: "y"),
+            SyntaxEditorTextChange.Replacement(location: 6, length: 0, replacement: "y"),
             currentTextLength: 12
         )
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 7, length: 0, replacement: "z"),
+            SyntaxEditorTextChange.Replacement(location: 7, length: 0, replacement: "z"),
             currentTextLength: 13
         )
 
@@ -432,7 +432,7 @@ struct SyntaxEditorUICommonTests {
         )
 
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 5, length: 0, replacement: " "),
+            SyntaxEditorTextChange.Replacement(location: 5, length: 0, replacement: " "),
             currentTextLength: 11
         )
 
@@ -466,7 +466,7 @@ struct SyntaxEditorUICommonTests {
         )
 
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            SyntaxEditorTextChange.Replacement(location: 5, length: 0, replacement: "xx"),
             currentTextLength: 12
         )
 
@@ -497,7 +497,7 @@ struct SyntaxEditorUICommonTests {
             )
             // Pending edit so the next partial commit lands in current runs.
             store.recordPendingEdit(
-                SyntaxHighlightMutation(location: 90, length: 0, replacement: "x"),
+                SyntaxEditorTextChange.Replacement(location: 90, length: 0, replacement: "x"),
                 currentTextLength: 101
             )
             store.commitSnapshot(
@@ -521,7 +521,7 @@ struct SyntaxEditorUICommonTests {
         // Insert before both runs: both shift right.
         let shifted = makeStore()
         shifted.recordPendingEdit(
-            SyntaxHighlightMutation(location: 0, length: 0, replacement: "ab"),
+            SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: "ab"),
             currentTextLength: 103
         )
         #expect(shifted.maintainsNormalizedRunInvariantForTesting)
@@ -534,7 +534,7 @@ struct SyntaxEditorUICommonTests {
         // until the next highlighter result replaces it.
         let split = makeStore()
         split.recordPendingEdit(
-            SyntaxHighlightMutation(location: 15, length: 0, replacement: "ab"),
+            SyntaxEditorTextChange.Replacement(location: 15, length: 0, replacement: "ab"),
             currentTextLength: 103
         )
         #expect(split.maintainsNormalizedRunInvariantForTesting)
@@ -547,7 +547,7 @@ struct SyntaxEditorUICommonTests {
         // separate runs, now adjacent; the second run loses its head.
         let bridged = makeStore()
         bridged.recordPendingEdit(
-            SyntaxHighlightMutation(location: 18, length: 14, replacement: ""),
+            SyntaxEditorTextChange.Replacement(location: 18, length: 14, replacement: ""),
             currentTextLength: 87
         )
         #expect(bridged.maintainsNormalizedRunInvariantForTesting)
@@ -559,7 +559,7 @@ struct SyntaxEditorUICommonTests {
         // Delete inside one run: the two kept sides re-merge into one run.
         let merged = makeStore()
         merged.recordPendingEdit(
-            SyntaxHighlightMutation(location: 12, length: 4, replacement: ""),
+            SyntaxEditorTextChange.Replacement(location: 12, length: 4, replacement: ""),
             currentTextLength: 97
         )
         #expect(merged.maintainsNormalizedRunInvariantForTesting)
@@ -595,12 +595,12 @@ struct SyntaxEditorUICommonTests {
         }
 
         // Scattered single-character inserts that defeat the map's coalescing.
-        var edits: [(SyntaxHighlightMutation, Int)] = []
+        var edits: [(SyntaxEditorTextChange.Replacement, Int)] = []
         var length = 100
         for step in 0..<12 {
             let location = (step * 17 + (step.isMultiple(of: 2) ? 2 : 55)) % max(1, length - 1)
             length += 1
-            edits.append((SyntaxHighlightMutation(location: location, length: 0, replacement: "x"), length))
+            edits.append((SyntaxEditorTextChange.Replacement(location: location, length: 0, replacement: "x"), length))
         }
 
         HighlightRenderSnapshotStore.pendingEditCheckpointThresholdOverrideForTesting = 1_000_000
@@ -685,7 +685,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            SyntaxEditorTextChange.Replacement(location: 5, length: 0, replacement: "xx"),
             currentTextLength: 12
         )
         #expect(store.hasPendingEditsForTesting)
@@ -724,7 +724,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            SyntaxEditorTextChange.Replacement(location: 5, length: 0, replacement: "xx"),
             currentTextLength: 12
         )
 
@@ -773,7 +773,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            SyntaxEditorTextChange.Replacement(location: 5, length: 0, replacement: "xx"),
             currentTextLength: 12
         )
         store.commitSnapshot(
@@ -854,7 +854,7 @@ struct SyntaxEditorUICommonTests {
             baseFont: nil
         )
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 5, length: 0, replacement: "xx"),
+            SyntaxEditorTextChange.Replacement(location: 5, length: 0, replacement: "xx"),
             currentTextLength: 12
         )
         store.commitSnapshot(
@@ -871,7 +871,7 @@ struct SyntaxEditorUICommonTests {
         )
 
         store.recordPendingEdit(
-            SyntaxHighlightMutation(location: 0, length: 0, replacement: "y"),
+            SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: "y"),
             currentTextLength: 13
         )
 
@@ -946,7 +946,7 @@ struct SyntaxEditorUICommonTests {
     }
 }
 
-private var baseForeground: SyntaxEditorColor {
+private var baseForeground: SyntaxEditorTheme.Color {
 #if canImport(UIKit)
     .label
 #elseif canImport(AppKit)
@@ -954,7 +954,7 @@ private var baseForeground: SyntaxEditorColor {
 #endif
 }
 
-private var redColor: SyntaxEditorColor {
+private var redColor: SyntaxEditorTheme.Color {
 #if canImport(UIKit)
     .red
 #elseif canImport(AppKit)
@@ -962,7 +962,7 @@ private var redColor: SyntaxEditorColor {
 #endif
 }
 
-private var blueColor: SyntaxEditorColor {
+private var blueColor: SyntaxEditorTheme.Color {
 #if canImport(UIKit)
     .blue
 #elseif canImport(AppKit)

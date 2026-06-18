@@ -8,8 +8,8 @@ struct ObjectiveCLanguage: SyntaxLanguageSupport {
     var language: SyntaxLanguage { .objectiveC }
     var displayName: String { "Objective-C" }
     var aliases: Set<String> { ["objective-c", "objectivec", "objc"] }
-    var treeSitterSupport: SyntaxTreeSitterSupport? {
-        SyntaxTreeSitterSupport(
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? {
+        SyntaxLanguage.TreeSitterSupport(
             name: "Objective-C",
             bundleName: "TreeSitterObjc_TreeSitterObjc",
             queryDirectories: Self.queryDirectories,
@@ -17,7 +17,7 @@ struct ObjectiveCLanguage: SyntaxLanguageSupport {
         )
     }
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult? {
         SyntaxLanguageTextUtilities.toggleLineComment(
             source: source,
             selection: selection,

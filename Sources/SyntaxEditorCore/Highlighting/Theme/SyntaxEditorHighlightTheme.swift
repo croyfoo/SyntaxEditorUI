@@ -2,17 +2,19 @@ import Foundation
 
 #if canImport(UIKit)
 import UIKit
-
-public typealias SyntaxEditorColor = UIColor
-public typealias SyntaxEditorFont = UIFont
 #elseif canImport(AppKit)
 import AppKit
-
-public typealias SyntaxEditorColor = NSColor
-public typealias SyntaxEditorFont = NSFont
 #endif
 
 public struct SyntaxEditorTheme: Identifiable, Hashable {
+#if canImport(UIKit)
+    public typealias Color = UIColor
+    public typealias Font = UIFont
+#elseif canImport(AppKit)
+    public typealias Color = NSColor
+    public typealias Font = NSFont
+#endif
+
     public enum Preset: String, CaseIterable, Identifiable, Sendable {
         case bare
         case basic
@@ -79,24 +81,24 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
     private let storage: Storage
 
     public init(
-        baseForeground: SyntaxEditorColor,
-        bracketBackground: SyntaxEditorColor,
-        comment: SyntaxEditorColor,
-        string: SyntaxEditorColor,
-        keyword: SyntaxEditorColor,
-        number: SyntaxEditorColor,
-        function: SyntaxEditorColor,
-        type: SyntaxEditorColor,
-        constant: SyntaxEditorColor,
-        variable: SyntaxEditorColor,
-        punctuation: SyntaxEditorColor,
-        font: SyntaxEditorFont,
-        background: SyntaxEditorColor = .clear
+        baseForeground: SyntaxEditorTheme.Color,
+        bracketBackground: SyntaxEditorTheme.Color,
+        comment: SyntaxEditorTheme.Color,
+        string: SyntaxEditorTheme.Color,
+        keyword: SyntaxEditorTheme.Color,
+        number: SyntaxEditorTheme.Color,
+        function: SyntaxEditorTheme.Color,
+        type: SyntaxEditorTheme.Color,
+        constant: SyntaxEditorTheme.Color,
+        variable: SyntaxEditorTheme.Color,
+        punctuation: SyntaxEditorTheme.Color,
+        font: SyntaxEditorTheme.Font,
+        background: SyntaxEditorTheme.Color = .clear
     ) {
-        let fontDescriptor = SyntaxEditorFontDescriptor(font: font)
+        let fontDescriptor = SyntaxEditorTheme.FontDescriptor(font: font)
         id = "custom.\(UUID().uuidString)"
         storage = .custom(
-            SyntaxEditorResolvedTheme(
+            SyntaxEditorTheme.Resolved(
                 background: background,
                 bracketBackground: bracketBackground,
                 base: .init(foreground: baseForeground, font: fontDescriptor),
@@ -150,51 +152,51 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
         preset?.displayName ?? "Custom"
     }
 
-    public var background: SyntaxEditorColor {
+    public var background: SyntaxEditorTheme.Color {
         resolved(for: nil).background
     }
 
-    public var baseForeground: SyntaxEditorColor {
+    public var baseForeground: SyntaxEditorTheme.Color {
         resolved(for: nil).base.foreground
     }
 
-    public var bracketBackground: SyntaxEditorColor {
+    public var bracketBackground: SyntaxEditorTheme.Color {
         resolved(for: nil).bracketBackground
     }
 
-    public var comment: SyntaxEditorColor {
+    public var comment: SyntaxEditorTheme.Color {
         resolved(for: nil).comment.foreground
     }
 
-    public var string: SyntaxEditorColor {
+    public var string: SyntaxEditorTheme.Color {
         resolved(for: nil).string.foreground
     }
 
-    public var keyword: SyntaxEditorColor {
+    public var keyword: SyntaxEditorTheme.Color {
         resolved(for: nil).keyword.foreground
     }
 
-    public var number: SyntaxEditorColor {
+    public var number: SyntaxEditorTheme.Color {
         resolved(for: nil).number.foreground
     }
 
-    public var function: SyntaxEditorColor {
+    public var function: SyntaxEditorTheme.Color {
         resolved(for: nil).function.foreground
     }
 
-    public var type: SyntaxEditorColor {
+    public var type: SyntaxEditorTheme.Color {
         resolved(for: nil).type.foreground
     }
 
-    public var constant: SyntaxEditorColor {
+    public var constant: SyntaxEditorTheme.Color {
         resolved(for: nil).constant.foreground
     }
 
-    public var variable: SyntaxEditorColor {
+    public var variable: SyntaxEditorTheme.Color {
         resolved(for: nil).variable.foreground
     }
 
-    public var punctuation: SyntaxEditorColor {
+    public var punctuation: SyntaxEditorTheme.Color {
         resolved(for: nil).punctuation.foreground
     }
 
@@ -208,8 +210,8 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
 
     package func resolved(
         for language: SyntaxLanguage?,
-        appearance: SyntaxEditorThemeAppearance? = nil
-    ) -> SyntaxEditorResolvedTheme {
+        appearance: SyntaxEditorTheme.Appearance? = nil
+    ) -> SyntaxEditorTheme.Resolved {
         switch storage {
         case let .custom(theme):
             theme
@@ -223,10 +225,10 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
     }
 
     package func style(
-        for syntaxID: EditorSourceSyntaxID,
+        for syntaxID: EditorSourceSyntax.ID,
         language: SyntaxLanguage?,
-        appearance: SyntaxEditorThemeAppearance? = nil
-    ) -> SyntaxEditorResolvedTextStyle? {
+        appearance: SyntaxEditorTheme.Appearance? = nil
+    ) -> SyntaxEditorTheme.TextStyle? {
         switch storage {
         case let .custom(theme):
             theme.style(for: syntaxID)
@@ -241,54 +243,55 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
     }
 
     private enum Storage {
-        case custom(SyntaxEditorResolvedTheme)
+        case custom(SyntaxEditorTheme.Resolved)
         case preset(Preset)
     }
 }
 
-package enum SyntaxEditorThemeAppearance {
+extension SyntaxEditorTheme {
+package enum Appearance {
     case light
     case dark
 }
 
-package struct SyntaxEditorResolvedTextStyle {
-    package let foreground: SyntaxEditorColor
-    package let font: SyntaxEditorFontDescriptor
+package struct TextStyle {
+    package let foreground: SyntaxEditorTheme.Color
+    package let font: SyntaxEditorTheme.FontDescriptor
 
     package init(
-        foreground: SyntaxEditorColor,
-        font: SyntaxEditorFontDescriptor
+        foreground: SyntaxEditorTheme.Color,
+        font: SyntaxEditorTheme.FontDescriptor
     ) {
         self.foreground = foreground
         self.font = font
     }
 
-    package func applyingPlatformFontSizeAdjustment() -> SyntaxEditorResolvedTextStyle {
-        SyntaxEditorResolvedTextStyle(
+    package func applyingPlatformFontSizeAdjustment() -> SyntaxEditorTheme.TextStyle {
+        SyntaxEditorTheme.TextStyle(
             foreground: foreground,
-            font: font.applyingPointSizeAdjustment(SyntaxEditorFontSize.platformThemePointSizeAdjustment)
+            font: font.applyingPointSizeAdjustment(SyntaxEditorTheme.FontSize.platformThemePointSizeAdjustment)
         )
     }
 }
 
-package struct SyntaxEditorResolvedTheme {
-    package let background: SyntaxEditorColor
-    package let bracketBackground: SyntaxEditorColor
-    package let base: SyntaxEditorResolvedTextStyle
-    package let comment: SyntaxEditorResolvedTextStyle
-    package let string: SyntaxEditorResolvedTextStyle
-    package let keyword: SyntaxEditorResolvedTextStyle
-    package let number: SyntaxEditorResolvedTextStyle
-    package let function: SyntaxEditorResolvedTextStyle
-    package let type: SyntaxEditorResolvedTextStyle
-    package let constant: SyntaxEditorResolvedTextStyle
-    package let variable: SyntaxEditorResolvedTextStyle
-    package let punctuation: SyntaxEditorResolvedTextStyle
+package struct Resolved {
+    package let background: SyntaxEditorTheme.Color
+    package let bracketBackground: SyntaxEditorTheme.Color
+    package let base: SyntaxEditorTheme.TextStyle
+    package let comment: SyntaxEditorTheme.TextStyle
+    package let string: SyntaxEditorTheme.TextStyle
+    package let keyword: SyntaxEditorTheme.TextStyle
+    package let number: SyntaxEditorTheme.TextStyle
+    package let function: SyntaxEditorTheme.TextStyle
+    package let type: SyntaxEditorTheme.TextStyle
+    package let constant: SyntaxEditorTheme.TextStyle
+    package let variable: SyntaxEditorTheme.TextStyle
+    package let punctuation: SyntaxEditorTheme.TextStyle
 
-    package var baseForeground: SyntaxEditorColor { base.foreground }
+    package var baseForeground: SyntaxEditorTheme.Color { base.foreground }
 
-    package func applyingPlatformFontSizeAdjustment() -> SyntaxEditorResolvedTheme {
-        SyntaxEditorResolvedTheme(
+    package func applyingPlatformFontSizeAdjustment() -> SyntaxEditorTheme.Resolved {
+        SyntaxEditorTheme.Resolved(
             background: background,
             bracketBackground: bracketBackground,
             base: base.applyingPlatformFontSizeAdjustment(),
@@ -304,8 +307,8 @@ package struct SyntaxEditorResolvedTheme {
         )
     }
 
-    package func style(for syntaxID: EditorSourceSyntaxID) -> SyntaxEditorResolvedTextStyle? {
-        switch EditorSourceSyntaxCategory.category(for: syntaxID) {
+    package func style(for syntaxID: EditorSourceSyntax.ID) -> SyntaxEditorTheme.TextStyle? {
+        switch EditorSourceSyntax.Category.category(for: syntaxID) {
         case .comment: comment
         case .string: string
         case .keyword: keyword
@@ -320,31 +323,31 @@ package struct SyntaxEditorResolvedTheme {
     }
 }
 
-package struct SyntaxEditorFontDescriptor: Hashable, Sendable {
+package struct FontDescriptor: Hashable, Sendable {
     package let family: String?
     package let size: CGFloat
-    package let weight: SyntaxEditorFontWeight
+    package let weight: SyntaxEditorTheme.FontWeight
 
-    package init(family: String?, size: CGFloat, weight: SyntaxEditorFontWeight) {
+    package init(family: String?, size: CGFloat, weight: SyntaxEditorTheme.FontWeight) {
         self.family = family
         self.size = size
         self.weight = weight
     }
 
-    package init(font: SyntaxEditorFont) {
+    package init(font: SyntaxEditorTheme.Font) {
 #if canImport(UIKit)
         let traits = font.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any]
         self.init(
             family: font.fontName,
             size: font.pointSize,
-            weight: SyntaxEditorFontWeight(platformWeightValue: Self.platformWeightValue(from: traits?[.weight]))
+            weight: SyntaxEditorTheme.FontWeight(platformWeightValue: Self.platformWeightValue(from: traits?[.weight]))
         )
 #elseif canImport(AppKit)
         let traits = font.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
         self.init(
             family: font.fontName,
             size: font.pointSize,
-            weight: SyntaxEditorFontWeight(platformWeightValue: Self.platformWeightValue(from: traits?[.weight]))
+            weight: SyntaxEditorTheme.FontWeight(platformWeightValue: Self.platformWeightValue(from: traits?[.weight]))
         )
 #endif
     }
@@ -359,14 +362,14 @@ package struct SyntaxEditorFontDescriptor: Hashable, Sendable {
         return nil
     }
 
-    package func applyingPointSizeAdjustment(_ adjustment: CGFloat) -> SyntaxEditorFontDescriptor {
+    package func applyingPointSizeAdjustment(_ adjustment: CGFloat) -> SyntaxEditorTheme.FontDescriptor {
         guard adjustment != 0 else { return self }
-        return SyntaxEditorFontDescriptor(family: family, size: size + adjustment, weight: weight)
+        return SyntaxEditorTheme.FontDescriptor(family: family, size: size + adjustment, weight: weight)
     }
 
 #if canImport(UIKit)
     package func platformFont(fontSizeDelta: Int = 0) -> UIFont {
-        let pointSize = SyntaxEditorFontSize.pointSize(size, applying: fontSizeDelta)
+        let pointSize = SyntaxEditorTheme.FontSize.pointSize(size, applying: fontSizeDelta)
         if let family,
            let font = UIFont(name: family, size: pointSize) {
             return font.applying(weight: weight)
@@ -375,7 +378,7 @@ package struct SyntaxEditorFontDescriptor: Hashable, Sendable {
     }
 #elseif canImport(AppKit)
     package func platformFont(fontSizeDelta: Int = 0) -> NSFont {
-        let pointSize = SyntaxEditorFontSize.pointSize(size, applying: fontSizeDelta)
+        let pointSize = SyntaxEditorTheme.FontSize.pointSize(size, applying: fontSizeDelta)
         if let family,
            let font = NSFont(name: family, size: pointSize) {
             return font.applying(weight: weight)
@@ -385,7 +388,7 @@ package struct SyntaxEditorFontDescriptor: Hashable, Sendable {
 #endif
 }
 
-package enum SyntaxEditorFontSize {
+package enum FontSize {
     package static let minimum: CGFloat = 4
     package static let maximum: CGFloat = 64
     #if os(macOS)
@@ -421,7 +424,7 @@ package enum SyntaxEditorFontSize {
     }
 }
 
-package enum SyntaxEditorFontWeight: String, CaseIterable, Sendable {
+package enum FontWeight: String, CaseIterable, Sendable {
     case ultraLight
     case thin
     case light
@@ -481,10 +484,11 @@ package enum SyntaxEditorFontWeight: String, CaseIterable, Sendable {
     }
 #endif
 }
+}
 
 #if canImport(UIKit)
 private extension UIFont {
-    func applying(weight: SyntaxEditorFontWeight) -> UIFont {
+    func applying(weight: SyntaxEditorTheme.FontWeight) -> UIFont {
         let descriptor = fontDescriptor.addingAttributes([
             .traits: [
                 UIFontDescriptor.TraitKey.weight: weight.uiFontWeight.rawValue,
@@ -495,7 +499,7 @@ private extension UIFont {
 }
 #elseif canImport(AppKit)
 private extension NSFont {
-    func applying(weight: SyntaxEditorFontWeight) -> NSFont {
+    func applying(weight: SyntaxEditorTheme.FontWeight) -> NSFont {
         let descriptor = fontDescriptor.addingAttributes([
             .traits: [
                 NSFontDescriptor.TraitKey.weight: weight.nsFontWeight.rawValue,
@@ -508,11 +512,11 @@ private extension NSFont {
 
 package enum SyntaxEditorHighlightTheme {
     package static func color(
-        for syntaxID: EditorSourceSyntaxID,
+        for syntaxID: EditorSourceSyntax.ID,
         in theme: SyntaxEditorTheme = .default,
         language: SyntaxLanguage? = nil,
-        appearance: SyntaxEditorThemeAppearance? = nil
-    ) -> SyntaxEditorColor? {
+        appearance: SyntaxEditorTheme.Appearance? = nil
+    ) -> SyntaxEditorTheme.Color? {
         style(
             for: syntaxID,
             in: theme,
@@ -522,11 +526,11 @@ package enum SyntaxEditorHighlightTheme {
     }
 
     package static func style(
-        for syntaxID: EditorSourceSyntaxID,
+        for syntaxID: EditorSourceSyntax.ID,
         in theme: SyntaxEditorTheme = .default,
         language: SyntaxLanguage? = nil,
-        appearance: SyntaxEditorThemeAppearance? = nil
-    ) -> SyntaxEditorResolvedTextStyle? {
+        appearance: SyntaxEditorTheme.Appearance? = nil
+    ) -> SyntaxEditorTheme.TextStyle? {
         guard isKnownSemanticSyntaxID(syntaxID, language: language) else {
             return nil
         }
@@ -537,10 +541,10 @@ package enum SyntaxEditorHighlightTheme {
         for sourceSyntaxID: String,
         in theme: SyntaxEditorTheme = .default,
         language: SyntaxLanguage? = nil,
-        appearance: SyntaxEditorThemeAppearance? = nil
-    ) -> SyntaxEditorColor? {
+        appearance: SyntaxEditorTheme.Appearance? = nil
+    ) -> SyntaxEditorTheme.Color? {
         color(
-            for: EditorSourceSyntaxID(sourceSyntaxID),
+            for: EditorSourceSyntax.ID(sourceSyntaxID),
             in: theme,
             language: language,
             appearance: appearance
@@ -551,10 +555,10 @@ package enum SyntaxEditorHighlightTheme {
         for sourceSyntaxID: String,
         in theme: SyntaxEditorTheme = .default,
         language: SyntaxLanguage? = nil,
-        appearance: SyntaxEditorThemeAppearance? = nil
-    ) -> SyntaxEditorResolvedTextStyle? {
+        appearance: SyntaxEditorTheme.Appearance? = nil
+    ) -> SyntaxEditorTheme.TextStyle? {
         style(
-            for: EditorSourceSyntaxID(sourceSyntaxID),
+            for: EditorSourceSyntax.ID(sourceSyntaxID),
             in: theme,
             language: language,
             appearance: appearance
@@ -562,7 +566,7 @@ package enum SyntaxEditorHighlightTheme {
     }
 
     package static func semanticStyleKeys(
-        for syntaxID: EditorSourceSyntaxID,
+        for syntaxID: EditorSourceSyntax.ID,
         language: SyntaxLanguage? = nil
     ) -> [String]? {
         guard isKnownSemanticSyntaxID(syntaxID, language: language) else {
@@ -575,14 +579,14 @@ package enum SyntaxEditorHighlightTheme {
         for sourceSyntaxID: String,
         language: SyntaxLanguage? = nil
     ) -> [String]? {
-        semanticStyleKeys(for: EditorSourceSyntaxID(sourceSyntaxID), language: language)
+        semanticStyleKeys(for: EditorSourceSyntax.ID(sourceSyntaxID), language: language)
     }
 
     private static func isKnownSemanticSyntaxID(
-        _ syntaxID: EditorSourceSyntaxID,
+        _ syntaxID: EditorSourceSyntax.ID,
         language: SyntaxLanguage?
     ) -> Bool {
-        EditorSourceSyntaxCategory.category(for: syntaxID) != nil
+        EditorSourceSyntax.Category.category(for: syntaxID) != nil
             || syntaxID == .plain
             || syntaxID == .identifier
             || BuiltInEditorThemeDefinitions.containsStyle(for: syntaxID)
@@ -592,7 +596,7 @@ package enum SyntaxEditorHighlightTheme {
 private extension BuiltInEditorThemeDefinitions {
     static let allStyleKeys: Set<String> = Set(all.values.flatMap { $0.styles.keys })
 
-    static func containsStyle(for syntaxID: EditorSourceSyntaxID) -> Bool {
+    static func containsStyle(for syntaxID: EditorSourceSyntax.ID) -> Bool {
         allStyleKeys.contains(syntaxID.styleKey)
     }
 }
@@ -601,10 +605,10 @@ enum BuiltInEditorThemeStore {
     static func resolvedTheme(
         for preset: SyntaxEditorTheme.Preset,
         language: SyntaxLanguage?,
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorResolvedTheme {
+        appearance: SyntaxEditorTheme.Appearance?
+    ) -> SyntaxEditorTheme.Resolved {
         let pair = pair(for: preset)
-        return SyntaxEditorResolvedTheme(
+        return SyntaxEditorTheme.Resolved(
             background: pair.backgroundColor(appearance: appearance),
             bracketBackground: fallbackBracketBackground(appearance: appearance),
             base: pair.style(for: .base, language: language, appearance: appearance),
@@ -621,11 +625,11 @@ enum BuiltInEditorThemeStore {
     }
 
     static func style(
-        for syntaxID: EditorSourceSyntaxID,
+        for syntaxID: EditorSourceSyntax.ID,
         preset: SyntaxEditorTheme.Preset,
         language: SyntaxLanguage?,
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorResolvedTextStyle? {
+        appearance: SyntaxEditorTheme.Appearance?
+    ) -> SyntaxEditorTheme.TextStyle? {
         let pair = pair(for: preset)
         if let exactStyle = pair.styleIfPresent(for: [syntaxID.styleKey], appearance: appearance) {
             return exactStyle
@@ -649,8 +653,8 @@ enum BuiltInEditorThemeStore {
     }
 
     private static func fallbackBracketBackground(
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorColor {
+        appearance: SyntaxEditorTheme.Appearance?
+    ) -> SyntaxEditorTheme.Color {
         color(light: .init(red: 245, green: 232, blue: 144, alpha: 1),
               dark: .init(red: 102, green: 92, blue: 43, alpha: 1),
               appearance: appearance)
@@ -659,15 +663,15 @@ enum BuiltInEditorThemeStore {
     fileprivate static func color(
         light: SyntaxEditorColorComponents,
         dark: SyntaxEditorColorComponents,
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorColor {
+        appearance: SyntaxEditorTheme.Appearance?
+    ) -> SyntaxEditorTheme.Color {
         switch appearance {
         case .light:
-            SyntaxEditorColor.syntaxEditorColor(light)
+            SyntaxEditorTheme.Color.syntaxEditorColor(light)
         case .dark:
-            SyntaxEditorColor.syntaxEditorColor(dark)
+            SyntaxEditorTheme.Color.syntaxEditorColor(dark)
         case .none:
-            SyntaxEditorColor.syntaxEditorDynamic(light: light, dark: dark)
+            SyntaxEditorTheme.Color.syntaxEditorDynamic(light: light, dark: dark)
         }
     }
 }
@@ -676,7 +680,7 @@ private struct BuiltInEditorThemePair {
     let light: BuiltInEditorThemeDefinition
     let dark: BuiltInEditorThemeDefinition
 
-    func backgroundColor(appearance: SyntaxEditorThemeAppearance?) -> SyntaxEditorColor {
+    func backgroundColor(appearance: SyntaxEditorTheme.Appearance?) -> SyntaxEditorTheme.Color {
         BuiltInEditorThemeStore.color(
             light: light.backgroundColor,
             dark: dark.backgroundColor,
@@ -687,15 +691,15 @@ private struct BuiltInEditorThemePair {
     func style(
         for slot: BuiltInEditorThemeSlot,
         language: SyntaxLanguage?,
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorResolvedTextStyle {
+        appearance: SyntaxEditorTheme.Appearance?
+    ) -> SyntaxEditorTheme.TextStyle {
         style(for: styleKeys(for: slot, language: language), appearance: appearance)
     }
 
     func style(
         for styleKeys: [String],
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorResolvedTextStyle {
+        appearance: SyntaxEditorTheme.Appearance?
+    ) -> SyntaxEditorTheme.TextStyle {
         switch appearance {
         case .light:
             return light.style(for: styleKeys).resolvedStyle()
@@ -704,7 +708,7 @@ private struct BuiltInEditorThemePair {
         case .none:
             let lightStyle = light.style(for: styleKeys)
             let darkStyle = dark.style(for: styleKeys)
-            return SyntaxEditorResolvedTextStyle(
+            return SyntaxEditorTheme.TextStyle(
                 foreground: BuiltInEditorThemeStore.color(
                     light: lightStyle.color,
                     dark: darkStyle.color,
@@ -717,8 +721,8 @@ private struct BuiltInEditorThemePair {
 
     func styleIfPresent(
         for styleKeys: [String],
-        appearance: SyntaxEditorThemeAppearance?
-    ) -> SyntaxEditorResolvedTextStyle? {
+        appearance: SyntaxEditorTheme.Appearance?
+    ) -> SyntaxEditorTheme.TextStyle? {
         switch appearance {
         case .light:
             return light.styleIfPresent(for: styleKeys)?.resolvedStyle()
@@ -730,7 +734,7 @@ private struct BuiltInEditorThemePair {
             else {
                 return nil
             }
-            return SyntaxEditorResolvedTextStyle(
+            return SyntaxEditorTheme.TextStyle(
                 foreground: BuiltInEditorThemeStore.color(
                     light: lightStyle.color,
                     dark: darkStyle.color,
@@ -788,14 +792,14 @@ private enum BuiltInEditorThemeSlot {
     case variable
     case punctuation
 
-    init(syntaxID: EditorSourceSyntaxID) {
+    init(syntaxID: EditorSourceSyntax.ID) {
         let value = syntaxID.rawValue
         if value == "preprocessor" || value.hasPrefix("preprocessor.") {
             self = .preprocessor
             return
         }
 
-        switch EditorSourceSyntaxCategory.category(for: syntaxID) {
+        switch EditorSourceSyntax.Category.category(for: syntaxID) {
         case .comment:
             self = .comment
         case .string:
@@ -850,10 +854,10 @@ struct BuiltInEditorThemeDefinition {
 
 struct BuiltInEditorTextStyleDefinition {
     let color: SyntaxEditorColorComponents
-    let font: SyntaxEditorFontDescriptor
+    let font: SyntaxEditorTheme.FontDescriptor
 
-    func resolvedStyle() -> SyntaxEditorResolvedTextStyle {
-        SyntaxEditorResolvedTextStyle(foreground: SyntaxEditorColor.syntaxEditorColor(color), font: font)
+    func resolvedStyle() -> SyntaxEditorTheme.TextStyle {
+        SyntaxEditorTheme.TextStyle(foreground: SyntaxEditorTheme.Color.syntaxEditorColor(color), font: font)
     }
 }
 

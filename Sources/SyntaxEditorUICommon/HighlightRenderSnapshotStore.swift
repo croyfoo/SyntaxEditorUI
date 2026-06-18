@@ -10,9 +10,9 @@ import AppKit
 
 package struct HighlightColorRun {
     package var range: NSRange
-    package let color: SyntaxEditorColor
+    package let color: SyntaxEditorTheme.Color
 
-    package init(range: NSRange, color: SyntaxEditorColor) {
+    package init(range: NSRange, color: SyntaxEditorTheme.Color) {
         self.range = range
         self.color = color
     }
@@ -20,9 +20,9 @@ package struct HighlightColorRun {
 
 package struct HighlightFontRun {
     package var range: NSRange
-    package let font: SyntaxEditorFont
+    package let font: SyntaxEditorTheme.Font
 
-    package init(range: NSRange, font: SyntaxEditorFont) {
+    package init(range: NSRange, font: SyntaxEditorTheme.Font) {
         self.range = range
         self.font = font
     }
@@ -42,8 +42,8 @@ package struct HighlightRenderSnapshot {
     package let revision: Int?
     package let language: SyntaxLanguage?
     package let textLength: Int
-    package let baseForeground: SyntaxEditorColor?
-    package let baseFont: SyntaxEditorFont?
+    package let baseForeground: SyntaxEditorTheme.Color?
+    package let baseFont: SyntaxEditorTheme.Font?
     package let colorRuns: [HighlightColorRun]
     package let fontRuns: [HighlightFontRun]
     package let suppressionRanges: [NSRange]
@@ -52,8 +52,8 @@ package struct HighlightRenderSnapshot {
         revision: Int?,
         language: SyntaxLanguage?,
         textLength: Int,
-        baseForeground: SyntaxEditorColor?,
-        baseFont: SyntaxEditorFont?,
+        baseForeground: SyntaxEditorTheme.Color?,
+        baseFont: SyntaxEditorTheme.Font?,
         colorRuns: [HighlightColorRun],
         fontRuns: [HighlightFontRun],
         suppressionRanges: [NSRange]
@@ -122,7 +122,7 @@ package struct PendingHighlightEditMap {
     }
 
     package mutating func recordPendingEdit(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         currentTextLength: Int
     ) {
         let currentTextLength = max(0, currentTextLength)
@@ -490,8 +490,8 @@ package struct HighlightResolvedVisibleRuns {
 
 private struct OptimisticHighlightRunSet {
     let range: NSRange
-    let color: SyntaxEditorColor?
-    let font: SyntaxEditorFont?
+    let color: SyntaxEditorTheme.Color?
+    let font: SyntaxEditorTheme.Font?
 }
 
 @MainActor
@@ -507,7 +507,7 @@ package final class HighlightRenderSnapshotStore {
     private var currentFontRuns: [HighlightFontRun] = []
     private var currentMaterializedRanges: [NSRange] = []
 
-    package var baseForeground: SyntaxEditorColor? {
+    package var baseForeground: SyntaxEditorTheme.Color? {
         snapshot.baseForeground
     }
 
@@ -548,29 +548,29 @@ package final class HighlightRenderSnapshotStore {
         return HighlightRunUtilities.coalescedColorRuns(runs)
     }
 
-    package func foregroundColor(at location: Int) -> SyntaxEditorColor? {
+    package func foregroundColor(at location: Int) -> SyntaxEditorTheme.Color? {
         guard location >= 0, location < currentTextLength else { return nil }
-        var color: SyntaxEditorColor?
+        var color: SyntaxEditorTheme.Color?
         forEachColorRun(in: NSRange(location: location, length: 1)) { run in
             color = run.color
         }
         return color
     }
 
-    package func font(at location: Int) -> SyntaxEditorFont? {
+    package func font(at location: Int) -> SyntaxEditorTheme.Font? {
         guard location >= 0, location < currentTextLength else { return nil }
-        var font: SyntaxEditorFont?
+        var font: SyntaxEditorTheme.Font?
         forEachFontRun(in: NSRange(location: location, length: 1)) { run in
             font = run.font
         }
         return font
     }
 
-    package func effectiveForegroundColor(at location: Int) -> SyntaxEditorColor? {
+    package func effectiveForegroundColor(at location: Int) -> SyntaxEditorTheme.Color? {
         foregroundColor(at: location) ?? baseForeground
     }
 
-    package func updateBaseForeground(_ color: SyntaxEditorColor?, textLength nextTextLength: Int? = nil) {
+    package func updateBaseForeground(_ color: SyntaxEditorTheme.Color?, textLength nextTextLength: Int? = nil) {
         let nextTextLength = nextTextLength.map { max(0, $0) } ?? currentTextLength
         let baseChanged: Bool
         switch (snapshot.baseForeground, color) {
@@ -601,7 +601,7 @@ package final class HighlightRenderSnapshotStore {
 
     @discardableResult
     package func updateBaseFont(
-        _ font: SyntaxEditorFont?,
+        _ font: SyntaxEditorTheme.Font?,
         textLength nextTextLength: Int? = nil,
         clearsFontRuns: Bool = false
     ) -> [NSRange] {
@@ -683,8 +683,8 @@ package final class HighlightRenderSnapshotStore {
         revision: Int?,
         language: SyntaxLanguage?,
         textLength nextTextLength: Int,
-        baseForeground: SyntaxEditorColor,
-        baseFont: SyntaxEditorFont?,
+        baseForeground: SyntaxEditorTheme.Color,
+        baseFont: SyntaxEditorTheme.Font?,
         suppressionRanges nextSuppressionRanges: [NSRange] = []
     ) -> [NSRange] {
         let nextTextLength = max(0, nextTextLength)
@@ -760,7 +760,7 @@ package final class HighlightRenderSnapshotStore {
     nonisolated(unsafe) package static var pendingEditCheckpointThresholdOverrideForTesting: Int?
 
     package func recordPendingEdit(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         currentTextLength nextTextLength: Int
     ) {
         let nextTextLength = max(0, nextTextLength)
@@ -777,7 +777,7 @@ package final class HighlightRenderSnapshotStore {
     }
 
     private func optimisticHighlightRunSet(
-        for mutation: SyntaxHighlightMutation,
+        for mutation: SyntaxEditorTextChange.Replacement,
         currentTextLength nextTextLength: Int
     ) -> OptimisticHighlightRunSet? {
         let replacementLength = mutation.replacement.utf16.count
@@ -820,7 +820,7 @@ package final class HighlightRenderSnapshotStore {
     private func inheritedForegroundColorForInsertion(
         at location: Int,
         previousTextLength: Int
-    ) -> SyntaxEditorColor? {
+    ) -> SyntaxEditorTheme.Color? {
         if location > 0,
            let color = foregroundColor(at: location - 1) {
             return color
@@ -834,7 +834,7 @@ package final class HighlightRenderSnapshotStore {
     private func inheritedFontForInsertion(
         at location: Int,
         previousTextLength: Int
-    ) -> SyntaxEditorFont? {
+    ) -> SyntaxEditorTheme.Font? {
         if location > 0,
            let font = font(at: location - 1) {
             return font
@@ -914,7 +914,7 @@ package final class HighlightRenderSnapshotStore {
     /// offset pass; the mapping semantics mirror `PendingHighlightEditMap`'s
     /// single-edit rules exactly.
     private func shiftCurrentRuns(
-        for mutation: SyntaxHighlightMutation,
+        for mutation: SyntaxEditorTextChange.Replacement,
         currentTextLength nextTextLength: Int
     ) {
         guard !currentColorRuns.isEmpty || !currentFontRuns.isEmpty || !currentMaterializedRanges.isEmpty else { return }
@@ -961,8 +961,8 @@ package final class HighlightRenderSnapshotStore {
 
     package func clear(
         textLength nextTextLength: Int,
-        baseForeground: SyntaxEditorColor,
-        baseFont: SyntaxEditorFont?
+        baseForeground: SyntaxEditorTheme.Color,
+        baseFont: SyntaxEditorTheme.Font?
     ) {
         let nextTextLength = max(0, nextTextLength)
         snapshot = HighlightRenderSnapshot(

@@ -8,8 +8,8 @@ struct JavaScriptLanguage: SyntaxLanguageSupport {
     var language: SyntaxLanguage { .javascript }
     var displayName: String { "JavaScript" }
     var aliases: Set<String> { ["javascript", "js"] }
-    var treeSitterSupport: SyntaxTreeSitterSupport? {
-        SyntaxTreeSitterSupport(
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? {
+        SyntaxLanguage.TreeSitterSupport(
             name: "JavaScript",
             bundleName: "TreeSitterJavaScript_TreeSitterJavaScript",
             queryDirectories: Self.queryDirectories,
@@ -17,7 +17,7 @@ struct JavaScriptLanguage: SyntaxLanguageSupport {
         )
     }
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult? {
         SyntaxLanguageTextUtilities.toggleLineComment(
             source: source,
             selection: selection,

@@ -48,7 +48,7 @@ extension SyntaxEditorView {
 
     public var selectedTextRange: UITextRange? {
         get {
-            SyntaxEditorTextRange(nsRange: selectedRange)
+            SyntaxEditorView.TextRange(nsRange: selectedRange)
         }
         set {
             preserveTextInteractionHorizontalOffsetForCurrentTurn()
@@ -80,7 +80,7 @@ extension SyntaxEditorView {
 
     public var markedTextRange: UITextRange? {
         guard let markedRange else { return nil }
-        return SyntaxEditorTextRange(nsRange: markedRange)
+        return SyntaxEditorView.TextRange(nsRange: markedRange)
     }
 
     public func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
@@ -121,8 +121,8 @@ extension SyntaxEditorView {
 
         inputDelegate?.textWillChange(self)
         inputDelegate?.selectionWillChange(self)
-        commitEdits(
-            [SyntaxEditorTextEdit(range: clampedRange, replacement: replacement)],
+        commitTextReplacements(
+            [SyntaxEditorTextChange.Replacement(range: clampedRange, replacement: replacement)],
             selectedRange: nextSelection,
             refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                 in: source,
@@ -168,8 +168,8 @@ extension SyntaxEditorView {
 
         let nextSelection = NSRange(location: clampedRange.location + replacement.utf16.count, length: 0)
 
-        commitEdits(
-            [SyntaxEditorTextEdit(range: clampedRange, replacement: replacement)],
+        commitTextReplacements(
+            [SyntaxEditorTextChange.Replacement(range: clampedRange, replacement: replacement)],
             selectedRange: nextSelection,
             refreshStartUTF16: SyntaxEditorRangeUtilities.lineStartUTF16Offset(
                 in: source,
@@ -201,11 +201,11 @@ extension SyntaxEditorView {
     }
 
     public var beginningOfDocument: UITextPosition {
-        SyntaxEditorTextPosition(offset: 0)
+        SyntaxEditorView.TextPosition(offset: 0)
     }
 
     public var endOfDocument: UITextPosition {
-        SyntaxEditorTextPosition(offset: text.utf16.count)
+        SyntaxEditorView.TextPosition(offset: text.utf16.count)
     }
 
     public func text(in range: UITextRange) -> String? {
@@ -236,9 +236,9 @@ extension SyntaxEditorView {
         let lower = min(fromOffset, toOffset)
         let upper = max(fromOffset, toOffset)
         let anchorsLineEndHit = lower == upper
-            && (((fromPosition as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false)
-                || ((toPosition as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false))
-        return SyntaxEditorTextRange(
+            && (((fromPosition as? SyntaxEditorView.TextPosition)?.anchorsLineEndHit ?? false)
+                || ((toPosition as? SyntaxEditorView.TextPosition)?.anchorsLineEndHit ?? false))
+        return SyntaxEditorView.TextRange(
             nsRange: NSRange(location: lower, length: upper - lower),
             anchorsLineEndHit: anchorsLineEndHit
         )
@@ -269,10 +269,10 @@ extension SyntaxEditorView {
 
     public func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
         guard let currentOffset = self.offset(for: position) else { return nil }
-        let anchorsLineEndHit = (position as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false
+        let anchorsLineEndHit = (position as? SyntaxEditorView.TextPosition)?.anchorsLineEndHit ?? false
         if anchorsLineEndHit,
            isAnchoredLineEndHitAdjustment(from: currentOffset, by: offset) {
-            return SyntaxEditorTextPosition(offset: currentOffset, anchorsLineEndHit: true)
+            return SyntaxEditorView.TextPosition(offset: currentOffset, anchorsLineEndHit: true)
         }
 
         let source = text as NSString
@@ -284,7 +284,7 @@ extension SyntaxEditorView {
         else {
             return nil
         }
-        return SyntaxEditorTextPosition(offset: nextOffset)
+        return SyntaxEditorView.TextPosition(offset: nextOffset)
     }
 
     public func position(
@@ -320,7 +320,7 @@ extension SyntaxEditorView {
         }
 
         guard let location = destinationSelection?.textRanges.first?.location else { return nil }
-        return SyntaxEditorTextPosition(offset: utf16Offset(for: location))
+        return SyntaxEditorView.TextPosition(offset: utf16Offset(for: location))
     }
 
     public func compare(_ position: UITextPosition, to other: UITextPosition) -> ComparisonResult {
@@ -359,7 +359,7 @@ extension SyntaxEditorView {
         guard let currentOffset = offset(for: position) else { return nil }
 
         guard let characterRange = composedCharacterRange(extendingFrom: currentOffset, in: direction) else { return nil }
-        return SyntaxEditorTextRange(nsRange: characterRange)
+        return SyntaxEditorView.TextRange(nsRange: characterRange)
     }
 
     public func baseWritingDirection(for position: UITextPosition, in direction: UITextStorageDirection) -> NSWritingDirection {
@@ -666,7 +666,7 @@ extension SyntaxEditorView {
 
         if length == 0 {
             return [
-                SyntaxEditorSelectionRect(
+                SyntaxEditorView.SelectionRect(
                     rect: caretRect(for: range.start),
                     containsStart: true,
                     containsEnd: true
@@ -685,7 +685,7 @@ extension SyntaxEditorView {
         ) { textSegmentRange, rect, _, _ in
             let isFirst = result.isEmpty
             result.append(
-                SyntaxEditorSelectionRect(
+                SyntaxEditorView.SelectionRect(
                     rect: rect.offsetBy(dx: self.textContentView.frame.minX, dy: self.textContentView.frame.minY),
                     containsStart: isFirst,
                     containsEnd: textSegmentRange?.endLocation.compare(textRange.endLocation) == .orderedSame
@@ -721,19 +721,19 @@ extension SyntaxEditorView {
         else {
             return nil
         }
-        let anchorsLineEndHit = (position as? SyntaxEditorTextPosition)?.anchorsLineEndHit ?? false
+        let anchorsLineEndHit = (position as? SyntaxEditorView.TextPosition)?.anchorsLineEndHit ?? false
 
         if isHardLineBreakCaretLocation(start) {
-            return SyntaxEditorTextRange(
+            return SyntaxEditorView.TextRange(
                 nsRange: NSRange(location: start, length: 0),
                 anchorsLineEndHit: anchorsLineEndHit
             )
         }
 
         guard let characterRange = composedCharacterRange(extendingFrom: start, in: .right) else {
-            return SyntaxEditorTextRange(nsRange: NSRange(location: start, length: 0))
+            return SyntaxEditorView.TextRange(nsRange: NSRange(location: start, length: 0))
         }
-        return SyntaxEditorTextRange(nsRange: characterRange)
+        return SyntaxEditorView.TextRange(nsRange: characterRange)
     }
 
     public func position(within range: UITextRange, atCharacterOffset offset: Int) -> UITextPosition? {
@@ -746,7 +746,7 @@ extension SyntaxEditorView {
             byComposedCharacterOffset: offset,
             limitedTo: endOffset
         )
-        return SyntaxEditorTextPosition(offset: targetOffset)
+        return SyntaxEditorView.TextPosition(offset: targetOffset)
     }
 
     public func characterOffset(of position: UITextPosition, within range: UITextRange) -> Int {
@@ -813,7 +813,7 @@ extension SyntaxEditorView {
             let location = hit.location
             let rawOffset = utf16Offset(for: location)
             let clampedOffset = clampedHitOffset(rawOffset, constrainedTo: range)
-            return SyntaxEditorTextPosition(
+            return SyntaxEditorView.TextPosition(
                 offset: clampedOffset,
                 anchorsLineEndHit: hit.anchorsLineEndHit && rawOffset == clampedOffset
             )
@@ -830,13 +830,13 @@ extension SyntaxEditorView {
         if let location = fallbackSelections.first?.textRanges.first?.location {
             let rawOffset = utf16Offset(for: location)
             let clampedOffset = clampedHitOffset(rawOffset, constrainedTo: range)
-            return SyntaxEditorTextPosition(
+            return SyntaxEditorView.TextPosition(
                 offset: clampedOffset
             )
         }
 
         let endOffset = clampedHitOffset(text.utf16.count, constrainedTo: range)
-        return SyntaxEditorTextPosition(offset: endOffset)
+        return SyntaxEditorView.TextPosition(offset: endOffset)
     }
 
     func caretTextLocation(
@@ -1084,10 +1084,10 @@ extension SyntaxEditorView {
         guard !isApplyingUndoRedo else { return }
 
         registerUndoAction(
-            restore: EditorUndoState(
-                edits: SyntaxEditorModel.inverseEdits(
+            restore: EditorCommandEngine.UndoState(
+                edits: SyntaxEditorModel.inverseReplacements(
                     for: [
-                        SyntaxEditorTextEdit(
+                        SyntaxEditorTextChange.Replacement(
                             range: NSRange(location: 0, length: restore.source.utf16.count),
                             replacement: finalText
                         ),
@@ -1097,9 +1097,9 @@ extension SyntaxEditorView {
                 selectedRange: restore.selectedRange,
                 refreshStartUTF16: restore.refreshStartUTF16
             ),
-            counterpart: EditorUndoState(
+            counterpart: EditorCommandEngine.UndoState(
                 edits: [
-                    SyntaxEditorTextEdit(
+                    SyntaxEditorTextChange.Replacement(
                         range: NSRange(location: 0, length: restore.source.utf16.count),
                         replacement: finalText
                     ),

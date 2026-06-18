@@ -214,7 +214,7 @@ extension SyntaxEditorUITests {
         let resetGate = ManualSyntaxHighlightGate()
         let highlighter = SyntaxEditorUITestHighlighter(
             tokens: [
-                SyntaxHighlightToken(
+                SyntaxEditorHighlighting.Token(
                     range: NSRange(location: 0, length: 3),
                     rawCaptureName: "editor.syntax.swift.keyword"
                 ),
@@ -249,7 +249,7 @@ extension SyntaxEditorUITests {
         guard didSuspendReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.baseForeground))
         await resetGate.resumeAll()
-        let didApplyReplacementHighlight = await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxHighlightPhase.complete)
+        let didApplyReplacementHighlight = await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
         #expect(didApplyReplacementHighlight)
         guard didApplyReplacementHighlight else { return }
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), updatedTheme.keyword))

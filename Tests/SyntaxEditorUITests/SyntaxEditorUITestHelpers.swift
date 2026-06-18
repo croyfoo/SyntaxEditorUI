@@ -177,7 +177,7 @@ extension SyntaxEditorView {
         self.init(model: testContext.model)
     }
 
-    convenience init(testContext: SyntaxEditorTestContext, highlighter: any SyntaxHighlighting) {
+    convenience init(testContext: SyntaxEditorTestContext, highlighter: any SyntaxEditorHighlighting.Engine) {
         self.init(model: testContext.model, highlighter: highlighter)
     }
 }
@@ -188,7 +188,7 @@ extension SyntaxEditorViewController {
     }
 }
 
-func syntaxEditorUITestColor(hex: UInt32) -> SyntaxEditorColor {
+func syntaxEditorUITestColor(hex: UInt32) -> SyntaxEditorTheme.Color {
     let red = CGFloat((hex >> 16) & 0xFF) / 255.0
     let green = CGFloat((hex >> 8) & 0xFF) / 255.0
     let blue = CGFloat(hex & 0xFF) / 255.0
@@ -201,19 +201,19 @@ func syntaxEditorUITestColor(hex: UInt32) -> SyntaxEditorColor {
 }
 
 func syntaxEditorUITestTheme(
-    baseForeground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x101112),
-    bracketBackground: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x202122),
-    comment: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x303132),
-    string: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x404142),
-    keyword: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x505152),
-    number: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x606162),
-    function: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x707172),
-    type: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x808182),
-    constant: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0x909192),
-    variable: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xA0A1A2),
-    punctuation: SyntaxEditorColor = syntaxEditorUITestColor(hex: 0xB0B1B2),
-    font: SyntaxEditorFont = SyntaxEditorFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-    background: SyntaxEditorColor = .clear
+    baseForeground: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x101112),
+    bracketBackground: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x202122),
+    comment: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x303132),
+    string: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x404142),
+    keyword: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x505152),
+    number: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x606162),
+    function: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x707172),
+    type: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x808182),
+    constant: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0x909192),
+    variable: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0xA0A1A2),
+    punctuation: SyntaxEditorTheme.Color = syntaxEditorUITestColor(hex: 0xB0B1B2),
+    font: SyntaxEditorTheme.Font = SyntaxEditorTheme.Font.monospacedSystemFont(ofSize: 12, weight: .regular),
+    background: SyntaxEditorTheme.Color = .clear
 ) -> SyntaxEditorTheme {
     SyntaxEditorTheme(
         baseForeground: baseForeground,
@@ -232,7 +232,7 @@ func syntaxEditorUITestTheme(
     )
 }
 
-func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: SyntaxEditorColor) -> Bool {
+func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorTheme.Color?, _ rhs: SyntaxEditorTheme.Color) -> Bool {
     guard let lhs else { return false }
 
 #if canImport(UIKit)
@@ -275,8 +275,8 @@ func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorColor?, _ rhs: SyntaxEdito
 
 @MainActor
 func syntaxEditorWaitForColor(
-    _ currentColor: @MainActor () -> SyntaxEditorColor?,
-    equals expectedColor: SyntaxEditorColor,
+    _ currentColor: @MainActor () -> SyntaxEditorTheme.Color?,
+    equals expectedColor: SyntaxEditorTheme.Color,
     attempts: Int = 20
 ) async -> Bool {
     for _ in 0..<attempts {
@@ -414,23 +414,23 @@ actor ManualSyntaxHighlightGate {
     }
 }
 
-actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
-    let tokens: [SyntaxHighlightToken]
-    let updateTokens: [SyntaxHighlightToken]?
+actor SyntaxEditorUITestHighlighter: SyntaxEditorHighlighting.Engine {
+    let tokens: [SyntaxEditorHighlighting.Token]
+    let updateTokens: [SyntaxEditorHighlighting.Token]?
     let resetGate: ManualSyntaxHighlightGate?
     let updateGate: ManualSyntaxHighlightGate?
     let updateRefreshRange: NSRange?
-    let updateTokenPayload: SyntaxHighlightTokenPayload
+    let updateTokenPayload: SyntaxEditorHighlighting.Result.Payload
     var resetCount = 0
     var updateCount = 0
 
     init(
-        tokens: [SyntaxHighlightToken] = [],
-        updateTokens: [SyntaxHighlightToken]? = nil,
+        tokens: [SyntaxEditorHighlighting.Token] = [],
+        updateTokens: [SyntaxEditorHighlighting.Token]? = nil,
         resetGate: ManualSyntaxHighlightGate? = nil,
         updateGate: ManualSyntaxHighlightGate? = nil,
         updateRefreshRange: NSRange? = nil,
-        updateTokenPayload: SyntaxHighlightTokenPayload = .replacement
+        updateTokenPayload: SyntaxEditorHighlighting.Result.Payload = .replacement
     ) {
         self.tokens = tokens
         self.updateTokens = updateTokens
@@ -440,7 +440,7 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
         self.updateTokenPayload = updateTokenPayload
     }
 
-    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxEditorHighlighting.Result {
         resetCount += 1
         if let resetGate {
             await resetGate.suspend()
@@ -451,9 +451,9 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     func update(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> SyntaxHighlightResult {
+    ) async -> SyntaxEditorHighlighting.Result {
         updateCount += 1
         if let updateGate {
             await updateGate.suspend()
@@ -473,15 +473,15 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     }
 
     func result(
-        tokens: [SyntaxHighlightToken]? = nil,
+        tokens: [SyntaxEditorHighlighting.Token]? = nil,
         source: String,
         language: SyntaxLanguage,
         revision: Int,
         refreshRange: NSRange?,
-        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot
-    ) -> SyntaxHighlightResult {
+        tokenPayload: SyntaxEditorHighlighting.Result.Payload = .fullSnapshot
+    ) -> SyntaxEditorHighlighting.Result {
         let resolvedTokens = language == .plainText ? [] : tokens ?? self.tokens
-        return SyntaxHighlightResult(
+        return SyntaxEditorHighlighting.Result(
             tokens: resolvedTokens,
             source: source,
             language: language,
@@ -495,21 +495,21 @@ actor SyntaxEditorUITestHighlighter: SyntaxHighlighting {
     }
 }
 
-actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
-    let fastTokens: [SyntaxHighlightToken]
-    let updateFastTokens: [SyntaxHighlightToken]?
-    let completeTokens: [SyntaxHighlightToken]
-    let updateCompleteTokens: [SyntaxHighlightToken]?
+actor SyntaxEditorPhasedTestHighlighter: SyntaxEditorHighlighting.Engine {
+    let fastTokens: [SyntaxEditorHighlighting.Token]
+    let updateFastTokens: [SyntaxEditorHighlighting.Token]?
+    let completeTokens: [SyntaxEditorHighlighting.Token]
+    let updateCompleteTokens: [SyntaxEditorHighlighting.Token]?
     let completeGate: ManualSyntaxHighlightGate?
     let updateRefreshRange: NSRange?
     var resetCount = 0
     var updateCount = 0
 
     init(
-        fastTokens: [SyntaxHighlightToken],
-        updateFastTokens: [SyntaxHighlightToken]? = nil,
-        completeTokens: [SyntaxHighlightToken],
-        updateCompleteTokens: [SyntaxHighlightToken]? = nil,
+        fastTokens: [SyntaxEditorHighlighting.Token],
+        updateFastTokens: [SyntaxEditorHighlighting.Token]? = nil,
+        completeTokens: [SyntaxEditorHighlighting.Token],
+        updateCompleteTokens: [SyntaxEditorHighlighting.Token]? = nil,
         completeGate: ManualSyntaxHighlightGate? = nil,
         updateRefreshRange: NSRange? = nil
     ) {
@@ -521,7 +521,7 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         self.updateRefreshRange = updateRefreshRange
     }
 
-    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxEditorHighlighting.Result {
         resetCount += 1
         if let completeGate {
             await completeGate.suspend()
@@ -540,7 +540,7 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
         source: String,
         language: SyntaxLanguage,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult> {
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         resetCount += 1
         return Self.phases(
             fastTokens: fastTokens,
@@ -556,9 +556,9 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
     func update(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> SyntaxHighlightResult {
+    ) async -> SyntaxEditorHighlighting.Result {
         updateCount += 1
         if let completeGate {
             await completeGate.suspend()
@@ -577,9 +577,9 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
     func updatePhases(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> AsyncStream<SyntaxHighlightResult> {
+    ) async -> AsyncStream<SyntaxEditorHighlighting.Result> {
         updateCount += 1
         return Self.phases(
             fastTokens: updateFastTokens ?? fastTokens,
@@ -598,15 +598,15 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
     }
 
     private static func phases(
-        fastTokens: [SyntaxHighlightToken],
-        completeTokens: [SyntaxHighlightToken],
+        fastTokens: [SyntaxEditorHighlighting.Token],
+        completeTokens: [SyntaxEditorHighlighting.Token],
         completeGate: ManualSyntaxHighlightGate?,
         refreshRange: NSRange?,
-        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot,
+        tokenPayload: SyntaxEditorHighlighting.Result.Payload = .fullSnapshot,
         source: String,
         language: SyntaxLanguage,
         revision: Int
-    ) -> AsyncStream<SyntaxHighlightResult> {
+    ) -> AsyncStream<SyntaxEditorHighlighting.Result> {
         AsyncStream { continuation in
             let task = Task {
                 continuation.yield(
@@ -647,15 +647,15 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxHighlighting {
     }
 
     private static func result(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         language: SyntaxLanguage,
         revision: Int,
-        phase: SyntaxHighlightPhase,
+        phase: SyntaxEditorHighlighting.Result.Phase,
         refreshRange: NSRange?,
-        tokenPayload: SyntaxHighlightTokenPayload = .fullSnapshot
-    ) -> SyntaxHighlightResult {
-        return SyntaxHighlightResult(
+        tokenPayload: SyntaxEditorHighlighting.Result.Payload = .fullSnapshot
+    ) -> SyntaxEditorHighlighting.Result {
+        return SyntaxEditorHighlighting.Result(
             tokens: tokens,
             source: source,
             language: language,
@@ -677,15 +677,15 @@ private func syntaxEditorTestClampedRange(_ range: NSRange, textLength: Int) -> 
     return NSRange(location: location, length: upperBound - location)
 }
 
-actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {
-    let swiftTokens: [SyntaxHighlightToken]
-    let jsonTokens: [SyntaxHighlightToken]
+actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxEditorHighlighting.Engine {
+    let swiftTokens: [SyntaxEditorHighlighting.Token]
+    let jsonTokens: [SyntaxEditorHighlighting.Token]
     let resetGate: ManualSyntaxHighlightGate?
     let updateGate: ManualSyntaxHighlightGate?
 
     init(
-        swiftTokens: [SyntaxHighlightToken],
-        jsonTokens: [SyntaxHighlightToken],
+        swiftTokens: [SyntaxEditorHighlighting.Token],
+        jsonTokens: [SyntaxEditorHighlighting.Token],
         resetGate: ManualSyntaxHighlightGate? = nil,
         updateGate: ManualSyntaxHighlightGate? = nil
     ) {
@@ -695,7 +695,7 @@ actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {
         self.updateGate = updateGate
     }
 
-    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxHighlightResult {
+    func reset(source: String, language: SyntaxLanguage, revision: Int) async -> SyntaxEditorHighlighting.Result {
         if let resetGate {
             await resetGate.suspend()
         }
@@ -705,24 +705,24 @@ actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {
     func update(
         source: String,
         language: SyntaxLanguage,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         revision: Int
-    ) async -> SyntaxHighlightResult {
+    ) async -> SyntaxEditorHighlighting.Result {
         if let updateGate {
             await updateGate.suspend()
         }
         return result(source: source, language: language, revision: revision)
     }
 
-    func result(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxHighlightResult {
-        let tokens: [SyntaxHighlightToken] = if language == SyntaxLanguage.swift {
+    func result(source: String, language: SyntaxLanguage, revision: Int) -> SyntaxEditorHighlighting.Result {
+        let tokens: [SyntaxEditorHighlighting.Token] = if language == SyntaxLanguage.swift {
             swiftTokens
         } else if language == SyntaxLanguage.json {
             jsonTokens
         } else {
             []
         }
-        return SyntaxHighlightResult(
+        return SyntaxEditorHighlighting.Result(
             tokens: tokens,
             source: source,
             language: language,
@@ -734,10 +734,10 @@ actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxHighlighting {
 
 func syntaxEditorDenseHighlightFixture(
     tokenCount: Int = 2_400
-) -> (source: String, tokens: [SyntaxHighlightToken]) {
+) -> (source: String, tokens: [SyntaxEditorHighlighting.Token]) {
     let source = String(repeating: "x", count: tokenCount)
     let tokens = (0..<tokenCount).map { index in
-        SyntaxHighlightToken(
+        SyntaxEditorHighlighting.Token(
             range: NSRange(location: index, length: 1),
             rawCaptureName: syntaxEditorDenseHighlightCaptureName(at: index)
         )
@@ -756,7 +756,7 @@ func syntaxEditorDenseHighlightCaptureName(at index: Int) -> String {
 func syntaxEditorDenseHighlightColor(
     in theme: SyntaxEditorTheme,
     at index: Int
-) -> SyntaxEditorColor {
+) -> SyntaxEditorTheme.Color {
     switch index % 3 {
     case 0: theme.keyword
     case 1: theme.string
@@ -1280,14 +1280,14 @@ func macEditorTextStorageBackgroundColor(_ editorView: SyntaxEditorView, at loca
 }
 
 @MainActor
-func macEditorVisibleFragmentViews(_ editorView: SyntaxEditorView) -> [SyntaxEditorTextLayoutFragmentView] {
+func macEditorVisibleFragmentViews(_ editorView: SyntaxEditorView) -> [SyntaxEditorTextInputView.TextLayoutFragmentView] {
     editorView.textView.layoutVisibleViewport()
-    return editorView.textView.textContentView.subviews.compactMap { $0 as? SyntaxEditorTextLayoutFragmentView }
+    return editorView.textView.textContentView.subviews.compactMap { $0 as? SyntaxEditorTextInputView.TextLayoutFragmentView }
 }
 
 @MainActor
 func macEditorRenderedFragmentContainsDominantColor(
-    _ fragmentView: SyntaxEditorTextLayoutFragmentView,
+    _ fragmentView: SyntaxEditorTextInputView.TextLayoutFragmentView,
     targetColor: NSColor,
     backgroundColor: NSColor,
     minimumPixelCount: Int = 8
@@ -1338,7 +1338,7 @@ func macEditorRenderedFragmentContainsDominantColor(
 
 @MainActor
 func macEditorDrawFragment(
-    _ fragmentView: SyntaxEditorTextLayoutFragmentView,
+    _ fragmentView: SyntaxEditorTextInputView.TextLayoutFragmentView,
     dirtyRect: NSRect,
     backgroundColor: NSColor
 ) {

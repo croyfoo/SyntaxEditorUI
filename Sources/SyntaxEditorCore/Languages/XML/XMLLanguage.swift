@@ -7,8 +7,8 @@ struct XMLLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .xml }
     var displayName: String { "XML" }
-    var treeSitterSupport: SyntaxTreeSitterSupport? {
-        SyntaxTreeSitterSupport(
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? {
+        SyntaxLanguage.TreeSitterSupport(
             name: "XML",
             bundleName: "TreeSitterXML_TreeSitterXML",
             queryDirectories: Self.queryDirectories,
@@ -16,7 +16,7 @@ struct XMLLanguage: SyntaxLanguageSupport {
         )
     }
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult? {
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let targetLinesRange = SyntaxLanguageTextUtilities.selectedLineEnvelope(

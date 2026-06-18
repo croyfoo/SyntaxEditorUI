@@ -17,7 +17,7 @@ package final class DocumentLineMetrics {
         index.reset(source: source)
     }
 
-    package func apply(edits: [SyntaxEditorTextEdit], previousSource: String) {
+    package func apply(edits: [SyntaxEditorTextChange.Replacement], previousSource: String) {
         index.apply(edits: edits, previousSource: previousSource)
     }
 

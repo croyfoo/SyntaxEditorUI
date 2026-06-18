@@ -1,6 +1,6 @@
 import Foundation
 
-typealias SyntaxLanguageTextEdit = SyntaxEditorTextEdit
+typealias SyntaxLanguageTextEdit = SyntaxEditorTextChange.Replacement
 
 enum SyntaxLanguageSelectionBoundaryAffinity {
     case forward
@@ -25,7 +25,7 @@ enum SyntaxLanguageTextUtilities {
         source: String,
         selection: NSRange,
         commentPrefix: String = "//"
-    ) -> SyntaxLanguageEdit? {
+    ) -> SyntaxLanguage.EditResult? {
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let lineRanges = selectedLineRanges(in: nsSource, selection: safeSelection)
@@ -74,7 +74,7 @@ enum SyntaxLanguageTextUtilities {
         selection: NSRange,
         openMarker: String,
         closeMarker: String
-    ) -> SyntaxLanguageEdit? {
+    ) -> SyntaxLanguage.EditResult? {
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let targetLinesRange = selectedLineEnvelope(in: nsSource, selection: safeSelection)
@@ -146,7 +146,7 @@ enum SyntaxLanguageTextUtilities {
         _ edits: [SyntaxLanguageTextEdit],
         source: String,
         selection: NSRange
-    ) -> SyntaxLanguageEdit {
+    ) -> SyntaxLanguage.EditResult {
         let sorted = edits.sorted { lhs, rhs in
             lhs.range.location > rhs.range.location
         }
@@ -161,7 +161,7 @@ enum SyntaxLanguageTextUtilities {
 
         let clampedStart = max(0, selectionStart)
         let clampedEnd = max(clampedStart, selectionEnd)
-        return SyntaxLanguageEdit(
+        return SyntaxLanguage.EditResult(
             edits: edits,
             selectedRange: NSRange(location: clampedStart, length: clampedEnd - clampedStart)
         )

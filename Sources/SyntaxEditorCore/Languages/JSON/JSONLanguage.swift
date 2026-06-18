@@ -7,8 +7,8 @@ struct JSONLanguage: SyntaxLanguageSupport {
 
     var language: SyntaxLanguage { .json }
     var displayName: String { "JSON" }
-    var treeSitterSupport: SyntaxTreeSitterSupport? {
-        SyntaxTreeSitterSupport(
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? {
+        SyntaxLanguage.TreeSitterSupport(
             name: "JSON",
             bundleName: "TreeSitterJSON_TreeSitterJSON",
             queryDirectories: Self.queryDirectories,
@@ -16,7 +16,7 @@ struct JSONLanguage: SyntaxLanguageSupport {
         )
     }
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult? {
         nil
     }
 

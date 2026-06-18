@@ -13,10 +13,10 @@ protocol SemanticPass: AnyObject {
     /// `tokens` is the store's merged materialization (base + stale overlays);
     /// passes strip/replace overlay tokens per their language's rules.
     func fullMerge(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         rootNode: Node?
-    ) -> (tokens: [SyntaxHighlightToken], isCancelled: Bool)
+    ) -> (tokens: [SyntaxEditorHighlighting.Token], isCancelled: Bool)
 
     /// Drops any cached state (after cancellation or reset).
     func invalidate()
@@ -25,7 +25,7 @@ protocol SemanticPass: AnyObject {
     /// the committed edit and bound the reclassification targets. nil means the
     /// pass has no incremental support (the engine runs `fullMerge`).
     func plannedUpdate(
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         envelope: NSRange,
         source: String,
         rootNode: Node?
@@ -35,9 +35,9 @@ protocol SemanticPass: AnyObject {
     /// store's base-plane tokens intersecting the target.
     func overlayTokens(
         in targetRange: NSRange,
-        baseTokens: [SyntaxHighlightToken],
+        baseTokens: [SyntaxEditorHighlighting.Token],
         source: String
-    ) -> [SyntaxHighlightToken]
+    ) -> [SyntaxEditorHighlighting.Token]
 
     /// True when the full-document pass can run as chunked `overlayTokens`
     /// calls over a debt set instead of one monolithic `fullMerge` — the
@@ -62,7 +62,7 @@ enum SemanticUpdatePlan {
 
 extension SemanticPass {
     func plannedUpdate(
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         envelope: NSRange,
         source: String,
         rootNode: Node?
@@ -72,9 +72,9 @@ extension SemanticPass {
 
     func overlayTokens(
         in targetRange: NSRange,
-        baseTokens: [SyntaxHighlightToken],
+        baseTokens: [SyntaxEditorHighlighting.Token],
         source: String
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         []
     }
 
@@ -115,10 +115,10 @@ final class SwiftSemanticPass: SemanticPass {
     private var state: SwiftSemanticOverlayState?
 
     func fullMerge(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         rootNode: Node?
-    ) -> (tokens: [SyntaxHighlightToken], isCancelled: Bool) {
+    ) -> (tokens: [SyntaxEditorHighlighting.Token], isCancelled: Bool) {
         let result = SwiftSyntaxOverlayTokenProvider.mergingOverlayResult(
             tokens: tokens,
             source: source,
@@ -130,7 +130,7 @@ final class SwiftSemanticPass: SemanticPass {
     }
 
     func plannedUpdate(
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         envelope: NSRange,
         source: String,
         rootNode: Node?
@@ -175,9 +175,9 @@ final class SwiftSemanticPass: SemanticPass {
 
     func overlayTokens(
         in targetRange: NSRange,
-        baseTokens: [SyntaxHighlightToken],
+        baseTokens: [SyntaxEditorHighlighting.Token],
         source: String
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         SwiftSyntaxOverlayTokenProvider.overlayTokens(
             in: targetRange,
             baseTokens: baseTokens,
@@ -216,10 +216,10 @@ final class ObjectiveCConservativeSemanticPass: SemanticPass {
     private var state: ObjectiveCSemanticOverlayState?
 
     func fullMerge(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         rootNode: Node?
-    ) -> (tokens: [SyntaxHighlightToken], isCancelled: Bool) {
+    ) -> (tokens: [SyntaxEditorHighlighting.Token], isCancelled: Bool) {
         let result = ObjectiveCSyntaxOverlayTokenProvider.mergingOverlayResult(
             tokens: tokens,
             source: source,
@@ -245,10 +245,10 @@ final class CSSSemanticPass: SemanticPass {
     }
 
     func fullMerge(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         source: String,
         rootNode: Node?
-    ) -> (tokens: [SyntaxHighlightToken], isCancelled: Bool) {
+    ) -> (tokens: [SyntaxEditorHighlighting.Token], isCancelled: Bool) {
         if let scanningRangesProvider {
             return (
                 CSSSyntaxOverlayTokenProvider.mergingOverlayTokens(

@@ -34,8 +34,8 @@ public final class SyntaxEditorModel {
     public var theme: SyntaxEditorTheme
     public var drawsBackground: Bool
     public var fontSizeDelta: Int
-    public private(set) var revision: Int
-    public private(set) var latestChange: SyntaxEditorTextChange?
+    public private(set) var textRevision: Int
+    public private(set) var latestTextChange: SyntaxEditorTextChange?
 
     public init(
         text: String = "",
@@ -58,8 +58,8 @@ public final class SyntaxEditorModel {
         self.theme = theme
         self.drawsBackground = drawsBackground
         self.fontSizeDelta = fontSizeDelta
-        self.revision = 0
-        self.latestChange = nil
+        self.textRevision = 0
+        self.latestTextChange = nil
     }
 
     @discardableResult
@@ -77,20 +77,20 @@ public final class SyntaxEditorModel {
             return nil
         }
 
-        let edit = SyntaxEditorTextEdit(
+        let replacement = SyntaxEditorTextChange.Replacement(
             range: NSRange(location: 0, length: textStorage.utf16.count),
             replacement: text
         )
         textStorage = text
         selectedRangeStorage = nextSelectedRange
-        revision += 1
+        textRevision += 1
         let change = SyntaxEditorTextChange(
-            revision: revision,
-            edits: [edit],
+            textRevision: textRevision,
+            replacements: [replacement],
             selectedRange: nextSelectedRange,
-            kind: .replacement
+            kind: .wholeDocumentReplacement
         )
-        latestChange = change
+        latestTextChange = change
         return change
     }
 
@@ -105,14 +105,14 @@ public final class SyntaxEditorModel {
     }
 
     public func increaseFontSize() {
-        fontSizeDelta = SyntaxEditorFontSize.increasedDelta(
+        fontSizeDelta = SyntaxEditorTheme.FontSize.increasedDelta(
             fontSizeDelta,
             forBasePointSize: fontSizeCommandBasePointSize
         )
     }
 
     public func decreaseFontSize() {
-        fontSizeDelta = SyntaxEditorFontSize.decreasedDelta(
+        fontSizeDelta = SyntaxEditorTheme.FontSize.decreasedDelta(
             fontSizeDelta,
             forBasePointSize: fontSizeCommandBasePointSize
         )
@@ -127,11 +127,11 @@ public final class SyntaxEditorModel {
     }
 
     @discardableResult
-    package func commitEdits(
-        _ edits: [SyntaxEditorTextEdit],
+    package func commitTextReplacements(
+        _ replacements: [SyntaxEditorTextChange.Replacement],
         selectedRange: NSRange
     ) -> SyntaxEditorTextChange? {
-        guard !edits.isEmpty else {
+        guard !replacements.isEmpty else {
             selectedRangeStorage = SyntaxEditorRangeUtilities.clampedRange(
                 selectedRange,
                 utf16Length: textStorage.utf16.count
@@ -139,84 +139,159 @@ public final class SyntaxEditorModel {
             return nil
         }
 
-        textStorage = Self.applying(edits, to: textStorage)
+        textStorage = Self.applying(replacements, to: textStorage)
         let nextSelectedRange = SyntaxEditorRangeUtilities.clampedRange(
             selectedRange,
             utf16Length: textStorage.utf16.count
         )
         selectedRangeStorage = nextSelectedRange
-        revision += 1
+        textRevision += 1
         let change = SyntaxEditorTextChange(
-            revision: revision,
-            edits: edits,
+            textRevision: textRevision,
+            replacements: replacements,
             selectedRange: nextSelectedRange,
             kind: .incremental
         )
-        latestChange = change
+        latestTextChange = change
         return change
     }
 
-    nonisolated package static func applying(_ edits: [SyntaxEditorTextEdit], to source: String) -> String {
+    nonisolated package static func applying(
+        _ replacements: [SyntaxEditorTextChange.Replacement],
+        to source: String
+    ) -> String {
         let mutable = NSMutableString(string: source)
-        for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
-            mutable.replaceCharacters(in: edit.range, with: edit.replacement)
+        for replacement in replacements.sorted(by: { $0.range.location > $1.range.location }) {
+            mutable.replaceCharacters(in: replacement.range, with: replacement.replacement)
         }
         return mutable as String
     }
 
-    nonisolated package static func inverseEdits(
-        for edits: [SyntaxEditorTextEdit],
+    nonisolated package static func inverseReplacements(
+        for replacements: [SyntaxEditorTextChange.Replacement],
         in source: String
-    ) -> [SyntaxEditorTextEdit] {
+    ) -> [SyntaxEditorTextChange.Replacement] {
         let nsSource = source as NSString
         var delta = 0
-        return edits
+        return replacements
             .sorted { $0.range.location < $1.range.location }
-            .map { edit in
-                let original = nsSource.substring(with: edit.range)
-                let inverse = SyntaxEditorTextEdit(
+            .map { replacement in
+                let original = nsSource.substring(with: replacement.range)
+                let inverse = SyntaxEditorTextChange.Replacement(
                     range: NSRange(
-                        location: edit.range.location + delta,
-                        length: edit.replacement.utf16.count
+                        location: replacement.range.location + delta,
+                        length: replacement.replacement.utf16.count
                     ),
                     replacement: original
                 )
-                delta += edit.replacement.utf16.count - edit.range.length
+                delta += replacement.replacement.utf16.count - replacement.range.length
                 return inverse
             }
     }
 }
 
-public struct SyntaxEditorTextEdit: Equatable, Sendable {
-    public let range: NSRange
-    public let replacement: String
-
-    public init(range: NSRange, replacement: String) {
-        self.range = range
-        self.replacement = replacement
-    }
-}
-
 public struct SyntaxEditorTextChange: Equatable, Sendable {
+    public struct Replacement: Equatable, Sendable {
+        public let range: NSRange
+        public let replacement: String
+
+        public var location: Int {
+            range.location
+        }
+
+        public var length: Int {
+            range.length
+        }
+
+        public init(range: NSRange, replacement: String) {
+            self.range = range
+            self.replacement = replacement
+        }
+
+        public init(location: Int, length: Int, replacement: String) {
+            self.init(
+                range: NSRange(location: location, length: length),
+                replacement: replacement
+            )
+        }
+
+        package static func singleReplacement(from oldText: String, to newText: String) -> Replacement? {
+            guard oldText != newText else { return nil }
+
+            let oldUTF16 = Array(oldText.utf16)
+            let newUTF16 = Array(newText.utf16)
+            let prefixLength = commonPrefixLength(oldUTF16, newUTF16)
+            let suffixLength = commonSuffixLength(
+                oldUTF16,
+                newUTF16,
+                prefixLength: prefixLength
+            )
+
+            let oldChangeEnd = oldUTF16.count - suffixLength
+            let newChangeEnd = newUTF16.count - suffixLength
+            let replacementUTF16 = Array(newUTF16[prefixLength..<newChangeEnd])
+
+            return Replacement(
+                range: NSRange(
+                    location: prefixLength,
+                    length: oldChangeEnd - prefixLength
+                ),
+                replacement: String(decoding: replacementUTF16, as: UTF16.self)
+            )
+        }
+    }
+
     public enum Kind: Equatable, Sendable {
         case incremental
-        case replacement
+        case wholeDocumentReplacement
     }
 
-    public let revision: Int
-    public let edits: [SyntaxEditorTextEdit]
+    public let textRevision: Int
+    public let replacements: [Replacement]
     public let selectedRange: NSRange
     public let kind: Kind
 
     public init(
-        revision: Int,
-        edits: [SyntaxEditorTextEdit],
+        textRevision: Int,
+        replacements: [Replacement],
         selectedRange: NSRange,
         kind: Kind
     ) {
-        self.revision = revision
-        self.edits = edits
+        self.textRevision = textRevision
+        self.replacements = replacements
         self.selectedRange = selectedRange
         self.kind = kind
+    }
+}
+
+private extension SyntaxEditorTextChange.Replacement {
+    static func commonPrefixLength(_ lhs: [UInt16], _ rhs: [UInt16]) -> Int {
+        let count = min(lhs.count, rhs.count)
+        var index = 0
+        while index < count, lhs[index] == rhs[index] {
+            index += 1
+        }
+        return index
+    }
+
+    static func commonSuffixLength(
+        _ lhs: [UInt16],
+        _ rhs: [UInt16],
+        prefixLength: Int
+    ) -> Int {
+        var lhsIndex = lhs.count
+        var rhsIndex = rhs.count
+        var matched = 0
+
+        while lhsIndex > prefixLength,
+              rhsIndex > prefixLength,
+              lhs[lhsIndex - 1] == rhs[rhsIndex - 1]
+        {
+            lhsIndex -= 1
+            rhsIndex -= 1
+            matched += 1
+        }
+
+        return matched
     }
 }

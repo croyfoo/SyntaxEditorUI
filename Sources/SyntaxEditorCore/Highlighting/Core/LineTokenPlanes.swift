@@ -57,7 +57,7 @@ package final class LineTokenPlanes {
 
     // MARK: - Whole-document writes
 
-    package func reset(tokens: [SyntaxHighlightToken], lineTable: HighlightLineTable) {
+    package func reset(tokens: [SyntaxEditorHighlighting.Token], lineTable: HighlightLineTable) {
         lines = ContiguousArray(repeating: Line(), count: max(1, lineTable.lineCount))
         insert(tokens: tokens, lineTable: lineTable)
         sortAllLines()
@@ -77,7 +77,7 @@ package final class LineTokenPlanes {
     /// end), which differ from the line table's own envelope; only the resulting
     /// line COUNTS must agree, and they do because both splice the same text.
     package func applyEdit(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         previousSource: String,
         lineTable: HighlightLineTable
     ) -> EditResult {
@@ -111,7 +111,7 @@ package final class LineTokenPlanes {
         let affectedRange = NSRange(location: lowerOffset, length: max(0, upperOffset - lowerOffset))
         let oldSegment = nsSource.substring(with: affectedRange)
         let newSegment = SyntaxEditorModel.applying([
-            SyntaxEditorTextEdit(
+            SyntaxEditorTextChange.Replacement(
                 range: NSRange(
                     location: mutation.location - affectedRange.location,
                     length: mutation.length
@@ -289,7 +289,7 @@ package final class LineTokenPlanes {
     /// previous behavior), which is what keeps real structure flips correct.
     package func replaceTokens(
         in range: NSRange,
-        with tokens: [SyntaxHighlightToken],
+        with tokens: [SyntaxEditorHighlighting.Token],
         plane: Plane,
         lineTable: HighlightLineTable
     ) -> NSRange? {
@@ -384,7 +384,7 @@ package final class LineTokenPlanes {
 
     private func chainPreservingReplace(
         in range: NSRange,
-        with tokens: [SyntaxHighlightToken],
+        with tokens: [SyntaxEditorHighlighting.Token],
         plane: Plane,
         lineTable: HighlightLineTable,
         lower: Int,
@@ -784,7 +784,7 @@ package final class LineTokenPlanes {
     // MARK: - Insertion
 
     private func insert(
-        tokens: [SyntaxHighlightToken],
+        tokens: [SyntaxEditorHighlighting.Token],
         lineTable: HighlightLineTable,
         willTouch: (Int) -> Void = { _ in }
     ) {
@@ -840,7 +840,7 @@ package final class LineTokenPlanes {
     package func tokens(
         in range: NSRange? = nil,
         lineTable: HighlightLineTable
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         guard !lines.isEmpty else { return [] }
         let lineRange: Range<Int>
         if let range {
@@ -904,7 +904,7 @@ package final class LineTokenPlanes {
             }
         }
 
-        var tokens: [SyntaxHighlightToken] = []
+        var tokens: [SyntaxEditorHighlighting.Token] = []
         tokens.reserveCapacity(results.count)
         var order: [(range: NSRange, styleID: UInt16)] = []
         order.reserveCapacity(results.count)
@@ -922,7 +922,7 @@ package final class LineTokenPlanes {
         }
         for entry in order {
             let style = styles[entry.styleID]
-            tokens.append(SyntaxHighlightToken(
+            tokens.append(SyntaxEditorHighlighting.Token(
                 range: entry.range,
                 syntaxID: style.syntaxID,
                 language: style.language,

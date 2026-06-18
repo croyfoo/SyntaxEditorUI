@@ -26,7 +26,7 @@ package final class LineMetricsIndex {
         rebuildColumnCountsAndHeap()
     }
 
-    package func apply(edits: [SyntaxEditorTextEdit], previousSource: String) {
+    package func apply(edits: [SyntaxEditorTextChange.Replacement], previousSource: String) {
         guard !edits.isEmpty else { return }
         guard let affected = affectedRange(for: edits, in: previousSource) else {
             reset(source: SyntaxEditorModel.applying(edits, to: previousSource))
@@ -36,7 +36,7 @@ package final class LineMetricsIndex {
         let nsSource = previousSource as NSString
         let oldSegment = nsSource.substring(with: affected.range)
         let localEdits = edits.map {
-            SyntaxEditorTextEdit(
+            SyntaxEditorTextChange.Replacement(
                 range: NSRange(location: $0.range.location - affected.range.location, length: $0.range.length),
                 replacement: $0.replacement
             )
@@ -80,7 +80,7 @@ package final class LineMetricsIndex {
 }
 
 private extension LineMetricsIndex {
-    func affectedRange(for edits: [SyntaxEditorTextEdit], in source: String) -> (range: NSRange, includesLineBreakMutation: Bool)? {
+    func affectedRange(for edits: [SyntaxEditorTextChange.Replacement], in source: String) -> (range: NSRange, includesLineBreakMutation: Bool)? {
         let nsSource = source as NSString
         let sorted = edits.sorted { $0.range.location < $1.range.location }
         guard let first = sorted.first, let last = sorted.last else { return nil }

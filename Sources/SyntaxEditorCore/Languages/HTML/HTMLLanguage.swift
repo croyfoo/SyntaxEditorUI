@@ -8,8 +8,8 @@ struct HTMLLanguage: SyntaxLanguageSupport {
     var language: SyntaxLanguage { .html }
     var displayName: String { "HTML" }
     var aliases: Set<String> { ["html", "htm"] }
-    var treeSitterSupport: SyntaxTreeSitterSupport? {
-        SyntaxTreeSitterSupport(
+    var treeSitterSupport: SyntaxLanguage.TreeSitterSupport? {
+        SyntaxLanguage.TreeSitterSupport(
             name: "HTML",
             bundleName: "TreeSitterHTML_TreeSitterHTML",
             queryDirectories: Self.queryDirectories,
@@ -17,7 +17,7 @@ struct HTMLLanguage: SyntaxLanguageSupport {
         )
     }
 
-    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguageEdit? {
+    func toggleComment(source: String, selection: NSRange) -> SyntaxLanguage.EditResult? {
         let nsSource = source as NSString
         let safeSelection = SyntaxEditorRangeUtilities.clampedRange(selection, utf16Length: nsSource.length)
         let selectionEnd = safeSelection.location + safeSelection.length
@@ -133,7 +133,7 @@ private extension HTMLLanguage {
         source: String,
         selection: NSRange,
         context: EmbeddedRawTextContext
-    ) -> SyntaxLanguageEdit? {
+    ) -> SyntaxLanguage.EditResult? {
         let nsSource = source as NSString
         let embeddedSource = nsSource.substring(with: context.range)
         let embeddedSelection = NSRange(
@@ -148,7 +148,7 @@ private extension HTMLLanguage {
         }
 
         let edits = embeddedEdit.edits.map {
-            SyntaxEditorTextEdit(
+            SyntaxEditorTextChange.Replacement(
                 range: NSRange(
                     location: context.range.location + $0.range.location,
                     length: $0.range.length
@@ -156,7 +156,7 @@ private extension HTMLLanguage {
                 replacement: $0.replacement
             )
         }
-        return SyntaxLanguageEdit(
+        return SyntaxLanguage.EditResult(
             edits: edits,
             selectedRange: NSRange(
                 location: context.range.location + embeddedEdit.selectedRange.location,

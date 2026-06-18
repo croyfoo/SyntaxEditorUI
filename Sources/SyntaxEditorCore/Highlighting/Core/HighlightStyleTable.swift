@@ -7,13 +7,13 @@ import Foundation
 /// string work (the old comparator split `syntaxID.rawValue` on every call).
 package final class HighlightStyleTable {
     package struct Style: Hashable {
-        package let syntaxID: EditorSourceSyntaxID
+        package let syntaxID: EditorSourceSyntax.ID
         package let language: SyntaxLanguage?
         package let rawCaptureName: String
         package let isSemanticOverlay: Bool
 
         package init(
-            syntaxID: EditorSourceSyntaxID,
+            syntaxID: EditorSourceSyntax.ID,
             language: SyntaxLanguage?,
             rawCaptureName: String,
             isSemanticOverlay: Bool
@@ -45,7 +45,7 @@ package final class HighlightStyleTable {
         styles[Int(id)]
     }
 
-    package func intern(_ token: SyntaxHighlightToken) -> UInt16 {
+    package func intern(_ token: SyntaxEditorHighlighting.Token) -> UInt16 {
         intern(Style(
             syntaxID: token.syntaxID,
             language: token.language,
@@ -102,8 +102,9 @@ package final class HighlightStyleTable {
 
     private static func rank(for style: Style, ordinal: UInt16) -> UInt32 {
         let priority = UInt32(renderPriority(for: style.syntaxID))
-        // Specificity = `rawValue.split(separator: ".").count` in the legacy
-        // comparator; split drops empty components, so count non-empty runs.
+        // Specificity matches the token display comparator's
+        // `rawValue.split(separator: ".").count`; split drops empty
+        // components, so count non-empty runs.
         var dotComponents = 0
         var inComponent = false
         for character in style.syntaxID.rawValue {
@@ -117,11 +118,11 @@ package final class HighlightStyleTable {
         return (priority << 24) | (UInt32(min(255, dotComponents)) << 16) | UInt32(ordinal)
     }
 
-    /// Legacy render priority, ported verbatim from
-    /// `SyntaxHighlightTokenOrdering.renderPriority` — branch order matters
+    /// Render priority matches `SyntaxHighlightTokenOrdering.renderPriority`;
+    /// branch order matters
     /// (e.g. "comment.doc" wins over the ".doc"-less comparisons, and
     /// "identifier.macro.system" falls through to the `.macro` branch = 3).
-    package static func renderPriority(for syntaxID: EditorSourceSyntaxID) -> Int {
+    package static func renderPriority(for syntaxID: EditorSourceSyntax.ID) -> Int {
         let value = syntaxID.rawValue
         if value == "plain" {
             return 0

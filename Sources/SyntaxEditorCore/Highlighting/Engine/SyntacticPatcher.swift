@@ -4,9 +4,9 @@ import SwiftTreeSitterLayer
 
 /// Syntactic-layer plumbing for the highlighting session: layer construction,
 /// content readers, input edits, envelope computation, capture queries with
-/// envelope clipping, and mutation validation. Mechanical helpers are ported
-/// verbatim from the previous engine; the two NEW behaviors are documented at
-/// `patchEnvelope` and `validateMutation`.
+/// envelope clipping, and mutation validation. `patchEnvelope` and
+/// `validateMutation` define the edit-boundary contracts shared by reset and
+/// incremental highlighting paths.
 enum SyntacticPatcher {
     static func layeredSource(for source: String, setup: HighlightingSetup) -> String {
         setup.usesHTMLPreprocessing
@@ -20,11 +20,11 @@ enum SyntacticPatcher {
     /// transient restructurings (unbalanced braces) legitimately widen it.
     static func patchEnvelope(
         invalidated: IndexSet,
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         source: String,
         sourceUTF16Length: Int
     ) -> NSRange {
-        let queryRange = SyntaxHighlightInvalidation.queryRange(
+        let queryRange = SyntaxEditorHighlighting.Invalidation.queryRange(
             invalidatedSet: invalidated,
             mutation: mutation,
             sourceUTF16Length: sourceUTF16Length
@@ -57,11 +57,11 @@ enum SyntacticPatcher {
         source: String,
         language: SyntaxLanguage,
         clipTo: NSRange?
-    ) -> [SyntaxHighlightToken] {
+    ) -> [SyntaxEditorHighlighting.Token] {
         guard range.length > 0 else { return [] }
         do {
             let sourceUTF16Length = source.utf16.count
-            var tokens: [SyntaxHighlightToken] = []
+            var tokens: [SyntaxEditorHighlighting.Token] = []
             for namedRange in try layer.highlights(in: range, provider: source.predicateTextProvider) {
                 guard let tokenRange = Self.utf16Range(
                     fromByteRange: namedRange.tsRange.bytes,
@@ -73,11 +73,11 @@ enum SyntacticPatcher {
                    !(tokenRange.location < clipTo.upperBound && tokenRange.upperBound > clipTo.location) {
                     continue
                 }
-                let classification = EditorSyntaxCapture.parse(
+                let classification = EditorSourceSyntax.Capture.parse(
                     rawCaptureName: namedRange.name,
                     rootLanguage: language
                 )
-                tokens.append(SyntaxHighlightToken(
+                tokens.append(SyntaxEditorHighlighting.Token(
                     range: tokenRange,
                     syntaxID: classification.syntaxID,
                     language: classification.language ?? language,
@@ -103,7 +103,7 @@ enum SyntacticPatcher {
     /// The splice costs one buffer copy and a memcmp-class compare (~0.1ms at
     /// 478KB), and mismatches keep falling back to the full-diff recovery.
     static func validateMutation(
-        _ mutation: SyntaxHighlightMutation,
+        _ mutation: SyntaxEditorTextChange.Replacement,
         previousSource: String,
         nextSource: String
     ) -> MutationValidation {
@@ -159,7 +159,7 @@ enum SyntacticPatcher {
     }
 
     static func inputEdit(
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         previousSource: String,
         nextSource: String,
         lineTable: HighlightLineTable
@@ -222,7 +222,7 @@ enum SyntacticPatcher {
     }
 
     static func mutationTouchesMarkupBoundary(
-        mutation: SyntaxHighlightMutation,
+        mutation: SyntaxEditorTextChange.Replacement,
         previousSource: String,
         nextSource: String
     ) -> Bool {

@@ -31,7 +31,8 @@ final class SyntaxEditorReadOnlyGuardedUndoManager: UndoManager {
     }
 }
 
-final class SyntaxEditorTextPosition: UITextPosition {
+extension SyntaxEditorView {
+final class TextPosition: UITextPosition {
     let offset: Int
     let anchorsLineEndHit: Bool
 
@@ -42,12 +43,12 @@ final class SyntaxEditorTextPosition: UITextPosition {
     }
 }
 
-final class SyntaxEditorTextRange: UITextRange {
+final class TextRange: UITextRange {
     let nsRange: NSRange
     let findSearchIdentifier: Int?
 
-    let startPosition: SyntaxEditorTextPosition
-    let endPosition: SyntaxEditorTextPosition
+    let startPosition: SyntaxEditorView.TextPosition
+    let endPosition: SyntaxEditorView.TextPosition
 
     init(nsRange: NSRange, anchorsLineEndHit: Bool = false, findSearchIdentifier: Int? = nil) {
         let location = max(0, nsRange.location)
@@ -55,11 +56,11 @@ final class SyntaxEditorTextRange: UITextRange {
         let anchorsCollapsedLineEndHit = anchorsLineEndHit && length == 0
         self.nsRange = NSRange(location: location, length: length)
         self.findSearchIdentifier = findSearchIdentifier
-        self.startPosition = SyntaxEditorTextPosition(
+        self.startPosition = SyntaxEditorView.TextPosition(
             offset: location,
             anchorsLineEndHit: anchorsCollapsedLineEndHit
         )
-        self.endPosition = SyntaxEditorTextPosition(
+        self.endPosition = SyntaxEditorView.TextPosition(
             offset: location + length,
             anchorsLineEndHit: anchorsCollapsedLineEndHit
         )
@@ -78,14 +79,16 @@ final class SyntaxEditorTextRange: UITextRange {
         nsRange.length == 0
     }
 }
+}
 
 struct SyntaxEditorTextInteractionCaretOverride {
     let offset: Int
     var wordRange: NSRange?
 }
 
+extension SyntaxEditorView {
 @MainActor
-final class SyntaxEditorTextInputTokenizer: NSObject, UITextInputTokenizer {
+final class TextInputTokenizer: NSObject, UITextInputTokenizer {
     weak var textInput: SyntaxEditorView?
     private let baseTokenizer: UITextInputStringTokenizer
 
@@ -148,7 +151,7 @@ final class SyntaxEditorTextInputTokenizer: NSObject, UITextInputTokenizer {
     }
 }
 
-final class SyntaxEditorSelectionRect: UITextSelectionRect {
+final class SelectionRect: UITextSelectionRect {
     let selectionRect: CGRect
     let selectionWritingDirection: NSWritingDirection
     let selectionContainsStart: Bool
@@ -188,7 +191,7 @@ final class SyntaxEditorSelectionRect: UITextSelectionRect {
     }
 }
 
-final class SyntaxEditorTextContentView: UIView {
+final class TextContentView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isOpaque = false
@@ -202,7 +205,7 @@ final class SyntaxEditorTextContentView: UIView {
     }
 }
 
-final class SyntaxEditorTextLayoutFragmentView: UIView {
+final class TextLayoutFragmentView: UIView {
     let layoutFragment: NSTextLayoutFragment
     var findHighlightRects: [CGRect] = []
     var findHighlightColor: CGColor?
@@ -257,6 +260,7 @@ final class SyntaxEditorTextLayoutFragmentView: UIView {
         }
         layoutFragment.draw(at: .zero, in: context)
     }
+}
 }
 
 extension UIColor {
