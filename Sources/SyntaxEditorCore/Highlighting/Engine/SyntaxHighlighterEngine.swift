@@ -274,6 +274,11 @@ private actor HighlightRequestWorker {
         revision: Int,
         emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?
     ) async -> SyntaxEditorHighlighting.Result {
+        guard !source.isEmpty else {
+            session = nil
+            return SyntaxEditorHighlighting.Result.empty(source: source, language: language, revision: revision)
+        }
+
         let setup = await registry.highlightingSetup(for: language)
         guard !Task.isCancelled else {
             return SyntaxEditorHighlighting.Result.empty(source: source, language: language, revision: revision)

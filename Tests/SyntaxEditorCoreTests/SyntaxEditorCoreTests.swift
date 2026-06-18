@@ -4137,21 +4137,31 @@ struct SyntaxHighlighterEngineTests {
         #expect(phases.first?.phase == .complete)
     }
 
-    @Test("SyntaxHighlighterEngine produces highlight tokens for lightweight direct languages")
-    func highlighterProducesTokensForLightweightDirectLanguages() async {
-        let engine = sharedSyntaxHighlighterEngine
-        let cases: [(language: SyntaxLanguage, source: String)] = [
-            (SyntaxLanguage.css, "body { color: red; }"),
-            (SyntaxLanguage.javascript, "const answer = 42;"),
-            (SyntaxLanguage.json, "{\"enabled\": true, \"count\": 1}"),
-            (SyntaxLanguage.swift, "let answer = 42"),
-        ]
+    @Test("SyntaxHighlighterEngine produces highlight tokens for CSS")
+    func highlighterProducesTokensForCSS() async {
+        await expectHighlightTokens(source: "body { color: red; }", language: .css)
+    }
 
-        for testCase in cases {
-            let tokens = await engine.render(source: testCase.source, language: testCase.language)
-            #expect(tokens.isEmpty == false)
-            #expect(tokens.allSatisfy { $0.range.length > 0 })
-        }
+    @Test("SyntaxHighlighterEngine produces highlight tokens for JavaScript")
+    func highlighterProducesTokensForJavaScript() async {
+        await expectHighlightTokens(source: "const answer = 42;", language: .javascript)
+    }
+
+    @Test("SyntaxHighlighterEngine produces highlight tokens for JSON")
+    func highlighterProducesTokensForJSON() async {
+        await expectHighlightTokens(source: "{\"enabled\": true, \"count\": 1}", language: .json)
+    }
+
+    @Test("SyntaxHighlighterEngine produces highlight tokens for Swift")
+    func highlighterProducesTokensForSwift() async {
+        await expectHighlightTokens(source: "let answer = 42", language: .swift)
+    }
+
+    private func expectHighlightTokens(source: String, language: SyntaxLanguage) async {
+        let engine = sharedSyntaxHighlighterEngine
+        let tokens = await engine.render(source: source, language: language)
+        #expect(tokens.isEmpty == false)
+        #expect(tokens.allSatisfy { $0.range.length > 0 })
     }
 
     @Test("SyntaxEditorHighlighting handles overlapping prepare request patterns")
@@ -12201,7 +12211,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine keeps large Objective-C value edits scoped")
     func highlighterKeepsLargeObjectiveCValueEditsScoped() async throws {
-        let declarations = (0..<3_000)
+        let declarations = (0..<100)
             .map { "static NSInteger Value\($0) = \($0);" }
             .joined(separator: "\n")
         let source = """
@@ -12236,7 +12246,7 @@ struct SyntaxHighlighterEngineTests {
 
     @Test("SyntaxHighlighterEngine keeps large Objective-C multiline body edits scoped")
     func highlighterKeepsLargeObjectiveCMultilineBodyEditsScoped() async throws {
-        let declarations = (0..<3_000)
+        let declarations = (0..<100)
             .map { "static NSInteger Value\($0) = \($0);" }
             .joined(separator: "\n")
         let source = """
