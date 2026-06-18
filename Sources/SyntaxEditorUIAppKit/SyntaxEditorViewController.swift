@@ -40,7 +40,7 @@ private struct PendingHighlightApplication {
     let expectedRevision: Int
     let source: String
     let language: SyntaxLanguage
-    let refreshRange: NSRange
+    let refreshRanges: [NSRange]
     let mutation: SyntaxEditorTextChange.Replacement?
     let recordsCache: Bool
     let phase: SyntaxEditorHighlighting.Result.Phase
@@ -1503,7 +1503,7 @@ public final class SyntaxEditorView: NSScrollView {
             recordSkippedHighlightPhaseForTesting(result.phase, revision: result.revision)
             return
         }
-        let refreshRange = highlightApplicationRefreshRange(
+        let refreshRanges = highlightApplicationRefreshRanges(
             for: result,
             mutation: mutation
         )
@@ -1512,7 +1512,7 @@ public final class SyntaxEditorView: NSScrollView {
             expectedRevision: result.revision,
             source: result.source,
             language: result.language,
-            refreshRange: refreshRange,
+            refreshRanges: refreshRanges,
             mutation: mutation,
             recordsCache: result.phase == .complete,
             phase: result.phase,
@@ -1545,14 +1545,38 @@ public final class SyntaxEditorView: NSScrollView {
         return materializedHighlightRevision < result.revision
     }
 
-    private func highlightApplicationRefreshRange(
+    private func highlightApplicationRefreshRanges(
         for result: SyntaxEditorHighlighting.Result,
         mutation: SyntaxEditorTextChange.Replacement?
-    ) -> NSRange {
-        guard mutation != nil else {
-            return result.refreshRange
+    ) -> [NSRange] {
+        _ = mutation
+        return result.refreshRanges
+    }
+
+    private static func highlightTargetRanges(_ ranges: [NSRange], textLength: Int) -> [NSRange] {
+        let validRanges = ranges.filter { $0.location != NSNotFound }
+        let clampedRanges = validRanges.map {
+            SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: textLength)
         }
-        return result.refreshRange
+        let nonEmptyRanges = clampedRanges.filter { $0.length > 0 }
+        let clamped = nonEmptyRanges.sorted { lhs, rhs in
+            lhs.location == rhs.location ? lhs.length < rhs.length : lhs.location < rhs.location
+        }
+        guard var current = clamped.first else { return [] }
+        var merged: [NSRange] = []
+        for range in clamped.dropFirst() {
+            if range.location <= current.upperBound {
+                current = NSRange(
+                    location: current.location,
+                    length: max(current.upperBound, range.upperBound) - current.location
+                )
+            } else {
+                merged.append(current)
+                current = range
+            }
+        }
+        merged.append(current)
+        return merged
     }
 
     private func canApplyHighlightTokenPayload(
@@ -1602,7 +1626,7 @@ public final class SyntaxEditorView: NSScrollView {
             expectedRevision: revision,
             source: source,
             language: language,
-            refreshRange: NSRange(location: 0, length: source.utf16.count),
+            refreshRanges: [NSRange(location: 0, length: source.utf16.count)],
             mutation: nil
         )
     }
@@ -1846,7 +1870,7 @@ public final class SyntaxEditorView: NSScrollView {
         expectedRevision: Int,
         source expectedSource: String,
         language expectedLanguage: SyntaxLanguage,
-        refreshRange: NSRange,
+        refreshRanges: [NSRange],
         mutation: SyntaxEditorTextChange.Replacement?,
         recordsCache: Bool = true,
         phase: SyntaxEditorHighlighting.Result.Phase = .complete,
@@ -1864,7 +1888,7 @@ public final class SyntaxEditorView: NSScrollView {
             expectedRevision: expectedRevision,
             source: expectedSource,
             language: expectedLanguage,
-            refreshRange: refreshRange,
+            refreshRanges: refreshRanges,
             mutation: mutation,
             recordsCache: recordsCache,
             phase: phase,
@@ -1879,8 +1903,11 @@ public final class SyntaxEditorView: NSScrollView {
         pendingHighlightApplication = nil
 
         let textLength = textStorage.length
-        let targetRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
-        guard targetRange.length > 0 else {
+        let targetRanges = Self.highlightTargetRanges(
+            refreshRanges,
+            textLength: textLength
+        )
+        guard !targetRanges.isEmpty else {
             if recordsCache {
                 recordAppliedHighlight(
                     tokens: tokens,
@@ -1903,18 +1930,22 @@ public final class SyntaxEditorView: NSScrollView {
         isApplyingHighlight = true
         defer { isApplyingHighlight = false }
 
-        installSyntaxHighlightRendering(
-            for: tokens,
-            targetRange: targetRange,
-            textLength: textLength,
-            baseAttributes: base,
-            revision: expectedRevision,
-            language: expectedLanguage
-        )
+        for targetRange in targetRanges {
+            installSyntaxHighlightRendering(
+                for: tokens,
+                targetRange: targetRange,
+                textLength: textLength,
+                baseAttributes: base,
+                revision: expectedRevision,
+                language: expectedLanguage
+            )
+        }
         textView.applyMarkedTextAttributes()
         textView.typingAttributes = base
         applyMatchingBracketHighlight(force: true)
-        invalidateSyntaxHighlightDisplay(for: targetRange)
+        for targetRange in targetRanges {
+            invalidateSyntaxHighlightDisplay(for: targetRange)
+        }
         if recordsCache {
             recordAppliedHighlight(
                 tokens: tokens,
@@ -1938,7 +1969,7 @@ public final class SyntaxEditorView: NSScrollView {
         expectedRevision: Int,
         source expectedSource: String,
         language expectedLanguage: SyntaxLanguage,
-        refreshRange: NSRange,
+        refreshRanges: [NSRange],
         mutation: SyntaxEditorTextChange.Replacement?,
         recordsCache: Bool = true,
         phase: SyntaxEditorHighlighting.Result.Phase = .complete,
@@ -1956,7 +1987,7 @@ public final class SyntaxEditorView: NSScrollView {
             expectedRevision: expectedRevision,
             source: expectedSource,
             language: expectedLanguage,
-            refreshRange: refreshRange,
+            refreshRanges: refreshRanges,
             mutation: mutation,
             recordsCache: recordsCache,
             phase: phase,
@@ -1971,8 +2002,11 @@ public final class SyntaxEditorView: NSScrollView {
         pendingHighlightApplication = nil
 
         let textLength = textStorage.length
-        let targetRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
-        guard targetRange.length > 0 else {
+        let targetRanges = Self.highlightTargetRanges(
+            refreshRanges,
+            textLength: textLength
+        )
+        guard !targetRanges.isEmpty else {
             if recordsCache {
                 recordAppliedHighlight(
                     tokens: tokens,
@@ -1994,19 +2028,23 @@ public final class SyntaxEditorView: NSScrollView {
         guard !Task.isCancelled else { return false }
         isApplyingHighlight = true
         defer { isApplyingHighlight = false }
-        guard await installSyntaxHighlightRenderingIncrementally(
-            for: tokens,
-            targetRange: targetRange,
-            textLength: textLength,
-            baseAttributes: base,
-            expectedRevision: expectedRevision
-        ) else { return false }
+        for targetRange in targetRanges {
+            guard await installSyntaxHighlightRenderingIncrementally(
+                for: tokens,
+                targetRange: targetRange,
+                textLength: textLength,
+                baseAttributes: base,
+                expectedRevision: expectedRevision
+            ) else { return false }
+        }
         guard !Task.isCancelled, model.textRevision == expectedRevision else { return false }
 
         textView.applyMarkedTextAttributes()
         textView.typingAttributes = base
         applyMatchingBracketHighlight(force: true)
-        invalidateSyntaxHighlightDisplay(for: targetRange)
+        for targetRange in targetRanges {
+            invalidateSyntaxHighlightDisplay(for: targetRange)
+        }
         if recordsCache {
             recordAppliedHighlight(
                 tokens: tokens,
@@ -2384,7 +2422,7 @@ public final class SyntaxEditorView: NSScrollView {
             expectedRevision: pendingHighlightApplication.expectedRevision,
             source: pendingHighlightApplication.source,
             language: pendingHighlightApplication.language,
-            refreshRange: pendingHighlightApplication.refreshRange,
+            refreshRanges: pendingHighlightApplication.refreshRanges,
             mutation: pendingHighlightApplication.mutation,
             recordsCache: pendingHighlightApplication.recordsCache,
             phase: pendingHighlightApplication.phase,

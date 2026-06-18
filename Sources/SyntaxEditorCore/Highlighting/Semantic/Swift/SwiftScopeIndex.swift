@@ -553,8 +553,11 @@ final class SwiftScopeIndex {
     struct SubtreeUpdate {
         /// Scope ranges that bound every position whose resolution may have changed.
         let boundedTargets: [NSRange]
+        /// Declaration names whose enum-case visibility changed. These names are
+        /// file-wide, but only matching identifier tokens can change color.
+        let tokenTextTargetNames: Set<String>
         /// True when a changed declaration is visible file-wide (file scope, types,
-        /// enum cases) and targeting must widen to the whole document.
+        /// or unbounded members) and targeting must widen to the whole document.
         let requiresFullPass: Bool
     }
 
@@ -569,7 +572,11 @@ final class SwiftScopeIndex {
         // rebuild per keystroke.
         if let covering = deepestNode(containing: envelope, from: rootNode),
            covering.nodeType == "comment" || covering.nodeType == "multiline_comment" {
-            return SubtreeUpdate(boundedTargets: [], requiresFullPass: false)
+            return SubtreeUpdate(
+                boundedTargets: [],
+                tokenTextTargetNames: [],
+                requiresFullPass: false
+            )
         }
 
         var path: [Scope] = []
@@ -634,7 +641,10 @@ final class SwiftScopeIndex {
                     previousHostEnumCases[name] = inHost
                 }
             }
-            let enumCasesChanged = previousHostEnumCases != rebuiltEnumCases
+            let changedEnumCaseNames = Self.changedDeclarationNames(
+                previousHostEnumCases,
+                rebuiltEnumCases
+            )
 
             // The declaration diff below consults the extension topology to
             // decide whether a changed member is visible beyond the host. Fold
@@ -654,7 +664,7 @@ final class SwiftScopeIndex {
             registerRebuiltExtensionOwners(replacement)
 
             var boundedTargets: [NSRange] = []
-            var requiresFullPass = enumCasesChanged
+            var requiresFullPass = false
 
             func declarationMap(
                 _ scope: Scope,
@@ -777,10 +787,23 @@ final class SwiftScopeIndex {
                 }
             }
 
-            return SubtreeUpdate(boundedTargets: boundedTargets, requiresFullPass: requiresFullPass)
+            return SubtreeUpdate(
+                boundedTargets: boundedTargets,
+                tokenTextTargetNames: changedEnumCaseNames,
+                requiresFullPass: requiresFullPass
+            )
         }
 
         return nil
+    }
+
+    private static func changedDeclarationNames(
+        _ lhs: [String: [Declaration]],
+        _ rhs: [String: [Declaration]]
+    ) -> Set<String> {
+        var names = Set(lhs.keys)
+        names.formUnion(rhs.keys)
+        return Set(names.filter { (lhs[$0] ?? []) != (rhs[$0] ?? []) })
     }
 
     private func appendTarget(

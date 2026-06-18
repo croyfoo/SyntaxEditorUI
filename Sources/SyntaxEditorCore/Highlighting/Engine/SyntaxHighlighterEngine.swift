@@ -294,7 +294,7 @@ private actor HighlightRequestWorker {
                 source: source,
                 language: language,
                 revision: revision,
-                refreshRange: NSRange(location: 0, length: source.utf16.count)
+                refreshRanges: [NSRange(location: 0, length: source.utf16.count)]
             )
         }
         session = nextSession
@@ -511,7 +511,7 @@ final class HighlightSession {
             source: source,
             language: language,
             revision: revision,
-            refreshRange: NSRange(location: 0, length: source.utf16.count)
+            refreshRanges: [NSRange(location: 0, length: source.utf16.count)]
         )
     }
 
@@ -583,7 +583,7 @@ final class HighlightSession {
                     source: source,
                     language: language,
                     revision: revision,
-                    refreshRange: target,
+                    refreshRanges: [target],
                     tokenPayload: .replacement
                 ))
             }
@@ -759,6 +759,7 @@ final class HighlightSession {
         )
 
         var resultRefresh = syntacticRefresh
+        var resultRefreshRanges = [syntacticRefresh]
         if let semanticPass {
             let rootNode = semanticRootNodeSnapshot()
             // Overlays go stale exactly where base tokens changed (shifts are
@@ -780,15 +781,30 @@ final class HighlightSession {
                 switch plan {
                 case .full:
                     runConservative = true
-                case .reuse, .targets:
+                case .reuse, .targets, .tokenTextTargets:
                     var targets: [NSRange] = [planEnvelope]
-                    if case .targets(let bounded) = plan {
+                    let appendBoundedTargets: ([NSRange]) -> Void = { bounded in
                         targets.append(contentsOf: bounded.map {
                             SyntacticPatcher.lineEnvelope(
                                 containing: SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextLength),
                                 source: nextLayeredSource
                             )
                         })
+                    }
+                    switch plan {
+                    case .reuse:
+                        break
+                    case .targets(let bounded):
+                        appendBoundedTargets(bounded)
+                    case .tokenTextTargets(let names, let bounded):
+                        appendBoundedTargets(bounded)
+                        targets.append(contentsOf: tokenTextTargetLineRanges(
+                            names: names,
+                            source: nextLayeredSource,
+                            sourceLength: nextLength
+                        ))
+                    case .full:
+                        break
                     }
                     let merged = Self.mergedRanges(targets)
                     let totalLength = merged.reduce(0) { $0 + $1.length }
@@ -818,6 +834,7 @@ final class HighlightSession {
                                 lineTable: lineTable
                             ) {
                                 resultRefresh = SyntacticPatcher.union(resultRefresh, diff)
+                                resultRefreshRanges.append(diff)
                             }
                         }
                         if cancelled {
@@ -847,6 +864,7 @@ final class HighlightSession {
             priorityHint: layeredMutation.location
         ) {
             resultRefresh = SyntacticPatcher.union(resultRefresh, drained)
+            resultRefreshRanges.append(drained)
         }
         if Task.isCancelled {
             // The phase stream drops a cancelled task's result: keep the whole
@@ -854,17 +872,23 @@ final class HighlightSession {
             refreshDebt.insert(resultRefresh)
         }
         resultRefresh = SyntaxEditorRangeUtilities.clampedRange(resultRefresh, utf16Length: nextSource.utf16.count)
+        let normalizedResultRefreshRanges = Self.mergedRanges(resultRefreshRanges.map {
+            SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: nextSource.utf16.count)
+        })
+        let replacementPayloadTokens = normalizedResultRefreshRanges.flatMap {
+            planes.tokens(in: $0, lineTable: lineTable)
+        }
 
         return SyntaxEditorHighlighting.Result(
             tokens: resultTokens(
-                from: planes.tokens(in: resultRefresh, lineTable: lineTable),
-                refreshRange: resultRefresh,
+                from: replacementPayloadTokens,
+                refreshRanges: normalizedResultRefreshRanges,
                 tokenPayload: .replacement
             ),
             source: nextSource,
             language: language,
             revision: revision,
-            refreshRange: resultRefresh,
+            refreshRanges: normalizedResultRefreshRanges,
             tokenPayload: .replacement
         )
     }
@@ -1000,7 +1024,7 @@ final class HighlightSession {
                         source: source,
                         language: language,
                         revision: revision,
-                        refreshRange: diff,
+                        refreshRanges: [diff],
                         tokenPayload: .replacement
                     ))
                 }
@@ -1035,6 +1059,28 @@ final class HighlightSession {
         return layer?.snapshot()?.rootSnapshot.tree.rootNode
     }
 
+    private func tokenTextTargetLineRanges(
+        names: Set<String>,
+        source: String,
+        sourceLength: Int
+    ) -> [NSRange] {
+        guard !names.isEmpty, sourceLength > 0 else { return [] }
+        let nsSource = source as NSString
+        return planes.tokens(lineTable: lineTable).compactMap { token in
+            guard !token.isSemanticOverlay,
+                  token.syntaxID == .plain,
+                  token.language == language || token.language == nil,
+                  token.range.location >= 0,
+                  token.range.length > 0,
+                  token.range.upperBound <= nsSource.length,
+                  names.contains(nsSource.nativeSubstring(with: token.range))
+            else {
+                return nil
+            }
+            return SyntacticPatcher.lineEnvelope(containing: token.range, source: source)
+        }
+    }
+
     private var usesDeferredSemanticHighlighting: Bool {
         language == .swift || language == .objectiveC
     }
@@ -1054,7 +1100,7 @@ final class HighlightSession {
                 source: source,
                 language: language,
                 revision: revision,
-                refreshRange: refreshRange,
+                refreshRanges: [refreshRange],
                 phase: .syntacticFastPass,
                 tokenPayload: tokenPayload
             )
@@ -1066,13 +1112,63 @@ final class HighlightSession {
         refreshRange: NSRange,
         tokenPayload: SyntaxEditorHighlighting.Result.Payload
     ) -> [SyntaxEditorHighlighting.Token] {
+        resultTokens(from: tokens, refreshRanges: [refreshRange], tokenPayload: tokenPayload)
+    }
+
+    private func resultTokens(
+        from tokens: [SyntaxEditorHighlighting.Token],
+        refreshRanges: [NSRange],
+        tokenPayload: SyntaxEditorHighlighting.Result.Payload
+    ) -> [SyntaxEditorHighlighting.Token] {
         switch tokenPayload {
         case .fullSnapshot:
             return tokens
         case .replacement:
-            return tokens.filter {
-                $0.range.location < refreshRange.upperBound && $0.range.upperBound > refreshRange.location
+            let refreshRanges = Self.mergedRanges(refreshRanges)
+            let filtered = tokens.filter {
+                token in refreshRanges.contains {
+                    token.range.location < $0.upperBound && token.range.upperBound > $0.location
+                }
             }
+            return Self.deduplicatedSortedTokens(filtered)
+        }
+    }
+
+    private static func deduplicatedSortedTokens(
+        _ tokens: [SyntaxEditorHighlighting.Token]
+    ) -> [SyntaxEditorHighlighting.Token] {
+        var seen = Set<TokenIdentity>()
+        var unique: [SyntaxEditorHighlighting.Token] = []
+        unique.reserveCapacity(tokens.count)
+        for token in tokens where seen.insert(TokenIdentity(token)).inserted {
+            unique.append(token)
+        }
+        return unique.enumerated().sorted {
+            if $0.element.range.location != $1.element.range.location {
+                return $0.element.range.location < $1.element.range.location
+            }
+            if $0.element.range.length != $1.element.range.length {
+                return $0.element.range.length > $1.element.range.length
+            }
+            return $0.offset < $1.offset
+        }.map(\.element)
+    }
+
+    private struct TokenIdentity: Hashable {
+        let location: Int
+        let length: Int
+        let syntaxID: EditorSourceSyntax.ID
+        let language: SyntaxLanguage?
+        let rawCaptureName: String
+        let isSemanticOverlay: Bool
+
+        init(_ token: SyntaxEditorHighlighting.Token) {
+            location = token.range.location
+            length = token.range.length
+            syntaxID = token.syntaxID
+            language = token.language
+            rawCaptureName = token.rawCaptureName
+            isSemanticOverlay = token.isSemanticOverlay
         }
     }
 
@@ -1084,7 +1180,7 @@ final class HighlightSession {
             source: source,
             language: language,
             revision: revision,
-            refreshRange: NSRange(location: 0, length: 0),
+            refreshRanges: [],
             tokenPayload: .replacement
         )
     }

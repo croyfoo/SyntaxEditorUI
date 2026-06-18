@@ -318,6 +318,8 @@ private enum HighlightBenchmarkRunner {
 
         var fastPassLatencies: [Int] = []
         fastPassLatencies.reserveCapacity(insertions.count)
+        var finalCompleteResult: SyntaxEditorHighlighting.Result?
+        var finalSettleLatency: Int?
         var revision = 1
         var stoppedMeasurement = false
 
@@ -360,7 +362,13 @@ private enum HighlightBenchmarkRunner {
             if index == insertions.index(before: insertions.endIndex) {
                 benchmark.stopMeasurement()
                 stoppedMeasurement = true
-                while await iterator.next() != nil {}
+                let settleStart = DispatchTime.now().uptimeNanoseconds
+                while let result = await iterator.next() {
+                    if result.phase == .complete {
+                        finalCompleteResult = result
+                    }
+                }
+                finalSettleLatency = elapsedNanoseconds(since: settleStart)
             }
 
             currentSource = nextSource
@@ -374,20 +382,38 @@ private enum HighlightBenchmarkRunner {
         for latency in fastPassLatencies {
             benchmark.measurement(HighlightBenchmarkMetrics.typingFastPassLatencyNanoseconds, latency)
         }
+        if let finalSettleLatency {
+            benchmark.measurement(HighlightBenchmarkMetrics.typingSettleLatencyNanoseconds, finalSettleLatency)
+        }
 
-        let settled = await engine.update(
-            source: currentSource,
-            language: workload.language,
-            mutation: SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: ""),
-            revision: revision
-        )
+        let settled: SyntaxEditorHighlighting.Result
+        if let finalCompleteResult {
+            settled = finalCompleteResult
+        } else {
+            settled = await engine.update(
+                source: currentSource,
+                language: workload.language,
+                mutation: SyntaxEditorTextChange.Replacement(location: 0, length: 0, replacement: ""),
+                revision: revision
+            )
+        }
         let settledTokens = await engine.currentTokensForTesting()
         let freshEngine = SyntaxHighlighterEngine()
         _ = await freshEngine.reset(source: currentSource, language: workload.language, revision: 0)
         let freshTokens = await freshEngine.currentTokensForTesting()
         let matchesFresh = settledTokens == freshTokens
+        let completeRefreshRanges = finalCompleteResult?.refreshRanges ?? settled.refreshRanges
+        let completeRefreshTotalLength = completeRefreshRanges.reduce(0) { $0 + $1.length }
 
         benchmark.measurement(HighlightBenchmarkMetrics.settleEqualsFresh, matchesFresh ? 1 : 0)
+        benchmark.measurement(
+            HighlightBenchmarkMetrics.typingCompleteRefreshRangeCount,
+            completeRefreshRanges.count
+        )
+        benchmark.measurement(
+            HighlightBenchmarkMetrics.typingCompleteRefreshTotalLength,
+            completeRefreshTotalLength
+        )
         if matchesFresh == false {
             benchmark.error("typing/cancelled-fast-pass did not settle to a fresh highlight result")
         }
@@ -395,7 +421,7 @@ private enum HighlightBenchmarkRunner {
             benchmark,
             source: currentSource,
             tokenCount: settledTokens.count,
-            refreshRange: settled.refreshRange
+            refreshRanges: settled.refreshRanges
         )
     }
 
@@ -462,7 +488,7 @@ private enum HighlightBenchmarkRunner {
             benchmark,
             source: source,
             tokenCount: result.tokens.count,
-            refreshRange: result.refreshRange
+            refreshRanges: result.refreshRanges
         )
     }
 
@@ -470,13 +496,27 @@ private enum HighlightBenchmarkRunner {
         _ benchmark: Benchmark,
         source: String,
         tokenCount: Int,
-        refreshRange: NSRange
+        refreshRanges: [NSRange]
     ) {
+        let refreshRange = unionRefreshRange(refreshRanges)
         benchmark.measurement(HighlightBenchmarkMetrics.utf16Length, (source as NSString).length)
         benchmark.measurement(HighlightBenchmarkMetrics.lineCount, sourceLineCount(source))
         benchmark.measurement(HighlightBenchmarkMetrics.tokenCount, tokenCount)
         benchmark.measurement(HighlightBenchmarkMetrics.refreshLocation, refreshRange.location)
         benchmark.measurement(HighlightBenchmarkMetrics.refreshLength, refreshRange.length)
+    }
+
+    private static func unionRefreshRange(_ ranges: [NSRange]) -> NSRange {
+        guard let first = ranges.first else {
+            return NSRange(location: 0, length: 0)
+        }
+        var lower = first.location
+        var upper = first.upperBound
+        for range in ranges.dropFirst() {
+            lower = min(lower, range.location)
+            upper = max(upper, range.upperBound)
+        }
+        return NSRange(location: lower, length: upper - lower)
     }
 
     private static func elapsedNanoseconds(since start: UInt64) -> Int {
@@ -696,6 +736,18 @@ private enum HighlightBenchmarkMetrics {
         "Typing fast-pass latency ns",
         useScalingFactor: false
     )
+    static let typingSettleLatencyNanoseconds = BenchmarkMetric.custom(
+        "Typing settle latency ns",
+        useScalingFactor: false
+    )
+    static let typingCompleteRefreshRangeCount = BenchmarkMetric.custom(
+        "Typing complete refresh range count",
+        useScalingFactor: false
+    )
+    static let typingCompleteRefreshTotalLength = BenchmarkMetric.custom(
+        "Typing complete refresh total length",
+        useScalingFactor: false
+    )
 
     static let all: [BenchmarkMetric] = [
         .wallClock,
@@ -710,6 +762,9 @@ private enum HighlightBenchmarkMetrics {
         settleEqualsFresh,
         typingEditLatencyNanoseconds,
         typingFastPassLatencyNanoseconds,
+        typingSettleLatencyNanoseconds,
+        typingCompleteRefreshRangeCount,
+        typingCompleteRefreshTotalLength,
     ]
 }
 
