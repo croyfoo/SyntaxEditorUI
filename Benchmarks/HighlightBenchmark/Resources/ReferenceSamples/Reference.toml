@@ -1,0 +1,13 @@
+[package]
+name = "ReferencePreview"
+enabled = true
+count = 2
+
+[theme]
+name = "Default"
+preview = ["css", "html", "swift"]
+
+[[items]]
+id = 1
+title = "Reference"
+enabled = true

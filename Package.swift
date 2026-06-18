@@ -25,6 +25,7 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-xml", exact: "0.7.0"),
         .package(url: "https://github.com/lynnswap/tree-sitter-swift", exact: "0.1.0"),
         .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.12.0"),
+        .package(url: "https://github.com/ordo-one/benchmark", exact: "1.34.1", traits: []),
     ],
     targets: [
         .target(
@@ -83,13 +84,19 @@ let package = Package(
             name: "HighlightBenchmark",
             dependencies: [
                 "SyntaxEditorCore",
+                .product(name: "Benchmark", package: "benchmark"),
             ],
-            path: "Tools/HighlightBenchmark",
-            exclude: ["Fixtures"],
+            path: "Benchmarks/HighlightBenchmark",
+            resources: [
+                .copy("Resources"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
                 .defaultIsolation(nil),
                 .strictMemorySafety(),
+            ],
+            plugins: [
+                .plugin(name: "BenchmarkPlugin", package: "benchmark"),
             ]
         ),
         .target(
