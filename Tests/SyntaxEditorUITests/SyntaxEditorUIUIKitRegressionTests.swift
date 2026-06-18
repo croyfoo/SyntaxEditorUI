@@ -1699,19 +1699,13 @@ extension SyntaxEditorUITests {
 
         await completeGate.waitUntilSuspended()
         #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
-        #expect(await syntaxEditorWaitForColor(
-            { iOSEditorForegroundColor(editorView, at: 0) },
-            equals: theme.keyword
-        ))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
         editorView.insertText("x")
 
         #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
-        #expect(await syntaxEditorWaitForColor(
-            { iOSEditorForegroundColor(editorView, at: 0) },
-            equals: theme.string
-        ))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.string))
         #expect(editorView.text == "\(source)x")
 
         await completeGate.resumeAll()
@@ -1766,10 +1760,7 @@ extension SyntaxEditorUITests {
 
         await completeGate.waitUntilSuspended()
         #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
-        #expect(await syntaxEditorWaitForColor(
-            { iOSEditorForegroundColor(editorView, at: 0) },
-            equals: theme.keyword
-        ))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
         await completeGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
@@ -1825,10 +1816,8 @@ extension SyntaxEditorUITests {
         editorView.selectedRange = NSRange(location: 0, length: 0)
         editorView.insertText("l")
 
-        #expect(await syntaxEditorWaitForColor(
-            { iOSEditorForegroundColor(editorView, at: 0) },
-            equals: theme.keyword
-        ))
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(editorView.text == "l")
 
         await completeGate.resumeAll()
