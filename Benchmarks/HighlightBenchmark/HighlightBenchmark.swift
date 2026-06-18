@@ -45,15 +45,17 @@ private struct HighlightBenchmarkSuite: Sendable {
 
         guard workload.language.supportsSyntaxHighlighting else { return }
 
-        Benchmark(
-            benchmarkName(workload: workload, scenario: "highlight/full-reset/fast-pass"),
-            configuration: configuration(workload: workload, options: options, phase: "fast-pass")
-        ) { benchmark in
-            await HighlightBenchmarkRunner.phasedFullReset(
-                benchmark: benchmark,
-                workload: workload,
-                targetPhase: .syntacticFastPass
-            )
+        if workload.language.emitsSyntacticFastPass {
+            Benchmark(
+                benchmarkName(workload: workload, scenario: "highlight/full-reset/fast-pass"),
+                configuration: configuration(workload: workload, options: options, phase: "fast-pass")
+            ) { benchmark in
+                await HighlightBenchmarkRunner.phasedFullReset(
+                    benchmark: benchmark,
+                    workload: workload,
+                    targetPhase: .syntacticFastPass
+                )
+            }
         }
 
         Benchmark(
@@ -67,15 +69,17 @@ private struct HighlightBenchmarkSuite: Sendable {
             )
         }
 
-        Benchmark(
-            benchmarkName(workload: workload, scenario: "highlight/incremental/fast-pass"),
-            configuration: configuration(workload: workload, options: options, phase: "fast-pass")
-        ) { benchmark in
-            await HighlightBenchmarkRunner.phasedIncrementalUpdate(
-                benchmark: benchmark,
-                workload: workload,
-                targetPhase: .syntacticFastPass
-            )
+        if workload.language.emitsSyntacticFastPass {
+            Benchmark(
+                benchmarkName(workload: workload, scenario: "highlight/incremental/fast-pass"),
+                configuration: configuration(workload: workload, options: options, phase: "fast-pass")
+            ) { benchmark in
+                await HighlightBenchmarkRunner.phasedIncrementalUpdate(
+                    benchmark: benchmark,
+                    workload: workload,
+                    targetPhase: .syntacticFastPass
+                )
+            }
         }
 
         Benchmark(
@@ -108,7 +112,7 @@ private struct HighlightBenchmarkSuite: Sendable {
             }
         }
 
-        guard workload.language.supportsSyntaxHighlighting, options.typeText.isEmpty == false else {
+        guard workload.language.emitsSyntacticFastPass, options.typeText.isEmpty == false else {
             return
         }
 
@@ -345,6 +349,11 @@ private enum HighlightBenchmarkRunner {
                 benchmark.error("typing/cancelled-fast-pass produced no result")
                 return
             }
+            if firstResult?.phase != .syntacticFastPass {
+                benchmark.stopMeasurement()
+                benchmark.error("typing/cancelled-fast-pass produced \(String(describing: firstResult?.phase)) instead of syntacticFastPass")
+                return
+            }
 
             if index == insertions.index(before: insertions.endIndex) {
                 while await iterator.next() != nil {}
@@ -394,18 +403,23 @@ private enum HighlightBenchmarkRunner {
         var stoppedMeasurement = false
 
         for await result in stream {
-            guard result.phase == targetPhase, selectedResult == nil else {
+            guard result.phase == targetPhase else {
                 continue
             }
-            selectedResult = result
-            benchmark.stopMeasurement()
-            stoppedMeasurement = true
+
+            if selectedResult == nil || targetPhase != .syntacticFastPass {
+                selectedResult = result
+            }
+            if targetPhase == .syntacticFastPass, stoppedMeasurement == false {
+                benchmark.stopMeasurement()
+                stoppedMeasurement = true
+            }
         }
 
+        if stoppedMeasurement == false {
+            benchmark.stopMeasurement()
+        }
         guard let selectedResult else {
-            if stoppedMeasurement == false {
-                benchmark.stopMeasurement()
-            }
             benchmark.error("Missing \(targetPhase) result")
             return
         }
@@ -671,6 +685,12 @@ private enum TypingAnchor: String, Sendable {
     case start
     case middle
     case end
+}
+
+private extension SyntaxLanguage {
+    var emitsSyntacticFastPass: Bool {
+        self == .swift || self == .objectiveC
+    }
 }
 
 private extension [String: String] {
