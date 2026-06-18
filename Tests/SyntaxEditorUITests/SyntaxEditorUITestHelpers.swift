@@ -19,14 +19,16 @@ import AppKit
 @Observable
 final class SyntaxEditorSwiftUIProbe {
     struct RenderedTickWaiter {
+        let id: Int
         let tick: Int
-        let continuation: CheckedContinuation<Void, Never>
+        let continuation: CheckedContinuation<Bool, Never>
     }
 
     var tick = 0
     var model = SyntaxEditorModel(text: "let value = 1", language: SyntaxLanguage.javascript)
 
     @ObservationIgnored private var renderedTicks: Set<Int> = []
+    @ObservationIgnored private var nextRenderedTickWaiterID = 0
     @ObservationIgnored private var renderedTickWaiters: [RenderedTickWaiter] = []
 
     func recordRenderedTick(_ tick: Int) {
@@ -42,18 +44,45 @@ final class SyntaxEditorSwiftUIProbe {
         }
 
         for waiter in readyWaiters {
-            waiter.continuation.resume()
+            waiter.continuation.resume(returning: true)
         }
     }
 
-    func waitForRenderedTick(_ tick: Int) async {
-        guard !renderedTicks.contains(tick) else { return }
+    func waitForRenderedTick(_ tick: Int) async -> Bool {
+        guard !renderedTicks.contains(tick) else { return true }
 
-        await withCheckedContinuation { continuation in
-            renderedTickWaiters.append(
-                RenderedTickWaiter(tick: tick, continuation: continuation)
-            )
+        let waiterID = nextRenderedTickWaiterID
+        nextRenderedTickWaiterID += 1
+
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: false)
+                    return
+                }
+
+                if renderedTicks.contains(tick) {
+                    continuation.resume(returning: true)
+                    return
+                }
+
+                renderedTickWaiters.append(
+                    RenderedTickWaiter(id: waiterID, tick: tick, continuation: continuation)
+                )
+            }
+        } onCancel: {
+            Task { @MainActor in
+                self.cancelRenderedTickWaiter(id: waiterID)
+            }
         }
+    }
+
+    private func cancelRenderedTickWaiter(id: Int) {
+        guard let index = renderedTickWaiters.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let waiter = renderedTickWaiters.remove(at: index)
+        waiter.continuation.resume(returning: false)
     }
 }
 

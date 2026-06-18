@@ -37,13 +37,13 @@ extension SyntaxEditorUITests {
             window.rootViewController = nil
         }
         syntaxEditorSettleUIKitHost(controller)
-        await probe.waitForRenderedTick(0)
+        try #require(await probe.waitForRenderedTick(0))
         let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
 
         firstEditor.model.replaceText(editedText)
         firstEditor.synchronizeDocumentForTesting()
         probe.tick += 1
-        await probe.waitForRenderedTick(1)
+        try #require(await probe.waitForRenderedTick(1))
 
         let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
@@ -53,13 +53,13 @@ extension SyntaxEditorUITests {
 #elseif canImport(AppKit)
         let controller = NSHostingController(rootView: SyntaxEditorDefaultWrapperHost(probe: probe))
         syntaxEditorSettleAppKitHost(controller)
-        await probe.waitForRenderedTick(0)
+        try #require(await probe.waitForRenderedTick(0))
         let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
 
         firstEditor.model.replaceText(editedText)
         firstEditor.synchronizeDocumentForTesting()
         probe.tick += 1
-        await probe.waitForRenderedTick(1)
+        try #require(await probe.waitForRenderedTick(1))
 
         let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
@@ -87,12 +87,12 @@ extension SyntaxEditorUITests {
             window.rootViewController = nil
         }
         syntaxEditorSettleUIKitHost(controller)
-        await probe.waitForRenderedTick(0)
+        try #require(await probe.waitForRenderedTick(0))
         let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
 
         probe.model = replacementModel
         probe.tick += 1
-        await probe.waitForRenderedTick(1)
+        try #require(await probe.waitForRenderedTick(1))
 
         let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
@@ -102,12 +102,12 @@ extension SyntaxEditorUITests {
 #elseif canImport(AppKit)
         let controller = NSHostingController(rootView: SyntaxEditorModelReplacementHost(probe: probe))
         syntaxEditorSettleAppKitHost(controller)
-        await probe.waitForRenderedTick(0)
+        try #require(await probe.waitForRenderedTick(0))
         let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
 
         probe.model = replacementModel
         probe.tick += 1
-        await probe.waitForRenderedTick(1)
+        try #require(await probe.waitForRenderedTick(1))
 
         let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
