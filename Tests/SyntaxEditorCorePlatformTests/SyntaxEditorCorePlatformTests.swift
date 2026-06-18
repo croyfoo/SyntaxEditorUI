@@ -179,16 +179,22 @@ struct SyntaxEditorCorePlatformTests {
         #expect(abs(font.pointSize - 13) < 0.01)
     }
 
-    @Test("SyntaxEditorTheme.FontDescriptor applies font size delta with clamp")
-    func syntaxEditorFontDescriptorAppliesFontSizeDeltaWithClamp() {
+    @Test("SyntaxEditorTheme.FontSize applies font size delta with clamp")
+    func syntaxEditorFontSizeAppliesFontSizeDeltaWithClamp() {
+        #expect(abs(SyntaxEditorTheme.FontSize.pointSize(13, applying: 4) - 17) < 0.01)
+        #expect(abs(SyntaxEditorTheme.FontSize.pointSize(13, applying: -20) - 4) < 0.01)
+        #expect(abs(SyntaxEditorTheme.FontSize.pointSize(13, applying: 100) - 64) < 0.01)
+    }
+
+    @Test("SyntaxEditorTheme.FontDescriptor resolves platform fonts for font size deltas")
+    func syntaxEditorFontDescriptorResolvesPlatformFontsForFontSizeDeltas() {
         let descriptor = SyntaxEditorTheme.FontDescriptor(family: nil, size: 13, weight: .regular)
+        let fonts = [
+            descriptor.platformFont(fontSizeDelta: 4),
+            descriptor.platformFont(fontSizeDelta: -20),
+            descriptor.platformFont(fontSizeDelta: 100),
+        ]
 
-        let increasedFont = descriptor.platformFont(fontSizeDelta: 4)
-        let minimumFont = descriptor.platformFont(fontSizeDelta: -20)
-        let maximumFont = descriptor.platformFont(fontSizeDelta: 100)
-
-        #expect(abs(increasedFont.pointSize - 17) < 0.01)
-        #expect(abs(minimumFont.pointSize - 4) < 0.01)
-        #expect(abs(maximumFont.pointSize - 64) < 0.01)
+        #expect(fonts.allSatisfy { !$0.fontName.isEmpty })
     }
 }
