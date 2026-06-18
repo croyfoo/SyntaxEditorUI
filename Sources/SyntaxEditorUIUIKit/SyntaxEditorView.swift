@@ -2105,7 +2105,6 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             revision: result.revision,
             language: result.language
         )
-        recordAppliedHighlightPhaseForTesting(result.phase, revision: result.revision)
         guard result.phase == .complete else { return }
         recordAppliedHighlightTokenSnapshot(
             tokens: result.tokens,
@@ -2270,6 +2269,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         materializedHighlightPhase = phase
         materializedHighlightRevision = revision
         materializedHighlightLanguage = language
+        recordAppliedHighlightPhaseForTesting(phase, revision: revision)
     }
 
     private func clearMaterializedHighlightState() {
