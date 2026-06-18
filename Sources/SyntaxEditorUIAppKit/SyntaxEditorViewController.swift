@@ -232,6 +232,8 @@ public final class SyntaxEditorView: NSScrollView {
     private var modelConfigurationObservation: PortableObservationTracking.Token?
     var modelDeliveryForTesting: PortableObservationTracking.Token? { modelObservation }
     var modelConfigurationDeliveryForTesting: PortableObservationTracking.Token? { modelConfigurationObservation }
+    private var appliedHighlightPhaseRecordsForTesting: [HighlightPhaseRecord] = []
+    private var appliedHighlightPhaseWaitersForTesting: [HighlightPhaseWaiter] = []
     private var skippedHighlightPhaseRecordsForTesting: [HighlightPhaseRecord] = []
     private var skippedHighlightPhaseWaitersForTesting: [HighlightPhaseWaiter] = []
     private var nextHighlightPhaseWaiterID = 0
@@ -365,6 +367,28 @@ public final class SyntaxEditorView: NSScrollView {
             if nextScheduledHighlightRequestID == generation {
                 return true
             }
+        }
+    }
+
+    internal func waitForAppliedHighlightPhaseForTesting(
+        _ phase: SyntaxEditorHighlighting.Result.Phase
+    ) async -> Bool {
+        let expectedRevision = model.textRevision
+        guard !hasAppliedHighlightPhaseForTesting(phase, revision: expectedRevision) else {
+            return true
+        }
+
+        let waiterID = nextHighlightPhaseWaiterID
+        nextHighlightPhaseWaiterID += 1
+        return await withCheckedContinuation { continuation in
+            appliedHighlightPhaseWaitersForTesting.append(
+                HighlightPhaseWaiter(
+                    id: waiterID,
+                    revision: expectedRevision,
+                    phase: phase,
+                    continuation: continuation
+                )
+            )
         }
     }
 
@@ -1355,9 +1379,40 @@ public final class SyntaxEditorView: NSScrollView {
         return true
     }
 
-    private func resetSkippedHighlightPhaseTrackingForTesting() {
+    private func resetHighlightPhaseTrackingForTesting() {
+        appliedHighlightPhaseRecordsForTesting.removeAll()
         skippedHighlightPhaseRecordsForTesting.removeAll()
+        resumeAppliedHighlightPhaseWaitersForTesting(result: false)
         resumeSkippedHighlightPhaseWaitersForTesting(result: false)
+    }
+
+    private func hasAppliedHighlightPhaseForTesting(
+        _ phase: SyntaxEditorHighlighting.Result.Phase,
+        revision: Int
+    ) -> Bool {
+        appliedHighlightPhaseRecordsForTesting.contains {
+            $0.revision == revision && $0.phase == phase
+        }
+    }
+
+    private func recordAppliedHighlightPhaseForTesting(
+        _ phase: SyntaxEditorHighlighting.Result.Phase,
+        revision: Int
+    ) {
+        appliedHighlightPhaseRecordsForTesting.append(
+            HighlightPhaseRecord(revision: revision, phase: phase)
+        )
+        if appliedHighlightPhaseRecordsForTesting.count > 16 {
+            appliedHighlightPhaseRecordsForTesting.removeFirst(
+                appliedHighlightPhaseRecordsForTesting.count - 16
+            )
+        }
+
+        resumeAppliedHighlightPhaseWaitersForTesting(
+            revision: revision,
+            phase: phase,
+            result: true
+        )
     }
 
     private func hasSkippedHighlightPhaseForTesting(
@@ -1387,6 +1442,27 @@ public final class SyntaxEditorView: NSScrollView {
             phase: phase,
             result: true
         )
+    }
+
+    private func resumeAppliedHighlightPhaseWaitersForTesting(
+        revision: Int? = nil,
+        phase: SyntaxEditorHighlighting.Result.Phase? = nil,
+        result: Bool
+    ) {
+        var matchedWaiters: [HighlightPhaseWaiter] = []
+        appliedHighlightPhaseWaitersForTesting.removeAll { waiter in
+            guard revision == nil || waiter.revision == revision,
+                  phase == nil || waiter.phase == phase
+            else {
+                return false
+            }
+            matchedWaiters.append(waiter)
+            return true
+        }
+
+        for waiter in matchedWaiters {
+            waiter.continuation.resume(returning: result)
+        }
     }
 
     private func resumeSkippedHighlightPhaseWaiterForTesting(id: Int, result: Bool) {
@@ -1437,7 +1513,7 @@ public final class SyntaxEditorView: NSScrollView {
             mutation: mutation
         )
         pendingHighlightApplication = nil
-        resetSkippedHighlightPhaseTrackingForTesting()
+        resetHighlightPhaseTrackingForTesting()
 
         let highlighter = self.highlighter
         // Viewport hint: progressive opens and background semantic drains
@@ -1665,7 +1741,7 @@ public final class SyntaxEditorView: NSScrollView {
         lastHighlightLanguage = nil
         clearMaterializedHighlightState()
         pendingHighlightApplication = nil
-        resetSkippedHighlightPhaseTrackingForTesting()
+        resetHighlightPhaseTrackingForTesting()
         resetSyntaxHighlightRenderingState(textLength: textStorage.length)
     }
 
@@ -2401,6 +2477,7 @@ public final class SyntaxEditorView: NSScrollView {
         materializedHighlightPhase = phase
         materializedHighlightRevision = revision
         materializedHighlightLanguage = language
+        recordAppliedHighlightPhaseForTesting(phase, revision: revision)
     }
 
     private func clearMaterializedHighlightState() {
