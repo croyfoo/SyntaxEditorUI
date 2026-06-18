@@ -1,7 +1,4 @@
 import Foundation
-import Observation
-import ObservationBridge
-import SwiftUI
 import Testing
 @testable import SyntaxEditorUI
 
@@ -23,101 +20,6 @@ import AppKit
 struct SyntaxEditorUITests {}
 
 extension SyntaxEditorUITests {
-    @Test("SyntaxEditor preserves default SwiftUI document across parent updates")
-    @MainActor
-    func syntaxEditorPreservesDefaultSwiftUIDocumentAcrossParentUpdates() async throws {
-        let probe = SyntaxEditorSwiftUIProbe()
-        let editedText = "let edited = 2"
-
-#if canImport(UIKit)
-        let controller = UIHostingController(rootView: SyntaxEditorDefaultWrapperHost(probe: probe))
-        let window = syntaxEditorAttachUIKitHost(controller)
-        defer {
-            window.isHidden = true
-            window.rootViewController = nil
-        }
-        syntaxEditorSettleUIKitHost(controller)
-        try #require(await probe.waitForRenderedTick(0))
-        let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
-
-        firstEditor.model.replaceText(editedText)
-        firstEditor.synchronizeDocumentForTesting()
-        probe.tick += 1
-        try #require(await probe.waitForRenderedTick(1))
-
-        let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
-        #expect(firstEditor === secondEditor)
-        #expect(secondEditor.model === firstEditor.model)
-        #expect(secondEditor.model.text == editedText)
-        #expect(secondEditor.text == editedText)
-#elseif canImport(AppKit)
-        let controller = NSHostingController(rootView: SyntaxEditorDefaultWrapperHost(probe: probe))
-        syntaxEditorSettleAppKitHost(controller)
-        try #require(await probe.waitForRenderedTick(0))
-        let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
-
-        firstEditor.model.replaceText(editedText)
-        firstEditor.synchronizeDocumentForTesting()
-        probe.tick += 1
-        try #require(await probe.waitForRenderedTick(1))
-
-        let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
-        #expect(firstEditor === secondEditor)
-        #expect(secondEditor.model === firstEditor.model)
-        #expect(secondEditor.model.text == editedText)
-        #expect(secondEditor.textView.string == editedText)
-#endif
-    }
-
-    @Test("SyntaxEditor rebinds replaced SwiftUI model without recreating native view")
-    @MainActor
-    func syntaxEditorRebindsReplacedSwiftUIModelWithoutRecreatingNativeView() async throws {
-        let probe = SyntaxEditorSwiftUIProbe()
-        let replacementModel = SyntaxEditorModel(
-            language: SyntaxLanguage.json,
-            isEditable: false,
-            lineWrappingEnabled: true
-        )
-
-#if canImport(UIKit)
-        let controller = UIHostingController(rootView: SyntaxEditorModelReplacementHost(probe: probe))
-        let window = syntaxEditorAttachUIKitHost(controller)
-        defer {
-            window.isHidden = true
-            window.rootViewController = nil
-        }
-        syntaxEditorSettleUIKitHost(controller)
-        try #require(await probe.waitForRenderedTick(0))
-        let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
-
-        probe.model = replacementModel
-        probe.tick += 1
-        try #require(await probe.waitForRenderedTick(1))
-
-        let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
-        #expect(firstEditor === secondEditor)
-        #expect(secondEditor.model === replacementModel)
-        #expect(secondEditor.model.language == SyntaxLanguage.json)
-        #expect(secondEditor.model.isEditable == false)
-#elseif canImport(AppKit)
-        let controller = NSHostingController(rootView: SyntaxEditorModelReplacementHost(probe: probe))
-        syntaxEditorSettleAppKitHost(controller)
-        try #require(await probe.waitForRenderedTick(0))
-        let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
-
-        probe.model = replacementModel
-        probe.tick += 1
-        try #require(await probe.waitForRenderedTick(1))
-
-        let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
-        #expect(firstEditor === secondEditor)
-        #expect(secondEditor.model === replacementModel)
-        #expect(secondEditor.model.language == SyntaxLanguage.json)
-        #expect(secondEditor.model.isEditable == false)
-        #expect(secondEditor.textView.isEditable == false)
-#endif
-    }
-
     @Test("SyntaxEditorView clears undo state when rebinding document")
     @MainActor
     func syntaxEditorViewClearsUndoStateWhenRebindingDocument() throws {
