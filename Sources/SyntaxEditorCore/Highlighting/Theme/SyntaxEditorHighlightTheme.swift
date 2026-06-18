@@ -372,18 +372,18 @@ package struct FontDescriptor: Hashable, Sendable {
         let pointSize = SyntaxEditorTheme.FontSize.pointSize(size, applying: fontSizeDelta)
         if let family,
            let font = UIFont(name: family, size: pointSize) {
-            return font.applying(weight: weight)
+            return font.applying(weight: weight).withSize(pointSize)
         }
-        return UIFont.monospacedSystemFont(ofSize: pointSize, weight: weight.uiFontWeight)
+        return UIFont.monospacedSystemFont(ofSize: pointSize, weight: weight.uiFontWeight).withSize(pointSize)
     }
 #elseif canImport(AppKit)
     package func platformFont(fontSizeDelta: Int = 0) -> NSFont {
         let pointSize = SyntaxEditorTheme.FontSize.pointSize(size, applying: fontSizeDelta)
         if let family,
            let font = NSFont(name: family, size: pointSize) {
-            return font.applying(weight: weight)
+            return font.applying(weight: weight).withSize(pointSize)
         }
-        return NSFont.monospacedSystemFont(ofSize: pointSize, weight: weight.nsFontWeight)
+        return NSFont.monospacedSystemFont(ofSize: pointSize, weight: weight.nsFontWeight).withSize(pointSize)
     }
 #endif
 }
