@@ -486,10 +486,10 @@ actor SyntaxEditorUITestHighlighter: SyntaxEditorHighlighting.Engine {
             source: source,
             language: language,
             revision: revision,
-            refreshRange: syntaxEditorTestClampedRange(
+            refreshRanges: [syntaxEditorTestClampedRange(
                 refreshRange ?? NSRange(location: 0, length: source.utf16.count),
                 textLength: source.utf16.count
-            ),
+            )],
             tokenPayload: tokenPayload
         )
     }
@@ -660,10 +660,10 @@ actor SyntaxEditorPhasedTestHighlighter: SyntaxEditorHighlighting.Engine {
             source: source,
             language: language,
             revision: revision,
-            refreshRange: syntaxEditorTestClampedRange(
+            refreshRanges: [syntaxEditorTestClampedRange(
                 refreshRange ?? NSRange(location: 0, length: source.utf16.count),
                 textLength: source.utf16.count
-            ),
+            )],
             phase: phase,
             tokenPayload: tokenPayload
         )
@@ -727,7 +727,7 @@ actor SyntaxEditorLanguageAwareTestHighlighter: SyntaxEditorHighlighting.Engine 
             source: source,
             language: language,
             revision: revision,
-            refreshRange: NSRange(location: 0, length: source.utf16.count)
+            refreshRanges: [NSRange(location: 0, length: source.utf16.count)]
         )
     }
 }

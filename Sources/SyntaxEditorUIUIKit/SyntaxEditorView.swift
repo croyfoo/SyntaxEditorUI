@@ -2086,7 +2086,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             recordSkippedHighlightPhaseForTesting(result.phase, revision: result.revision)
             return
         }
-        let refreshRange = highlightApplicationRefreshRange(
+        let refreshRanges = highlightApplicationRefreshRanges(
             for: result,
             mutation: mutation
         )
@@ -2095,7 +2095,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             expectedRevision: result.revision,
             source: result.source,
             language: result.language,
-            refreshRange: refreshRange,
+            refreshRanges: refreshRanges,
             mutation: mutation,
             tokenPayload: result.tokenPayload
         )
@@ -2141,14 +2141,38 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return materializedHighlightRevision < result.revision
     }
 
-    func highlightApplicationRefreshRange(
+    func highlightApplicationRefreshRanges(
         for result: SyntaxEditorHighlighting.Result,
         mutation: SyntaxEditorTextChange.Replacement?
-    ) -> NSRange {
-        guard mutation != nil else {
-            return result.refreshRange
+    ) -> [NSRange] {
+        _ = mutation
+        return result.refreshRanges
+    }
+
+    private static func highlightTargetRanges(_ ranges: [NSRange], textLength: Int) -> [NSRange] {
+        let validRanges = ranges.filter { $0.location != NSNotFound }
+        let clampedRanges = validRanges.map {
+            SyntaxEditorRangeUtilities.clampedRange($0, utf16Length: textLength)
         }
-        return result.refreshRange
+        let nonEmptyRanges = clampedRanges.filter { $0.length > 0 }
+        let clamped = nonEmptyRanges.sorted { lhs, rhs in
+            lhs.location == rhs.location ? lhs.length < rhs.length : lhs.location < rhs.location
+        }
+        guard var current = clamped.first else { return [] }
+        var merged: [NSRange] = []
+        for range in clamped.dropFirst() {
+            if range.location <= current.upperBound {
+                current = NSRange(
+                    location: current.location,
+                    length: max(current.upperBound, range.upperBound) - current.location
+                )
+            } else {
+                merged.append(current)
+                current = range
+            }
+        }
+        merged.append(current)
+        return merged
     }
 
     private func canApplyHighlightTokenPayload(
@@ -2306,7 +2330,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         expectedRevision: Int,
         source expectedSource: String,
         language expectedLanguage: SyntaxLanguage,
-        refreshRange: NSRange,
+        refreshRanges: [NSRange],
         mutation: SyntaxEditorTextChange.Replacement?,
         tokenPayload _: SyntaxEditorHighlighting.Result.Payload = .fullSnapshot
     ) async -> Bool {
@@ -2318,22 +2342,27 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
 
         let textLength = expectedSource.utf16.count
-        let targetRange = SyntaxEditorRangeUtilities.clampedRange(refreshRange, utf16Length: textLength)
-        guard targetRange.length > 0 else {
+        let targetRanges = Self.highlightTargetRanges(
+            refreshRanges,
+            textLength: textLength
+        )
+        guard !targetRanges.isEmpty else {
             applyMatchingBracketHighlight(force: true)
             return true
         }
         let base = baseAttributes()
 
-        guard await commitSyntaxHighlightSnapshotFromScheduledTask(
-            for: tokens,
-            targetRange: targetRange,
-            baseAttributes: base,
-            textLength: textLength,
-            revision: expectedRevision,
-            language: expectedLanguage
-        ) else {
-            return false
+        for targetRange in targetRanges {
+            guard await commitSyntaxHighlightSnapshotFromScheduledTask(
+                for: tokens,
+                targetRange: targetRange,
+                baseAttributes: base,
+                textLength: textLength,
+                revision: expectedRevision,
+                language: expectedLanguage
+            ) else {
+                return false
+            }
         }
 
         applyMarkedTextAttributes()

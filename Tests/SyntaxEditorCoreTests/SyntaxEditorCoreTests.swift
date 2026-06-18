@@ -59,6 +59,23 @@ private func sortHighlightTokens(_ tokens: [SyntaxEditorHighlighting.Token]) -> 
     }
 }
 
+private func refreshRangeUnion(_ result: SyntaxEditorHighlighting.Result) -> NSRange {
+    refreshRangeUnion(result.refreshRanges)
+}
+
+private func refreshRangeUnion(_ ranges: [NSRange]) -> NSRange {
+    guard let first = ranges.first else {
+        return NSRange(location: 0, length: 0)
+    }
+    var lower = first.location
+    var upper = first.upperBound
+    for range in ranges.dropFirst() {
+        lower = min(lower, range.location)
+        upper = max(upper, range.upperBound)
+    }
+    return NSRange(location: lower, length: upper - lower)
+}
+
 private func tokenIntersects(
     _ token: SyntaxEditorHighlighting.Token,
     range: NSRange,
@@ -382,7 +399,7 @@ private extension SyntaxHighlighterEngine {
             source: result.source,
             language: result.language,
             revision: result.revision,
-            refreshRange: result.refreshRange,
+            refreshRanges: result.refreshRanges,
             phase: result.phase,
             tokenPayload: .fullSnapshot
         )
@@ -4101,7 +4118,7 @@ struct SyntaxHighlighterEngineTests {
 
         let reset = await engine.reset(source: source, language: .plainText)
         #expect(reset.tokens.isEmpty)
-        #expect(reset.refreshRange == NSRange(location: 0, length: source.utf16.count))
+        #expect(refreshRangeUnion(reset) == NSRange(location: 0, length: source.utf16.count))
 
         let update = await engine.update(
             previousSource: source,
@@ -4110,7 +4127,7 @@ struct SyntaxHighlighterEngineTests {
             mutation: SyntaxEditorTextChange.Replacement(location: source.utf16.count, length: 0, replacement: "\n")
         )
         #expect(update.tokens.isEmpty)
-        #expect(update.refreshRange == NSRange(location: 0, length: (source + "\n").utf16.count))
+        #expect(refreshRangeUnion(update) == NSRange(location: 0, length: (source + "\n").utf16.count))
 
         let phases = await collectHighlightPhases(
             await engine.resetPhases(source: source, language: .plainText, revision: 2)
@@ -4383,8 +4400,8 @@ struct SyntaxHighlighterEngineTests {
                 revision: revision
             )
             #expect(
-                result.refreshRange.length < 200,
-                "refresh \(result.refreshRange) should stay near the edited line, not span the comment"
+                refreshRangeUnion(result).length < 200,
+                "refresh \(refreshRangeUnion(result)) should stay near the edited line, not span the comment"
             )
             current = next
             revision += 1
@@ -6457,7 +6474,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
         #expect(Set(incremental.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName)" }).count == incremental.tokens.count)
     }
 
@@ -6485,7 +6502,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
 
         _ = try effectiveSemanticSnapshot(
             in: incremental.tokens,
@@ -6525,7 +6542,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < 256)
+        #expect(refreshRangeUnion(incremental).length < 256)
     }
 
     @Test("SyntaxHighlighterEngine returns replacement token payloads for incremental updates")
@@ -6554,8 +6571,11 @@ struct SyntaxHighlighterEngineTests {
         #expect(update.tokenPayload == .replacement)
         #expect(update.containsCompleteTokenSnapshot == false)
         #expect(update.tokens.count < currentTokens.count)
+        #expect(Set(update.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName):\($0.isSemanticOverlay)" }).count == update.tokens.count)
         #expect(update.tokens.allSatisfy {
-            SyntaxEditorRangeUtilities.intersection(of: $0.range, and: update.refreshRange).length > 0
+            token in update.refreshRanges.contains {
+                SyntaxEditorRangeUtilities.intersection(of: token.range, and: $0).length > 0
+            }
         })
     }
 
@@ -6587,9 +6607,9 @@ struct SyntaxHighlighterEngineTests {
         #expect(complete.phase == .complete)
         #expect(
             SyntaxEditorRangeUtilities.intersection(
-                of: complete.refreshRange,
-                and: syntacticFastPass.refreshRange
-            ) == syntacticFastPass.refreshRange
+                of: refreshRangeUnion(complete),
+                and: refreshRangeUnion(syntacticFastPass)
+            ) == refreshRangeUnion(syntacticFastPass)
         )
     }
 
@@ -6617,7 +6637,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine rebuilds Swift semantic index after same-length closure parameter edits")
@@ -6702,7 +6722,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
         _ = try effectiveSemanticSnapshot(
             in: incremental.tokens,
             source: updatedSource,
@@ -6883,7 +6903,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
         #expect(
             syntaxIDs(
                 in: incremental.tokens,
@@ -6923,7 +6943,7 @@ struct SyntaxHighlighterEngineTests {
         let nsUpdatedSource = updatedSource as NSString
         let returnLineRange = nsUpdatedSource.range(of: "return value")
         let returnValueRange = nsUpdatedSource.range(of: "value", options: [], range: returnLineRange)
-        #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: returnValueRange) == returnValueRange)
+        #expect(SyntaxEditorRangeUtilities.intersection(of: refreshRangeUnion(incremental), and: returnValueRange) == returnValueRange)
 
         let valueReference = try effectiveSemanticSnapshot(
             in: incremental.tokens,
@@ -6966,7 +6986,109 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens.contains {
             tokenIntersects($0, range: returnItemRange, syntaxID: .identifierVariable, language: .swift)
         } == false)
-        #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: returnItemRange) == returnItemRange)
+        #expect(SyntaxEditorRangeUtilities.intersection(of: refreshRangeUnion(incremental), and: returnItemRange) == returnItemRange)
+    }
+
+    @Test("SyntaxHighlighterEngine keeps Swift enum case insertion name-targeted")
+    func highlighterKeepsSwiftEnumCaseInsertionNameTargeted() async throws {
+        let filler = (0..<500)
+            .map { "let filler\($0) = \($0)" }
+            .joined(separator: "\n")
+        let source = "enum State {\n"
+            + "    case idle\n"
+            + "    \n"
+            + "}\n"
+            + "\(filler)\n"
+            + "let selected = State.failed\n"
+        let nsSource = source as NSString
+        let insertionTarget = nsSource.range(of: "    \n}")
+        let insertionLocation = try #require(
+            insertionTarget.location == NSNotFound ? nil : insertionTarget.location
+        )
+        let insertion = "    case failed\n"
+        let mutation = SyntaxEditorTextChange.Replacement(
+            location: insertionLocation,
+            length: 0,
+            replacement: insertion
+        )
+        let updatedSource = nsSource.replacingCharacters(
+            in: NSRange(location: insertionLocation, length: 0),
+            with: insertion
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift, revision: 0)
+        let update = await incrementalEngine.update(
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: mutation,
+            revision: 1
+        )
+        let currentTokens = await incrementalEngine.currentTokensForTesting()
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+        let nsUpdatedSource = updatedSource as NSString
+        let stateFailedRange = nsUpdatedSource.range(of: "State.failed")
+        let failedRange = nsUpdatedSource.range(of: "failed", options: [], range: stateFailedRange)
+        let refreshTotalLength = update.refreshRanges.reduce(0) { $0 + $1.length }
+
+        #expect(update.tokenPayload == .replacement)
+        #expect(highlightTokensMatch(currentTokens, full.tokens))
+        #expect(Set(update.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName):\($0.isSemanticOverlay)" }).count == update.tokens.count)
+        #expect(update.refreshRanges.count >= 2)
+        #expect(refreshTotalLength < updatedSource.utf16.count / 4)
+        #expect(refreshRangeUnion(update).length > refreshTotalLength)
+        #expect(currentTokens.contains {
+            tokenIntersects($0, range: failedRange, syntaxID: .identifierConstant, language: .swift)
+        })
+    }
+
+    @Test("SyntaxHighlighterEngine keeps duplicate Swift enum cases incremental")
+    func highlighterKeepsDuplicateSwiftEnumCasesIncremental() async throws {
+        let filler = (0..<500)
+            .map { "let filler\($0) = \($0)" }
+            .joined(separator: "\n")
+        let source = "enum State {\n"
+            + "    case idle\n"
+            + "    case failed\n"
+            + "    \n"
+            + "}\n"
+            + "\(filler)\n"
+            + "let selected = State.failed\n"
+        let nsSource = source as NSString
+        let insertionTarget = nsSource.range(of: "    \n}")
+        let insertionLocation = try #require(
+            insertionTarget.location == NSNotFound ? nil : insertionTarget.location
+        )
+        let insertion = "    case failed\n"
+        let mutation = SyntaxEditorTextChange.Replacement(
+            location: insertionLocation,
+            length: 0,
+            replacement: insertion
+        )
+        let updatedSource = nsSource.replacingCharacters(
+            in: NSRange(location: insertionLocation, length: 0),
+            with: insertion
+        )
+        let incrementalEngine = SyntaxHighlighterEngine()
+        let fullEngine = SyntaxHighlighterEngine()
+
+        _ = await incrementalEngine.reset(source: source, language: SyntaxLanguage.swift, revision: 0)
+        let update = await incrementalEngine.update(
+            source: updatedSource,
+            language: SyntaxLanguage.swift,
+            mutation: mutation,
+            revision: 1
+        )
+        let currentTokens = await incrementalEngine.currentTokensForTesting()
+        let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.swift)
+        let refreshTotalLength = update.refreshRanges.reduce(0) { $0 + $1.length }
+
+        #expect(update.tokenPayload == .replacement)
+        #expect(highlightTokensMatch(currentTokens, full.tokens))
+        #expect(Set(update.tokens.map { "\($0.range.location):\($0.range.length):\($0.rawCaptureName):\($0.isSemanticOverlay)" }).count == update.tokens.count)
+        #expect(refreshTotalLength < updatedSource.utf16.count / 4)
+        #expect(refreshRangeUnion(update).length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine rebuilds Swift semantic index after modifier declaration edits")
@@ -6999,7 +7121,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens.contains {
             tokenIntersects($0, range: returnItemRange, syntaxID: .identifierVariable, language: .swift)
         } == false)
-        #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: returnItemRange) == returnItemRange)
+        #expect(SyntaxEditorRangeUtilities.intersection(of: refreshRangeUnion(incremental), and: returnItemRange) == returnItemRange)
     }
 
     @Test("SyntaxHighlighterEngine strips stale Swift system macro overlays after local macro declarations")
@@ -8265,7 +8387,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.location <= mutation.range.location)
+        #expect(refreshRangeUnion(incremental).location <= mutation.range.location)
     }
 
     @Test("SyntaxHighlighterEngine queries full touched lines for partial token edits")
@@ -8286,7 +8408,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine re-queries expanded JavaScript template coverage")
@@ -8345,7 +8467,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens == full.tokens)
         #expect(
             SyntaxEditorRangeUtilities.intersection(
-                of: incremental.refreshRange,
+                of: refreshRangeUnion(incremental),
                 and: oldCommentExtent
             ) == oldCommentExtent
         )
@@ -8372,7 +8494,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count / 10)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count / 10)
     }
 
     @Test("SyntaxHighlighterEngine incrementally updates HTML injected languages")
@@ -8428,7 +8550,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.html)
 
         #expect(mutation.range == NSRange(location: 2, length: 5))
-        #expect(incremental.refreshRange == NSRange(location: 0, length: updatedSource.utf16.count))
+        #expect(refreshRangeUnion(incremental) == NSRange(location: 0, length: updatedSource.utf16.count))
         #expect(highlightTokensMatch(incremental.tokens, full.tokens))
     }
 
@@ -8675,7 +8797,7 @@ struct SyntaxHighlighterEngineTests {
             .reset(source: updatedSource, language: SyntaxLanguage.javascript)
 
         #expect(highlightTokensMatch(staleUpdate.tokens, fullJavaScript.tokens))
-        #expect(staleUpdate.refreshRange.location <= mutation.range.location)
+        #expect(refreshRangeUnion(staleUpdate).location <= mutation.range.location)
 
         let jsonSource = #"{"enabled": true}"#
         let languageChange = await engine.update(
@@ -8710,8 +8832,8 @@ struct SyntaxHighlighterEngineTests {
             .reset(source: updatedSource, language: SyntaxLanguage.javascript, revision: 2)
 
         #expect(highlightTokensMatch(await engine.currentTokensForTesting(), full.tokens))
-        #expect(staleUpdate.refreshRange.location == 0)
-        #expect(staleUpdate.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(staleUpdate).location == 0)
+        #expect(refreshRangeUnion(staleUpdate).length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine survives repeated paste-sized Swift updates")
@@ -9001,7 +9123,7 @@ struct SyntaxHighlighterEngineTests {
         )
 
         #expect(incremental.tokens.isEmpty == false)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")
@@ -11336,7 +11458,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine keeps Objective-C property-heavy reference edits equal to full reset")
@@ -11372,7 +11494,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
         _ = try effectiveSemanticSnapshot(
             in: incremental.tokens,
             source: updatedSource,
@@ -11429,7 +11551,7 @@ struct SyntaxHighlighterEngineTests {
         #expect(incremental.tokens.contains {
             tokenIntersects($0, range: referenceNameRange, syntaxID: .identifierVariable, language: .objectiveC)
         } == false)
-        #expect(SyntaxEditorRangeUtilities.intersection(of: incremental.refreshRange, and: referenceNameRange) == referenceNameRange)
+        #expect(SyntaxEditorRangeUtilities.intersection(of: refreshRangeUnion(incremental), and: referenceNameRange) == referenceNameRange)
     }
 
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after property keyword edits")
@@ -12074,7 +12196,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count / 2)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count / 2)
     }
 
     @Test("SyntaxHighlighterEngine keeps large Objective-C value edits scoped")
@@ -12109,7 +12231,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < 256)
+        #expect(refreshRangeUnion(incremental).length < 256)
     }
 
     @Test("SyntaxHighlighterEngine keeps large Objective-C multiline body edits scoped")
@@ -12153,7 +12275,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < 512)
+        #expect(refreshRangeUnion(incremental).length < 512)
     }
 
     @Test("SyntaxHighlighterEngine keeps Objective-C macro continuation edits scoped")
@@ -12186,7 +12308,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine rebuilds Objective-C semantic index after declaration value member edits")
@@ -12622,7 +12744,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
         _ = try effectiveSemanticSnapshot(
             in: incremental.tokens,
             source: updatedSource,
@@ -12782,7 +12904,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
         _ = try effectiveSemanticSnapshot(
             in: incremental.tokens,
             source: updatedSource,
@@ -12816,7 +12938,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
         #expect(syntaxIDs(
             in: incremental.tokens,
             source: updatedSource,
@@ -12945,7 +13067,7 @@ struct SyntaxHighlighterEngineTests {
         let full = await fullEngine.reset(source: updatedSource, language: SyntaxLanguage.objectiveC)
 
         #expect(incremental.tokens == full.tokens)
-        #expect(incremental.refreshRange.length < updatedSource.utf16.count)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
     }
 
     @Test("SyntaxHighlighterEngine strips stale Objective-C type shadows after declaration removal")

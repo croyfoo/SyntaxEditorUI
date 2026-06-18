@@ -87,7 +87,7 @@ package struct Result: Sendable {
     package let source: String
     package let language: SyntaxLanguage
     package let revision: Int
-    package let refreshRange: NSRange
+    package let refreshRanges: [NSRange]
     package let phase: SyntaxEditorHighlighting.Result.Phase
     package let tokenPayload: SyntaxEditorHighlighting.Result.Payload
 
@@ -100,7 +100,7 @@ package struct Result: Sendable {
         source: String,
         language: SyntaxLanguage,
         revision: Int,
-        refreshRange: NSRange,
+        refreshRanges: [NSRange],
         phase: SyntaxEditorHighlighting.Result.Phase = .complete,
         tokenPayload: SyntaxEditorHighlighting.Result.Payload = .fullSnapshot
     ) {
@@ -108,10 +108,34 @@ package struct Result: Sendable {
         self.source = source
         self.language = language
         self.revision = revision
-        self.refreshRange = refreshRange
+        self.refreshRanges = Self.normalizedRefreshRanges(refreshRanges)
         self.phase = phase
         self.tokenPayload = tokenPayload
     }
+
+    private static func normalizedRefreshRanges(_ ranges: [NSRange]) -> [NSRange] {
+        let sorted = ranges
+            .filter { $0.location != NSNotFound && $0.length > 0 }
+            .sorted { lhs, rhs in
+                lhs.location == rhs.location ? lhs.length < rhs.length : lhs.location < rhs.location
+            }
+        guard var current = sorted.first else { return [] }
+        var merged: [NSRange] = []
+        for range in sorted.dropFirst() {
+            if range.location <= current.upperBound {
+                current = NSRange(
+                    location: current.location,
+                    length: max(current.upperBound, range.upperBound) - current.location
+                )
+            } else {
+                merged.append(current)
+                current = range
+            }
+        }
+        merged.append(current)
+        return merged
+    }
+
 }
 
 package struct Request: Equatable, Sendable {
@@ -304,7 +328,7 @@ extension SyntaxEditorHighlighting.Result {
             source: source,
             language: language,
             revision: revision,
-            refreshRange: NSRange(location: 0, length: source.utf16.count)
+            refreshRanges: [NSRange(location: 0, length: source.utf16.count)]
         )
     }
 }

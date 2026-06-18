@@ -56,6 +56,9 @@ enum SemanticUpdatePlan {
     case reuse
     /// State updated; the envelope plus these scope-bounded ranges need overlays.
     case targets([NSRange])
+    /// State updated; the envelope, bounded ranges, and base-token lines whose
+    /// text exactly matches one of these names need overlays.
+    case tokenTextTargets(names: Set<String>, ranges: [NSRange])
     /// The edit's effects are not boundable; run the full-document merge.
     case full
 }
@@ -166,6 +169,12 @@ final class SwiftSemanticPass: SemanticPass {
         state = SwiftSemanticOverlayState(scopeIndex: index, indexedSourceUTF16Length: nsSource.length)
         if update.requiresFullPass {
             return .full
+        }
+        if !update.tokenTextTargetNames.isEmpty {
+            return .tokenTextTargets(
+                names: update.tokenTextTargetNames,
+                ranges: update.boundedTargets
+            )
         }
         if update.boundedTargets.isEmpty {
             return .reuse
