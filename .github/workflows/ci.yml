@@ -70,6 +70,10 @@ jobs:
         run: |
           swift test
 
+      - name: Check benchmark discovery
+        run: |
+          swift package benchmark list --target HighlightBenchmark --no-progress
+
   ios-tests:
     name: iOS Tests
     runs-on: macos-26

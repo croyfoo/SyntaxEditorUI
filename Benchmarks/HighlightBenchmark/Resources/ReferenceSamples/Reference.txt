@@ -1,0 +1,6 @@
+Plain text note
+
+This sample uses SyntaxLanguage.plainText.
+
+Parentheses (like this), quotes "like this", and brackets [like this] stay ordinary text.
+Tabs, indentation, comments, and line breaks use normal text editing behavior.
