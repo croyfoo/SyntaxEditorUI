@@ -319,6 +319,7 @@ private enum HighlightBenchmarkRunner {
         var fastPassLatencies: [Int] = []
         fastPassLatencies.reserveCapacity(insertions.count)
         var revision = 1
+        var stoppedMeasurement = false
 
         benchmark.startMeasurement()
         for index in insertions.indices {
@@ -357,6 +358,8 @@ private enum HighlightBenchmarkRunner {
             }
 
             if index == insertions.index(before: insertions.endIndex) {
+                benchmark.stopMeasurement()
+                stoppedMeasurement = true
                 while await iterator.next() != nil {}
             }
 
@@ -364,7 +367,9 @@ private enum HighlightBenchmarkRunner {
             caret += (insertion as NSString).length
             revision += 1
         }
-        benchmark.stopMeasurement()
+        if stoppedMeasurement == false {
+            benchmark.stopMeasurement()
+        }
 
         for latency in fastPassLatencies {
             benchmark.measurement(HighlightBenchmarkMetrics.typingFastPassLatencyNanoseconds, latency)
@@ -490,14 +495,16 @@ private struct BenchmarkWorkload: Sendable {
 
     init(benchmarkCase: HighlightBenchmarkCase) {
         let baseSource = benchmarkCase.resource.loadString()
-        let repeatCount = benchmarkCase.repeatSource ?? repeatCountForMinimumLineCount(
+        let repeatCount = benchmarkCase.repeatSource ?? repeatCountForApproximateLineCount(
             benchmarkCase.minimumLineCount,
-            source: baseSource
+            baseSource,
+            language: benchmarkCase.language
         )
+
         name = benchmarkCase.name
         language = benchmarkCase.language
-        source = repeatedSource(baseSource, count: repeatCount)
-        updatedSource = incrementalEditSource(from: source)
+        source = amplifiedSource(baseSource, count: repeatCount, language: benchmarkCase.language)
+        updatedSource = incrementalEditSource(from: source, language: benchmarkCase.language)
         mutation = SyntaxEditorTextChange.Replacement.singleReplacement(
             from: source,
             to: updatedSource
@@ -732,7 +739,7 @@ private extension [String: String] {
     }
 }
 
-private func incrementalEditSource(from source: String) -> String {
+private func incrementalEditSource(from source: String, language: SyntaxLanguage) -> String {
     if source.contains("Reference highlighting surface") {
         return source.replacingOccurrences(
             of: "Reference highlighting surface",
@@ -757,7 +764,43 @@ private func incrementalEditSource(from source: String) -> String {
             range: range
         )
     }
-    return source + "\n// benchmark edit\n"
+
+    switch language {
+    case .plainText:
+        return source + "\nbenchmark edit\n"
+    case .css:
+        return source + "\n/* benchmark edit */\n"
+    case .html:
+        return replacingFirstOccurrence(
+            in: source,
+            of: "Reference Preview",
+            with: "Reference Benchmark"
+        ) ?? inserting("<!-- benchmark edit -->", before: "</body>", in: source)
+    case .javascript:
+        return source + "\n// benchmark edit\n"
+    case .json:
+        return replacingFirstOccurrence(
+            in: source,
+            of: "\"enabled\": true",
+            with: "\"enabled\": false"
+        ) ?? insertingJSONPropertyFallback(in: source)
+    case .objectiveC:
+        return source + "\n// benchmark edit\n"
+    case .swift:
+        return source + "\n// benchmark edit\n"
+    case .toml:
+        return replacingFirstOccurrence(
+            in: source,
+            of: "enabled = true",
+            with: "enabled = false"
+        ) ?? (source + "\n# benchmark edit\n")
+    case .xml:
+        return replacingFirstOccurrence(
+            in: source,
+            of: "<enabled>true</enabled>",
+            with: "<enabled>false</enabled>"
+        ) ?? inserting("<!-- benchmark edit -->", before: "</benchmark-documents>", in: source)
+    }
 }
 
 private let typingValueMarker = "ReferenceTypingBenchmarkValue = "
@@ -845,10 +888,167 @@ private func repeatedSource(_ source: String, count: Int) -> String {
     return Array(repeating: source, count: count).joined(separator: "\n\n")
 }
 
-private func repeatCountForMinimumLineCount(_ minimumLineCount: Int?, source: String) -> Int {
-    guard let minimumLineCount else { return 1 }
-    let baseLineCount = max(1, sourceLineCount(source))
-    return max(1, (minimumLineCount + baseLineCount - 1) / baseLineCount)
+private func amplifiedSource(_ source: String, count: Int, language: SyntaxLanguage) -> String {
+    guard count > 1 else { return source }
+
+    switch language {
+    case .html:
+        return amplifiedHTMLSource(source, count: count)
+    case .json:
+        return amplifiedJSONSource(source, count: count)
+    case .toml:
+        return amplifiedTOMLSource(source, count: count)
+    case .xml:
+        return amplifiedXMLSource(source, count: count)
+    default:
+        return repeatedSource(source, count: count)
+    }
+}
+
+private func repeatCountForApproximateLineCount(
+    _ minimumLineCount: Int?,
+    _ source: String,
+    language: SyntaxLanguage
+) -> Int {
+    guard let minimumLineCount else {
+        return 1
+    }
+
+    let lineEstimate = amplifiedLineEstimate(source, language: language)
+    let repeatedLines = max(1, lineEstimate.repeatedLines)
+    let remainingLines = max(1, minimumLineCount - lineEstimate.fixedLines)
+    return max(1, (remainingLines + repeatedLines - 1) / repeatedLines)
+}
+
+private func amplifiedLineEstimate(
+    _ source: String,
+    language: SyntaxLanguage
+) -> (fixedLines: Int, repeatedLines: Int) {
+    switch language {
+    case .html:
+        guard
+            let bodyOpen = source.range(of: "<body>"),
+            let bodyClose = source.range(of: "</body>", options: .backwards)
+        else {
+            return (0, sourceLineCount(source) + 2)
+        }
+
+        let fixedSource = String(source[..<bodyOpen.upperBound]) + String(source[bodyClose.lowerBound...])
+        let body = String(source[bodyOpen.upperBound..<bodyClose.lowerBound])
+        return (
+            sourceLineCount(fixedSource),
+            sourceLineCount(body) + 1
+        )
+    case .json:
+        return (
+            3,
+            sourceLineCount(source.trimmingCharacters(in: .whitespacesAndNewlines)) + 1
+        )
+    case .toml:
+        return (
+            0,
+            sourceLineCount(source.trimmingCharacters(in: .whitespacesAndNewlines)) + 3
+        )
+    case .xml:
+        let body = xmlBodyWithoutDeclaration(source)
+        return (
+            source.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<?xml") ? 4 : 3,
+            sourceLineCount(body) + 1
+        )
+    default:
+        return (0, sourceLineCount(source) + 2)
+    }
+}
+
+private func amplifiedHTMLSource(_ source: String, count: Int) -> String {
+    guard
+        let bodyOpen = source.range(of: "<body>"),
+        let bodyClose = source.range(of: "</body>", options: .backwards)
+    else {
+        return repeatedSource(source, count: count)
+    }
+
+    let prefix = String(source[..<bodyOpen.upperBound])
+    let body = String(source[bodyOpen.upperBound..<bodyClose.lowerBound])
+    let suffix = String(source[bodyClose.lowerBound...])
+    return prefix + Array(repeating: body, count: count).joined(separator: "\n") + suffix
+}
+
+private func amplifiedJSONSource(_ source: String, count: Int) -> String {
+    let element = indentMultiline(source.trimmingCharacters(in: .whitespacesAndNewlines), spaces: 4)
+    return "[\n" + Array(repeating: element, count: count).joined(separator: ",\n") + "\n]\n"
+}
+
+private func amplifiedTOMLSource(_ source: String, count: Int) -> String {
+    let document = source
+        .replacingOccurrences(of: "[package]", with: "[documents.package]")
+        .replacingOccurrences(of: "[theme]", with: "[documents.theme]")
+        .replacingOccurrences(of: "[[items]]", with: "[[documents.items]]")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    let documents = (0..<count).map { index in
+        "[[documents]]\nindex = \(index)\n" + document
+    }
+    return documents.joined(separator: "\n\n") + "\n"
+}
+
+private func amplifiedXMLSource(_ source: String, count: Int) -> String {
+    var body = source.trimmingCharacters(in: .whitespacesAndNewlines)
+    var declaration: String?
+    if body.hasPrefix("<?xml"), let declarationRange = body.range(of: "?>") {
+        declaration = String(body[..<declarationRange.upperBound])
+        body = String(body[declarationRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    let repeatedElements = Array(repeating: indentMultiline(body, spaces: 4), count: count)
+        .joined(separator: "\n")
+    let document = "<benchmark-documents>\n" + repeatedElements + "\n</benchmark-documents>\n"
+    if let declaration {
+        return declaration + "\n" + document
+    }
+    return document
+}
+
+private func xmlBodyWithoutDeclaration(_ source: String) -> String {
+    var body = source.trimmingCharacters(in: .whitespacesAndNewlines)
+    if body.hasPrefix("<?xml"), let declarationRange = body.range(of: "?>") {
+        body = String(body[declarationRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return body
+}
+
+private func indentMultiline(_ source: String, spaces: Int) -> String {
+    let prefix = String(repeating: " ", count: spaces)
+    return source.split(separator: "\n", omittingEmptySubsequences: false)
+        .map { prefix + String($0) }
+        .joined(separator: "\n")
+}
+
+private func replacingFirstOccurrence(
+    in source: String,
+    of target: String,
+    with replacement: String
+) -> String? {
+    guard let range = source.range(of: target) else { return nil }
+    return source.replacingCharacters(in: range, with: replacement)
+}
+
+private func inserting(_ insertion: String, before marker: String, in source: String) -> String {
+    guard let markerRange = source.range(of: marker, options: .backwards) else {
+        return source + "\n" + insertion + "\n"
+    }
+    return String(source[..<markerRange.lowerBound]) + insertion + "\n" + String(source[markerRange.lowerBound...])
+}
+
+private func insertingJSONPropertyFallback(in source: String) -> String {
+    guard let closeBrace = source.range(of: "}", options: .backwards) else {
+        return source
+    }
+
+    let prefix = String(source[..<closeBrace.lowerBound])
+    let suffix = String(source[closeBrace.lowerBound...])
+    let needsComma = prefix.contains(":")
+    return prefix + (needsComma ? "," : "") + "\n  \"benchmarkEdit\": true\n" + suffix
 }
 
 private func sourceLineCount(_ source: String) -> Int {
