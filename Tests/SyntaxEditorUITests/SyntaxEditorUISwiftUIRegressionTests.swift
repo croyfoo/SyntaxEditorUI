@@ -16,7 +16,7 @@ import AppKit
 /// ObservationBridge); the time limit is the only failure detector for a
 /// pipeline that never settles, so it bounds hangs without ever racing a
 /// slow-but-correct run into a flaky false.
-@Suite("SyntaxEditorUI", .timeLimit(.minutes(1)))
+@Suite("SyntaxEditorUI", .serialized, .timeLimit(.minutes(1)))
 struct SyntaxEditorUITests {}
 
 extension SyntaxEditorUITests {

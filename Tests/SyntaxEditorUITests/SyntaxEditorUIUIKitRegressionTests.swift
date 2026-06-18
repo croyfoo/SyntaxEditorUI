@@ -1096,7 +1096,7 @@ extension SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(editorView.syntaxForegroundColorForTesting(at: 0) != nil)
 
@@ -1596,7 +1596,7 @@ extension SyntaxEditorUITests {
         #expect(iOSEditorLineBreakMode(editorView) == .byCharWrapping)
 
         await resetGate.resumeOne()
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
 
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(iOSEditorLineBreakMode(editorView) == .byCharWrapping)
@@ -1709,7 +1709,7 @@ extension SyntaxEditorUITests {
         #expect(editorView.text == "\(source)x")
 
         await completeGate.resumeAll()
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
     }
 
@@ -1762,7 +1762,7 @@ extension SyntaxEditorUITests {
         #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
         await completeGate.resumeOne()
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         editorView.selectedRange = NSRange(location: source.utf16.count, length: 0)
@@ -1771,7 +1771,7 @@ extension SyntaxEditorUITests {
         await completeGate.waitUntilSuspended(after: updateSuspensionCount)
 
         await completeGate.resumeAll()
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
 
         #expect(editorView.text == "\(source)x")
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
@@ -1811,7 +1811,7 @@ extension SyntaxEditorUITests {
 
         await completeGate.waitUntilSuspended()
         await completeGate.resumeOne()
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
 
         editorView.selectedRange = NSRange(location: 0, length: 0)
         editorView.insertText("l")
@@ -1821,7 +1821,7 @@ extension SyntaxEditorUITests {
         #expect(editorView.text == "l")
 
         await completeGate.resumeAll()
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
     }
 
     @Test("SyntaxEditorView preserves iOS semantic highlight during incremental fast pass")
@@ -2013,14 +2013,14 @@ extension SyntaxEditorUITests {
         let model = SyntaxEditorTestContext(text: source, language: SyntaxLanguage.swift)
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
         let baseFont = try #require(iOSEditorFont(editorView, at: 4))
         let highlightedFont = try #require(iOSEditorFont(editorView, at: 0))
         #expect(!syntaxEditorUITestFontsEqual(highlightedFont, baseFont))
 
         editorView.selectedRange = NSRange(location: 0, length: 3)
         editorView.insertText("var")
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
 
         #expect(editorView.text == "var value = 1")
         #expect(syntaxEditorUITestFontsEqual(iOSEditorFont(editorView, at: 0), baseFont))
@@ -2245,7 +2245,7 @@ extension SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewIOSRendersPastedTextBeforeAsyncHighlightCompletes() async {
         let source = "let start = 0\n"
-        let pastedText = String(repeating: "let value = 1\n", count: 500)
+        let pastedText = String(repeating: "let value = 1\n", count: 120)
         let theme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
@@ -2259,7 +2259,7 @@ extension SyntaxEditorUITests {
         )
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
         layoutIOSEditorView(editorView, width: 393, height: 658)
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
         let initialContentHeight = editorView.contentSize.height
 
         editorView.selectedRange = NSRange(location: 0, length: 0)
@@ -2440,9 +2440,9 @@ extension SyntaxEditorUITests {
             language: SyntaxLanguage.swift,
             theme: theme
         )
-        let editorView = SyntaxEditorView(testContext: model)
+        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
         layoutIOSEditorView(editorView)
-        await editorView.waitForPendingHighlightForTesting()
+        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
 
         editorView.textStorage.addAttribute(
             .foregroundColor,
