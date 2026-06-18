@@ -275,6 +275,9 @@ private actor HighlightRequestWorker {
         emitFastPass: ((SyntaxEditorHighlighting.Result) -> Void)?
     ) async -> SyntaxEditorHighlighting.Result {
         guard !source.isEmpty else {
+            guard !Task.isCancelled else {
+                return SyntaxEditorHighlighting.Result.empty(source: source, language: language, revision: revision)
+            }
             session = nil
             return SyntaxEditorHighlighting.Result.empty(source: source, language: language, revision: revision)
         }

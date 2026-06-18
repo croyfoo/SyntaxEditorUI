@@ -9136,6 +9136,42 @@ struct SyntaxHighlighterEngineTests {
         #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
     }
 
+    @Test("SyntaxHighlighterEngine keeps current session after cancelled empty reset")
+    func highlighterKeepsCurrentSessionAfterCancelledEmptyReset() async throws {
+        let source = """
+        const first = 1;
+        const second = 2;
+        """
+        let engine = SyntaxHighlighterEngine()
+        _ = await engine.reset(source: source, language: SyntaxLanguage.javascript, revision: 1)
+
+        let resetTask = Task {
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+            return await engine.reset(
+                source: "",
+                language: SyntaxLanguage.javascript,
+                revision: 2
+            )
+        }
+        resetTask.cancel()
+        let cancelled = await resetTask.value
+        #expect(cancelled.tokens.isEmpty)
+
+        let updatedSource = source.replacingOccurrences(of: "second = 2", with: "second = 3")
+        let mutation = try #require(SyntaxEditorTextChange.Replacement.singleReplacement(from: source, to: updatedSource))
+        let incremental = await engine.update(
+            source: updatedSource,
+            language: SyntaxLanguage.javascript,
+            mutation: mutation,
+            revision: 3
+        )
+
+        #expect(incremental.tokens.isEmpty == false)
+        #expect(refreshRangeUnion(incremental).length < updatedSource.utf16.count)
+    }
+
     @Test("SyntaxHighlighterEngine keeps unsupported injections in direct highlighting mode")
     func highlighterKeepsUnsupportedInjectionsDirect() async {
         let engine = SyntaxHighlighterEngine()
