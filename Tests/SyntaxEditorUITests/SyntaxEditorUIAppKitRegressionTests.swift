@@ -880,10 +880,8 @@ extension SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
         await completeGate.waitUntilSuspended()
-        #expect(await syntaxEditorWaitForColor(
-            { macEditorForegroundColor(editorView, at: 0) },
-            equals: theme.keyword
-        ))
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 4), theme.baseForeground))
         #expect(await highlighter.callCount() == 1)
 
@@ -945,19 +943,15 @@ extension SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
         await completeGate.waitUntilSuspended()
-        #expect(await syntaxEditorWaitForColor(
-            { macEditorForegroundColor(editorView, at: 0) },
-            equals: theme.keyword
-        ))
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         let insertionRange = NSRange(location: source.utf16.count, length: 0)
         editorView.textView.setSelectedRange(insertionRange)
         editorView.textView.insertText("x", replacementRange: insertionRange)
 
-        #expect(await syntaxEditorWaitForColor(
-            { macEditorForegroundColor(editorView, at: 0) },
-            equals: theme.string
-        ))
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.string))
         #expect(editorView.textView.string == "\(source)x")
 
         await completeGate.resumeAll()
@@ -1011,10 +1005,8 @@ extension SyntaxEditorUITests {
         let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
 
         await completeGate.waitUntilSuspended()
-        #expect(await syntaxEditorWaitForColor(
-            { macEditorForegroundColor(editorView, at: 0) },
-            equals: theme.keyword
-        ))
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
         await completeGate.resumeOne()
         await editorView.waitForPendingHighlightForTesting()
         #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
@@ -1071,10 +1063,8 @@ extension SyntaxEditorUITests {
         editorView.textView.setSelectedRange(NSRange(location: 0, length: 0))
         editorView.textView.insertText("l", replacementRange: NSRange(location: 0, length: 0))
 
-        #expect(await syntaxEditorWaitForColor(
-            { macEditorForegroundColor(editorView, at: 0) },
-            equals: theme.keyword
-        ))
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.syntacticFastPass))
+        #expect(syntaxEditorUITestColorsEqual(macEditorForegroundColor(editorView, at: 0), theme.keyword))
         #expect(editorView.textView.string == "l")
 
         await completeGate.resumeAll()
