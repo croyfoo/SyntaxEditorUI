@@ -18,8 +18,72 @@ import AppKit
 @MainActor
 @Observable
 final class SyntaxEditorSwiftUIProbe {
+    struct RenderedTickWaiter {
+        let id: Int
+        let tick: Int
+        let continuation: CheckedContinuation<Bool, Never>
+    }
+
     var tick = 0
     var model = SyntaxEditorModel(text: "let value = 1", language: SyntaxLanguage.javascript)
+
+    @ObservationIgnored private var renderedTicks: Set<Int> = []
+    @ObservationIgnored private var nextRenderedTickWaiterID = 0
+    @ObservationIgnored private var renderedTickWaiters: [RenderedTickWaiter] = []
+
+    func recordRenderedTick(_ tick: Int) {
+        renderedTicks.insert(tick)
+
+        var readyWaiters: [RenderedTickWaiter] = []
+        renderedTickWaiters.removeAll { waiter in
+            guard waiter.tick == tick else {
+                return false
+            }
+            readyWaiters.append(waiter)
+            return true
+        }
+
+        for waiter in readyWaiters {
+            waiter.continuation.resume(returning: true)
+        }
+    }
+
+    func waitForRenderedTick(_ tick: Int) async -> Bool {
+        guard !renderedTicks.contains(tick) else { return true }
+
+        let waiterID = nextRenderedTickWaiterID
+        nextRenderedTickWaiterID += 1
+
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: false)
+                    return
+                }
+
+                if renderedTicks.contains(tick) {
+                    continuation.resume(returning: true)
+                    return
+                }
+
+                renderedTickWaiters.append(
+                    RenderedTickWaiter(id: waiterID, tick: tick, continuation: continuation)
+                )
+            }
+        } onCancel: {
+            Task { @MainActor in
+                self.cancelRenderedTickWaiter(id: waiterID)
+            }
+        }
+    }
+
+    private func cancelRenderedTickWaiter(id: Int) {
+        guard let index = renderedTickWaiters.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let waiter = renderedTickWaiters.remove(at: index)
+        waiter.continuation.resume(returning: false)
+    }
 }
 
 struct SyntaxEditorDefaultWrapperHost: View {
@@ -29,6 +93,8 @@ struct SyntaxEditorDefaultWrapperHost: View {
         VStack {
             SyntaxEditor(probe.model)
             Text("\(probe.tick)")
+            SyntaxEditorSwiftUIRenderSignal(probe: probe, tick: probe.tick)
+                .frame(width: 0, height: 0)
         }
     }
 }
@@ -40,6 +106,8 @@ struct SyntaxEditorModelReplacementHost: View {
         VStack {
             SyntaxEditor(probe.model)
             Text("\(probe.tick)")
+            SyntaxEditorSwiftUIRenderSignal(probe: probe, tick: probe.tick)
+                .frame(width: 0, height: 0)
         }
     }
 }
@@ -68,7 +136,6 @@ func syntaxEditorSettleUIKitHost<Content: View>(_ controller: UIHostingControlle
     controller.view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
     controller.view.setNeedsLayout()
     controller.view.layoutIfNeeded()
-    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
 }
 
 @MainActor
@@ -103,7 +170,38 @@ func syntaxEditorSettleAppKitHost<Content: View>(_ controller: NSHostingControll
     controller.view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
     controller.view.needsLayout = true
     controller.view.layoutSubtreeIfNeeded()
-    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+}
+#endif
+
+#if canImport(UIKit)
+@MainActor
+private struct SyntaxEditorSwiftUIRenderSignal: UIViewRepresentable {
+    let probe: SyntaxEditorSwiftUIProbe
+    let tick: Int
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        probe.recordRenderedTick(tick)
+    }
+}
+#elseif canImport(AppKit)
+@MainActor
+private struct SyntaxEditorSwiftUIRenderSignal: NSViewRepresentable {
+    let probe: SyntaxEditorSwiftUIProbe
+    let tick: Int
+
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        probe.recordRenderedTick(tick)
+    }
 }
 #endif
 
@@ -273,6 +371,10 @@ func syntaxEditorUITestColorsEqual(_ lhs: SyntaxEditorTheme.Color?, _ rhs: Synta
         && abs(lhsAlpha - rhsAlpha) < 0.002
 }
 
+/// Legacy paint fallback for platform tests that cannot yet wait for an
+/// applied-highlight phase. Prefer owner-boundary waits such as
+/// `waitForAppliedHighlightPhaseForTesting` before sampling color directly;
+/// this helper observes paint symptoms and is not a materialization contract.
 @MainActor
 func syntaxEditorWaitForColor(
     _ currentColor: @MainActor () -> SyntaxEditorTheme.Color?,

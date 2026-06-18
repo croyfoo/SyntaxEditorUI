@@ -25,7 +25,7 @@ struct SyntaxEditorUITests {}
 extension SyntaxEditorUITests {
     @Test("SyntaxEditor preserves default SwiftUI document across parent updates")
     @MainActor
-    func syntaxEditorPreservesDefaultSwiftUIDocumentAcrossParentUpdates() throws {
+    func syntaxEditorPreservesDefaultSwiftUIDocumentAcrossParentUpdates() async throws {
         let probe = SyntaxEditorSwiftUIProbe()
         let editedText = "let edited = 2"
 
@@ -37,13 +37,13 @@ extension SyntaxEditorUITests {
             window.rootViewController = nil
         }
         syntaxEditorSettleUIKitHost(controller)
+        try #require(await probe.waitForRenderedTick(0))
         let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
 
         firstEditor.model.replaceText(editedText)
         firstEditor.synchronizeDocumentForTesting()
-        syntaxEditorSettleUIKitHost(controller)
         probe.tick += 1
-        syntaxEditorSettleUIKitHost(controller)
+        try #require(await probe.waitForRenderedTick(1))
 
         let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
@@ -53,13 +53,13 @@ extension SyntaxEditorUITests {
 #elseif canImport(AppKit)
         let controller = NSHostingController(rootView: SyntaxEditorDefaultWrapperHost(probe: probe))
         syntaxEditorSettleAppKitHost(controller)
+        try #require(await probe.waitForRenderedTick(0))
         let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
 
         firstEditor.model.replaceText(editedText)
         firstEditor.synchronizeDocumentForTesting()
-        syntaxEditorSettleAppKitHost(controller)
         probe.tick += 1
-        syntaxEditorSettleAppKitHost(controller)
+        try #require(await probe.waitForRenderedTick(1))
 
         let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
@@ -71,7 +71,7 @@ extension SyntaxEditorUITests {
 
     @Test("SyntaxEditor rebinds replaced SwiftUI model without recreating native view")
     @MainActor
-    func syntaxEditorRebindsReplacedSwiftUIModelWithoutRecreatingNativeView() throws {
+    func syntaxEditorRebindsReplacedSwiftUIModelWithoutRecreatingNativeView() async throws {
         let probe = SyntaxEditorSwiftUIProbe()
         let replacementModel = SyntaxEditorModel(
             language: SyntaxLanguage.json,
@@ -87,11 +87,12 @@ extension SyntaxEditorUITests {
             window.rootViewController = nil
         }
         syntaxEditorSettleUIKitHost(controller)
+        try #require(await probe.waitForRenderedTick(0))
         let firstEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
 
         probe.model = replacementModel
         probe.tick += 1
-        syntaxEditorSettleUIKitHost(controller)
+        try #require(await probe.waitForRenderedTick(1))
 
         let secondEditor = try #require(syntaxEditorUIView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
@@ -101,11 +102,12 @@ extension SyntaxEditorUITests {
 #elseif canImport(AppKit)
         let controller = NSHostingController(rootView: SyntaxEditorModelReplacementHost(probe: probe))
         syntaxEditorSettleAppKitHost(controller)
+        try #require(await probe.waitForRenderedTick(0))
         let firstEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
 
         probe.model = replacementModel
         probe.tick += 1
-        syntaxEditorSettleAppKitHost(controller)
+        try #require(await probe.waitForRenderedTick(1))
 
         let secondEditor = try #require(syntaxEditorNSView(ofType: SyntaxEditorView.self, in: controller.view))
         #expect(firstEditor === secondEditor)
