@@ -151,9 +151,9 @@ Benchmarks are intended for local development and are not part of regular CI. Pe
 
 ## Migration
 
-### Unreleased
+### v0.15.0
 
-These notes apply when upgrading from `v0.13.x` or earlier.
+These notes apply when upgrading from `v0.14.x` or earlier to `v0.15.0`.
 
 - `SyntaxEditorTextEdit` has been replaced by `SyntaxEditorTextChange.Replacement`.
 - `SyntaxEditorTextChange.edits` has been renamed to `replacements`.
