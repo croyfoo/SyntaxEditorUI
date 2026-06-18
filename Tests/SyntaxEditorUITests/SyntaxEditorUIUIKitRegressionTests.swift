@@ -1811,7 +1811,7 @@ extension SyntaxEditorUITests {
 
         await completeGate.waitUntilSuspended()
         await completeGate.resumeOne()
-        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete))
 
         editorView.selectedRange = NSRange(location: 0, length: 0)
         editorView.insertText("l")
@@ -1821,7 +1821,7 @@ extension SyntaxEditorUITests {
         #expect(editorView.text == "l")
 
         await completeGate.resumeAll()
-        await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
+        #expect(await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete))
     }
 
     @Test("SyntaxEditorView preserves iOS semantic highlight during incremental fast pass")
@@ -2245,7 +2245,7 @@ extension SyntaxEditorUITests {
     @MainActor
     func syntaxEditorViewIOSRendersPastedTextBeforeAsyncHighlightCompletes() async {
         let source = "let start = 0\n"
-        let pastedText = String(repeating: "let value = 1\n", count: 120)
+        let pastedText = String(repeating: "let value = 1\n", count: 293)
         let theme = syntaxEditorUITestTheme(
             baseForeground: syntaxEditorUITestColor(hex: 0x123456),
             keyword: syntaxEditorUITestColor(hex: 0x345678)
@@ -2440,15 +2440,19 @@ extension SyntaxEditorUITests {
             language: SyntaxLanguage.swift,
             theme: theme
         )
-        let editorView = SyntaxEditorView(testContext: model, highlighter: SyntaxEditorUITestHighlighter())
+        let highlighter = SyntaxEditorUITestHighlighter(
+            tokens: [
+                SyntaxEditorHighlighting.Token(
+                    range: NSRange(location: 0, length: 3),
+                    rawCaptureName: "editor.syntax.swift.keyword"
+                ),
+            ]
+        )
+        let editorView = SyntaxEditorView(testContext: model, highlighter: highlighter)
         layoutIOSEditorView(editorView)
         await editorView.waitForAppliedHighlightPhaseForTesting(SyntaxEditorHighlighting.Result.Phase.complete)
 
-        editorView.textStorage.addAttribute(
-            .foregroundColor,
-            value: theme.keyword,
-            range: NSRange(location: 0, length: 3)
-        )
+        #expect(editorView.syntaxForegroundColorForTesting(at: 0) != nil)
         #expect(syntaxEditorUITestColorsEqual(iOSEditorForegroundColor(editorView, at: 0), theme.keyword))
 
         model.model.lineWrappingEnabled = true
