@@ -189,12 +189,17 @@ struct SyntaxEditorCorePlatformTests {
     @Test("SyntaxEditorTheme.FontDescriptor resolves platform fonts for font size deltas")
     func syntaxEditorFontDescriptorResolvesPlatformFontsForFontSizeDeltas() {
         let descriptor = SyntaxEditorTheme.FontDescriptor(family: nil, size: 13, weight: .regular)
-        let fonts = [
-            descriptor.platformFont(fontSizeDelta: 4),
-            descriptor.platformFont(fontSizeDelta: -20),
-            descriptor.platformFont(fontSizeDelta: 100),
+        let fontSizeCases = [
+            (delta: 4, pointSize: SyntaxEditorTheme.FontSize.pointSize(13, applying: 4)),
+            (delta: -20, pointSize: SyntaxEditorTheme.FontSize.pointSize(13, applying: -20)),
+            (delta: 100, pointSize: SyntaxEditorTheme.FontSize.pointSize(13, applying: 100)),
         ]
 
-        #expect(fonts.allSatisfy { !$0.fontName.isEmpty })
+        for fontSizeCase in fontSizeCases {
+            let font = descriptor.platformFont(fontSizeDelta: fontSizeCase.delta)
+
+            #expect(!font.fontName.isEmpty)
+            #expect(abs(font.pointSize - fontSizeCase.pointSize) < 0.01)
+        }
     }
 }
