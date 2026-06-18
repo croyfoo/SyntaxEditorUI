@@ -138,6 +138,7 @@ private struct HighlightBenchmarkSuite: Sendable {
         var tags = [
             "case": workload.name,
             "language": workload.language.identifier,
+            "lines": workload.lineCount.description,
             "repeat": workload.repeatSource.description,
         ]
         if let phase {
@@ -467,6 +468,7 @@ private enum HighlightBenchmarkRunner {
         refreshRange: NSRange
     ) {
         benchmark.measurement(HighlightBenchmarkMetrics.utf16Length, (source as NSString).length)
+        benchmark.measurement(HighlightBenchmarkMetrics.lineCount, sourceLineCount(source))
         benchmark.measurement(HighlightBenchmarkMetrics.tokenCount, tokenCount)
         benchmark.measurement(HighlightBenchmarkMetrics.refreshLocation, refreshRange.location)
         benchmark.measurement(HighlightBenchmarkMetrics.refreshLength, refreshRange.length)
@@ -483,21 +485,25 @@ private struct BenchmarkWorkload: Sendable {
     let source: String
     let updatedSource: String
     let mutation: SyntaxEditorTextChange.Replacement?
+    let lineCount: Int
     let repeatSource: Int
 
     init(benchmarkCase: HighlightBenchmarkCase) {
+        let baseSource = benchmarkCase.resource.loadString()
+        let repeatCount = benchmarkCase.repeatSource ?? repeatCountForMinimumLineCount(
+            benchmarkCase.minimumLineCount,
+            source: baseSource
+        )
         name = benchmarkCase.name
         language = benchmarkCase.language
-        source = repeatedSource(
-            benchmarkCase.resource.loadString(),
-            count: benchmarkCase.repeatSource
-        )
+        source = repeatedSource(baseSource, count: repeatCount)
         updatedSource = incrementalEditSource(from: source)
         mutation = SyntaxEditorTextChange.Replacement.singleReplacement(
             from: source,
             to: updatedSource
         )
-        repeatSource = benchmarkCase.repeatSource
+        lineCount = sourceLineCount(source)
+        repeatSource = repeatCount
     }
 }
 
@@ -505,7 +511,11 @@ private struct HighlightBenchmarkCase: Sendable {
     let name: String
     let language: SyntaxLanguage
     let resource: BenchmarkResource
-    let repeatSource: Int
+    let repeatSource: Int?
+    let minimumLineCount: Int?
+
+    private static let bundledMinimumLineCount = 10_000
+    private static let largeMinimumLineCount = 50_000
 
     static func cases(options: HighlightBenchmarkOptions) -> [Self] {
         if let filePath = options.externalFile {
@@ -515,7 +525,8 @@ private struct HighlightBenchmarkCase: Sendable {
                     name: "external",
                     language: language,
                     resource: .externalFile(filePath),
-                    repeatSource: options.repeatSource ?? 1
+                    repeatSource: options.repeatSource ?? 1,
+                    minimumLineCount: nil
                 ),
             ]
         }
@@ -532,8 +543,17 @@ private struct HighlightBenchmarkCase: Sendable {
             Self.reference("reference-xml", "Reference.xml", .xml),
             Self.fixture("fixture-swift-structural-edit", "bench-structural-edit.swift"),
             Self.fixture("fixture-swift-comment-edit", "bench-comment-edit.swift"),
-            Self.fixture("fixture-swift-structural-edit-large", "bench-structural-edit.swift", repeatSource: 5),
-            Self.reference("reference-objective-c-large", "Reference.m", .objectiveC, repeatSource: 5),
+            Self.fixture(
+                "fixture-swift-structural-edit-large",
+                "bench-structural-edit.swift",
+                minimumLineCount: largeMinimumLineCount
+            ),
+            Self.reference(
+                "reference-objective-c-large",
+                "Reference.m",
+                .objectiveC,
+                minimumLineCount: largeMinimumLineCount
+            ),
         ]
 
         guard let repeatSource = options.repeatSource else { return cases }
@@ -542,7 +562,8 @@ private struct HighlightBenchmarkCase: Sendable {
                 name: $0.name,
                 language: $0.language,
                 resource: $0.resource,
-                repeatSource: repeatSource
+                repeatSource: repeatSource,
+                minimumLineCount: nil
             )
         }
     }
@@ -551,26 +572,28 @@ private struct HighlightBenchmarkCase: Sendable {
         _ name: String,
         _ fileName: String,
         _ language: SyntaxLanguage,
-        repeatSource: Int = 1
+        minimumLineCount: Int = bundledMinimumLineCount
     ) -> Self {
         Self(
             name: name,
             language: language,
             resource: .bundled(subdirectory: "ReferenceSamples", fileName: fileName),
-            repeatSource: repeatSource
+            repeatSource: nil,
+            minimumLineCount: minimumLineCount
         )
     }
 
     private static func fixture(
         _ name: String,
         _ fileName: String,
-        repeatSource: Int = 1
+        minimumLineCount: Int = bundledMinimumLineCount
     ) -> Self {
         Self(
             name: name,
             language: .swift,
             resource: .bundled(subdirectory: "Fixtures", fileName: fileName),
-            repeatSource: repeatSource
+            repeatSource: nil,
+            minimumLineCount: minimumLineCount
         )
     }
 }
@@ -656,6 +679,7 @@ private enum HighlightBenchmarkMetrics {
     static let tokenCount = BenchmarkMetric.custom("Token count", useScalingFactor: false)
     static let refreshLocation = BenchmarkMetric.custom("Refresh location", useScalingFactor: false)
     static let refreshLength = BenchmarkMetric.custom("Refresh length", useScalingFactor: false)
+    static let lineCount = BenchmarkMetric.custom("Line count", useScalingFactor: false)
     static let settleEqualsFresh = BenchmarkMetric.custom("Settle equals fresh", useScalingFactor: false)
     static let typingEditLatencyNanoseconds = BenchmarkMetric.custom(
         "Typing edit latency ns",
@@ -672,6 +696,7 @@ private enum HighlightBenchmarkMetrics {
         .cpuTotal,
         .instructions,
         utf16Length,
+        lineCount,
         tokenCount,
         refreshLocation,
         refreshLength,
@@ -818,6 +843,19 @@ private func insertionPoint(in source: String, typeAfter: String?) -> Int {
 private func repeatedSource(_ source: String, count: Int) -> String {
     guard count > 1 else { return source }
     return Array(repeating: source, count: count).joined(separator: "\n\n")
+}
+
+private func repeatCountForMinimumLineCount(_ minimumLineCount: Int?, source: String) -> Int {
+    guard let minimumLineCount else { return 1 }
+    let baseLineCount = max(1, sourceLineCount(source))
+    return max(1, (minimumLineCount + baseLineCount - 1) / baseLineCount)
+}
+
+private func sourceLineCount(_ source: String) -> Int {
+    guard source.isEmpty == false else { return 0 }
+    return source.utf8.reduce(1) { partialResult, byte in
+        byte == 10 ? partialResult + 1 : partialResult
+    }
 }
 
 private func inferredLanguage(forFilePath filePath: String) -> SyntaxLanguage {

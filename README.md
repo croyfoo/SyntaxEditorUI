@@ -139,15 +139,15 @@ Highlighting performance benchmarks are exposed through the SwiftPM `benchmark` 
 
 ```bash
 swift package benchmark list --target HighlightBenchmark
-swift package benchmark run --target HighlightBenchmark --time-units microseconds --no-progress
-swift package --allow-writing-to-package-directory benchmark baseline update before --target HighlightBenchmark
-swift package benchmark baseline compare before --target HighlightBenchmark
+swift package benchmark run --target HighlightBenchmark --filter 'fixture-swift-structural-edit/highlight/incremental-update' --time-units microseconds --no-progress
+swift package --allow-writing-to-package-directory benchmark baseline update before --target HighlightBenchmark --filter 'fixture-swift-structural-edit/highlight/incremental-update'
+swift package benchmark baseline compare before --target HighlightBenchmark --filter 'fixture-swift-structural-edit/highlight/incremental-update'
 SYNTAX_EDITOR_BENCHMARK_FILE=/path/to/file.swift swift package benchmark run --target HighlightBenchmark
 ```
 
-The benchmark suite uses bundled reference samples by default. Set `SYNTAX_EDITOR_BENCHMARK_FILE` to benchmark a custom file, and optionally set `SYNTAX_EDITOR_BENCHMARK_LANGUAGE`, `SYNTAX_EDITOR_BENCHMARK_REPEAT_SOURCE`, `SYNTAX_EDITOR_BENCHMARK_ITERATIONS`, `SYNTAX_EDITOR_BENCHMARK_TYPING_EDITS`, `SYNTAX_EDITOR_BENCHMARK_TYPING_ANCHOR`, `SYNTAX_EDITOR_BENCHMARK_TYPE_TEXT`, `SYNTAX_EDITOR_BENCHMARK_TYPE_AFTER`, or `SYNTAX_EDITOR_BENCHMARK_TYPE_REPEAT` to adjust the run.
+The benchmark suite uses bundled reference samples by default and repeats them to at least 10,000 lines. Large cases repeat to at least 50,000 lines. Set `SYNTAX_EDITOR_BENCHMARK_FILE` to benchmark a custom file, and optionally set `SYNTAX_EDITOR_BENCHMARK_LANGUAGE`, `SYNTAX_EDITOR_BENCHMARK_REPEAT_SOURCE`, `SYNTAX_EDITOR_BENCHMARK_ITERATIONS`, `SYNTAX_EDITOR_BENCHMARK_TYPING_EDITS`, `SYNTAX_EDITOR_BENCHMARK_TYPING_ANCHOR`, `SYNTAX_EDITOR_BENCHMARK_TYPE_TEXT`, `SYNTAX_EDITOR_BENCHMARK_TYPE_AFTER`, or `SYNTAX_EDITOR_BENCHMARK_TYPE_REPEAT` to adjust the run. `SYNTAX_EDITOR_BENCHMARK_REPEAT_SOURCE` overrides the default sample amplification.
 
-Regular CI only builds and lists the benchmarks. Performance regression checks should run on a dedicated machine or a manually triggered workflow to avoid shared-runner noise.
+Benchmarks are intended for local development and are not part of regular CI. Performance regression checks should run on a dedicated machine or a manually triggered workflow to avoid shared-runner noise.
 
 ## Migration
 
