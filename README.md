@@ -23,7 +23,9 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 
 - Swift 6.3+
 - iOS 18+
+- Mac Catalyst 18+
 - macOS 15+
+- visionOS 2+
 
 ## Shortcuts
 

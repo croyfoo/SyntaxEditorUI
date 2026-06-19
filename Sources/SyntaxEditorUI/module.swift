@@ -6,6 +6,6 @@
 @_exported import SyntaxEditorUIAppKit
 #endif
 
-#if os(iOS)
+#if os(iOS) || targetEnvironment(macCatalyst) || os(visionOS)
 @_exported import SyntaxEditorUIUIKit
 #endif

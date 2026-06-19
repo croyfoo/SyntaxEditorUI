@@ -170,8 +170,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var findDecorationBatchDepth = 0
     var pendingFindDecorationInvalidationRanges: [NSRange] = []
     var findHighlightUpdatePassCount = 0
+    #if !os(visionOS)
     var keyboardAccessoryModel: SyntaxEditorKeyboardAccessoryModel?
     var keyboardAccessoryView: UIView?
+    #endif
     private var modelObservation: PortableObservationTracking.Token?
     private var modelConfigurationObservation: PortableObservationTracking.Token?
     var modelDeliveryForTesting: PortableObservationTracking.Token? { modelObservation }
@@ -384,9 +386,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         guardedUndoManager
     }
 
+    #if !os(visionOS)
     public override var inputAccessoryView: UIView? {
         keyboardAccessoryView
     }
+    #endif
 
     internal func synchronizeDocumentForTesting() {
         applyObservedConfiguration(
@@ -756,7 +760,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     func configureScrollView() {
         updateEditorBackgroundColor()
         alwaysBounceVertical = true
+        #if !os(visionOS)
         keyboardDismissMode = .interactive
+        #endif
         delaysContentTouches = false
         panGestureRecognizer.allowedTouchTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
@@ -771,7 +777,9 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         smartInsertDeleteType = .no
         spellCheckingType = .no
 
+        #if !os(visionOS)
         keyboardAccessoryView = makeInputAccessoryView()
+        #endif
         refreshKeyboardAccessoryState()
     }
 
@@ -990,6 +998,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         return command
     }
 
+    #if !os(visionOS)
     func makeInputAccessoryView() -> UIView {
         let accessoryModel = SyntaxEditorKeyboardAccessoryModel(
             onUndo: { [weak self] in
@@ -1005,15 +1014,18 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         keyboardAccessoryModel = accessoryModel
         return SyntaxEditorKeyboardAccessoryView(model: accessoryModel)
     }
+    #endif
 
     var activeUndoManager: UndoManager? {
         guardedUndoManager
     }
 
     func refreshKeyboardAccessoryState() {
+        #if !os(visionOS)
         guard let keyboardAccessoryModel else { return }
         keyboardAccessoryModel.isUndoable = model.isEditable && (activeUndoManager?.canUndo ?? false)
         keyboardAccessoryModel.isRedoable = model.isEditable && (activeUndoManager?.canRedo ?? false)
+        #endif
     }
 
     var typingAttributes: [NSAttributedString.Key: Any] = [:]
