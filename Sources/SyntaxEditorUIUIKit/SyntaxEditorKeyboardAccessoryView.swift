@@ -1,4 +1,4 @@
-#if canImport(UIKit)
+#if canImport(UIKit) && !os(visionOS)
 import Observation
 import SwiftUI
 import UIKit

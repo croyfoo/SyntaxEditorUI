@@ -6,7 +6,9 @@ let package = Package(
     name: "SyntaxEditorUI",
     platforms: [
         .iOS(.v18),
+        .macCatalyst(.v18),
         .macOS(.v15),
+        .visionOS(.v2),
     ],
     products: [
         .library(
@@ -136,7 +138,7 @@ let package = Package(
                 "SyntaxEditorUICommon",
                 "SyntaxEditorUISwiftUI",
                 .target(name: "SyntaxEditorUIAppKit", condition: .when(platforms: [.macOS])),
-                .target(name: "SyntaxEditorUIUIKit", condition: .when(platforms: [.iOS])),
+                .target(name: "SyntaxEditorUIUIKit", condition: .when(platforms: [.iOS, .macCatalyst, .visionOS])),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -186,7 +188,7 @@ let package = Package(
             dependencies: [
                 "SyntaxEditorCore",
                 .target(name: "SyntaxEditorUIAppKit", condition: .when(platforms: [.macOS])),
-                .target(name: "SyntaxEditorUIUIKit", condition: .when(platforms: [.iOS])),
+                .target(name: "SyntaxEditorUIUIKit", condition: .when(platforms: [.iOS, .macCatalyst, .visionOS])),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

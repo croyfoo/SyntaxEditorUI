@@ -144,7 +144,8 @@ extension SyntaxEditorMenu {
             image: nil,
             action: command.selector,
             input: command.input,
-            modifierFlags: command.modifierFlags
+            modifierFlags: command.modifierFlags,
+            propertyList: nil
         )
         keyCommand.discoverabilityTitle = command.title
         keyCommand.wantsPriorityOverSystemBehavior = true
@@ -189,7 +190,7 @@ private extension SyntaxEditorMenu.Command {
 }
 #endif
 
-#if canImport(AppKit)
+#if os(macOS) && !targetEnvironment(macCatalyst) && canImport(AppKit)
 extension SyntaxEditorMenu {
     private static let editorMenuItemIdentifier = NSUserInterfaceItemIdentifier("com.lynnswap.SyntaxEditorUI.editor")
 
