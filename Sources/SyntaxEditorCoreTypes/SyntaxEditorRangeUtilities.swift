@@ -21,4 +21,3 @@ package enum SyntaxEditorRangeUtilities {
         return nsString.lineRange(for: NSRange(location: clampedOffset, length: 0)).location
     }
 }
-

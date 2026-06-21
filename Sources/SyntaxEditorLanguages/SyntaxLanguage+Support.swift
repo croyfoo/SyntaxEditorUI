@@ -47,4 +47,3 @@ package extension SyntaxLanguage {
         support.isInsideLiteralOrComment(source: source, location: location)
     }
 }
-
