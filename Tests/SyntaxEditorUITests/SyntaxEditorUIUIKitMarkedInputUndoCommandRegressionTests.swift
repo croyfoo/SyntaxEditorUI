@@ -161,7 +161,7 @@ extension SyntaxEditorUITests {
         let markedLocation = "let value = ".utf16.count
         #expect(editorView.markedTextRange != nil)
         #expect(iOSEditorUnderlineStyle(editorView, at: markedLocation) == NSUnderlineStyle.single.rawValue)
-        #expect(syntaxEditorUITestColorsEqual(iOSEditorUnderlineColor(editorView, at: markedLocation), markedTextColor))
+        #expect(syntaxEditorUITestColorsEqual(iOSEditorUnderlineColor(editorView, at: markedLocation), editorView.tintColor))
 
         editorView.unmarkText()
 

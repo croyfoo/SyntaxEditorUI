@@ -1086,6 +1086,10 @@ private enum EditorSpecTool {
         return ToolSymbolCacheComposite(providers: providers)
     }
 
+    // SymbolCacheIndexing exposes SDKSymbolCache's provider conformance in its
+    // swiftinterface, but not as a linkable descriptor in current Xcode builds.
+    @inline(never)
+    @_optimize(none)
     private static func sdkSymbolCacheProviders(
         options: Options,
         fileSymbolCache: FileParsingSymbolCache

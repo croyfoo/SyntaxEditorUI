@@ -302,16 +302,12 @@ struct SyntaxEditorCoreTests {
         #expect(SyntaxEditorHighlightTheme.semanticStyleKeys(for: "keyword", language: .html)?.first == "editor.syntax.keyword")
     }
 
-    @Test("Language source files live in language-specific directories")
-    func languageSourceFilesLiveInLanguageSpecificDirectories() {
-        let languagesURL = repositoryRootURL()
-            .appendingPathComponent("Sources/SyntaxEditorCore/Languages", isDirectory: true)
-        #expect(!FileManager.default.fileExists(atPath: languagesURL.appendingPathComponent("Builtin").path))
-        #expect(!FileManager.default.fileExists(atPath: languagesURL.appendingPathComponent("Generated").path))
-        #expect(!FileManager.default.fileExists(atPath: languagesURL.appendingPathComponent("Support").path))
+    @Test("Language source files live in language-specific targets")
+    func languageSourceFilesLiveInLanguageSpecificTargets() {
+        let sourcesURL = repositoryRootURL()
+            .appendingPathComponent("Sources", isDirectory: true)
 
         for language in SyntaxLanguage.allCases {
-            let directoryName = languageImplementationDirectoryName(for: language)
             let typeName = switch language {
             case .plainText:
                 "PlainTextLanguage"
@@ -332,7 +328,7 @@ struct SyntaxEditorCoreTests {
             case .xml:
                 "XMLLanguage"
             }
-            let languageDirectory = languagesURL.appendingPathComponent(directoryName, isDirectory: true)
+            let languageDirectory = sourcesURL.appendingPathComponent(languageTargetName(for: language), isDirectory: true)
             #expect(FileManager.default.fileExists(atPath: languageDirectory.appendingPathComponent("\(typeName).swift").path))
         }
     }
