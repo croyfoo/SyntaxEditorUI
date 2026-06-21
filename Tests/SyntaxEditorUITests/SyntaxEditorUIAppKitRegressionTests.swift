@@ -2956,7 +2956,7 @@ extension SyntaxEditorUITests {
 
             let contentInsets = editorView.contentView.contentInsets
             let expectedWidth = editorView.contentSize.width - contentInsets.left - contentInsets.right
-            let expectedHeight = editorView.contentSize.height - contentInsets.bottom
+            let expectedHeight = editorView.contentSize.height - contentInsets.top - contentInsets.bottom
             let expectedClipOriginX = -contentInsets.left
             return editorView.hasHorizontalScroller == false
                 && approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX)
@@ -2965,6 +2965,25 @@ extension SyntaxEditorUITests {
                 && approximatelyEqual(editorView.textView.frame.width, expectedWidth)
                 && approximatelyEqual(editorView.textView.minSize.height, expectedHeight)
         }())
+    }
+
+    @Test("SyntaxEditorView keeps short macOS content non-scrollable with top insets")
+    @MainActor
+    func syntaxEditorViewMacShortContentAccountsForTopInsets() async {
+        let model = SyntaxEditorTestContext(
+            text: #"{"result":"ok"}"#,
+            language: SyntaxLanguage.json,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.contentInsets = NSEdgeInsets(top: 54, left: 0, bottom: 12, right: 0)
+        layoutMacEditorView(editorView, width: 360, height: 240)
+
+        let contentInsets = editorView.contentView.contentInsets
+        let unobscuredHeight = editorView.contentSize.height - contentInsets.top - contentInsets.bottom
+
+        #expect(approximatelyEqual(editorView.textView.frame.height, unobscuredHeight))
+        #expect(approximatelyEqual(editorView.textView.minSize.height, unobscuredHeight))
     }
 
     @Test("SyntaxEditorView updates macOS wrapping geometry after resize")
