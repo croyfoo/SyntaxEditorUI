@@ -25,6 +25,15 @@ extension SyntaxEditorUITests {
     }
 
     @MainActor
+    private func macUnobscuredContentSize(_ editorView: SyntaxEditorView) -> NSSize {
+        let contentInsets = editorView.contentView.contentInsets
+        return NSSize(
+            width: max(0, editorView.contentSize.width - contentInsets.left - contentInsets.right),
+            height: max(0, editorView.contentSize.height - contentInsets.top - contentInsets.bottom)
+        )
+    }
+
+    @MainActor
     private func attachMacEditorWindow(_ editorView: SyntaxEditorView) -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
@@ -2946,7 +2955,8 @@ extension SyntaxEditorUITests {
             lineWrappingEnabled: true
         )
         let editorView = SyntaxEditorView(testContext: model)
-        editorView.contentInsets = NSEdgeInsets(top: 12, left: 80, bottom: 0, right: 24)
+        editorView.automaticallyAdjustsContentInsets = false
+        editorView.contentInsets = NSEdgeInsets(top: 12, left: 80, bottom: 18, right: 24)
         layoutMacEditorView(editorView, width: 360, height: 160)
 
         #expect({
@@ -2954,17 +2964,65 @@ extension SyntaxEditorUITests {
                 return false
             }
 
-            let contentInsets = editorView.contentView.contentInsets
-            let expectedWidth = editorView.contentSize.width - contentInsets.left - contentInsets.right
-            let expectedHeight = editorView.contentSize.height - contentInsets.bottom
-            let expectedClipOriginX = -contentInsets.left
+            let unobscuredContentSize = macUnobscuredContentSize(editorView)
+            let expectedClipOriginX = -editorView.contentView.contentInsets.left
             return editorView.hasHorizontalScroller == false
                 && approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX)
                 && textContainer.widthTracksTextView == true
-                && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
-                && approximatelyEqual(editorView.textView.frame.width, expectedWidth)
-                && approximatelyEqual(editorView.textView.minSize.height, expectedHeight)
+                && approximatelyEqual(textContainer.containerSize.width, unobscuredContentSize.width)
+                && approximatelyEqual(editorView.textView.frame.width, unobscuredContentSize.width)
+                && approximatelyEqual(editorView.textView.minSize.height, unobscuredContentSize.height)
         }())
+    }
+
+    @Test("SyntaxEditorView keeps short macOS content non-scrollable with top insets")
+    @MainActor
+    func syntaxEditorViewMacShortContentAccountsForTopInsets() async {
+        let insetCases = [
+            NSEdgeInsets(top: 54, left: 0, bottom: 12, right: 0),
+            NSEdgeInsets(top: 16, left: 40, bottom: 28, right: 24),
+            NSEdgeInsets(top: 0, left: 20, bottom: 44, right: 36),
+        ]
+
+        for lineWrappingEnabled in [true, false] {
+            for contentInsets in insetCases {
+                let model = SyntaxEditorTestContext(
+                    text: #"{"result":"ok"}"#,
+                    language: SyntaxLanguage.json,
+                    lineWrappingEnabled: lineWrappingEnabled
+                )
+                let editorView = SyntaxEditorView(testContext: model)
+                editorView.automaticallyAdjustsContentInsets = false
+                editorView.contentInsets = contentInsets
+                layoutMacEditorView(editorView, width: 360, height: 240)
+
+                let unobscuredContentSize = macUnobscuredContentSize(editorView)
+
+                #expect(approximatelyEqual(editorView.textView.frame.height, unobscuredContentSize.height))
+                #expect(approximatelyEqual(editorView.textView.minSize.height, unobscuredContentSize.height))
+                #expect(editorView.textView.frame.height <= unobscuredContentSize.height + 0.5)
+            }
+        }
+    }
+
+    @Test("SyntaxEditorTextInputView updates short macOS document frame to unobscured inset height")
+    @MainActor
+    func syntaxEditorTextInputViewMacDocumentFrameAccountsForTopInsets() async {
+        let model = SyntaxEditorTestContext(
+            text: #"{"result":"ok"}"#,
+            language: SyntaxLanguage.json,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.automaticallyAdjustsContentInsets = false
+        editorView.contentInsets = NSEdgeInsets(top: 54, left: 24, bottom: 12, right: 36)
+        layoutMacEditorView(editorView, width: 360, height: 240)
+
+        editorView.textView.updateDocumentFrameForCurrentText()
+
+        let unobscuredContentSize = macUnobscuredContentSize(editorView)
+        #expect(approximatelyEqual(editorView.textView.frame.width, unobscuredContentSize.width))
+        #expect(approximatelyEqual(editorView.textView.frame.height, unobscuredContentSize.height))
     }
 
     @Test("SyntaxEditorView updates macOS wrapping geometry after resize")
@@ -3028,6 +3086,30 @@ extension SyntaxEditorUITests {
         #expect(approximatelyEqual(editorView.textView.frame.width, editorView.contentSize.width))
     }
 
+    @Test("SyntaxEditorView keeps unwrapped long macOS content minimum height tied to unobscured insets")
+    @MainActor
+    func syntaxEditorViewMacUnwrappedLongContentAccountsForTopInsets() async {
+        let source = (0..<80)
+            .map { "let value\($0) = \(String(repeating: "x", count: 24))" }
+            .joined(separator: "\n")
+        let model = SyntaxEditorTestContext(
+            text: source,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.automaticallyAdjustsContentInsets = false
+        editorView.contentInsets = NSEdgeInsets(top: 48, left: 24, bottom: 32, right: 36)
+        layoutMacEditorView(editorView, width: 360, height: 180)
+
+        let unobscuredContentSize = macUnobscuredContentSize(editorView)
+
+        #expect(editorView.hasHorizontalScroller)
+        #expect(approximatelyEqual(editorView.textView.minSize.height, unobscuredContentSize.height))
+        #expect(editorView.textView.frame.height > unobscuredContentSize.height + 1)
+        #expect(editorView.textView.frame.width >= unobscuredContentSize.width)
+    }
+
     @Test("SyntaxEditorView keeps inset macOS wrapping geometry after resize")
     @MainActor
     func syntaxEditorViewMacWrappingTracksInsetContentWidthAfterResize() async {
@@ -3037,6 +3119,7 @@ extension SyntaxEditorUITests {
             lineWrappingEnabled: true
         )
         let editorView = SyntaxEditorView(testContext: model)
+        editorView.automaticallyAdjustsContentInsets = false
         editorView.contentInsets = NSEdgeInsets(top: 0, left: 96, bottom: 0, right: 44)
         layoutMacEditorView(editorView, width: 560, height: 180)
 
@@ -3067,6 +3150,37 @@ extension SyntaxEditorUITests {
                 && approximatelyEqual(textContainer.containerSize.width, expectedWidth)
                 && approximatelyEqual(editorView.textView.frame.width, expectedWidth)
         }())
+    }
+
+    @Test("SyntaxEditorView recomputes macOS wrapping geometry after content inset changes")
+    @MainActor
+    func syntaxEditorViewMacWrappingGeometryTracksContentInsetChanges() async {
+        let model = SyntaxEditorTestContext(
+            text: String(repeating: "let dynamicInsetWrappingWidth = true; ", count: 24),
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.automaticallyAdjustsContentInsets = false
+        layoutMacEditorView(editorView, width: 520, height: 220)
+
+        guard let textContainer = editorView.textView.textContainer else {
+            Issue.record("SyntaxEditorView did not create a text container")
+            return
+        }
+        let initialContainerWidth = textContainer.containerSize.width
+
+        editorView.contentInsets = NSEdgeInsets(top: 28, left: 72, bottom: 36, right: 40)
+        layoutMacEditorView(editorView, width: 520, height: 220)
+
+        let unobscuredContentSize = macUnobscuredContentSize(editorView)
+        let expectedClipOriginX = -editorView.contentView.contentInsets.left
+
+        #expect(approximatelyEqual(editorView.contentView.bounds.origin.x, expectedClipOriginX))
+        #expect(textContainer.containerSize.width < initialContainerWidth)
+        #expect(approximatelyEqual(textContainer.containerSize.width, unobscuredContentSize.width))
+        #expect(approximatelyEqual(editorView.textView.frame.width, unobscuredContentSize.width))
+        #expect(approximatelyEqual(editorView.textView.minSize.height, unobscuredContentSize.height))
     }
 
     @Test("SyntaxEditorView keeps synchronizing after language changes on macOS")

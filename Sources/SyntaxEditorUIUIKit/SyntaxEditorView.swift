@@ -527,6 +527,16 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         )
     }
 
+    public override func adjustedContentInsetDidChange() {
+        super.adjustedContentInsetDidChange()
+        updateTextContainerForCurrentWrappingMode()
+        if bounds.width > 0, bounds.height > 0 {
+            layoutTextIfNeeded()
+        } else {
+            setNeedsLayout()
+        }
+    }
+
     public override func scrollRectToVisible(_ rect: CGRect, animated: Bool) {
         guard shouldPreserveHorizontalOffsetForImplicitTextInteractionScroll,
               let preservedX = preservedTextInteractionHorizontalOffset else {
@@ -2963,7 +2973,8 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
         guard bounds.width > 0, bounds.height > 0 else { return }
 
-        let availableWidth = max(0, bounds.width - textContainerInset.left - textContainerInset.right)
+        let visibleSize = adjustedVisibleContentSize
+        let availableWidth = max(0, visibleSize.width - textContainerInset.left - textContainerInset.right)
         let containerWidth = lineWrappingEnabled
             ? availableWidth
             : max(availableWidth, measuredHorizontalDocumentLayoutWidth() - textContainerInset.left - textContainerInset.right)
@@ -2999,12 +3010,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
 
     func updateContentSizeIfNeeded() {
         let estimatedLayoutSize = estimatedDocumentLayoutSize()
+        let minimumContentSize = adjustedVisibleContentSize
         let lineHeight = resolvedBaseFont().lineHeight
         let textHeight = max(lineHeight, ceil(estimatedLayoutSize.height))
         let targetWidth = lastAppliedLineWrappingEnabled
-            ? bounds.width
-            : max(bounds.width, measuredHorizontalDocumentLayoutWidth(), ceil(estimatedLayoutSize.width + textContainerInset.left + textContainerInset.right))
-        let targetHeight = max(bounds.height, ceil(textHeight + textContainerInset.top + textContainerInset.bottom))
+            ? minimumContentSize.width
+            : max(minimumContentSize.width, measuredHorizontalDocumentLayoutWidth(), ceil(estimatedLayoutSize.width + textContainerInset.left + textContainerInset.right))
+        let targetHeight = max(minimumContentSize.height, ceil(textHeight + textContainerInset.top + textContainerInset.bottom))
         let nextContentSize = CGSize(width: targetWidth, height: targetHeight)
 
         if !contentSize.isNearlyEqual(to: nextContentSize) {
@@ -3043,7 +3055,7 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
             maxColumnsPerLine: Int(floor(availableLineWidth / estimatedColumnWidth))
         )) * font.lineHeight
         return CGSize(
-            width: max(measuredSize.width, bounds.width),
+            width: max(measuredSize.width, adjustedVisibleContentSize.width),
             height: max(measuredSize.height, estimatedHeight)
         )
     }
@@ -3210,12 +3222,13 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func measuredHorizontalDocumentLayoutWidth() -> CGFloat {
+        let visibleWidth = adjustedVisibleContentSize.width
         guard !text.isEmpty else {
-            return bounds.width
+            return visibleWidth
         }
 
         return max(
-            bounds.width,
+            visibleWidth,
             lineMetrics.horizontalDocumentWidth(
                 columnWidth: Self.estimatedMonospacedColumnWidth(for: resolvedBaseFont()),
                 textContainerInset: textContainerInset.left + textContainerInset.right,
@@ -3411,8 +3424,17 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     var adjustedVisibleContentRect: CGRect {
         let insets = adjustedContentInset
         return CGRect(
-            x: contentOffset.x + insets.left,
-            y: contentOffset.y + insets.top,
+            origin: CGPoint(
+                x: contentOffset.x + insets.left,
+                y: contentOffset.y + insets.top
+            ),
+            size: adjustedVisibleContentSize
+        )
+    }
+
+    var adjustedVisibleContentSize: CGSize {
+        let insets = adjustedContentInset
+        return CGSize(
             width: max(0, bounds.width - insets.left - insets.right),
             height: max(0, bounds.height - insets.top - insets.bottom)
         )
@@ -3453,9 +3475,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     }
 
     func ensureContentSizeContains(_ rect: CGRect) {
+        let minimumContentSize = adjustedVisibleContentSize
         let nextContentSize = CGSize(
-            width: max(contentSize.width, bounds.width, ceil(rect.maxX + adjustedContentInset.right)),
-            height: max(contentSize.height, bounds.height, ceil(rect.maxY + adjustedContentInset.bottom))
+            width: max(contentSize.width, minimumContentSize.width, ceil(rect.maxX)),
+            height: max(contentSize.height, minimumContentSize.height, ceil(rect.maxY))
         )
         guard !contentSize.isNearlyEqual(to: nextContentSize) else { return }
 
