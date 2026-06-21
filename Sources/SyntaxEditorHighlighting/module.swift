@@ -1,0 +1,8 @@
+@_exported import SyntaxEditorHighlightingTypes
+@_exported import SyntaxEditorHighlightingStorage
+@_exported import SyntaxEditorHighlightingPatching
+@_exported import SyntaxEditorHighlightingCSS
+@_exported import SyntaxEditorHighlightingSwift
+@_exported import SyntaxEditorHighlightingObjectiveC
+@_exported import SyntaxEditorHighlightingSemantic
+@_exported import SyntaxEditorHighlightingEngine
