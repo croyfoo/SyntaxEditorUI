@@ -230,6 +230,7 @@ public final class SyntaxEditorView: NSScrollView {
     private var lastAppliedDocumentRevision = 0
     private var modelObservation: PortableObservationTracking.Token?
     private var modelConfigurationObservation: PortableObservationTracking.Token?
+    private var isRetilingForContentInsetsChange = false
     var modelDeliveryForTesting: PortableObservationTracking.Token? { modelObservation }
     var modelConfigurationDeliveryForTesting: PortableObservationTracking.Token? { modelConfigurationObservation }
     private var appliedHighlightPhaseRecordsForTesting: [HighlightPhaseRecord] = []
@@ -239,6 +240,13 @@ public final class SyntaxEditorView: NSScrollView {
     private var nextHighlightPhaseWaiterID = 0
 
     private var scrollView: NSScrollView { self }
+
+    private func contentInsetsDidChange(from oldValue: NSEdgeInsets, to newValue: NSEdgeInsets) -> Bool {
+        oldValue.top != newValue.top
+            || oldValue.left != newValue.left
+            || oldValue.bottom != newValue.bottom
+            || oldValue.right != newValue.right
+    }
 
     public var text: String {
         get { textView.string }
@@ -264,6 +272,22 @@ public final class SyntaxEditorView: NSScrollView {
         set {
             guard model.isEditable != newValue else { return }
             model.isEditable = newValue
+        }
+    }
+
+    public override var contentInsets: NSEdgeInsets {
+        didSet {
+            guard contentInsetsDidChange(from: oldValue, to: contentInsets),
+                  isScrollViewConfigured,
+                  !isApplyingLineWrappingConfiguration,
+                  !isRetilingForContentInsetsChange
+            else {
+                return
+            }
+
+            isRetilingForContentInsetsChange = true
+            defer { isRetilingForContentInsetsChange = false }
+            tile()
         }
     }
 

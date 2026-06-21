@@ -10,6 +10,42 @@ import UIKit
 @testable import SyntaxEditorUIUIKit
 
 extension SyntaxEditorUITests {
+    private func approximatelyEqualIOS(_ lhs: CGFloat, _ rhs: CGFloat, tolerance: CGFloat = 0.5) -> Bool {
+        abs(lhs - rhs) <= tolerance
+    }
+
+    @MainActor
+    private func iOSAdjustedVisibleSize(_ editorView: SyntaxEditorView) -> CGSize {
+        let insets = editorView.adjustedContentInset
+        return CGSize(
+            width: max(0, editorView.bounds.width - insets.left - insets.right),
+            height: max(0, editorView.bounds.height - insets.top - insets.bottom)
+        )
+    }
+
+    @MainActor
+    private func iOSMaximumContentOffset(_ editorView: SyntaxEditorView) -> CGPoint {
+        let insets = editorView.adjustedContentInset
+        return CGPoint(
+            x: max(-insets.left, editorView.contentSize.width - editorView.bounds.width + insets.right),
+            y: max(-insets.top, editorView.contentSize.height - editorView.bounds.height + insets.bottom)
+        )
+    }
+
+    @MainActor
+    private func iOSExpectedTextContentSize(_ editorView: SyntaxEditorView) -> CGSize {
+        CGSize(
+            width: max(
+                editorView.font.lineHeight,
+                editorView.contentSize.width - editorView.textContainerInset.left - editorView.textContainerInset.right
+            ),
+            height: max(
+                editorView.font.lineHeight,
+                editorView.contentSize.height - editorView.textContainerInset.top - editorView.textContainerInset.bottom
+            )
+        )
+    }
+
     @Test("SyntaxEditorViewController renders source-of-truth state on iOS")
     @MainActor
     func syntaxEditorViewControllerIOSRendersSourceOfTruthState() async {
@@ -4434,6 +4470,151 @@ extension SyntaxEditorUITests {
         )
 
         #expect(viewportBounds == expectedBounds)
+    }
+
+    @Test("SyntaxEditorView sizes short iOS content to adjusted visible area")
+    @MainActor
+    func syntaxEditorViewIOSShortContentTracksAdjustedVisibleArea() {
+        let insetCases = [
+            UIEdgeInsets(top: 54, left: 0, bottom: 12, right: 0),
+            UIEdgeInsets(top: 16, left: 24, bottom: 28, right: 36),
+            UIEdgeInsets(top: 0, left: 40, bottom: 44, right: 12),
+        ]
+
+        for lineWrappingEnabled in [true, false] {
+            for contentInset in insetCases {
+                let model = SyntaxEditorTestContext(
+                    text: #"{"result":"ok"}"#,
+                    language: SyntaxLanguage.json,
+                    lineWrappingEnabled: lineWrappingEnabled
+                )
+                let editorView = SyntaxEditorView(testContext: model)
+                editorView.contentInset = contentInset
+                layoutIOSEditorView(editorView, width: 360, height: 240)
+
+                let visibleSize = iOSAdjustedVisibleSize(editorView)
+                let maximumContentOffset = iOSMaximumContentOffset(editorView)
+                let expectedTextContentSize = iOSExpectedTextContentSize(editorView)
+                let expectedContainerWidth = max(
+                    0,
+                    visibleSize.width - editorView.textContainerInset.left - editorView.textContainerInset.right
+                )
+
+                #expect(approximatelyEqualIOS(editorView.contentSize.width, visibleSize.width))
+                #expect(approximatelyEqualIOS(editorView.contentSize.height, visibleSize.height))
+                #expect(approximatelyEqualIOS(maximumContentOffset.x, -editorView.adjustedContentInset.left))
+                #expect(approximatelyEqualIOS(maximumContentOffset.y, -editorView.adjustedContentInset.top))
+                #expect(approximatelyEqualIOS(editorView.textContainer.size.width, expectedContainerWidth))
+                #expect(approximatelyEqualIOS(editorView.renderedTextContentFrameForTesting.width, expectedTextContentSize.width))
+                #expect(approximatelyEqualIOS(editorView.renderedTextContentFrameForTesting.height, expectedTextContentSize.height))
+            }
+        }
+    }
+
+    @Test("SyntaxEditorView wraps long iOS content to adjusted visible width")
+    @MainActor
+    func syntaxEditorViewIOSWrappedLongContentTracksAdjustedVisibleWidth() {
+        let model = SyntaxEditorTestContext(
+            text: String(repeating: "let insetAwareWrappingWidth = true; ", count: 40),
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.contentInset = UIEdgeInsets(top: 54, left: 48, bottom: 30, right: 24)
+        layoutIOSEditorView(editorView, width: 260, height: 180)
+
+        let visibleSize = iOSAdjustedVisibleSize(editorView)
+        let maximumContentOffset = iOSMaximumContentOffset(editorView)
+        let expectedContainerWidth = max(
+            0,
+            visibleSize.width - editorView.textContainerInset.left - editorView.textContainerInset.right
+        )
+
+        #expect(editorView.textContainer.widthTracksTextView)
+        #expect(approximatelyEqualIOS(editorView.contentSize.width, visibleSize.width))
+        #expect(editorView.contentSize.height > visibleSize.height + 1)
+        #expect(approximatelyEqualIOS(editorView.textContainer.size.width, expectedContainerWidth))
+        #expect(approximatelyEqualIOS(maximumContentOffset.x, -editorView.adjustedContentInset.left))
+        #expect(maximumContentOffset.y > -editorView.adjustedContentInset.top)
+    }
+
+    @Test("SyntaxEditorView keeps unwrapped iOS content height tied to adjusted visible height")
+    @MainActor
+    func syntaxEditorViewIOSUnwrappedLongContentTracksAdjustedVisibleHeight() {
+        let model = SyntaxEditorTestContext(
+            text: longSyntaxEditorLine,
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: false
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.contentInset = UIEdgeInsets(top: 32, left: 40, bottom: 36, right: 44)
+        layoutIOSEditorView(editorView, width: 260, height: 180)
+
+        let visibleSize = iOSAdjustedVisibleSize(editorView)
+        let maximumContentOffset = iOSMaximumContentOffset(editorView)
+        let expectedTextContentSize = iOSExpectedTextContentSize(editorView)
+
+        #expect(!editorView.textContainer.widthTracksTextView)
+        #expect(editorView.contentSize.width > visibleSize.width + 1)
+        #expect(approximatelyEqualIOS(editorView.contentSize.height, visibleSize.height))
+        #expect(maximumContentOffset.x > -editorView.adjustedContentInset.left)
+        #expect(approximatelyEqualIOS(maximumContentOffset.y, -editorView.adjustedContentInset.top))
+        #expect(approximatelyEqualIOS(editorView.renderedTextContentFrameForTesting.width, expectedTextContentSize.width))
+        #expect(approximatelyEqualIOS(editorView.renderedTextContentFrameForTesting.height, expectedTextContentSize.height))
+    }
+
+    @Test("SyntaxEditorView recomputes iOS wrapping geometry after adjusted inset changes")
+    @MainActor
+    func syntaxEditorViewIOSWrappingGeometryTracksAdjustedInsetChanges() {
+        let model = SyntaxEditorTestContext(
+            text: String(repeating: "let resizedInsetAwareWrappingWidth = true; ", count: 24),
+            language: SyntaxLanguage.swift,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        layoutIOSEditorView(editorView, width: 360, height: 240)
+
+        let initialContainerWidth = editorView.textContainer.size.width
+
+        editorView.contentInset = UIEdgeInsets(top: 20, left: 36, bottom: 44, right: 52)
+        layoutIOSEditorView(editorView, width: 360, height: 240)
+
+        let visibleSize = iOSAdjustedVisibleSize(editorView)
+        let expectedContainerWidth = max(
+            0,
+            visibleSize.width - editorView.textContainerInset.left - editorView.textContainerInset.right
+        )
+
+        #expect(editorView.textContainer.widthTracksTextView)
+        #expect(editorView.textContainer.size.width < initialContainerWidth)
+        #expect(approximatelyEqualIOS(editorView.contentSize.width, visibleSize.width))
+        #expect(approximatelyEqualIOS(editorView.textContainer.size.width, expectedContainerWidth))
+        #expect(editorView.contentSize.height >= visibleSize.height)
+    }
+
+    @Test("SyntaxEditorView does not double-count adjusted iOS insets when ensuring content size")
+    @MainActor
+    func syntaxEditorViewIOSContentSizeEnsuringDoesNotDoubleCountInsets() {
+        let model = SyntaxEditorTestContext(
+            text: #"{"result":"ok"}"#,
+            language: SyntaxLanguage.json,
+            lineWrappingEnabled: true
+        )
+        let editorView = SyntaxEditorView(testContext: model)
+        editorView.contentInset = UIEdgeInsets(top: 24, left: 28, bottom: 36, right: 40)
+        layoutIOSEditorView(editorView, width: 260, height: 180)
+
+        let targetRect = CGRect(
+            x: 0,
+            y: 0,
+            width: editorView.contentSize.width + 31,
+            height: editorView.contentSize.height + 29
+        )
+
+        editorView.scrollContentRectToVisible(targetRect)
+
+        #expect(approximatelyEqualIOS(editorView.contentSize.width, ceil(targetRect.maxX)))
+        #expect(approximatelyEqualIOS(editorView.contentSize.height, ceil(targetRect.maxY)))
     }
 
     @Test("SyntaxEditorView keeps iOS horizontal offset after visible cursor click")
