@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 
 /// Two-plane packed per-line token store.
 ///

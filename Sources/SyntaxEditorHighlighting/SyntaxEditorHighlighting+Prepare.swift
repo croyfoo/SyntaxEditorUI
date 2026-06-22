@@ -1,5 +1,5 @@
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 
 extension SyntaxEditorHighlighting {
     public static func prepare(_ language: SyntaxLanguage) async {

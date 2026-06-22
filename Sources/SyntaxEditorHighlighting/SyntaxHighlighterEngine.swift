@@ -1,9 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingPatching
-import SyntaxEditorHighlightingSemantic
-import SyntaxEditorHighlightingStorage
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 import SyntaxEditorLanguageSupport
 import SyntaxEditorLanguages
 import SwiftTreeSitter

@@ -267,101 +267,17 @@ let package = Package(
             swiftSettings: syntaxEditorSwiftSettings
         ),
         .target(
-            name: "SyntaxEditorHighlightingTypes",
-            dependencies: [
-                "SyntaxEditorCoreTypes",
-                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
-            ],
-            swiftSettings: syntaxEditorSwiftSettings
-        ),
-        .target(
-            name: "SyntaxEditorHighlightingStorage",
-            dependencies: [
-                "SyntaxEditorCoreTypes",
-                "SyntaxEditorHighlightingTypes",
-                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
-            ],
-            swiftSettings: syntaxEditorSwiftSettings
-        ),
-        .target(
-            name: "SyntaxEditorHighlightingPatching",
-            dependencies: [
-                "SyntaxEditorCoreTypes",
-                "SyntaxEditorHighlightingStorage",
-                "SyntaxEditorHighlightingTypes",
-                "SyntaxEditorLanguageHTML",
-                "SyntaxEditorLanguageSupport",
-                "SyntaxEditorLanguages",
-                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
-                .product(name: "SwiftTreeSitterLayer", package: "SwiftTreeSitter"),
-            ],
-            swiftSettings: syntaxEditorSwiftSettings
-        ),
-        .target(
-            name: "SyntaxEditorHighlightingCSS",
-            dependencies: [
-                "SyntaxEditorCoreTypes",
-                "SyntaxEditorHighlightingTypes",
-            ],
-            swiftSettings: syntaxEditorSwiftSettings
-        ),
-        .target(
-            name: "SyntaxEditorHighlightingSwift",
-            dependencies: [
-                "SyntaxEditorCoreTypes",
-                "SyntaxEditorHighlightingTypes",
-                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
-            ],
-            swiftSettings: syntaxEditorSwiftSettings
-        ),
-        .target(
-            name: "SyntaxEditorHighlightingObjectiveC",
-            dependencies: [
-                "SyntaxEditorCoreTypes",
-                "SyntaxEditorHighlightingTypes",
-                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
-            ],
-            swiftSettings: syntaxEditorSwiftSettings
-        ),
-        .target(
-            name: "SyntaxEditorHighlightingSemantic",
-            dependencies: [
-                "SyntaxEditorCoreTypes",
-                "SyntaxEditorHighlightingCSS",
-                "SyntaxEditorHighlightingObjectiveC",
-                "SyntaxEditorHighlightingSwift",
-                "SyntaxEditorHighlightingTypes",
-                "SyntaxEditorLanguageHTML",
-                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
-            ],
-            swiftSettings: syntaxEditorSwiftSettings
-        ),
-        .target(
-            name: "SyntaxEditorHighlightingEngine",
-            dependencies: [
-                "SyntaxEditorCoreTypes",
-                "SyntaxEditorHighlightingPatching",
-                "SyntaxEditorHighlightingSemantic",
-                "SyntaxEditorHighlightingStorage",
-                "SyntaxEditorHighlightingTypes",
-                "SyntaxEditorLanguageSupport",
-                "SyntaxEditorLanguages",
-                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
-                .product(name: "SwiftTreeSitterLayer", package: "SwiftTreeSitter"),
-            ],
-            swiftSettings: syntaxEditorSwiftSettings
-        ),
-        .target(
             name: "SyntaxEditorHighlighting",
             dependencies: [
-                "SyntaxEditorHighlightingCSS",
-                "SyntaxEditorHighlightingEngine",
-                "SyntaxEditorHighlightingObjectiveC",
-                "SyntaxEditorHighlightingPatching",
-                "SyntaxEditorHighlightingSemantic",
-                "SyntaxEditorHighlightingStorage",
-                "SyntaxEditorHighlightingSwift",
-                "SyntaxEditorHighlightingTypes",
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageCSS",
+                "SyntaxEditorLanguageHTML",
+                "SyntaxEditorLanguageObjectiveC",
+                "SyntaxEditorLanguageSupport",
+                "SyntaxEditorLanguageSwift",
+                "SyntaxEditorLanguages",
+                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
+                .product(name: "SwiftTreeSitterLayer", package: "SwiftTreeSitter"),
             ],
             swiftSettings: syntaxEditorSwiftSettings
         ),

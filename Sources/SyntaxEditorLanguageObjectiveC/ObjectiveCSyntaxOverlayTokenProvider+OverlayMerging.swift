@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 
 extension ObjectiveCSyntaxOverlayTokenProvider {
     static func preparedOverlayInput(

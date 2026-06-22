@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 
 /// A coalescing set of invalidated UTF-16 ranges that survives cancellation.
 ///

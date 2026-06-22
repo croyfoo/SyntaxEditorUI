@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 
 extension ObjectiveCSyntaxOverlayTokenProvider {
     private static let objectiveCSemanticStructuralCharacters = CharacterSet(charactersIn: "#@{}();")

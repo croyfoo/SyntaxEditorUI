@@ -1,7 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingStorage
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 import SyntaxEditorLanguageHTML
 import SyntaxEditorLanguageSupport
 import SyntaxEditorLanguages

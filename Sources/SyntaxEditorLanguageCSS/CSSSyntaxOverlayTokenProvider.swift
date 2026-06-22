@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 
 package enum CSSSyntaxOverlayTokenProvider {
     package static func mergingOverlayTokens(

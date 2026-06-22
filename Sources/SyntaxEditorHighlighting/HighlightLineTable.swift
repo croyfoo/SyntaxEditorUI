@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 import SwiftTreeSitter
 
 /// Chunked line-offset table for the highlighting session.

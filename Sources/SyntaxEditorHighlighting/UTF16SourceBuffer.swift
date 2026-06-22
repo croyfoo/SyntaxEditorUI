@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 import SwiftTreeSitter
 
 /// Session-owned contiguous UTF-16 image of the layered source.

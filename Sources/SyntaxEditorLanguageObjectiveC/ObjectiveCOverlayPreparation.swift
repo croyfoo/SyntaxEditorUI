@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 
 struct ObjectiveCOverlayPreparation {
     let baseTokensForIndex: [SyntaxEditorHighlighting.Token]

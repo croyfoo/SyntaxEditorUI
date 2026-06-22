@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 
 package typealias ObjectiveCRangeKey = SyntaxOverlayRangeKey
 package typealias ObjectiveCTokenKey = SyntaxOverlayTokenKey

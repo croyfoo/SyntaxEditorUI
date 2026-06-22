@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 import SwiftTreeSitter
 
 package enum ObjectiveCSyntaxOverlayTokenProvider: SyntaxOverlayProvider {

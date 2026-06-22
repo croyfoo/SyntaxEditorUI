@@ -1,6 +1,6 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
 import SwiftTreeSitter
 
 // Provides Swift substring tokens that cannot be expressed by Tree-sitter

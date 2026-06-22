@@ -1,10 +1,10 @@
 import Foundation
 import SyntaxEditorCoreTypes
-import SyntaxEditorHighlightingCSS
-import SyntaxEditorHighlightingObjectiveC
-import SyntaxEditorHighlightingSwift
-import SyntaxEditorHighlightingTypes
+import SyntaxEditorLanguageSupport
+import SyntaxEditorLanguageCSS
 import SyntaxEditorLanguageHTML
+import SyntaxEditorLanguageObjectiveC
+import SyntaxEditorLanguageSwift
 import SwiftTreeSitter
 
 /// The per-language semantic seam.
