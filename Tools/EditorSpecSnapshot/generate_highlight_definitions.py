@@ -9,7 +9,7 @@ import xclangspec_snapshot
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_QUERY_ROOT = REPOSITORY_ROOT / "Sources" / "SyntaxEditorCore" / "Resources"
+DEFAULT_QUERY_ROOT = REPOSITORY_ROOT / "Sources"
 
 LANGUAGE_CASES = {
     "Xcode.SourceCodeLanguage.CSS": "css",
@@ -22,15 +22,15 @@ LANGUAGE_CASES = {
     "Xcode.SourceCodeLanguage.XML": "xml",
 }
 
-QUERY_DIRECTORY_NAMES = {
-    "css": "CSSQueries",
-    "html": "HTMLQueries",
-    "javascript": "JavaScriptQueries",
-    "json": "JSONQueries",
-    "objectiveC": "ObjectiveCQueries",
-    "swift": "SwiftQueries",
-    "toml": "TOMLQueries",
-    "xml": "XMLQueries",
+QUERY_DIRECTORY_PATHS = {
+    "css": Path("SyntaxEditorLanguageCSS/Resources/CSSQueries"),
+    "html": Path("SyntaxEditorLanguageHTML/Resources/HTMLQueries"),
+    "javascript": Path("SyntaxEditorLanguageJavaScript/Resources/JavaScriptQueries"),
+    "json": Path("SyntaxEditorLanguageJSON/Resources/JSONQueries"),
+    "objectiveC": Path("SyntaxEditorLanguageObjectiveC/Resources/ObjectiveCQueries"),
+    "swift": Path("SyntaxEditorLanguageSwift/Resources/SwiftQueries"),
+    "toml": Path("SyntaxEditorLanguageTOML/Resources/TOMLQueries"),
+    "xml": Path("SyntaxEditorLanguageXML/Resources/XMLQueries"),
 }
 
 GENERATED_BLOCK_BEGIN = "; BEGIN GENERATED EDITOR SYNTAX WORDS: {name}"
@@ -87,7 +87,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--query-root",
         default=str(DEFAULT_QUERY_ROOT),
-        help="Root directory containing bundled query resources.",
+        help=(
+            "Root directory containing language target sources. A flat root "
+            "containing *Queries directories is also accepted."
+        ),
     )
     return parser.parse_args()
 
@@ -357,13 +360,25 @@ def replace_generated_block(source: str, name: str, body: str) -> str:
     return source[:content_start] + body.rstrip() + "\n" + source[end_index:]
 
 
+def query_directory_path(query_root: Path, language_case: str) -> Path:
+    target_relative_path = QUERY_DIRECTORY_PATHS[language_case]
+    candidates = [
+        query_root / target_relative_path,
+        query_root / target_relative_path.name,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 def rewrite_query_block(
     query_root: Path,
     language_case: str,
     block_name: str,
     languages: dict[str, dict[str, Any]],
 ) -> None:
-    query_path = query_root / QUERY_DIRECTORY_NAMES[language_case] / "highlights.scm"
+    query_path = query_directory_path(query_root, language_case) / "highlights.scm"
     source = query_path.read_text(encoding="utf-8")
     updated = replace_generated_block(
         source,

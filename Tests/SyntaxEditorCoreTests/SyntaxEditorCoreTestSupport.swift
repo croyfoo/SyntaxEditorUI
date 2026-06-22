@@ -145,7 +145,9 @@ func highlightQueryURL(language: SyntaxLanguage) -> URL {
         "XMLQueries"
     }
     return repositoryRootURL()
-        .appendingPathComponent("Sources/SyntaxEditorCore/Resources", isDirectory: true)
+        .appendingPathComponent("Sources", isDirectory: true)
+        .appendingPathComponent(languageTargetName(for: language), isDirectory: true)
+        .appendingPathComponent("Resources", isDirectory: true)
         .appendingPathComponent(directoryName, isDirectory: true)
         .appendingPathComponent("highlights.scm")
 }
@@ -194,6 +196,10 @@ func languageImplementationDirectoryName(for language: SyntaxLanguage) -> String
     case .xml:
         "XML"
     }
+}
+
+func languageTargetName(for language: SyntaxLanguage) -> String {
+    "SyntaxEditorLanguage\(languageImplementationDirectoryName(for: language))"
 }
 
 func captureNames(inQuerySource source: String) -> [String] {

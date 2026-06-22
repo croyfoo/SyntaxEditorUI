@@ -1,0 +1,7 @@
+@_exported import SyntaxEditorCoreTypes
+@_exported import SyntaxEditorTheme
+@_exported import SyntaxEditorModel
+@_exported import SyntaxEditorLanguageSupport
+@_exported import SyntaxEditorLanguages
+@_exported import SyntaxEditorEditing
+@_exported import SyntaxEditorHighlighting

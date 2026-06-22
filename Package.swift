@@ -2,6 +2,12 @@
 
 import PackageDescription
 
+let syntaxEditorSwiftSettings: [SwiftSetting] = [
+    .swiftLanguageMode(.v6),
+    .defaultIsolation(nil),
+    .strictMemorySafety(),
+]
+
 let package = Package(
     name: "SyntaxEditorUI",
     platforms: [
@@ -102,34 +108,191 @@ let package = Package(
             ]
         ),
         .target(
-            name: "SyntaxEditorCore",
+            name: "SyntaxEditorCoreTypes",
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorTheme",
             dependencies: [
+                "SyntaxEditorCoreTypes",
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorModel",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorTheme",
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageSupport",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
                 .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
-                .product(name: "SwiftTreeSitterLayer", package: "SwiftTreeSitter"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageCSS",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
                 .product(name: "TreeSitterCSS", package: "tree-sitter-css"),
-                .product(name: "TreeSitterHTML", package: "tree-sitter-html"),
-                .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
-                .product(name: "TreeSitterJSON", package: "tree-sitter-json"),
-                .product(name: "TreeSitterObjc", package: "tree-sitter-objc"),
-                .product(name: "TreeSitterSwift", package: "tree-sitter-swift"),
-                .product(name: "TreeSitterTOML", package: "tree-sitter-toml"),
-                .product(name: "TreeSitterXML", package: "tree-sitter-xml"),
             ],
             resources: [
                 .copy("Resources/CSSQueries"),
-                .copy("Resources/HTMLQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageJavaScript",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
+            ],
+            resources: [
                 .copy("Resources/JavaScriptQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageHTML",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageCSS",
+                "SyntaxEditorLanguageJavaScript",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterHTML", package: "tree-sitter-html"),
+            ],
+            resources: [
+                .copy("Resources/HTMLQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageJSON",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterJSON", package: "tree-sitter-json"),
+            ],
+            resources: [
                 .copy("Resources/JSONQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageObjectiveC",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterObjc", package: "tree-sitter-objc"),
+            ],
+            resources: [
                 .copy("Resources/ObjectiveCQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguagePlainText",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageSwift",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterSwift", package: "tree-sitter-swift"),
+            ],
+            resources: [
                 .copy("Resources/SwiftQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageTOML",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterTOML", package: "tree-sitter-toml"),
+            ],
+            resources: [
                 .copy("Resources/TOMLQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageXML",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterXML", package: "tree-sitter-xml"),
+            ],
+            resources: [
                 .copy("Resources/XMLQueries"),
             ],
-            swiftSettings: [
-                .swiftLanguageMode(.v6),
-                .defaultIsolation(nil),
-                .strictMemorySafety(),
-            ]
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguages",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageCSS",
+                "SyntaxEditorLanguageHTML",
+                "SyntaxEditorLanguageJavaScript",
+                "SyntaxEditorLanguageJSON",
+                "SyntaxEditorLanguageObjectiveC",
+                "SyntaxEditorLanguagePlainText",
+                "SyntaxEditorLanguageSupport",
+                "SyntaxEditorLanguageSwift",
+                "SyntaxEditorLanguageTOML",
+                "SyntaxEditorLanguageXML",
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorEditing",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                "SyntaxEditorLanguages",
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorHighlighting",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageCSS",
+                "SyntaxEditorLanguageHTML",
+                "SyntaxEditorLanguageObjectiveC",
+                "SyntaxEditorLanguageSupport",
+                "SyntaxEditorLanguageSwift",
+                "SyntaxEditorLanguages",
+                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
+                .product(name: "SwiftTreeSitterLayer", package: "SwiftTreeSitter"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorCore",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorEditing",
+                "SyntaxEditorHighlighting",
+                "SyntaxEditorLanguageSupport",
+                "SyntaxEditorLanguages",
+                "SyntaxEditorModel",
+                "SyntaxEditorTheme",
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
         ),
         .target(
             name: "SyntaxEditorUI",
