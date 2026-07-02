@@ -28,9 +28,17 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter/tree-sitter-html", exact: "0.23.2"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-javascript", exact: "0.23.1"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-json", exact: "0.24.8"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-php", exact: "0.24.2"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-bash", exact: "0.25.1"),
+        .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-markdown", exact: "0.5.1"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-objc", from: "3.0.2"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-toml", exact: "0.7.0"),
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-xml", exact: "0.7.0"),
+        // Fork of tree-sitter-grammars/tree-sitter-yaml @ v0.7.2 that lists the
+        // external scanner unconditionally; the upstream manifest gates it behind
+        // a relative-path `fileExists` that fails under Xcode (dropping the
+        // scanner → link errors).
+        .package(url: "https://github.com/croyfoo/tree-sitter-yaml", exact: "0.7.2-spm"),
         .package(url: "https://github.com/lynnswap/tree-sitter-swift", exact: "0.1.0"),
         .package(url: "https://github.com/lynnswap/ObservationBridge", exact: "0.13.0"),
         .package(url: "https://github.com/ordo-one/benchmark", exact: "1.34.1", traits: []),
@@ -197,6 +205,54 @@ let package = Package(
             swiftSettings: syntaxEditorSwiftSettings
         ),
         .target(
+            name: "SyntaxEditorLanguagePHP",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterPHP", package: "tree-sitter-php"),
+            ],
+            resources: [
+                .copy("Resources/PHPQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageShell",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterBash", package: "tree-sitter-bash"),
+            ],
+            resources: [
+                .copy("Resources/ShellQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageMarkdown",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterMarkdown", package: "tree-sitter-markdown"),
+            ],
+            resources: [
+                .copy("Resources/MarkdownQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageMarkdownInline",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterMarkdown", package: "tree-sitter-markdown"),
+            ],
+            resources: [
+                .copy("Resources/MarkdownInlineQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
             name: "SyntaxEditorLanguagePlainText",
             dependencies: [
                 "SyntaxEditorCoreTypes",
@@ -241,6 +297,18 @@ let package = Package(
             swiftSettings: syntaxEditorSwiftSettings
         ),
         .target(
+            name: "SyntaxEditorLanguageYAML",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterYAML", package: "tree-sitter-yaml"),
+            ],
+            resources: [
+                .copy("Resources/YAMLQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
             name: "SyntaxEditorLanguages",
             dependencies: [
                 "SyntaxEditorCoreTypes",
@@ -248,12 +316,17 @@ let package = Package(
                 "SyntaxEditorLanguageHTML",
                 "SyntaxEditorLanguageJavaScript",
                 "SyntaxEditorLanguageJSON",
+                "SyntaxEditorLanguageMarkdown",
+                "SyntaxEditorLanguageMarkdownInline",
                 "SyntaxEditorLanguageObjectiveC",
+                "SyntaxEditorLanguagePHP",
                 "SyntaxEditorLanguagePlainText",
+                "SyntaxEditorLanguageShell",
                 "SyntaxEditorLanguageSupport",
                 "SyntaxEditorLanguageSwift",
                 "SyntaxEditorLanguageTOML",
                 "SyntaxEditorLanguageXML",
+                "SyntaxEditorLanguageYAML",
             ],
             swiftSettings: syntaxEditorSwiftSettings
         ),

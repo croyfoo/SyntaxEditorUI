@@ -146,12 +146,22 @@ private extension SyntaxLanguage {
             "json"
         case .objectiveC:
             "objectivec"
+        case .php:
+            "php"
         case .swift:
             "swift"
         case .toml:
             "toml"
         case .xml:
             "xml"
+        case .yaml:
+            "yaml"
+        case .shell:
+            "shell"
+        case .markdown:
+            "markdown"
+        case .markdownInline:
+            "markdown-inline"
         }
     }
 
@@ -169,12 +179,22 @@ private extension SyntaxLanguage {
             .json
         case "objectivec":
             .objectiveC
+        case "php":
+            .php
         case "swift":
             .swift
         case "toml":
             .toml
         case "xml":
             .xml
+        case "yaml", "yml":
+            .yaml
+        case "shell", "bash", "sh", "zsh":
+            .shell
+        case "markdown", "md", "mdown", "mkd":
+            .markdown
+        case "markdown-inline", "markdown_inline":
+            .markdownInline
         default:
             nil
         }

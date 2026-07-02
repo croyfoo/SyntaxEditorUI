@@ -143,6 +143,16 @@ func highlightQueryURL(language: SyntaxLanguage) -> URL {
         "TOMLQueries"
     case .xml:
         "XMLQueries"
+    case .yaml:
+        "YAMLQueries"
+    case .shell:
+        "ShellQueries"
+    case .markdown:
+        "MarkdownQueries"
+    case .markdownInline:
+        "MarkdownInlineQueries"
+    case .php:
+        "PHPQueries"
     }
     return repositoryRootURL()
         .appendingPathComponent("Sources", isDirectory: true)
@@ -172,6 +182,16 @@ func canonicalCaptureLanguageName(for language: SyntaxLanguage) -> String {
         "toml"
     case .xml:
         "xml"
+    case .yaml:
+        "yaml"
+    case .shell:
+        "shell"
+    case .markdown:
+        "markdown"
+    case .markdownInline:
+        "markdown-inline"
+    case .php:
+        "php"
     }
 }
 
@@ -195,6 +215,16 @@ func languageImplementationDirectoryName(for language: SyntaxLanguage) -> String
         "TOML"
     case .xml:
         "XML"
+    case .yaml:
+        "YAML"
+    case .shell:
+        "Shell"
+    case .markdown:
+        "Markdown"
+    case .markdownInline:
+        "MarkdownInline"
+    case .php:
+        "PHP"
     }
 }
 
@@ -451,6 +481,16 @@ extension SyntaxHighlighterEngineTests {
             "title = \"Reference\"\n"
         case .xml:
             "<root attr=\"value\">text</root>"
+        case .yaml:
+            "name: value\n"
+        case .shell:
+            "echo hello\n"
+        case .markdown:
+            "# Heading\n"
+        case .markdownInline:
+            "**bold**"
+        case .php:
+            "<?php echo 1;\n"
         }
     }
 }

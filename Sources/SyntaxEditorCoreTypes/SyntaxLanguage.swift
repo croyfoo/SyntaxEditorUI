@@ -7,9 +7,14 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
     case javascript
     case json
     case objectiveC = "objective-c"
+    case php
     case swift
     case toml
     case xml
+    case yaml
+    case shell
+    case markdown
+    case markdownInline = "markdown-inline"
 
     public var id: String {
         identifier
@@ -33,12 +38,22 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
             "JSON"
         case .objectiveC:
             "Objective-C"
+        case .php:
+            "PHP"
         case .swift:
             "Swift"
         case .toml:
             "TOML"
         case .xml:
             "XML"
+        case .yaml:
+            "YAML"
+        case .shell:
+            "Shell"
+        case .markdown:
+            "Markdown"
+        case .markdownInline:
+            "Markdown (inline)"
         }
     }
 
@@ -101,12 +116,22 @@ extension SyntaxLanguage {
             ["json"]
         case .objectiveC:
             ["objective-c", "objectivec", "objc"]
+        case .php:
+            ["php", "phtml"]
         case .swift:
             ["swift"]
         case .toml:
             ["toml"]
         case .xml:
             ["xml"]
+        case .yaml:
+            ["yaml", "yml"]
+        case .shell:
+            ["shell", "bash", "sh", "zsh"]
+        case .markdown:
+            ["markdown", "md", "mdown", "mkd"]
+        case .markdownInline:
+            ["markdown-inline", "markdown_inline"]
         }
     }
 }

@@ -327,6 +327,16 @@ struct SyntaxEditorCoreTests {
                 "TOMLLanguage"
             case .xml:
                 "XMLLanguage"
+            case .yaml:
+                "YAMLLanguage"
+            case .shell:
+                "ShellLanguage"
+            case .markdown:
+                "MarkdownLanguage"
+            case .markdownInline:
+                "MarkdownInlineLanguage"
+            case .php:
+                "PHPLanguage"
             }
             let languageDirectory = sourcesURL.appendingPathComponent(languageTargetName(for: language), isDirectory: true)
             #expect(FileManager.default.fileExists(atPath: languageDirectory.appendingPathComponent("\(typeName).swift").path))

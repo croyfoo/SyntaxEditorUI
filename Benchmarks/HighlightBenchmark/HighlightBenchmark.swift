@@ -855,6 +855,8 @@ private func incrementalEditSource(from source: String, language: SyntaxLanguage
             of: "<enabled>true</enabled>",
             with: "<enabled>false</enabled>"
         ) ?? inserting("<!-- benchmark edit -->", before: "</benchmark-documents>", in: source)
+    default:
+        return source + "\nbenchmark edit\n"
     }
 }
 

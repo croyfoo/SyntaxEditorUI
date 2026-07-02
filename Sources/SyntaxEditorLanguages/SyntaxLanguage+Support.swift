@@ -4,12 +4,17 @@ import SyntaxEditorLanguageCSS
 import SyntaxEditorLanguageHTML
 import SyntaxEditorLanguageJavaScript
 import SyntaxEditorLanguageJSON
+import SyntaxEditorLanguageMarkdown
+import SyntaxEditorLanguageMarkdownInline
 import SyntaxEditorLanguageObjectiveC
+import SyntaxEditorLanguagePHP
 import SyntaxEditorLanguagePlainText
+import SyntaxEditorLanguageShell
 import SyntaxEditorLanguageSupport
 import SyntaxEditorLanguageSwift
 import SyntaxEditorLanguageTOML
 import SyntaxEditorLanguageXML
+import SyntaxEditorLanguageYAML
 
 package extension SyntaxLanguage {
     var support: any SyntaxLanguageSupport {
@@ -26,12 +31,22 @@ package extension SyntaxLanguage {
             JSONLanguage()
         case .objectiveC:
             ObjectiveCLanguage()
+        case .php:
+            PHPLanguage()
         case .swift:
             SwiftLanguage()
         case .toml:
             TOMLLanguage()
         case .xml:
             XMLLanguage()
+        case .yaml:
+            YAMLLanguage()
+        case .shell:
+            ShellLanguage()
+        case .markdown:
+            MarkdownLanguage()
+        case .markdownInline:
+            MarkdownInlineLanguage()
         }
     }
 
