@@ -31,8 +31,9 @@ extension SyntaxEditorTextInputView {
     }
 
     /// Scroll the enclosing scroll view by one page, keeping a couple of lines of
-    /// overlap for context — the emacs `C-v` / `M-v` behavior. Pure scrolling: the
-    /// insertion point is left in place, like a trackpad scroll.
+    /// overlap for context, and move the caret into the new viewport (first
+    /// visible line on page down, last on page up) preserving its column — the
+    /// emacs `C-v` / `M-v` behavior, so the cursor follows the scroll.
     func scrollByPage(up: Bool) {
         guard let scrollView = enclosingScrollView else { return }
         let clipView = scrollView.contentView
@@ -45,9 +46,19 @@ extension SyntaxEditorTextInputView {
         let delta = max(lineHeight, visibleHeight - overlap)
         let maxY = max(0, frame.height - visibleHeight)
         var origin = clipView.bounds.origin
-        origin.y = min(max(0, origin.y + (up ? -delta : delta)), maxY)
+        let targetOriginY = min(max(0, origin.y + (up ? -delta : delta)), maxY)
+        let didScroll = abs(targetOriginY - origin.y) > 0.5
+        origin.y = targetOriginY
         clipView.scroll(to: origin)
         scrollView.reflectScrolledClipView(clipView)
+
+        // Move the caret so it follows the page. Skip when the scroll clamped
+        // (already at an edge) so the cursor doesn't jump at the document bounds.
+        guard didScroll, let caret = caretRect(forUTF16Location: selectedRangeStorage.location) else { return }
+        let visible = visibleRect
+        let targetY = up ? (visible.maxY - lineHeight / 2) : (visible.minY + lineHeight / 2)
+        let location = characterIndex(at: NSPoint(x: caret.midX, y: targetY))
+        setSelectedRange(NSRange(location: location, length: 0))
     }
 
     /// Scroll the enclosing scroll view so the caret (or the active end of a
