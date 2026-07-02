@@ -27,6 +27,43 @@ extension SyntaxEditorTextInputView {
         guard !nextSelections.isEmpty else { return }
 
         applyTextSelections(nextSelections)
+        scrollSelectionToVisible()
+    }
+
+    /// Scroll the enclosing scroll view by one page, keeping a couple of lines of
+    /// overlap for context — the emacs `C-v` / `M-v` behavior. Pure scrolling: the
+    /// insertion point is left in place, like a trackpad scroll.
+    func scrollByPage(up: Bool) {
+        guard let scrollView = enclosingScrollView else { return }
+        let clipView = scrollView.contentView
+        let visibleHeight = clipView.bounds.height
+        guard visibleHeight > 0 else { return }
+        let baseFont = font ?? (typingAttributes[.font] as? NSFont)
+            ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let lineHeight = max(1, ceil(baseFont.ascender - baseFont.descender + baseFont.leading))
+        let overlap = min(visibleHeight, lineHeight * 2)
+        let delta = max(lineHeight, visibleHeight - overlap)
+        let maxY = max(0, frame.height - visibleHeight)
+        var origin = clipView.bounds.origin
+        origin.y = min(max(0, origin.y + (up ? -delta : delta)), maxY)
+        clipView.scroll(to: origin)
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    /// Scroll the enclosing scroll view so the caret (or the active end of a
+    /// selection) stays visible — the standard macOS text-view behavior. The
+    /// package defines `scrollRangeToVisible` but never invokes it on macOS, so
+    /// without this, caret movement and typing can run off-screen. `caretRect`
+    /// ensures layout up to the caret, so jumps into not-yet-laid-out text
+    /// (e.g. move-to-end-of-document) scroll correctly.
+    func scrollSelectionToVisible() {
+        guard unsafe window != nil else { return }
+        let selection = selectedRangeStorage
+        if selection.length == 0, let caret = caretRect(forUTF16Location: selection.location) {
+            scrollToVisible(caret.insetBy(dx: -4, dy: -4))
+        } else {
+            scrollRangeToVisible(selection)
+        }
     }
 
     func updateTextSelection(
