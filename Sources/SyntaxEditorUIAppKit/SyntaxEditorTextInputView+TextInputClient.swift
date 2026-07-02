@@ -329,6 +329,7 @@ extension SyntaxEditorTextInputView {
         rebuildFindHighlightRangeIndex()
         updateFindHighlightsForVisibleFragments()
         didChangeTextNotification()
+        scrollSelectionToVisible()
         return true
     }
 
