@@ -9,6 +9,15 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     let textContentView = SyntaxEditorTextInputView.TextContentView()
     let textFinder = NSTextFinder()
     let insertionIndicator = NSTextInsertionIndicator(frame: .zero)
+    /// A custom-drawn caret used for non-`.line` styles (`.bar`/`.block`); the
+    /// system `insertionIndicator` handles `.line`.
+    let customCaret = NSView(frame: .zero)
+    var caretStyle: CaretStyle = .line {
+        didSet {
+            guard caretStyle != oldValue else { return }
+            updateInsertionIndicator()
+        }
+    }
     private var incrementalMatchRangesObservation: NSKeyValueObservation?
     var findHighlightRangesOverrideForTesting: [NSRange]?
     var findHighlightRangeIndex = TextRangeIntersectionIndex(utf16Length: 0)
@@ -79,9 +88,12 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         textContentView.textInputView = self
         insertionIndicator.displayMode = .hidden
         insertionIndicator.isHidden = true
+        customCaret.wantsLayer = true
+        customCaret.isHidden = true
         textSystem.layoutManager.delegate = self
         addSubview(textContentView)
         addSubview(insertionIndicator)
+        addSubview(customCaret)
         incrementalMatchRangesObservation = textFinder.observe(\.incrementalMatchRanges, options: [.new, .old]) { [weak self] _, change in
             let changedRanges: [NSRange]?
             switch change.kind {

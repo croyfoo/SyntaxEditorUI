@@ -36,6 +36,8 @@ public final class SyntaxEditorModel {
     public var theme: SyntaxEditorTheme
     public var drawsBackground: Bool
     public var fontSizeDelta: Int
+    /// The shape of the insertion caret.
+    public var caretStyle: CaretStyle
     public private(set) var textRevision: Int
     public private(set) var latestTextChange: SyntaxEditorTextChange?
 
@@ -47,7 +49,8 @@ public final class SyntaxEditorModel {
         lineWrappingEnabled: Bool = false,
         theme: SyntaxEditorTheme = .default,
         drawsBackground: Bool = true,
-        fontSizeDelta: Int = 0
+        fontSizeDelta: Int = 0,
+        caretStyle: CaretStyle = .line
     ) {
         self.textStorage = text
         self.language = language
@@ -60,6 +63,7 @@ public final class SyntaxEditorModel {
         self.theme = theme
         self.drawsBackground = drawsBackground
         self.fontSizeDelta = fontSizeDelta
+        self.caretStyle = caretStyle
         self.textRevision = 0
         self.latestTextChange = nil
     }

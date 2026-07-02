@@ -325,12 +325,66 @@ extension SyntaxEditorTextInputView {
         else {
             insertionIndicator.displayMode = .hidden
             insertionIndicator.isHidden = true
+            hideCustomCaret()
             return
         }
 
-        insertionIndicator.frame = caretRect
-        insertionIndicator.isHidden = false
-        insertionIndicator.displayMode = .automatic
+        switch caretStyle {
+        case .line:
+            hideCustomCaret()
+            insertionIndicator.frame = caretRect
+            insertionIndicator.isHidden = false
+            insertionIndicator.displayMode = .automatic
+        case .bar(let width):
+            insertionIndicator.isHidden = true
+            insertionIndicator.displayMode = .hidden
+            var frame = caretRect
+            frame.size.width = max(1, width)
+            showCustomCaret(frame: frame, translucent: false)
+        case .block:
+            insertionIndicator.isHidden = true
+            insertionIndicator.displayMode = .hidden
+            var frame = caretRect
+            frame.size.width = blockCaretWidth()
+            showCustomCaret(frame: frame, translucent: true)
+        }
+    }
+
+    private func showCustomCaret(frame: CGRect, translucent: Bool) {
+        // No implicit animation on move/resize, so the caret doesn't slide.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        customCaret.frame = frame
+        let color = NSColor.systemBlue
+        customCaret.layer?.backgroundColor = (translucent ? color.withAlphaComponent(0.4) : color).cgColor
+        customCaret.isHidden = false
+        CATransaction.commit()
+
+        if customCaret.layer?.animation(forKey: "blink") == nil {
+            let blink = CABasicAnimation(keyPath: "opacity")
+            blink.fromValue = 1.0
+            // Dim rather than fully hide, so the caret's location never
+            // disappears between blinks.
+            blink.toValue = 0.35
+            blink.duration = 0.7
+            blink.autoreverses = true
+            blink.repeatCount = .greatestFiniteMagnitude
+            blink.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            customCaret.layer?.add(blink, forKey: "blink")
+        }
+    }
+
+    private func hideCustomCaret() {
+        customCaret.layer?.removeAnimation(forKey: "blink")
+        customCaret.isHidden = true
+    }
+
+    /// A block caret's width: one character cell of the editor font (exact for
+    /// the monospaced fonts editors use).
+    private func blockCaretWidth() -> CGFloat {
+        let baseFont = font ?? (typingAttributes[.font] as? NSFont)
+            ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        return max(1, ("0" as NSString).size(withAttributes: [.font: baseFont]).width)
     }
 
     private func isCaretVisibleInCurrentViewport(_ location: Int) -> Bool {

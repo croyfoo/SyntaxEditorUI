@@ -45,7 +45,8 @@
         lineWrappingEnabled: model.lineWrappingEnabled,
         theme: model.theme,
         drawsBackground: model.drawsBackground,
-        fontSizeDelta: model.fontSizeDelta
+        fontSizeDelta: model.fontSizeDelta,
+        caretStyle: model.caretStyle
       )
       applyObservedModelChange()
       applyObservedSelection(model.selectedRange)
@@ -66,6 +67,7 @@
         let theme = model.theme
         let drawsBackground = model.drawsBackground
         let fontSizeDelta = model.fontSizeDelta
+        let caretStyle = model.caretStyle
 
         self.applyObservedConfiguration(
           language: language,
@@ -74,6 +76,7 @@
           theme: theme,
           drawsBackground: drawsBackground,
           fontSizeDelta: fontSizeDelta,
+          caretStyle: caretStyle,
           forceLanguageRefresh: event.kind == .initial,
           schedulesHighlight: event.kind != .initial || schedulesInitialHighlight
         )
@@ -110,6 +113,7 @@
         theme: model.theme,
         drawsBackground: model.drawsBackground,
         fontSizeDelta: model.fontSizeDelta,
+        caretStyle: model.caretStyle,
         forceLanguageRefresh: true,
         schedulesHighlight: false
       )
@@ -199,6 +203,7 @@
       theme: SyntaxEditorTheme,
       drawsBackground: Bool,
       fontSizeDelta: Int,
+      caretStyle: CaretStyle = .line,
       forceLanguageRefresh: Bool = false,
       schedulesHighlight: Bool = true
     ) {
@@ -250,6 +255,8 @@
       if textView.isEditable != isEditable {
         textView.isEditable = isEditable
       }
+
+      textView.caretStyle = caretStyle
 
       applyLineWrappingConfiguration(lineWrappingEnabled: lineWrappingEnabled)
 
