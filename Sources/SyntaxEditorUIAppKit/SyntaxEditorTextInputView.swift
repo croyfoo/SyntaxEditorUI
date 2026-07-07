@@ -475,6 +475,17 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         setSelectedRange(NSRange(location: 0, length: storage.length))
     }
 
+    /// Delete back to the previous word boundary (or the current selection if
+    /// there is one). Extends the selection a word backward, then deletes it —
+    /// the same primitives as `moveWordBackwardAndModifySelection` + delete.
+    override func deleteWordBackward(_ sender: Any?) {
+        guard isEditable else { return }
+        if selectedRangeStorage.length == 0 {
+            moveSelection(direction: .backward, destination: .word, extending: true, confined: false)
+        }
+        deleteBackward()
+    }
+
     override func performTextFinderAction(_ sender: Any?) {
         guard usesFindBar else { return }
         configureTextFinder()
