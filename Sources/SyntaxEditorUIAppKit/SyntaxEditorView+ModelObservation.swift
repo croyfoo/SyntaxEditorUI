@@ -194,6 +194,10 @@
         isApplyingModel = false
       }
       textView.setSelectedRange(clamped)
+      // The guard above means the selection genuinely moved out from under the
+      // view — i.e. it was set programmatically on the model (e.g. jumping to an
+      // occur match). Reveal it, matching how user-driven caret motion scrolls.
+      textView.scrollSelectionToVisible()
     }
 
     private func applyObservedConfiguration(
