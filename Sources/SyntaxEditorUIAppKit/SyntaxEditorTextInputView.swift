@@ -397,6 +397,8 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             deleteBackward()
         case #selector(deleteForward(_:)):
             deleteForward()
+        case #selector(deleteToEndOfLine(_:)):
+            deleteToEndOfLine()
         case #selector(moveLeft(_:)):
             moveSelection(direction: .left, destination: .character, extending: false, confined: false)
         case #selector(moveLeftAndModifySelection(_:)):
@@ -484,6 +486,13 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             moveSelection(direction: .backward, destination: .word, extending: true, confined: false)
         }
         deleteBackward()
+    }
+
+    /// Real responder-chain entry point for emacs `kill-line`, so `NSApp.sendAction`
+    /// can invoke it (the `doCommand(by:)` case only fires when the input system
+    /// routes a key binding through it).
+    override func deleteToEndOfLine(_ sender: Any?) {
+        deleteToEndOfLine()
     }
 
     override func performTextFinderAction(_ sender: Any?) {

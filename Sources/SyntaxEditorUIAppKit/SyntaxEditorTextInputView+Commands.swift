@@ -151,6 +151,34 @@ extension SyntaxEditorTextInputView {
         }
     }
 
+    /// Emacs `kill-line` (`C-k`): delete from the caret to the end of the line.
+    /// When the caret is already at the end of a line, delete the line break so
+    /// the following line joins up — matching emacs. A ranged selection is
+    /// deleted as-is. Computed directly from the text rather than via selection
+    /// navigation so the deleted range is exactly caret → line end.
+    func deleteToEndOfLine() {
+        guard isEditable else { return }
+        if selectedRangeStorage.length > 0 {
+            deleteForward()
+            return
+        }
+        let source = string as NSString
+        let caret = selectedRangeStorage.location
+        guard caret < source.length else { return }
+        let rest = NSRange(location: caret, length: source.length - caret)
+        let newline = source.range(of: "\n", options: [], range: rest)
+        let length: Int
+        if newline.location == NSNotFound {
+            length = rest.length                    // no newline: to end of document
+        } else if newline.location == caret {
+            length = 1                              // at line end: take the line break
+        } else {
+            length = newline.location - caret       // to just before the line break
+        }
+        replaceText(in: NSRange(location: caret, length: length), with: "",
+                    selectedRange: NSRange(location: caret, length: 0))
+    }
+
     var canCopySelection: Bool {
         isSelectable && selectedRangeStorage.length > 0
     }
