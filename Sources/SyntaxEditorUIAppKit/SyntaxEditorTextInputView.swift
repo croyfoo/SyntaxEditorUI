@@ -180,10 +180,56 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     }
 
     override func keyDown(with event: NSEvent) {
+        if handlePageScrollKeyEvent(event) {
+            return
+        }
+        if !hasMarkedText(), handleWordMotionKeyEvent(event) {
+            return
+        }
         if inputContext?.handleEvent(event) == true {
             return
         }
         interpretKeyEvents([event])
+    }
+
+    /// Emacs page scrolling: `C-v` scrolls down a page, `M-v` (Option-v) up.
+    /// Handled here so Option-v doesn't insert `√` and C-v isn't left to the
+    /// input system (which maps it to an unimplemented `pageDown:`).
+    private func handlePageScrollKeyEvent(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.contains(.control) != modifiers.contains(.option),
+              !modifiers.contains(.command),
+              !modifiers.contains(.shift),
+              event.charactersIgnoringModifiers?.lowercased() == "v"
+        else {
+            return false
+        }
+        scrollByPage(up: modifiers.contains(.option))
+        return true
+    }
+
+    /// Handles Option-B/Option-F word motion before the input context can
+    /// interpret them as character insertions (∫/ƒ).
+    private func handleWordMotionKeyEvent(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.contains(.option),
+              !modifiers.contains(.command),
+              !modifiers.contains(.control),
+              !modifiers.contains(.shift)
+        else {
+            return false
+        }
+
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "b":
+            moveSelection(direction: .backward, destination: .word, extending: false, confined: false)
+            return true
+        case "f":
+            moveSelection(direction: .forward, destination: .word, extending: false, confined: false)
+            return true
+        default:
+            return false
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -347,6 +393,14 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             moveSelection(direction: .right, destination: .character, extending: false, confined: false)
         case #selector(moveRightAndModifySelection(_:)):
             moveSelection(direction: .right, destination: .character, extending: true, confined: false)
+        case #selector(moveForward(_:)):
+            moveSelection(direction: .forward, destination: .character, extending: false, confined: false)
+        case #selector(moveForwardAndModifySelection(_:)):
+            moveSelection(direction: .forward, destination: .character, extending: true, confined: false)
+        case #selector(moveBackward(_:)):
+            moveSelection(direction: .backward, destination: .character, extending: false, confined: false)
+        case #selector(moveBackwardAndModifySelection(_:)):
+            moveSelection(direction: .backward, destination: .character, extending: true, confined: false)
         case #selector(moveUp(_:)):
             moveSelection(direction: .up, destination: .character, extending: false, confined: false)
         case #selector(moveUpAndModifySelection(_:)):
@@ -380,6 +434,10 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         case #selector(moveToEndOfLine(_:)),
              #selector(moveToRightEndOfLine(_:)):
             moveSelection(direction: .forward, destination: .line, extending: false, confined: true)
+        case #selector(moveToBeginningOfParagraph(_:)):
+            moveSelection(direction: .backward, destination: .paragraph, extending: false, confined: true)
+        case #selector(moveToEndOfParagraph(_:)):
+            moveSelection(direction: .forward, destination: .paragraph, extending: false, confined: true)
         case #selector(moveToEndOfLineAndModifySelection(_:)),
              #selector(moveToRightEndOfLineAndModifySelection(_:)):
             moveSelection(direction: .forward, destination: .line, extending: true, confined: true)
@@ -391,6 +449,10 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             moveSelection(direction: .forward, destination: .document, extending: false, confined: false)
         case #selector(moveToEndOfDocumentAndModifySelection(_:)):
             moveSelection(direction: .forward, destination: .document, extending: true, confined: false)
+        case #selector(pageDown(_:)), #selector(scrollPageDown(_:)):
+            scrollByPage(up: false)
+        case #selector(pageUp(_:)), #selector(scrollPageUp(_:)):
+            scrollByPage(up: true)
         default:
             break
         }
