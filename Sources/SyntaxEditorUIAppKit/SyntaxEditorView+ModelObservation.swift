@@ -190,6 +190,7 @@
         isApplyingModel = false
       }
       textView.setSelectedRange(clamped)
+      textView.scrollRangeToVisible(clamped)
     }
 
     private func applyObservedConfiguration(
