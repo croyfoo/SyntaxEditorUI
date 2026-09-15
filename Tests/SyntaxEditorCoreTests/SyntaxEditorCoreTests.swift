@@ -7,6 +7,10 @@ import Testing
 struct SyntaxEditorCoreTests {
     @Test("SyntaxLanguage init(identifier:) maps supported values")
     func syntaxLanguageIdentifierInitializerMapsSupportedValues() {
+        #expect(SyntaxLanguage(identifier: "assembly-arm") == .assemblyARM)
+        #expect(SyntaxLanguage(identifier: " ARM64 ") == .assemblyARM)
+        #expect(SyntaxLanguage(identifier: "asm") == .assemblyARM)
+        #expect(SyntaxLanguage(identifier: "S") == .assemblyARM)
         #expect(SyntaxLanguage(identifier: "plain")?.identifier == SyntaxLanguage.plainText.identifier)
         #expect(SyntaxLanguage(identifier: "plaintext")?.identifier == SyntaxLanguage.plainText.identifier)
         #expect(SyntaxLanguage(identifier: "plain-text")?.identifier == SyntaxLanguage.plainText.identifier)
@@ -311,6 +315,8 @@ struct SyntaxEditorCoreTests {
             let typeName = switch language {
             case .plainText:
                 "PlainTextLanguage"
+            case .assemblyARM:
+                "AssemblyARMLanguage"
             case .css:
                 "CSSLanguage"
             case .html:
@@ -686,5 +692,31 @@ struct SyntaxEditorCoreTests {
         #expect(ranges.count == 2)
         #expect(ranges[0].length == 1)
         #expect(ranges[1].length == 1)
+    }
+
+    @Test("BracketMatcher matches across chunk boundaries and ignores non-ASCII")
+    func bracketMatcherMatchesAcrossChunks() {
+        let filler = String(repeating: "あ(x)🙂 ", count: 400)
+        let source = "{" + filler + "}"
+        let nsSource = source as NSString
+
+        let forward = BracketMatcher.matchedRanges(in: source, caretUTF16Offset: 1)
+        #expect(forward == [
+            NSRange(location: 0, length: 1),
+            NSRange(location: nsSource.length - 1, length: 1),
+        ])
+
+        let backward = BracketMatcher.matchedRanges(in: source, caretUTF16Offset: nsSource.length)
+        #expect(backward == forward)
+    }
+
+    @Test("BracketMatcher stops scanning at the distance cap")
+    func bracketMatcherHonorsScanCap() {
+        let filler = String(repeating: "x", count: BracketMatcher.maxScanDistance + 16)
+        let source = "(" + filler + ")"
+
+        let ranges = BracketMatcher.matchedRanges(in: source, caretUTF16Offset: 1)
+
+        #expect(ranges.isEmpty)
     }
 }

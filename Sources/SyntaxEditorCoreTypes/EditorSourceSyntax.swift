@@ -136,6 +136,8 @@ private extension SyntaxLanguage {
         switch self {
         case .plainText:
             "plaintext"
+        case .assemblyARM:
+            "assemblyarm"
         case .css:
             "css"
         case .html:
@@ -169,6 +171,8 @@ private extension SyntaxLanguage {
         switch rawName {
         case "plaintext", "plain-text", "plain", "text":
             .plainText
+        case "assemblyarm":
+            .assemblyARM
         case "css":
             .css
         case "html":

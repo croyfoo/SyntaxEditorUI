@@ -823,6 +823,8 @@ private func incrementalEditSource(from source: String, language: SyntaxLanguage
     switch language {
     case .plainText:
         return source + "\nbenchmark edit\n"
+    case .assemblyARM:
+        return source + "\n// benchmark edit\n"
     case .css:
         return source + "\n/* benchmark edit */\n"
     case .html:

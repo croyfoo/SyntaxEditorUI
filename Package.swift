@@ -24,6 +24,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ChimeHQ/SwiftTreeSitter", exact: "0.25.0"),
+        .package(url: "https://github.com/RubixDev/tree-sitter-asm", exact: "0.24.0"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-css", exact: "0.23.2"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-html", exact: "0.23.2"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-javascript", exact: "0.23.1"),
@@ -139,6 +140,18 @@ let package = Package(
             dependencies: [
                 "SyntaxEditorCoreTypes",
                 .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
+        .target(
+            name: "SyntaxEditorLanguageAssemblyARM",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                .product(name: "TreeSitterAsm", package: "tree-sitter-asm"),
+            ],
+            resources: [
+                .copy("Resources/AssemblyARMQueries"),
             ],
             swiftSettings: syntaxEditorSwiftSettings
         ),
@@ -312,6 +325,7 @@ let package = Package(
             name: "SyntaxEditorLanguages",
             dependencies: [
                 "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageAssemblyARM",
                 "SyntaxEditorLanguageCSS",
                 "SyntaxEditorLanguageHTML",
                 "SyntaxEditorLanguageJavaScript",

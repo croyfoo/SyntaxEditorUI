@@ -16,6 +16,7 @@ SOURCE_MODEL_RESOURCE_SUFFIX = Path(
 LANGUAGE_SPEC_DIRNAME = "LanguageSpecifications"
 LANGUAGE_METADATA_DIRNAME = "LanguageMetadata"
 SUPPORTED_LANGUAGE_IDENTIFIERS = {
+    "Xcode.SourceCodeLanguage.ARM-Assembly",
     "Xcode.SourceCodeLanguage.CSS",
     "Xcode.SourceCodeLanguage.HTML",
     "Xcode.SourceCodeLanguage.JavaScript",

@@ -33,10 +33,23 @@ private struct SyntaxEditorContainer: NSViewRepresentable {
 }
 #endif
 
+/// A SwiftUI code editor backed by an app-owned model.
+///
+/// Keep the `SyntaxEditorModel` in persistent view state, such as `@State`, so
+/// SwiftUI updates reuse the same document and editor settings. User edits and
+/// selection changes update that model, and the editor observes model changes.
+///
+/// The view uses the UIKit editor on iOS, Mac Catalyst, and visionOS, and the
+/// AppKit editor on macOS. Passing a different model instance switches the
+/// document and clears the native editor's undo history.
 @MainActor
 public struct SyntaxEditor: View {
     private let model: SyntaxEditorModel
 
+    /// Creates an editor that displays and edits the supplied model.
+    ///
+    /// - Parameter model: The model that owns the text, selection, and editor
+    ///   settings. The app is responsible for loading and saving its text.
     public init(_ model: SyntaxEditorModel) {
         self.model = model
     }

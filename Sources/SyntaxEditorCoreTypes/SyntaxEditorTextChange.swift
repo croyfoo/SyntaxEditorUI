@@ -1,23 +1,46 @@
 import Foundation
 
+/// A committed text change and the selection that followed it.
+///
+/// Replacement ranges use UTF-16 offsets in the text before the change.
+/// The selected range uses UTF-16 offsets in the resulting text. A value
+/// describes one revision; it does not contain the document's full history.
 public struct SyntaxEditorTextChange: Equatable, Sendable {
+    /// Text to insert in place of a range in the source document.
     public struct Replacement: Equatable, Sendable {
+        /// The range to replace, measured in UTF-16 code units before the change.
+        ///
+        /// A zero-length range inserts text at its location.
         public let range: NSRange
+        /// The inserted text, or an empty string to delete the range.
         public let replacement: String
 
+        /// The starting UTF-16 offset of ``range``.
         public var location: Int {
             range.location
         }
 
+        /// The number of UTF-16 code units removed by ``range``.
         public var length: Int {
             range.length
         }
 
+        /// Describes a replacement without applying it to a document.
+        ///
+        /// - Parameters:
+        ///   - range: The range in the original text, in UTF-16 code units.
+        ///   - replacement: The text to insert at that range.
         public init(range: NSRange, replacement: String) {
             self.range = range
             self.replacement = replacement
         }
 
+        /// Describes a replacement using a UTF-16 location and length.
+        ///
+        /// - Parameters:
+        ///   - location: The starting offset in the original text.
+        ///   - length: The number of UTF-16 code units to remove.
+        ///   - replacement: The text to insert at that location.
         public init(location: Int, length: Int, replacement: String) {
             self.init(
                 range: NSRange(location: location, length: length),
@@ -51,16 +74,33 @@ public struct SyntaxEditorTextChange: Equatable, Sendable {
         }
     }
 
+    /// Whether the change edits existing contents or replaces the document.
     public enum Kind: Equatable, Sendable {
+        /// One or more edits to ranges within the existing document.
         case incremental
+        /// A replacement of all document text.
         case wholeDocumentReplacement
     }
 
+    /// The model's text revision after this change was committed.
     public let textRevision: Int
+    /// The replacements that produced this revision.
+    ///
+    /// All ranges refer to the same pre-change text. To apply multiple
+    /// replacements to a mutable copy, process higher locations first.
     public let replacements: [Replacement]
+    /// The selection after the change, measured in UTF-16 code units.
     public let selectedRange: NSRange
+    /// The scope of the text replacement.
     public let kind: Kind
 
+    /// Creates a change description without mutating an editor model.
+    ///
+    /// - Parameters:
+    ///   - textRevision: The revision represented by the resulting text.
+    ///   - replacements: Replacements expressed in the pre-change text's coordinates.
+    ///   - selectedRange: The selection in the resulting text, in UTF-16 code units.
+    ///   - kind: Whether the change is incremental or replaces the whole document.
     public init(
         textRevision: Int,
         replacements: [Replacement],

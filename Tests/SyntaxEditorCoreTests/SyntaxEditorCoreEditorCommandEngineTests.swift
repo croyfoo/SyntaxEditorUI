@@ -3,6 +3,47 @@ import Testing
 @testable import SyntaxEditorCore
 
 extension SyntaxEditorCoreTests {
+    @Test("ARM assembly comments round-trip without changing immediates")
+    func armAssemblyCommentRoundTrip() throws {
+        let source = "    mov x0, #42\n    ret\n"
+        let engine = EditorCommandEngine()
+        let commented = try #require(engine.toggleComment(
+            source: source,
+            selection: NSRange(location: 0, length: source.utf16.count),
+            language: .assemblyARM
+        ))
+        let text = applying(commented, to: source)
+        #expect(text == "    // mov x0, #42\n    // ret\n")
+        let uncommented = engine.toggleComment(
+            source: text,
+            selection: commented.selectedRange,
+            language: .assemblyARM
+        )
+        #expect(applying(uncommented, to: text) == source)
+    }
+
+    @Test("ARM assembly quote pairing respects strings and comments")
+    func armAssemblyQuotePairing() {
+        let engine = EditorCommandEngine()
+        for source in ["// comment", "; comment", "/* comment", ".asciz \"text"] {
+            let result = engine.transformInput(
+                source: source,
+                range: NSRange(location: source.utf16.count, length: 0),
+                replacementText: "\"",
+                language: .assemblyARM
+            )
+            #expect(result == nil)
+        }
+        let source = "    mov x0, #42\n    .asciz "
+        let result = engine.transformInput(
+            source: source,
+            range: NSRange(location: source.utf16.count, length: 0),
+            replacementText: "\"",
+            language: .assemblyARM
+        )
+        #expect(applying(result, to: source) == source + "\"\"")
+    }
+
     @Test("EditorCommandEngine auto-pairs opening braces")
     func editorCommandEngineAutoPair() {
         let engine = EditorCommandEngine()

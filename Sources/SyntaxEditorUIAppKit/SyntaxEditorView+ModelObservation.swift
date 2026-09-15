@@ -6,6 +6,11 @@
 
   extension SyntaxEditorView {
 
+    /// The text currently displayed in the editor.
+    ///
+    /// Assigning a value replaces the model's document text and updates the
+    /// view. The current selection is clamped to the replacement text. This
+    /// programmatic replacement is available even when ``isEditable`` is `false`.
     public var text: String {
       get { textView.string }
       set {
@@ -17,6 +22,10 @@
       }
     }
 
+    /// The selection, expressed as a range of UTF-16 code units in ``text``.
+    ///
+    /// A zero-length range represents the insertion point. Assignments are
+    /// clamped to the document bounds and update the model's selection.
     public var selectedRange: NSRange {
       get { textView.selectedRange() }
       set {
@@ -25,6 +34,12 @@
       }
     }
 
+    /// Whether user input can modify the document.
+    ///
+    /// This property reads and writes the model's `isEditable` value. Disabling
+    /// editing preserves selection, copying, and find, and prevents user edits
+    /// and undo or redo from changing the text. Programmatic model updates remain
+    /// available.
     public var isEditable: Bool {
       get { model.isEditable }
       set {

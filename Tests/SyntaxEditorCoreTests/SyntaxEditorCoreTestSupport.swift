@@ -127,6 +127,8 @@ func highlightQueryURL(language: SyntaxLanguage) -> URL {
     let directoryName = switch language {
     case .plainText:
         preconditionFailure("Plain text does not have highlight queries.")
+    case .assemblyARM:
+        "AssemblyARMQueries"
     case .css:
         "CSSQueries"
     case .html:
@@ -166,6 +168,8 @@ func canonicalCaptureLanguageName(for language: SyntaxLanguage) -> String {
     switch language {
     case .plainText:
         "plaintext"
+    case .assemblyARM:
+        "assemblyarm"
     case .css:
         "css"
     case .html:
@@ -199,6 +203,8 @@ func languageImplementationDirectoryName(for language: SyntaxLanguage) -> String
     switch language {
     case .plainText:
         "PlainText"
+    case .assemblyARM:
+        "AssemblyARM"
     case .css:
         "CSS"
     case .html:
@@ -465,6 +471,8 @@ extension SyntaxHighlighterEngineTests {
         switch language {
         case .plainText:
             "plain text"
+        case .assemblyARM:
+            ".text\n_main:\n    mov x0, #42\n    ret\n"
         case .css:
             "body { color: red; }"
         case .html:

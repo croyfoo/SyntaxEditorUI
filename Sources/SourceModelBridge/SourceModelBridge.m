@@ -178,6 +178,7 @@ static NSInteger CallIntegerAtIndex(id object, NSString *selectorName, NSUIntege
 static NSDictionary<NSString *, NSString *> *LanguageAliases(void)
 {
     return @{
+        @"assembly-arm": @"xcode.lang.asm.arm",
         @"c": @"xcode.lang.c",
         @"cpp": @"xcode.lang.cpp",
         @"c++": @"xcode.lang.cpp",

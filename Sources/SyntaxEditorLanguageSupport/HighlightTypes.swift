@@ -1,6 +1,10 @@
 import Foundation
 import SyntaxEditorCoreTypes
 
+/// Optional preparation of the highlighting resources shared by editors.
+///
+/// Call `prepare(_:)` before presenting an editor when you want to perform
+/// first-use setup earlier. Editors also prepare their languages on demand.
 public enum SyntaxEditorHighlighting {
 package struct Token: Equatable, Sendable {
     package let range: NSRange
