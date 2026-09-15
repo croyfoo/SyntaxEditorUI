@@ -60,12 +60,13 @@ def generate_redirects(archive, legacy_root, output, hosting_base_path):
             path = f"{module}/{guide}"
             paths[path] = path
         paths[module] = f"{module}/{platform}integration"
+        redirects[f"{platform}/index.html"] = paths[module]
 
         for old_path, target in paths.items():
             if target not in pages:
                 raise ValueError(f"No current page for {platform}{old_path}: {target}")
             redirects[f"{platform}{old_path}/index.html"] = target
-        print(f"{platform}: {len(paths)} legacy guide and API routes mapped.")
+        print(f"{platform}: {len(paths) + 1} legacy HTML routes mapped.")
 
     base = "/" + hosting_base_path.strip("/") if hosting_base_path.strip("/") else ""
     for relative_path, route in redirects.items():
