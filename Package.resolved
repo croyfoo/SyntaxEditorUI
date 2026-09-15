@@ -1,5 +1,5 @@
 {
-  "originHash" : "a27c767e442a17444df01074fa718bca9dd005ebdc3e81dc8230694c00701703",
+  "originHash" : "51924c3577f504821a63400b5a7dfde2d0ed2bafcc097b4a9c473b8d583752af",
   "pins" : [
     {
       "identity" : "benchmark",
@@ -89,6 +89,15 @@
       "state" : {
         "revision" : "da6fe9beb4f7f67beb75914ca8e0d48ae48d6406",
         "version" : "0.25.10"
+      }
+    },
+    {
+      "identity" : "tree-sitter-asm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RubixDev/tree-sitter-asm",
+      "state" : {
+        "revision" : "5bb5b03e3c1ce5853b5282b9fba060f7c7bbf11e",
+        "version" : "0.24.0"
       }
     },
     {

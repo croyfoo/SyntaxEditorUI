@@ -6,7 +6,7 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 ## Features
 
 - Editable code views for SwiftUI, UIKit, and AppKit apps.
-- Plain Text editing plus syntax highlighting for CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
+- Plain Text editing plus syntax highlighting for ARM Assembly, CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
 - Embedded JavaScript and CSS highlighting inside HTML.
 - Code-aware editing behavior for supported syntax-highlighted languages:
   - bracket and quote auto-pairing
@@ -33,7 +33,7 @@ It provides SwiftUI, UIKit, and AppKit entry points with built-in language suppo
 - `Shift-Tab`: Outdent in syntax-highlighted language modes
 - `Cmd+]`: Indent in syntax-highlighted language modes
 - `Cmd+[` : Outdent in syntax-highlighted language modes
-- `Cmd+/`: Toggle comment (HTML/JavaScript/CSS/Objective-C/Swift/TOML/XML)
+- `Cmd+/`: Toggle comment (ARM Assembly/HTML/JavaScript/CSS/Objective-C/Swift/TOML/XML)
 - `Ctrl+Shift+Cmd+L`: Toggle line wrapping
 - `Cmd++`: Increase font size
 - `Cmd+-`: Decrease font size
@@ -87,8 +87,10 @@ Use `SyntaxLanguage.plainText` when an editor should behave as strict plain text
 let notesModel = SyntaxEditorModel(text: "Notes", language: .plainText)
 ```
 
-Supported languages are available through `SyntaxLanguage`: Plain Text, CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
+Supported languages are available through `SyntaxLanguage`: Plain Text, ARM Assembly, CSS, HTML, JavaScript, JSON, Objective-C, Swift, TOML, and XML.
 Use `SyntaxLanguage(identifier:)` when resolving user input or file metadata, and `SyntaxLanguage.allCases` when presenting every built-in language.
+
+Use `.assemblyARM` for basic ARM/ARM64 assembly highlighting and `//` comment toggling. This mode highlights directives, labels, numbers, strings, and comments; it does not validate instructions or provide complete assembler dialect coverage. The identifiers `asm`, `s`, `arm64`, and `aarch64` also select this mode.
 
 To move first-use highlighting setup out of the editor load path, prepare the languages your app expects to show:
 

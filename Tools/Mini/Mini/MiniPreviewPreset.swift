@@ -13,6 +13,7 @@ extension MiniPreviewPreset:Hashable,Identifiable{
 struct MiniPreviewPreset {
     enum ID: String, CaseIterable, Sendable {
         case plainText = "plain-text"
+        case assemblyARM = "assembly-arm"
         case css
         case html
         case javascript
@@ -62,6 +63,13 @@ struct MiniPreviewPreset {
         stay ordinary text in this mode.
         """,
         language: SyntaxLanguage.plainText
+    )
+
+    static let assemblyARM = MiniPreviewPreset(
+        id: .assemblyARM,
+        sampleFilename: "Reference.arm64.txt",
+        fallbackSampleText: ".text\n_main:\n    mov x0, #42\n    ret\n",
+        language: .assemblyARM
     )
 
     static let css = MiniPreviewPreset(
@@ -178,6 +186,7 @@ struct MiniPreviewPreset {
 
     static let all: [MiniPreviewPreset] = [
         plainText,
+        assemblyARM,
         css,
         html,
         javascript,

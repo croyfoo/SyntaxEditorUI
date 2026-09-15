@@ -7,6 +7,10 @@ import Testing
 struct SyntaxEditorCoreTests {
     @Test("SyntaxLanguage init(identifier:) maps supported values")
     func syntaxLanguageIdentifierInitializerMapsSupportedValues() {
+        #expect(SyntaxLanguage(identifier: "assembly-arm") == .assemblyARM)
+        #expect(SyntaxLanguage(identifier: " ARM64 ") == .assemblyARM)
+        #expect(SyntaxLanguage(identifier: "asm") == .assemblyARM)
+        #expect(SyntaxLanguage(identifier: "S") == .assemblyARM)
         #expect(SyntaxLanguage(identifier: "plain")?.identifier == SyntaxLanguage.plainText.identifier)
         #expect(SyntaxLanguage(identifier: "plaintext")?.identifier == SyntaxLanguage.plainText.identifier)
         #expect(SyntaxLanguage(identifier: "plain-text")?.identifier == SyntaxLanguage.plainText.identifier)
@@ -311,6 +315,8 @@ struct SyntaxEditorCoreTests {
             let typeName = switch language {
             case .plainText:
                 "PlainTextLanguage"
+            case .assemblyARM:
+                "AssemblyARMLanguage"
             case .css:
                 "CSSLanguage"
             case .html:
