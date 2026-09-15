@@ -48,6 +48,8 @@ The output directory must not already exist. Failed builds remove their newly cr
 
 The build compiles the public product for UIKit and AppKit, extracts its re-exported public symbols, and converts both platform graphs together with warnings treated as errors. The result is one DocC application: shared APIs have one page, and UIKit/AppKit native types appear in separate topic groups. It also checks comments on package-defined APIs, using compiler metadata to distinguish overrides and implementations of external protocol requirements.
 
+Temporary platform-only archives supply the former API routes for redirects. Old guide and API links retain their query strings and section fragments; only the combined DocC application and redirect pages are published.
+
 Documentation has two homes:
 
 - Public declaration comments describe each symbol's contract.

@@ -143,6 +143,16 @@ print(
 )
 PY
 
+    # Ask DocC for its platform-only routes so redirects also cover overloads
+    # and synthesized collection pages. These archives are never published.
+    mkdir -p "$build_root/LegacyRoutes"
+    xcrun docc convert \
+        --additional-symbol-graph-dir "$graphs" \
+        --output-dir "$build_root/LegacyRoutes/$platform.doccarchive" \
+        --fallback-display-name SyntaxEditorUI \
+        --fallback-bundle-identifier "dev.lynnswap.SyntaxEditorUI.Legacy.$platform" \
+        --no-transform-for-static-hosting \
+        --warnings-as-errors
 done
 
 # A single conversion keeps platform references in the same DocC router.
@@ -162,29 +172,7 @@ for page in syntaxeditormodel syntaxeditorview-6lnwr syntaxeditorview-77bw3 synt
 done
 cp -R "$archive/." "$output_dir/"
 
-# Keep published entry URLs usable without retaining separate DocC applications.
-python3 - "$output_dir" "$hosting_base_path" <<'PY'
-import html
-import pathlib
-import sys
-
-output = pathlib.Path(sys.argv[1])
-base = sys.argv[2]
-redirects = {
-    "index.html": f"{base}/documentation/syntaxeditorui/",
-    "uikit/documentation/syntaxeditorui/index.html": f"{base}/documentation/syntaxeditorui/uikitintegration",
-    "appkit/documentation/syntaxeditorui/index.html": f"{base}/documentation/syntaxeditorui/appkitintegration",
-}
-for relative_path, destination in redirects.items():
-    path = output / relative_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    target = html.escape(destination, quote=True)
-    path.write_text(
-        '<!doctype html>\n<html lang="en">\n<meta charset="utf-8">\n'
-        f'<meta http-equiv="refresh" content="0; url={target}">\n'
-        '<title>SyntaxEditorUI Documentation</title>\n'
-        f'<a href="{target}">Open documentation</a>\n</html>\n'
-    )
-PY
+python3 "$repo_root/Tools/generate-documentation-redirects.py" \
+    "$archive" "$build_root/LegacyRoutes" "$output_dir" "$hosting_base_path"
 
 echo "Documentation site: $output_dir"
