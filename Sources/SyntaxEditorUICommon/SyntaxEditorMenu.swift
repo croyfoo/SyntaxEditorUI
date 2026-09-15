@@ -6,6 +6,14 @@ import UIKit
 import AppKit
 #endif
 
+/// Creates and installs an Editor menu for the focused syntax editor.
+///
+/// The menu provides indentation, comment toggling, font-size adjustment, and
+/// line-wrapping commands. Actions are routed through the platform's responder
+/// chain, so the active editor determines their availability and state.
+///
+/// UIKit apps install the menu through a `UIMenuBuilder` for the main menu
+/// system. AppKit apps insert it into their application menu bar's `NSMenu`.
 @MainActor
 public enum SyntaxEditorMenu {
     private static let editorMenuTitle = "Editor"
@@ -80,8 +88,13 @@ package enum Command: CaseIterable {
 
 #if canImport(UIKit)
 extension SyntaxEditorMenu {
+    /// The identifier assigned to the UIKit Editor menu.
     public static let editorMenuIdentifier = UIMenu.Identifier("com.lynnswap.SyntaxEditorUI.editor")
 
+    /// Creates a UIKit Editor menu with commands for the responder chain.
+    ///
+    /// - Returns: A new menu with ``editorMenuIdentifier``. Creating the menu
+    ///   does not install it in a menu system.
     public static func makeMenu() -> UIMenu {
         UIMenu(
             title: editorMenuTitle,
@@ -116,6 +129,13 @@ extension SyntaxEditorMenu {
         )
     }
 
+    /// Adds the Editor menu while the app's main menu is being built.
+    ///
+    /// The menu is inserted after View, before Window if View is absent, or at
+    /// the end of the root menu when neither exists. Builders for other menu
+    /// systems are left unchanged.
+    ///
+    /// - Parameter builder: The builder supplied by the app's menu configuration.
     public static func insert(into builder: any UIMenuBuilder) {
         guard builder.system == UIMenuSystem.main else { return }
 
@@ -201,6 +221,13 @@ extension SyntaxEditorMenu {
         return item
     }
 
+    /// Installs the Editor menu in an AppKit menu bar.
+    ///
+    /// An existing menu installed by this method is replaced at the same index.
+    /// Otherwise, the menu is inserted after View or Edit, before Window, or at
+    /// the end, using the first matching placement in that order.
+    ///
+    /// - Parameter mainMenu: The application's main menu, typically `NSApp.mainMenu`.
     public static func insert(into mainMenu: NSMenu) {
         let item = makeMenuItem()
         if let existingIndex = mainMenu.items.firstIndex(where: { $0.identifier == editorMenuItemIdentifier }) {
@@ -220,6 +247,10 @@ extension SyntaxEditorMenu {
         }
     }
 
+    /// Creates an AppKit Editor menu with commands for the responder chain.
+    ///
+    /// - Returns: A new submenu for an `NSMenuItem`. Creating the menu does not
+    ///   install it in the application's menu bar.
     public static func makeMenu() -> NSMenu {
         let menu = NSMenu(title: editorMenuTitle)
 

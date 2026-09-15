@@ -31,9 +31,26 @@
     }
   }
 
+  /// An AppKit scroll view that displays and edits an app-owned model.
+  ///
+  /// Use the model to observe text and selection changes or update editor
+  /// settings. The view manages text input, syntax rendering, and scrolling;
+  /// the app remains responsible for loading and saving the document.
+  ///
+  /// The editor uses TextKit 2 and does not expose an `NSTextView`. Configure
+  /// text through ``model``, ``text``, and ``selectedRange``, and use inherited
+  /// `NSScrollView` properties for scroll-view configuration.
   @MainActor
   public final class SyntaxEditorView: NSScrollView {
+    /// The retained model that owns the editor's text, selection, and settings.
+    ///
+    /// To display another model instance, call ``update(model:)``.
     public private(set) var model: SyntaxEditorModel
+
+    /// Whether the editor supports the native find bar and incremental search.
+    ///
+    /// The default is `true`. Setting this value to `false` hides an open find
+    /// bar. Find remains available when ``isEditable`` is `false`.
     public var isFindInteractionEnabled = true {
       didSet {
         guard isFindInteractionEnabled != oldValue else { return }
@@ -110,6 +127,9 @@
       true
     }
 
+    /// Creates an editor and begins observing the supplied model.
+    ///
+    /// - Parameter model: The model to display and update through user editing.
     public convenience init(
       model: SyntaxEditorModel
     ) {
@@ -170,6 +190,13 @@
       startModelObservation(schedulesInitialHighlight: false)
     }
 
+    /// Switches the editor to another model instance.
+    ///
+    /// The editor stops observing the previous model, clears its undo history,
+    /// and applies the new model's text, selection, and settings. Passing the
+    /// current model instance has no effect; its changes are already observed.
+    ///
+    /// - Parameter nextModel: The model to display and observe.
     public func update(model nextModel: SyntaxEditorModel) {
       guard model !== nextModel else { return }
 
