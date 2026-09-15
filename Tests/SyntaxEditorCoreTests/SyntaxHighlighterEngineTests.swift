@@ -4,6 +4,50 @@ import Testing
 
 @Suite("SyntaxHighlighterEngine", .serialized)
 struct SyntaxHighlighterEngineTests {
+    @Test("ARM assembly highlights basic source tokens")
+    func armAssemblyHighlightsBasicSourceTokens() async throws {
+        let source = try referenceSampleText(named: "Reference.arm64.txt")
+        let tokens = await SyntaxHighlighterEngine().render(source: source, language: .assemblyARM)
+        let expected: [(String, EditorSourceSyntax.ID)] = [
+            (".text", .keyword),
+            ("_answer", .namePartial),
+            ("#42", .number),
+            ("#-16", .number),
+            ("\"Hello, ARM64!\"", .string),
+            ("// ARM64 assembly", .comment),
+            ("/* Data and strings */", .comment),
+        ]
+        for (text, syntaxID) in expected {
+            #expect(tokens.contains {
+                $0.syntaxID == syntaxID && $0.language == .assemblyARM &&
+                (source as NSString).substring(with: $0.range) == text
+            }, "Missing \(syntaxID.rawValue) for \(text)")
+        }
+    }
+
+    @Test("ARM assembly updates highlighting after an immediate changes")
+    func armAssemblyIncrementalHighlighting() async {
+        let source = ".text\n_answer:\n    mov x0, #42 // answer\n    ret\n"
+        let replacement = SyntaxEditorTextChange.Replacement(
+            range: (source as NSString).range(of: "42"),
+            replacement: "0x20"
+        )
+        let updated = (source as NSString).replacingCharacters(in: replacement.range, with: replacement.replacement)
+        let engine = SyntaxHighlighterEngine()
+        _ = await engine.reset(source: source, language: .assemblyARM)
+        let incremental = await engine.update(
+            previousSource: source,
+            source: updated,
+            language: .assemblyARM,
+            mutation: replacement
+        )
+        let full = await SyntaxHighlighterEngine().reset(source: updated, language: .assemblyARM)
+        #expect(highlightTokensMatch(incremental.tokens, full.tokens))
+        #expect(incremental.tokens.contains {
+            $0.syntaxID == .number && (updated as NSString).substring(with: $0.range) == "#0x20"
+        })
+    }
+
     @Test("SyntaxHighlighterEngine returns no tokens for empty source")
     func highlighterReturnsNoTokensForEmptySource() async {
         let engine = sharedSyntaxHighlighterEngine

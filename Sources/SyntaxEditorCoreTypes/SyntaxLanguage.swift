@@ -2,6 +2,7 @@ import Foundation
 
 public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
     case plainText = "plain-text"
+    case assemblyARM = "assembly-arm"
     case css
     case html
     case javascript
@@ -23,6 +24,8 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
         switch self {
         case .plainText:
             "Plain Text"
+        case .assemblyARM:
+            "Assembly (ARM)"
         case .css:
             "CSS"
         case .html:
@@ -91,6 +94,8 @@ extension SyntaxLanguage {
         switch self {
         case .plainText:
             ["plain-text", "plain", "plaintext", "text", "txt", "text/plain"]
+        case .assemblyARM:
+            ["assembly-arm", "arm-assembly", "asm", "assembly", "arm", "arm64", "aarch64", "s"]
         case .css:
             ["css"]
         case .html:

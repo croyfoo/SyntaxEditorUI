@@ -1,5 +1,6 @@
 import Foundation
 @_exported import SyntaxEditorCoreTypes
+import SyntaxEditorLanguageAssemblyARM
 import SyntaxEditorLanguageCSS
 import SyntaxEditorLanguageHTML
 import SyntaxEditorLanguageJavaScript
@@ -16,6 +17,8 @@ package extension SyntaxLanguage {
         switch self {
         case .plainText:
             PlainTextLanguage()
+        case .assemblyARM:
+            AssemblyARMLanguage()
         case .css:
             CSSLanguage()
         case .html:

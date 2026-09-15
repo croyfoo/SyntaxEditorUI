@@ -1055,6 +1055,8 @@ private enum EditorSpecTool {
             throw ToolError.invalidLanguage(language.identifier)
         case .css:
             return "xcode.lang.css"
+        case .assemblyARM:
+            return "xcode.lang.asm.arm"
         case .html:
             return "xcode.lang.html"
         case .javascript:
