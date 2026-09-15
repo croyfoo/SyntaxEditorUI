@@ -37,6 +37,13 @@
 
   extension SyntaxEditorView {
 
+    /// Synchronizes native text edits and the current selection into the model.
+    ///
+    /// Normal user editing performs this synchronization automatically. Use the
+    /// model or ``text`` for app-driven document changes.
+    ///
+    /// - Parameter notification: The change notification. Its payload is unused;
+    ///   this method reads the editor's current text and selection.
     public func textDidChange(_ notification: Notification) {
       textDidChange()
     }
@@ -132,6 +139,13 @@
       pendingHighlightEdit = nil
     }
 
+    /// Synchronizes the native selection and refreshes selection decorations.
+    ///
+    /// Normal user selection performs this synchronization automatically. Use
+    /// ``selectedRange`` or the model to change the selection from the app.
+    ///
+    /// - Parameter notification: The change notification. Its payload is unused;
+    ///   this method reads the editor's current selection.
     public func textViewDidChangeSelection(_ notification: Notification) {
       textSelectionDidChange()
     }

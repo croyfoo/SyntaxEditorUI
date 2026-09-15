@@ -66,10 +66,21 @@
       editorView.synchronizeDocumentForTesting()
     }
 
+    /// Forwards a native text-change notification to the editor.
+    ///
+    /// Use the model for app-driven edits. See ``SyntaxEditorView/textDidChange(_:)``.
+    ///
+    /// - Parameter notification: The notification to forward.
     public func textDidChange(_ notification: Notification) {
       editorView.textDidChange(notification)
     }
 
+    /// Forwards a native selection-change notification to the editor.
+    ///
+    /// Use the model for app-driven selection changes. See
+    /// ``SyntaxEditorView/textViewDidChangeSelection(_:)``.
+    ///
+    /// - Parameter notification: The notification to forward.
     public func textViewDidChangeSelection(_ notification: Notification) {
       editorView.textViewDidChangeSelection(notification)
     }
