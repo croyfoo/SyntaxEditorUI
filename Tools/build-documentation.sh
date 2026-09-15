@@ -16,10 +16,29 @@ if [[ -e "$output_dir" ]]; then
     echo "Output directory already exists: $output_dir" >&2
     exit 64
 fi
-mkdir -p "$output_dir"
-output_dir=$(cd "$output_dir" && pwd)
+mkdir -p "$(dirname "$output_dir")"
+mkdir "$output_dir"
+build_root=
+
+cleanup() {
+    local exit_status=$?
+    local cleanup_status=0
+    if (( exit_status != 0 )); then
+        rm -rf -- "$output_dir" || cleanup_status=$?
+    fi
+    if [[ -n "$build_root" ]]; then
+        rm -rf -- "$build_root" || cleanup_status=$?
+    fi
+    if (( exit_status != 0 )); then
+        exit "$exit_status"
+    fi
+    exit "$cleanup_status"
+}
+trap cleanup EXIT
+
+resolved_output_dir=$(cd "$output_dir" && pwd)
+output_dir=$resolved_output_dir
 build_root=$(mktemp -d "${TMPDIR:-/tmp}/syntax-editor-docs.XXXXXX")
-trap 'rm -rf "$build_root"' EXIT
 
 cp -R "$repo_root/Documentation/SyntaxEditorUI.docc" "$build_root/Documentation.docc"
 python3 - "$build_root/Documentation.docc" "$hosting_base_path" <<'PY'

@@ -44,7 +44,7 @@ Build the same static DocC site that the deployment workflow publishes:
 python3 -m http.server 8000 --bind 127.0.0.1 --directory .build/documentation
 ```
 
-The output directory must not already exist. Open `http://localhost:8000/SyntaxEditorUI/` to preview the site. For a site hosted at the domain root, omit the second argument and serve the output directory itself.
+The output directory must not already exist. Failed builds remove their newly created output so the same command can be rerun after fixing the failure. Open `http://localhost:8000/SyntaxEditorUI/` to preview the site. For a site hosted at the domain root, omit the second argument and serve the output directory itself.
 
 The build compiles the public product for UIKit and AppKit, extracts its re-exported public symbols, and converts the catalogs with warnings treated as errors. It also checks comments on package-defined APIs, using compiler metadata to distinguish overrides and implementations of external protocol requirements.
 
