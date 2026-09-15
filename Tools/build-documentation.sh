@@ -100,7 +100,7 @@ for platform in uikit appkit; do
     graphs="$build_root/$platform/SymbolGraphs"
     mkdir -p "$graphs"
     module_map_flags=()
-    for module_map in "$build_root/$platform/Build/Intermediates.noindex/GeneratedModuleMaps/"*.modulemap; do
+    for module_map in "$build_root/$platform/Build/Intermediates.noindex/GeneratedModuleMaps"*/*.modulemap; do
         module_map_flags+=(-Xcc "-fmodule-map-file=$module_map")
     done
 
@@ -115,8 +115,8 @@ for platform in uikit appkit; do
         -skip-synthesized-members \
         -output-dir "$graphs"
 
-    # DocC does not warn about missing comments. Check authored public declarations;
-    # inherited and synthesized members do not carry a first-party source location.
+    # DocC does not warn about missing comments. Require contracts for our API,
+    # while recognizing implementations of external requirements from compiler metadata.
     python3 - "$graphs/SyntaxEditorUI.symbols.json" "$repo_root/Sources" "$platform" <<'PY'
 import json
 import pathlib
@@ -134,14 +134,30 @@ for symbol in graph["symbols"]:
             symbols.append(symbol)
 if not symbols:
     raise SystemExit("No authored public symbols were extracted.")
-missing = [
-    ".".join(symbol["pathComponents"])
+authored_identifiers = {symbol["identifier"]["precise"] for symbol in symbols}
+external_implementations = set()
+for relationship in graph["relationships"]:
+    origin = relationship.get("sourceOrigin", {}).get("identifier")
+    if relationship["kind"] == "overrides":
+        origin = relationship["target"]
+    if origin and origin not in authored_identifiers:
+        external_implementations.add(relationship["source"])
+undocumented = [
+    symbol
     for symbol in symbols
     if not any(line["text"].strip() for line in symbol.get("docComment", {}).get("lines", []))
 ]
+missing = [
+    ".".join(symbol["pathComponents"])
+    for symbol in undocumented
+    if symbol["identifier"]["precise"] not in external_implementations
+]
 if missing:
     raise SystemExit("Missing public documentation:\n" + "\n".join(sorted(missing)))
-print(f"{sys.argv[3]}: all {len(symbols)} authored public symbols have documentation.")
+print(
+    f"{sys.argv[3]}: {len(symbols) - len(undocumented)} authored public symbols documented; "
+    f"{len(undocumented)} external API implementations without additional comments."
+)
 PY
 
     archive="$build_root/$platform/SyntaxEditorUI.doccarchive"

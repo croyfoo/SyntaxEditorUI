@@ -40,13 +40,13 @@ Benchmarks are intended for local development and are not part of regular CI. Pe
 Build the same static DocC site that the deployment workflow publishes:
 
 ```bash
-./Tools/build-documentation.sh /tmp/SyntaxEditorUI /SyntaxEditorUI
-python3 -m http.server 8000 --directory /tmp
+./Tools/build-documentation.sh .build/documentation/SyntaxEditorUI /SyntaxEditorUI
+python3 -m http.server 8000 --bind 127.0.0.1 --directory .build/documentation
 ```
 
 The output directory must not already exist. Open `http://localhost:8000/SyntaxEditorUI/` to preview the site. For a site hosted at the domain root, omit the second argument and serve the output directory itself.
 
-The build compiles the public product for UIKit and AppKit, extracts its re-exported public symbols, and converts the catalogs with warnings treated as errors. It also checks that authored public symbols have documentation.
+The build compiles the public product for UIKit and AppKit, extracts its re-exported public symbols, and converts the catalogs with warnings treated as errors. It also checks comments on package-defined APIs, using compiler metadata to distinguish overrides and implementations of external protocol requirements.
 
 Documentation has three homes:
 
