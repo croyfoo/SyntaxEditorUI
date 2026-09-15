@@ -46,7 +46,11 @@
     func applyFindInteractionConfiguration() {
       if isFindInteractionEnabled {
         textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
+        // Incremental (search-as-you-type) runs asynchronously and, when a match
+        // is found by wrapping, shows a "wrapped" indicator whose window ordering
+        // (`addChildWindow:`) throws inside a SwiftUI-hosted window and aborts.
+        // Keep search synchronous (type + Return / ⌘G) to avoid that crash.
+        textView.isIncrementalSearchingEnabled = false
         textView.usesFindPanel = false
       } else {
         isFindBarVisible = false

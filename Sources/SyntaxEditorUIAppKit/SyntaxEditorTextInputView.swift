@@ -198,6 +198,9 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         if !hasMarkedText(), handleWordMotionKeyEvent(event) {
             return
         }
+        if !hasMarkedText(), handleEmacsEditingKey(event) {
+            return
+        }
         if inputContext?.handleEvent(event) == true {
             return
         }
@@ -242,6 +245,43 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         default:
             return false
         }
+    }
+
+    /// Standard emacs motion/edit keys that the input system doesn't deliver to
+    /// this custom text-input view: `C-f`/`C-b`/`C-n`/`C-p` (char/line motion),
+    /// `C-a`/`C-e` (line ends), `C-d` (delete forward), `C-k` (kill-line), `C-o`
+    /// (open line above), and `M-<`/`M->` (document ends). Word motion
+    /// (`M-b`/`M-f`), paging (`C-v`/`M-v`), and `⌘B` (backward-kill-word) are
+    /// handled elsewhere.
+    private func handleEmacsEditingKey(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !modifiers.contains(.command),
+              modifiers.contains(.control) != modifiers.contains(.option)  // exactly one
+        else {
+            return false
+        }
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if modifiers.contains(.control) {
+            switch key {
+            case "f": moveSelection(direction: .forward, destination: .character, extending: false, confined: false)
+            case "b": moveSelection(direction: .backward, destination: .character, extending: false, confined: false)
+            case "n": moveSelection(direction: .down, destination: .character, extending: false, confined: false)
+            case "p": moveSelection(direction: .up, destination: .character, extending: false, confined: false)
+            case "a": moveSelection(direction: .backward, destination: .line, extending: false, confined: true)
+            case "e": moveSelection(direction: .forward, destination: .line, extending: false, confined: true)
+            case "d": deleteForward()
+            case "k": deleteToEndOfLine()
+            case "o": openLineAbove()
+            default: return false
+            }
+            return true
+        }
+        switch key {  // Meta (Option)
+        case "<": moveSelection(direction: .backward, destination: .document, extending: false, confined: false)
+        case ">": moveSelection(direction: .forward, destination: .document, extending: false, confined: false)
+        default: return false
+        }
+        return true
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -486,6 +526,16 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             moveSelection(direction: .backward, destination: .word, extending: true, confined: false)
         }
         deleteBackward()
+    }
+
+    /// Delete forward to the next word boundary (or the current selection if
+    /// there is one) — the emacs `kill-word` counterpart to `deleteWordBackward`.
+    override func deleteWordForward(_ sender: Any?) {
+        guard isEditable else { return }
+        if selectedRangeStorage.length == 0 {
+            moveSelection(direction: .forward, destination: .word, extending: true, confined: false)
+        }
+        deleteForward()
     }
 
     /// Real responder-chain entry point for emacs `kill-line`, so `NSApp.sendAction`

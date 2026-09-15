@@ -1335,7 +1335,7 @@ fileprivate enum HighlightRunUtilities {
         }
 
         if delta != 0, firstSuffix < runs.count {
-            unsafe runs.withUnsafeMutableBufferPointer { buffer in
+          runs.withUnsafeMutableBufferPointer { buffer in
                 var index = firstSuffix
                 while index < buffer.count {
                     unsafe buffer[index].range.location += delta
@@ -1400,7 +1400,7 @@ fileprivate enum HighlightRunUtilities {
         }
 
         if delta != 0, firstSuffix < runs.count {
-            unsafe runs.withUnsafeMutableBufferPointer { buffer in
+            runs.withUnsafeMutableBufferPointer { buffer in
                 var index = firstSuffix
                 while index < buffer.count {
                     unsafe buffer[index].range.location += delta
@@ -1465,7 +1465,7 @@ fileprivate enum HighlightRunUtilities {
         }
 
         if delta != 0, firstSuffix < ranges.count {
-            unsafe ranges.withUnsafeMutableBufferPointer { buffer in
+            ranges.withUnsafeMutableBufferPointer { buffer in
                 var index = firstSuffix
                 while index < buffer.count {
                     unsafe buffer[index].location += delta

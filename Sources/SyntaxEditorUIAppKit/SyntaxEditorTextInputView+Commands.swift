@@ -179,6 +179,17 @@ extension SyntaxEditorTextInputView {
                     selectedRange: NSRange(location: caret, length: 0))
     }
 
+    /// `C-o` (emacs `open-line`): insert a blank line above the current line and
+    /// place the caret on it, leaving the current line's text below.
+    func openLineAbove() {
+        guard isEditable else { return }
+        let source = string as NSString
+        let caret = min(selectedRangeStorage.location, source.length)
+        let lineStart = source.lineRange(for: NSRange(location: caret, length: 0)).location
+        replaceText(in: NSRange(location: lineStart, length: 0), with: "\n",
+                    selectedRange: NSRange(location: lineStart, length: 0))
+    }
+
     var canCopySelection: Bool {
         isSelectable && selectedRangeStorage.length > 0
     }
