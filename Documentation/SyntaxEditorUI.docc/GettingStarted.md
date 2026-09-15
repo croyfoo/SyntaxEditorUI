@@ -29,7 +29,7 @@ struct EditorView: View {
 }
 ```
 
-Use ``SyntaxEditorView`` or ``SyntaxEditorViewController`` for native integration. They accept the same ``SyntaxEditorModel``.
+For native integration, see <doc:UIKitIntegration> or <doc:AppKitIntegration>. Both platforms accept the same ``SyntaxEditorModel``.
 
 ## Own the document state
 

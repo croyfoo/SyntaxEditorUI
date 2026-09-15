@@ -1,33 +1,49 @@
-# SyntaxEditorUI
+# ``SyntaxEditorUI``
 
 Build editable code and plain-text views with SwiftUI, UIKit, and AppKit.
 
-@Metadata {
-    @TechnologyRoot
-}
-
 ## Overview
 
-SyntaxEditorUI provides syntax highlighting, text selection, find, undo, and code-editing commands around an observable editor model. Your app owns the document's storage and decides when to save changes.
+Import `SyntaxEditorUI` and create a ``SyntaxEditorModel`` for each document. Pass the model to ``SyntaxEditor`` in SwiftUI or choose a native editor for your platform.
 
-The package requires Swift 6.3 or later. Choose the platform used by your app to browse its guides and API reference.
+The package requires Swift 6.3 or later, with iOS 18+, Mac Catalyst 18+, visionOS 2+, or macOS 15+. The app owns loading and saving; the model owns the current editor state.
 
-## Platforms
+## Topics
 
-@Row {
-    @Column {
-        **[UIKit and SwiftUI](/uikit/documentation/syntaxeditorui/)**
+### Essentials
 
-        iOS 18+, Mac Catalyst 18+, and visionOS 2+.
-    }
+- <doc:GettingStarted>
+- ``SyntaxEditor``
 
-    @Column {
-        **[AppKit and SwiftUI](/appkit/documentation/syntaxeditorui/)**
+### Editor state
 
-        macOS 15+.
-    }
-}
+- ``SyntaxEditorModel``
+- ``SyntaxEditorTextChange``
 
-## Source and examples
+### UIKit
 
-See the [GitHub repository](https://github.com/lynnswap/SyntaxEditorUI) for installation instructions and the Mini example app.
+- <doc:UIKitIntegration>
+- ``SyntaxEditorView-6lnwr``
+- ``SyntaxEditorViewController-j7tv``
+
+### AppKit
+
+- <doc:AppKitIntegration>
+- ``SyntaxEditorView-77bw3``
+- ``SyntaxEditorViewController-16tjt``
+
+### Languages and appearance
+
+- <doc:LanguagesAndThemes>
+- ``SyntaxLanguage``
+- ``SyntaxEditorTheme``
+- ``SyntaxEditorHighlighting``
+
+### Editing commands
+
+- <doc:Editing>
+- ``SyntaxEditorMenu``
+
+### Upgrading
+
+- <doc:Migration>

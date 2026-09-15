@@ -4,7 +4,7 @@
   import SyntaxEditorCore
   import SyntaxEditorUICommon
 
-  /// An AppKit view controller whose root view is a ``SyntaxEditorView``.
+  /// An AppKit view controller whose root view is a ``SyntaxEditorView-77bw3``.
   ///
   /// Use this controller on the main actor when integrating the editor through
   /// view-controller containment. The supplied model remains the document and
@@ -52,7 +52,7 @@
     /// Switches the controller and its editor to another model instance.
     ///
     /// Passing the current instance has no effect. Switching models clears the
-    /// editor's undo history; see ``SyntaxEditorView/update(model:)``.
+    /// editor's undo history; see ``SyntaxEditorView-77bw3/update(model:)``.
     ///
     /// - Parameter nextModel: The model to display and observe.
     public func update(model nextModel: SyntaxEditorModel) {
@@ -68,7 +68,7 @@
 
     /// Forwards a native text-change notification to the editor.
     ///
-    /// Use the model for app-driven edits. See ``SyntaxEditorView/textDidChange(_:)``.
+    /// Use the model for app-driven edits. See ``SyntaxEditorView-77bw3/textDidChange(_:)``.
     ///
     /// - Parameter notification: The notification to forward.
     public func textDidChange(_ notification: Notification) {
@@ -78,7 +78,7 @@
     /// Forwards a native selection-change notification to the editor.
     ///
     /// Use the model for app-driven selection changes. See
-    /// ``SyntaxEditorView/textViewDidChangeSelection(_:)``.
+    /// ``SyntaxEditorView-77bw3/textViewDidChangeSelection(_:)``.
     ///
     /// - Parameter notification: The notification to forward.
     public func textViewDidChangeSelection(_ notification: Notification) {
