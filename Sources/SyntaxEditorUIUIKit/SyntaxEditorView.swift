@@ -10,8 +10,20 @@ struct SyntaxEditorMarkedTextUndoAnchor {
     let refreshStartUTF16: Int
 }
 
+/// A UIKit text-input and scroll view backed by an app-owned model.
+///
+/// Use the model to observe text and selection changes or update editor
+/// settings. The view manages text input, syntax rendering, and scrolling;
+/// the app remains responsible for loading and saving the document.
+///
+/// The editor itself implements `UITextInput`; it does not contain a public
+/// `UITextView`. Configure text through ``model``, ``text``, and
+/// ``selectedRange``, and use inherited `UIScrollView` properties for scrolling.
 @MainActor
 public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTraits, UITextInteractionDelegate, @preconcurrency NSTextViewportLayoutControllerDelegate {
+    /// The retained model that owns the editor's text, selection, and settings.
+    ///
+    /// To display another model instance, call ``update(model:)``.
     public internal(set) var model: SyntaxEditorModel
 
     let guardedUndoManager = SyntaxEditorReadOnlyGuardedUndoManager()
@@ -77,6 +89,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
     #endif
     var modelObservation: PortableObservationTracking.Token?
     var modelConfigurationObservation: PortableObservationTracking.Token?
+    /// Whether the editor installs a native find interaction.
+    ///
+    /// The default is `true`. Setting this value to `false` ends active search,
+    /// removes its decorations, and makes ``findInteraction`` return `nil`.
+    /// Find remains available when ``isEditable`` is `false`.
     public var isFindInteractionEnabled = true {
         didSet {
             guard isFindInteractionEnabled != oldValue else { return }
@@ -84,6 +101,10 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
     }
 
+    /// Insets, in points, between the text container and the editor's content.
+    ///
+    /// The default adds 8 points above and below the text and no horizontal
+    /// inset. Changes update text layout, including the width used for wrapping.
     public var textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0) {
         didSet {
             guard textContainerInset != oldValue else { return }
@@ -93,6 +114,11 @@ public final class SyntaxEditorView: UIScrollView, UITextInput, UITextInputTrait
         }
     }
 
+    /// Whether selection-only interaction and selection commands are enabled.
+    ///
+    /// The default is `true`. When ``isEditable`` is `false`, this property
+    /// controls whether the editor installs a noneditable text interaction for
+    /// selecting and copying text. Programmatic selection remains available.
     public var isSelectable = true {
         didSet {
             guard isSelectable != oldValue else { return }

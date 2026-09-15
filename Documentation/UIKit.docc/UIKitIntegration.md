@@ -1,0 +1,47 @@
+# Integrating with UIKit
+
+Host the editor in an iOS, Mac Catalyst, or visionOS view hierarchy.
+
+## Create a native editor
+
+```swift
+import UIKit
+import SyntaxEditorUI
+
+@MainActor
+func makeEditor() -> SyntaxEditorViewController {
+    let model = SyntaxEditorModel(
+        text: "let answer = 42",
+        language: .swift
+    )
+    return SyntaxEditorViewController(model: model)
+}
+```
+
+Present the controller or add it to your app's existing container with normal view-controller containment. Its `editorView` is the editing and scrolling surface. If your container already owns a view controller, create ``SyntaxEditorView`` directly and constrain it to the available space.
+
+Keep document state in ``SyntaxEditorModel``; do not expect an underlying `UITextView`. The native view handles text input and scrolling itself.
+
+## Add an Editor menu
+
+On iOS 26 and later, call this once from app launch, outside a menu-building callback:
+
+```swift
+if #available(iOS 26.0, *) {
+    UIMainMenuSystem.shared.setBuildConfiguration(
+        UIMainMenuSystem.Configuration()
+    ) { builder in
+        SyntaxEditorMenu.insert(into: builder)
+    }
+}
+```
+
+Apps that already customize menus through `buildMenu(with:)` can call `SyntaxEditorMenu.insert(into:)` from that app-delegate method instead. See Apple's [main menu configuration](https://developer.apple.com/documentation/uikit/uimainmenusystem/setbuildconfiguration(_:buildhandler:)).
+
+Commands act on the focused editor. On iPadOS, first-responder shortcuts may also appear in Help > Other Keyboard Shortcuts. See <doc:Editing> for the shortcut list.
+
+## Support pointer selection
+
+Indirect input is enabled by default on the iOS versions supported by this package. If your app explicitly sets `UIApplicationSupportsIndirectInputEvents` to `NO`, remove that opt-out or set it to `YES` so UIKit can distinguish pointer clicks from direct touches. visionOS always supports indirect input.
+
+See Apple's [indirect input setting](https://developer.apple.com/documentation/bundleresources/information-property-list/uiapplicationsupportsindirectinputevents).

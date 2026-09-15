@@ -68,6 +68,12 @@ extension SyntaxEditorView {
         command.state = editorCommand == .wrapLines && model.lineWrappingEnabled ? .on : .off
     }
 
+    /// Copies the selected text to the general pasteboard.
+    ///
+    /// This responder-chain action also works in a read-only editor. An empty
+    /// selection leaves the pasteboard unchanged.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func copy(_ sender: Any?) {
         guard selectedRange.length > 0,
               let selectedText = string(in: selectedRange)
@@ -77,12 +83,25 @@ extension SyntaxEditorView {
         UIPasteboard.general.string = selectedText
     }
 
+    /// Copies the selected text to the general pasteboard, then deletes it.
+    ///
+    /// This responder-chain action has no effect when ``isEditable`` is `false`
+    /// or the selection is empty.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func cut(_ sender: Any?) {
         guard model.isEditable, selectedRange.length > 0 else { return }
         copy(sender)
         applyUserReplacement(in: selectedRange, replacement: "", deletionIntent: .unspecified)
     }
 
+    /// Inserts the general pasteboard's string using the editor's text-input rules.
+    ///
+    /// This responder-chain action replaces active marked text, or the selection
+    /// when there is no composition. It has no effect when ``isEditable`` is
+    /// `false` or the pasteboard has no string.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func paste(_ sender: Any?) {
         guard model.isEditable,
               let pastedText = UIPasteboard.general.string
@@ -97,6 +116,13 @@ extension SyntaxEditorView {
         insertText(pastedText)
     }
 
+    /// Deletes the selection, or deletes backward when the selection is empty.
+    ///
+    /// Calling this responder-chain action has no effect when ``isEditable``
+    /// is `false`. At an insertion point it uses the same deletion behavior as
+    /// the Backspace key, including code-aware pair deletion.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func delete(_ sender: Any?) {
         guard model.isEditable else { return }
         if selectedRange.length > 0 {
@@ -106,28 +132,62 @@ extension SyntaxEditorView {
         }
     }
 
+    /// Selects the whole document through the responder chain.
+    ///
+    /// This action also works in a read-only editor, but has no effect when
+    /// ``isSelectable`` is `false`.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func selectAll(_ sender: Any?) {
         guard isSelectable else { return }
         selectedRange = NSRange(location: 0, length: text.utf16.count)
     }
 
+    /// Presents the native find interface without replacement controls.
+    ///
+    /// This responder-chain action also works in a read-only editor. It has no
+    /// effect when ``findInteraction`` is `nil`.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func find(_ sender: Any?) {
         findInteraction?.presentFindNavigator(showingReplace: false)
     }
 
+    /// Presents the native find interface with replacement controls.
+    ///
+    /// This responder-chain action has no effect when ``isEditable`` is `false`
+    /// or ``findInteraction`` is `nil`.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func findAndReplace(_ sender: Any?) {
         guard model.isEditable else { return }
         findInteraction?.presentFindNavigator(showingReplace: true)
     }
 
+    /// Asks the native find interaction to advance to the next match.
+    ///
+    /// This responder-chain action has no effect when ``findInteraction`` is `nil`.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func findNext(_ sender: Any?) {
         findInteraction?.findNext()
     }
 
+    /// Asks the native find interaction to move to the previous match.
+    ///
+    /// This responder-chain action has no effect when ``findInteraction`` is `nil`.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func findPrevious(_ sender: Any?) {
         findInteraction?.findPrevious()
     }
 
+    /// Uses the selected text as the query and presents the native find interface.
+    ///
+    /// This responder-chain action also works in a read-only editor. It has no
+    /// effect when the selection is empty or ``findInteraction`` is `nil`.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     public override func useSelectionForFind(_ sender: Any?) {
         guard selectedRange.length > 0,
               let selectedText = string(in: selectedRange)
@@ -285,30 +345,73 @@ extension SyntaxEditorView {
         keyboardAccessoryModel.isRedoable = model.isEditable && (activeUndoManager?.canRedo ?? false)
         #endif
     }
+    /// Indents the selected lines, or the current line at an insertion point.
+    ///
+    /// The Editor menu routes this action through the responder chain. It has
+    /// no effect when editing is disabled or the language is plain text.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     @objc public func syntaxEditorShiftRight(_ sender: Any?) {
         handleIndentCommand()
     }
 
+    /// Removes one level of indentation from the selected lines or current line.
+    ///
+    /// The Editor menu routes this action through the responder chain. It has
+    /// no effect when editing is disabled, the language is plain text, or the
+    /// affected lines have no removable indentation.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     @objc public func syntaxEditorShiftLeft(_ sender: Any?) {
         handleOutdentCommand()
     }
 
+    /// Toggles comments using the current language's rules for the selection.
+    ///
+    /// The Editor menu routes this action through the responder chain. It has
+    /// no effect when editing is disabled or the language cannot toggle a
+    /// comment at the current selection.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     @objc public func syntaxEditorCommentSelection(_ sender: Any?) {
         handleToggleCommentCommand()
     }
 
+    /// Toggles the model's line-wrapping setting from the Editor menu.
+    ///
+    /// This responder-chain action remains available in a read-only editor.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     @objc public func syntaxEditorToggleLineWrapping(_ sender: Any?) {
         handleToggleLineWrappingCommand()
     }
 
+    /// Invokes the model's font-size increase command from the Editor menu.
+    ///
+    /// This responder-chain action remains available in a read-only editor.
+    /// The model applies the supported font-size limits.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     @objc public func syntaxEditorIncreaseFontSize(_ sender: Any?) {
         handleIncreaseFontSizeCommand()
     }
 
+    /// Invokes the model's font-size decrease command from the Editor menu.
+    ///
+    /// This responder-chain action remains available in a read-only editor.
+    /// The model applies the supported font-size limits.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     @objc public func syntaxEditorDecreaseFontSize(_ sender: Any?) {
         handleDecreaseFontSizeCommand()
     }
 
+    /// Resets the model's font-size adjustment to zero from the Editor menu.
+    ///
+    /// This restores the selected theme's font sizes. The responder-chain
+    /// action remains available in a read-only editor.
+    ///
+    /// - Parameter sender: The object requesting the action, or `nil`.
     @objc public func syntaxEditorResetFontSize(_ sender: Any?) {
         handleResetFontSizeCommand()
     }

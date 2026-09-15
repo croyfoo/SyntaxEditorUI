@@ -7,35 +7,70 @@ import UIKit
 import AppKit
 #endif
 
+/// The colors and fonts used to render an editor.
+///
+/// Choose a built-in theme with ``preset(_:)`` or provide a custom palette and
+/// font. Presets can supply different styles for individual languages and
+/// adapt their colors to the current appearance.
+///
+/// Equality and hashing use ``id``, rather than comparing individual styles.
+/// Copies of a custom theme keep its identity; constructing another custom
+/// theme gives it a new identity even when its colors and font are identical.
+///
+/// The color properties expose the theme's general syntax categories. A
+/// built-in theme may use more specific colors for a language's tokens.
 public struct SyntaxEditorTheme: Identifiable, Hashable {
 #if canImport(UIKit)
+    /// The platform color type used by editor themes.
     public typealias Color = UIColor
+    /// The platform font type accepted when creating a custom theme.
     public typealias Font = UIFont
 #elseif canImport(AppKit)
+    /// The platform color type used by editor themes.
     public typealias Color = NSColor
+    /// The platform font type accepted when creating a custom theme.
     public typealias Font = NSFont
 #endif
 
+    /// A built-in theme selection that can be stored by its raw string value.
+    ///
+    /// Use ``SyntaxEditorTheme/preset(_:)`` to create a theme from a selection.
     public enum Preset: String, CaseIterable, Identifiable, Sendable {
+        /// The Bare preset.
         case bare
+        /// The Basic preset.
         case basic
+        /// The Civic preset.
         case civic
+        /// The Classic preset, with light and dark appearance variants.
         case classic
+        /// The Default preset, with light and dark appearance variants.
         case `default`
+        /// The Dusk preset.
         case dusk
+        /// The High Contrast preset, with light and dark appearance variants.
         case highContrast
+        /// The Low Key preset.
         case lowKey
+        /// The Midnight preset.
         case midnight
+        /// The Presentation preset, with light and dark appearance variants.
         case presentation
+        /// The Presentation Large preset, with light and dark appearance variants.
         case presentationLarge
+        /// The Printing preset.
         case printing
+        /// The Spartan preset.
         case spartan
+        /// The Sunset preset.
         case sunset
 
+        /// The preset's raw string identifier.
         public var id: String {
             rawValue
         }
 
+        /// The human-readable name to display in a theme picker.
         public var displayName: String {
             switch self {
             case .bare: "Bare"
@@ -78,9 +113,33 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
         }
     }
 
+    /// The identity used for equality, hashing, and identifiable collections.
+    ///
+    /// Repeated requests for the same preset share an identifier. Each custom
+    /// theme initializer creates a new identifier.
     public let id: String
     private let storage: Storage
 
+    /// Creates a custom palette with one base font for all syntax categories.
+    ///
+    /// The editor applies its model's `fontSizeDelta` when rendering this font.
+    /// Custom colors retain any appearance-dependent behavior supplied by their
+    /// platform color values.
+    ///
+    /// - Parameters:
+    ///   - baseForeground: The foreground color for unclassified text.
+    ///   - bracketBackground: The background color of a matching-bracket highlight.
+    ///   - comment: The foreground color for comments.
+    ///   - string: The foreground color for string and character literals.
+    ///   - keyword: The foreground color for keywords and preprocessor syntax.
+    ///   - number: The foreground color for numeric literals.
+    ///   - function: The foreground color for function syntax.
+    ///   - type: The foreground color for type syntax.
+    ///   - constant: The foreground color for constant syntax.
+    ///   - variable: The foreground color for variable syntax.
+    ///   - punctuation: The foreground color for punctuation syntax.
+    ///   - font: The font used as the basis for all text styles.
+    ///   - background: The editor background color. The default is transparent.
     public init(
         baseForeground: SyntaxEditorTheme.Color,
         bracketBackground: SyntaxEditorTheme.Color,
@@ -121,90 +180,125 @@ public struct SyntaxEditorTheme: Identifiable, Hashable {
         self.storage = storage
     }
 
+    /// Creates the theme for a built-in preset.
+    ///
+    /// - Parameter preset: The preset to use.
+    /// - Returns: A theme with the preset's stable identity and bundled styles.
     public static func preset(_ preset: Preset) -> SyntaxEditorTheme {
         SyntaxEditorTheme(id: "builtin.\(preset.rawValue)", storage: .preset(preset))
     }
 
+    /// The built-in Bare theme.
     public static var bare: SyntaxEditorTheme { preset(.bare) }
+    /// The built-in Basic theme.
     public static var basic: SyntaxEditorTheme { preset(.basic) }
+    /// The built-in Civic theme.
     public static var civic: SyntaxEditorTheme { preset(.civic) }
+    /// The built-in Classic theme.
     public static var classic: SyntaxEditorTheme { preset(.classic) }
+    /// The theme used by newly created editor models unless another is supplied.
     public static var `default`: SyntaxEditorTheme { preset(.default) }
+    /// The built-in Dusk theme.
     public static var dusk: SyntaxEditorTheme { preset(.dusk) }
+    /// The built-in High Contrast theme.
     public static var highContrast: SyntaxEditorTheme { preset(.highContrast) }
+    /// The built-in Low Key theme.
     public static var lowKey: SyntaxEditorTheme { preset(.lowKey) }
+    /// The built-in Midnight theme.
     public static var midnight: SyntaxEditorTheme { preset(.midnight) }
+    /// The built-in Presentation theme.
     public static var presentation: SyntaxEditorTheme { preset(.presentation) }
+    /// The built-in Presentation Large theme.
     public static var presentationLarge: SyntaxEditorTheme { preset(.presentationLarge) }
+    /// The built-in Printing theme.
     public static var printing: SyntaxEditorTheme { preset(.printing) }
+    /// The built-in Spartan theme.
     public static var spartan: SyntaxEditorTheme { preset(.spartan) }
+    /// The built-in Sunset theme.
     public static var sunset: SyntaxEditorTheme { preset(.sunset) }
 
+    /// All built-in themes, in the same order as `Preset.allCases`.
     public static var allPresets: [SyntaxEditorTheme] {
         Preset.allCases.map(preset)
     }
 
+    /// The built-in selection, or `nil` for a custom theme.
     public var preset: Preset? {
         guard case let .preset(preset) = storage else { return nil }
         return preset
     }
 
+    /// The preset's display name, or `Custom` for a custom theme.
     public var displayName: String {
         preset?.displayName ?? "Custom"
     }
 
+    /// The fill color used when the editor draws its background.
     public var background: SyntaxEditorTheme.Color {
         resolved(for: nil).background
     }
 
+    /// The foreground color for text without a more specific syntax style.
     public var baseForeground: SyntaxEditorTheme.Color {
         resolved(for: nil).base.foreground
     }
 
+    /// The background color of a matching-bracket highlight.
     public var bracketBackground: SyntaxEditorTheme.Color {
         resolved(for: nil).bracketBackground
     }
 
+    /// The general foreground color for comments.
     public var comment: SyntaxEditorTheme.Color {
         resolved(for: nil).comment.foreground
     }
 
+    /// The general foreground color for string and character literals.
     public var string: SyntaxEditorTheme.Color {
         resolved(for: nil).string.foreground
     }
 
+    /// The general foreground color for keywords.
     public var keyword: SyntaxEditorTheme.Color {
         resolved(for: nil).keyword.foreground
     }
 
+    /// The general foreground color for numeric literals.
     public var number: SyntaxEditorTheme.Color {
         resolved(for: nil).number.foreground
     }
 
+    /// The general foreground color for function syntax.
     public var function: SyntaxEditorTheme.Color {
         resolved(for: nil).function.foreground
     }
 
+    /// The general foreground color for type syntax.
     public var type: SyntaxEditorTheme.Color {
         resolved(for: nil).type.foreground
     }
 
+    /// The general foreground color for constant syntax.
     public var constant: SyntaxEditorTheme.Color {
         resolved(for: nil).constant.foreground
     }
 
+    /// The general foreground color for variable syntax.
     public var variable: SyntaxEditorTheme.Color {
         resolved(for: nil).variable.foreground
     }
 
+    /// The general foreground color for punctuation syntax.
     public var punctuation: SyntaxEditorTheme.Color {
         resolved(for: nil).punctuation.foreground
     }
 
+    /// Returns whether two themes have the same identity.
     public static func == (lhs: SyntaxEditorTheme, rhs: SyntaxEditorTheme) -> Bool {
         lhs.id == rhs.id
     }
 
+    /// Hashes the theme's identity.
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }

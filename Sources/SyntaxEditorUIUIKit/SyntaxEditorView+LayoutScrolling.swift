@@ -441,6 +441,14 @@ extension SyntaxEditorView {
         }
     }
 
+    /// Scrolls to reveal a text range when it is outside the visible area.
+    ///
+    /// This method lays out text as needed and leaves the current selection
+    /// unchanged. It has no effect when the target intersects the visible area
+    /// or no target rectangle can be resolved.
+    ///
+    /// - Parameter range: A range of UTF-16 code units in ``text``. The range is
+    ///   clamped to the document bounds before its geometry is resolved.
     public func scrollRangeToVisible(_ range: NSRange) {
         layoutTextIfNeeded()
         let clampedRange = clampedTextRange(range)
