@@ -2,7 +2,7 @@
 import SyntaxEditorCore
 import UIKit
 
-/// A UIKit view controller whose root view is a ``SyntaxEditorView``.
+/// A UIKit view controller whose root view is a ``SyntaxEditorView-6lnwr``.
 ///
 /// Use this controller when integrating the editor through view-controller
 /// containment. The supplied model remains the document and configuration owner.
@@ -39,7 +39,7 @@ public final class SyntaxEditorViewController: UIViewController {
     /// Switches the controller and its editor to another model instance.
     ///
     /// Passing the current instance has no effect. Switching models clears the
-    /// editor's undo history; see ``SyntaxEditorView/update(model:)``.
+    /// editor's undo history; see ``SyntaxEditorView-6lnwr/update(model:)``.
     ///
     /// - Parameter nextModel: The model to display and observe.
     public func update(model nextModel: SyntaxEditorModel) {

@@ -46,13 +46,14 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory .build/documentation
 
 The output directory must not already exist. Failed builds remove their newly created output so the same command can be rerun after fixing the failure. Open `http://localhost:8000/SyntaxEditorUI/` to preview the site. For a site hosted at the domain root, omit the second argument and serve the output directory itself.
 
-The build compiles the public product for UIKit and AppKit, extracts its re-exported public symbols, and converts the catalogs with warnings treated as errors. It also checks comments on package-defined APIs, using compiler metadata to distinguish overrides and implementations of external protocol requirements.
+The build compiles the public product for UIKit and AppKit, extracts its re-exported public symbols, and converts both platform graphs together with warnings treated as errors. The result is one DocC application: shared APIs have one page, and UIKit/AppKit native types appear in separate topic groups. It also checks comments on package-defined APIs, using compiler metadata to distinguish overrides and implementations of external protocol requirements.
 
-Documentation has three homes:
+Temporary platform-only archives supply the former API routes for redirects. Old guide and API links retain their query strings and section fragments; only the combined DocC application and redirect pages are published.
+
+Documentation has two homes:
 
 - Public declaration comments describe each symbol's contract.
-- `Documentation/Shared` contains guides used by both platform references.
-- `Documentation/UIKit.docc` and `Documentation/AppKit.docc` contain platform-specific integration guides; `Documentation/SyntaxEditorUI.docc` is the site entry point.
+- `Documentation/SyntaxEditorUI.docc` contains shared guides, platform integration guides, and the API landing page. Use DocC topic links so navigation stays within the same application.
 
 Keep README focused on installation and the first editor. Put detailed usage and migration guidance in DocC, and development commands in this guide.
 

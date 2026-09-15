@@ -18,7 +18,7 @@ func makeEditor() -> SyntaxEditorViewController {
 }
 ```
 
-Present the controller or add it to your app's existing container with normal view-controller containment. Its `editorView` is the editing and scrolling surface. If your container already owns a view controller, create ``SyntaxEditorView`` directly and constrain it to the available space.
+Present the controller or add it to your app's existing container with normal view-controller containment. Its `editorView` is the editing and scrolling surface. If your container already owns a view controller, create ``SyntaxEditorView-6lnwr`` directly and constrain it to the available space.
 
 Keep document state in ``SyntaxEditorModel``; do not expect an underlying `UITextView`. The native view handles text input and scrolling itself.
 
@@ -45,3 +45,10 @@ Commands act on the focused editor. On iPadOS, first-responder shortcuts may als
 Indirect input is enabled by default on the iOS versions supported by this package. If your app explicitly sets `UIApplicationSupportsIndirectInputEvents` to `NO`, remove that opt-out or set it to `YES` so UIKit can distinguish pointer clicks from direct touches. visionOS always supports indirect input.
 
 See Apple's [indirect input setting](https://developer.apple.com/documentation/bundleresources/information-property-list/uiapplicationsupportsindirectinputevents).
+
+## Topics
+
+### Native editor
+
+- ``SyntaxEditorView-6lnwr``
+- ``SyntaxEditorViewController-j7tv``

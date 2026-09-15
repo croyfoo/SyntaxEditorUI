@@ -43,7 +43,7 @@ For native UI, pass the same model to `SyntaxEditorView(model:)` or `SyntaxEdito
 
 See the [DocC documentation](https://lynnswap.github.io/SyntaxEditorUI/) for platform integration, language and theme configuration, editing commands, and API references.
 
-For upgrades from an earlier release, see [Migration notes](Documentation/Shared/Migration.md).
+For upgrades from an earlier release, see [Migration notes](Documentation/SyntaxEditorUI.docc/Migration.md).
 
 ## Example and development
 

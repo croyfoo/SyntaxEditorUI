@@ -40,37 +40,6 @@ resolved_output_dir=$(cd "$output_dir" && pwd)
 output_dir=$resolved_output_dir
 build_root=$(mktemp -d "${TMPDIR:-/tmp}/syntax-editor-docs.XXXXXX")
 
-cp -R "$repo_root/Documentation/SyntaxEditorUI.docc" "$build_root/Documentation.docc"
-python3 - "$build_root/Documentation.docc" "$hosting_base_path" <<'PY'
-import pathlib
-import sys
-
-for page in pathlib.Path(sys.argv[1]).glob("*.md"):
-    text = page.read_text()
-    for platform in ("uikit", "appkit"):
-        text = text.replace(f"](/{platform}/", f"]({sys.argv[2]}/{platform}/")
-    page.write_text(text)
-PY
-
-xcrun docc convert "$build_root/Documentation.docc" \
-    --output-dir "$build_root/Documentation.doccarchive" \
-    --hosting-base-path "$hosting_base_path" \
-    --fallback-display-name SyntaxEditorUI \
-    --fallback-bundle-identifier dev.lynnswap.SyntaxEditorUI.Documentation \
-    --warnings-as-errors
-cp -R "$build_root/Documentation.doccarchive/." "$output_dir/"
-
-# DocC's technology root is below /documentation, not the site's base URL.
-cat > "$output_dir/index.html" <<'HTML'
-<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=documentation/syntaxeditorui/">
-<title>SyntaxEditorUI Documentation</title>
-<a href="documentation/syntaxeditorui/">Open documentation</a>
-</html>
-HTML
-
 # The compiler still decides which modules the umbrella exports. This allowlist
 # permits its local source modules without exposing imported dependency APIs.
 reexported_modules=$(python3 - "$repo_root/Sources" <<'PY'
@@ -88,20 +57,15 @@ for platform in uikit appkit; do
             destination='generic/platform=iOS Simulator'
             sdk=iphonesimulator
             configuration_dir=Debug-iphonesimulator
-            catalog=UIKit
             target="$architecture-apple-ios$(xcrun --sdk "$sdk" --show-sdk-version)-simulator"
             ;;
         appkit)
             destination='generic/platform=macOS'
             sdk=macosx
             configuration_dir=Debug
-            catalog=AppKit
             target="$architecture-apple-macos$(xcrun --sdk "$sdk" --show-sdk-version)"
             ;;
     esac
-
-    cp -R "$repo_root/Documentation/$catalog.docc" "$build_root/$catalog.docc"
-    cp "$repo_root/Documentation/Shared/"*.md "$build_root/$catalog.docc/"
 
     # Build the product, then document its exported API. Running docbuild on the
     # package also compiles third-party catalogs and applies our DocC flags to them.
@@ -116,7 +80,7 @@ for platform in uikit appkit; do
         CODE_SIGNING_ALLOWED=NO
 
     products="$build_root/$platform/Build/Products/$configuration_dir"
-    graphs="$build_root/$platform/SymbolGraphs"
+    graphs="$build_root/SymbolGraphs/$platform"
     mkdir -p "$graphs"
     module_map_flags=()
     for module_map in "$build_root/$platform/Build/Intermediates.noindex/GeneratedModuleMaps"*/*.modulemap; do
@@ -179,20 +143,36 @@ print(
 )
 PY
 
-    archive="$build_root/$platform/SyntaxEditorUI.doccarchive"
-    xcrun docc convert "$build_root/$catalog.docc" \
+    # Ask DocC for its platform-only routes so redirects also cover overloads
+    # and synthesized collection pages. These archives are never published.
+    mkdir -p "$build_root/LegacyRoutes"
+    xcrun docc convert \
         --additional-symbol-graph-dir "$graphs" \
-        --output-dir "$archive" \
-        --hosting-base-path "$hosting_base_path/$platform" \
+        --output-dir "$build_root/LegacyRoutes/$platform.doccarchive" \
         --fallback-display-name SyntaxEditorUI \
-        --fallback-bundle-identifier "dev.lynnswap.SyntaxEditorUI.$catalog" \
-        --warnings-as-errors \
-        --experimental-documentation-coverage
-
-    test -f "$archive/documentation/syntaxeditorui/index.html"
-    test -f "$archive/documentation/syntaxeditorui/syntaxeditormodel/index.html"
-    test -f "$archive/documentation/syntaxeditorui/syntaxeditorview/index.html"
-    cp -R "$archive" "$output_dir/$platform"
+        --fallback-bundle-identifier "dev.lynnswap.SyntaxEditorUI.Legacy.$platform" \
+        --no-transform-for-static-hosting \
+        --warnings-as-errors
 done
+
+# A single conversion keeps platform references in the same DocC router.
+archive="$build_root/SyntaxEditorUI.doccarchive"
+xcrun docc convert "$repo_root/Documentation/SyntaxEditorUI.docc" \
+    --additional-symbol-graph-dir "$build_root/SymbolGraphs" \
+    --output-dir "$archive" \
+    --hosting-base-path "$hosting_base_path" \
+    --fallback-display-name SyntaxEditorUI \
+    --fallback-bundle-identifier dev.lynnswap.SyntaxEditorUI \
+    --warnings-as-errors \
+    --experimental-documentation-coverage
+
+test -f "$archive/documentation/syntaxeditorui/index.html"
+for page in syntaxeditormodel syntaxeditorview-6lnwr syntaxeditorview-77bw3 syntaxeditorviewcontroller-j7tv syntaxeditorviewcontroller-16tjt; do
+    test -f "$archive/documentation/syntaxeditorui/$page/index.html"
+done
+cp -R "$archive/." "$output_dir/"
+
+python3 "$repo_root/Tools/generate-documentation-redirects.py" \
+    "$archive" "$build_root/LegacyRoutes" "$output_dir" "$hosting_base_path"
 
 echo "Documentation site: $output_dir"
