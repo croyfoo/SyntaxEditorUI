@@ -335,11 +335,14 @@ extension SyntaxEditorTextInputView {
             return
         }
 
+        // Spans the editor, not the line: a fragment view is only as wide as
+        // its own text, so `bounds.width` here would stop at the end of a short
+        // line and read as a box around it rather than a band across the page.
         fragmentView.setCurrentLineHighlight(
             rect: CGRect(
-                x: 0,
+                x: -fragmentView.frame.minX,
                 y: caretRect.minY - fragmentView.frame.minY,
-                width: fragmentView.bounds.width,
+                width: bounds.width,
                 height: caretRect.height
             ),
             color: color
@@ -362,7 +365,7 @@ extension SyntaxEditorTextInputView {
             var shaded = base
             appearance.performAsCurrentDrawingAppearance {
                 if let text = NSColor.textColor.usingColorSpace(.sRGB),
-                   let blended = base.blended(withFraction: 0.09, of: text) {
+                   let blended = base.blended(withFraction: 0.18, of: text) {
                     shaded = blended
                 }
             }
