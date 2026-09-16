@@ -312,8 +312,29 @@ extension SyntaxEditorTextInputView {
         for case let fragmentView as SyntaxEditorTextInputView.TextLayoutFragmentView in textContentView.subviews {
             configureFindHighlights(for: fragmentView)
             configureSelectionHighlights(for: fragmentView)
+            configureCurrentLineHighlight(for: fragmentView)
         }
         updateInsertionIndicator()
+    }
+
+    /// Paints a full-width band behind the caret's line (emacs `hl-line-mode`).
+    /// Dropped while a selection is up, where the selection fill already marks
+    /// where the caret is.
+    func configureCurrentLineHighlight(for fragmentView: SyntaxEditorTextInputView.TextLayoutFragmentView) {
+        guard selectedRangeStorage.length == 0,
+              let caretRect = caretRect(forUTF16Location: selectedRangeStorage.location),
+              fragmentView.frame.intersects(caretRect)
+        else {
+            fragmentView.setCurrentLineHighlight(rect: nil)
+            return
+        }
+
+        fragmentView.setCurrentLineHighlight(rect: CGRect(
+            x: 0,
+            y: caretRect.minY - fragmentView.frame.minY,
+            width: fragmentView.bounds.width,
+            height: caretRect.height
+        ))
     }
 
     func updateInsertionIndicator() {

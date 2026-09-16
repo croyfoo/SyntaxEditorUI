@@ -53,6 +53,10 @@ final class TextLayoutFragmentView: NSView {
     static let findCandidateHighlightFillColor = dynamicTextColor(alpha: 0.14)
     private static let findCandidateHighlightStrokeColor = dynamicTextColor(alpha: 0.32)
     static let findCandidateHighlightCornerRadius: CGFloat = 3
+    /// Backs the caret's line (emacs `hl-line-mode`). Faint enough to sit under
+    /// syntax colors without changing how they read.
+    static let currentLineFillColor = dynamicTextColor(alpha: 0.06)
+    var currentLineRect: CGRect?
     var findHighlightRects: [CGRect] = []
     var selectionHighlightRects: [CGRect] = []
     var selectionHighlightColor: NSColor?
@@ -76,6 +80,13 @@ final class TextLayoutFragmentView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
+    }
+
+    func setCurrentLineHighlight(rect: CGRect?) {
+        guard currentLineRect != rect else { return }
+
+        currentLineRect = rect
+        needsDisplay = true
     }
 
     func setFindHighlights(rects: [CGRect]) {
@@ -108,6 +119,12 @@ final class TextLayoutFragmentView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        // Under everything else: the selection and bracket fills have to stay
+        // legible on top of it.
+        if let currentLineRect, currentLineRect.intersects(dirtyRect) {
+            Self.currentLineFillColor.setFill()
+            currentLineRect.fill()
+        }
         drawFindCandidateHighlights(in: dirtyRect)
         if let selectionHighlightColor, !selectionHighlightRects.isEmpty {
             selectionHighlightColor.setFill()
