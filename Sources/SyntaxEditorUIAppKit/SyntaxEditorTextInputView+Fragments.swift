@@ -55,7 +55,7 @@ final class TextLayoutFragmentView: NSView {
     static let findCandidateHighlightCornerRadius: CGFloat = 3
     /// Backs the caret's line (emacs `hl-line-mode`). Faint enough to sit under
     /// syntax colors without changing how they read.
-    static let currentLineFillColor = dynamicTextColor(alpha: 0.10)
+    static let currentLineFillColor = dynamicTextColor(alpha: 0.14)
     var currentLineRect: CGRect?
     var findHighlightRects: [CGRect] = []
     var selectionHighlightRects: [CGRect] = []
