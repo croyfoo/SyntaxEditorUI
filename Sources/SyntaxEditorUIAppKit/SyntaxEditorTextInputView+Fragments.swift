@@ -53,10 +53,13 @@ final class TextLayoutFragmentView: NSView {
     static let findCandidateHighlightFillColor = dynamicTextColor(alpha: 0.14)
     private static let findCandidateHighlightStrokeColor = dynamicTextColor(alpha: 0.32)
     static let findCandidateHighlightCornerRadius: CGFloat = 3
-    /// Backs the caret's line (emacs `hl-line-mode`). Faint enough to sit under
-    /// syntax colors without changing how they read.
-    static let currentLineFillColor = dynamicTextColor(alpha: 0.14)
+    /// Backs the caret's line (emacs `hl-line-mode`) when the editor draws no
+    /// background of its own and there's nothing to shade — a flat wash over
+    /// the text. Otherwise `currentLineColor` (a shade of the editor's own
+    /// background) is used, which darkens the line without greying the glyphs.
+    static let currentLineFallbackColor = dynamicTextColor(alpha: 0.14)
     var currentLineRect: CGRect?
+    var currentLineColor: NSColor?
     var findHighlightRects: [CGRect] = []
     var selectionHighlightRects: [CGRect] = []
     var selectionHighlightColor: NSColor?
@@ -82,10 +85,14 @@ final class TextLayoutFragmentView: NSView {
         nil
     }
 
-    func setCurrentLineHighlight(rect: CGRect?) {
-        guard currentLineRect != rect else { return }
-
+    func setCurrentLineHighlight(rect: CGRect?, color: NSColor?) {
+        guard currentLineRect != rect
+            || !colorsEqual(currentLineColor, color)
+        else {
+            return
+        }
         currentLineRect = rect
+        currentLineColor = color
         needsDisplay = true
     }
 
@@ -122,7 +129,7 @@ final class TextLayoutFragmentView: NSView {
         // Under everything else: the selection and bracket fills have to stay
         // legible on top of it.
         if let currentLineRect, currentLineRect.intersects(dirtyRect) {
-            Self.currentLineFillColor.setFill()
+            (currentLineColor ?? Self.currentLineFallbackColor).setFill()
             currentLineRect.fill()
         }
         drawFindCandidateHighlights(in: dirtyRect)

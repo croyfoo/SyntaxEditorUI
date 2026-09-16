@@ -309,10 +309,13 @@ extension SyntaxEditorTextInputView {
     }
 
     func updateDecorationRenderingForVisibleFragments() {
+        // Resolved once per pass, not once per visible line: a caret move
+        // refreshes every fragment on screen.
+        let currentLineColor = currentLineBandColor()
         for case let fragmentView as SyntaxEditorTextInputView.TextLayoutFragmentView in textContentView.subviews {
             configureFindHighlights(for: fragmentView)
             configureSelectionHighlights(for: fragmentView)
-            configureCurrentLineHighlight(for: fragmentView)
+            configureCurrentLineHighlight(for: fragmentView, color: currentLineColor)
         }
         updateInsertionIndicator()
     }
@@ -320,21 +323,51 @@ extension SyntaxEditorTextInputView {
     /// Paints a full-width band behind the caret's line (emacs `hl-line-mode`).
     /// Dropped while a selection is up, where the selection fill already marks
     /// where the caret is.
-    func configureCurrentLineHighlight(for fragmentView: SyntaxEditorTextInputView.TextLayoutFragmentView) {
+    func configureCurrentLineHighlight(
+        for fragmentView: SyntaxEditorTextInputView.TextLayoutFragmentView,
+        color: NSColor?
+    ) {
         guard selectedRangeStorage.length == 0,
               let caretRect = caretRect(forUTF16Location: selectedRangeStorage.location),
               fragmentView.frame.intersects(caretRect)
         else {
-            fragmentView.setCurrentLineHighlight(rect: nil)
+            fragmentView.setCurrentLineHighlight(rect: nil, color: nil)
             return
         }
 
-        fragmentView.setCurrentLineHighlight(rect: CGRect(
-            x: 0,
-            y: caretRect.minY - fragmentView.frame.minY,
-            width: fragmentView.bounds.width,
-            height: caretRect.height
-        ))
+        fragmentView.setCurrentLineHighlight(
+            rect: CGRect(
+                x: 0,
+                y: caretRect.minY - fragmentView.frame.minY,
+                width: fragmentView.bounds.width,
+                height: caretRect.height
+            ),
+            color: color
+        )
+    }
+
+    /// The editor's own background nudged toward the text color — an opaque
+    /// shade of the page rather than a grey wash laid over the glyphs, so the
+    /// band can read darker without dimming the line's syntax colors. `nil`
+    /// when there's no background to shade, leaving the flat-wash fallback.
+    private func currentLineBandColor() -> NSColor? {
+        guard drawsBackground,
+              let base = backgroundColor.usingColorSpace(.sRGB),
+              base.alphaComponent > 0
+        else {
+            return nil
+        }
+
+        return NSColor(name: nil) { appearance in
+            var shaded = base
+            appearance.performAsCurrentDrawingAppearance {
+                if let text = NSColor.textColor.usingColorSpace(.sRGB),
+                   let blended = base.blended(withFraction: 0.09, of: text) {
+                    shaded = blended
+                }
+            }
+            return shaded
+        }
     }
 
     func updateInsertionIndicator() {
