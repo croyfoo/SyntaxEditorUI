@@ -79,7 +79,7 @@ private extension BracketMatcher {
         var chunkStart = offset
         while chunkStart < limit {
             let chunkLength = min(scanChunkLength, limit - chunkStart)
-            unsafe buffer.withUnsafeMutableBufferPointer { pointer in
+          buffer.withUnsafeMutableBufferPointer { pointer in
                 unsafe source.getCharacters(
                     pointer.baseAddress!,
                     range: NSRange(location: chunkStart, length: chunkLength)
@@ -115,7 +115,7 @@ private extension BracketMatcher {
         while chunkEnd > limit {
             let chunkLength = min(scanChunkLength, chunkEnd - limit)
             let chunkStart = chunkEnd - chunkLength
-            unsafe buffer.withUnsafeMutableBufferPointer { pointer in
+          buffer.withUnsafeMutableBufferPointer { pointer in
                 unsafe source.getCharacters(
                     pointer.baseAddress!,
                     range: NSRange(location: chunkStart, length: chunkLength)
