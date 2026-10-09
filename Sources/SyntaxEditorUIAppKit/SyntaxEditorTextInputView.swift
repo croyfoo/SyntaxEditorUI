@@ -32,6 +32,19 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
     var didChangeMarkedTextRange: (() -> Void)?
     var shouldChangeText: (([NSRange], [String]) -> Bool)?
 
+    /// Bumped by every text edit, so kill and yank can tell whether anything
+    /// changed since they ran (see `SyntaxEditorTextInputView+KillRing`).
+    var textRevision = 0
+    /// The caret and revision right after the last kill: a kill starting
+    /// there, with no edit between, joins that kill-ring entry.
+    var lastKill: (caret: Int, revision: Int)?
+    /// What the last yank inserted, while it's still the latest edit — the
+    /// span `M-y` swaps for the next-older kill.
+    var lastYank: (range: NSRange, revision: Int)?
+    /// Emacs's mark (`C-SPC`), as a text offset: while set, cursor motion
+    /// extends the selection from it. Any edit, `C-g`, or a click clears it.
+    var mark: Int?
+
     var typingAttributes: [NSAttributedString.Key: Any] = [:]
     var isEditable = true
     var isSelectable = true
@@ -237,10 +250,10 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
 
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "b":
-            moveSelection(direction: .backward, destination: .word, extending: false, confined: false)
+            moveSelection(direction: .backward, destination: .word, extending: isMarkActive, confined: false)
             return true
         case "f":
-            moveSelection(direction: .forward, destination: .word, extending: false, confined: false)
+            moveSelection(direction: .forward, destination: .word, extending: isMarkActive, confined: false)
             return true
         default:
             return false
@@ -249,10 +262,11 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
 
     /// Standard emacs motion/edit keys that the input system doesn't deliver to
     /// this custom text-input view: `C-f`/`C-b`/`C-n`/`C-p` (char/line motion),
-    /// `C-a`/`C-e` (line ends), `C-d` (delete forward), `C-k` (kill-line), `C-o`
-    /// (open line above), and `M-<`/`M->` (document ends). Word motion
-    /// (`M-b`/`M-f`), paging (`C-v`/`M-v`), and `⌘B` (backward-kill-word) are
-    /// handled elsewhere.
+    /// `C-a`/`C-e` (line ends), `C-d` (delete forward), `C-o` (open line above),
+    /// `M-<`/`M->` (document ends), and the kill ring — `C-k` (kill-line),
+    /// `C-w`/`M-w` (kill/copy region), `C-y`/`M-y` (yank/yank-pop), `C-SPC`
+    /// (set mark; motion extends the region while it's set). Word motion
+    /// (`M-b`/`M-f`), paging (`C-v`/`M-v`), and word kills are handled elsewhere.
     private func handleEmacsEditingKey(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard !modifiers.contains(.command),
@@ -263,22 +277,29 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         let key = event.charactersIgnoringModifiers?.lowercased()
         if modifiers.contains(.control) {
             switch key {
-            case "f": moveSelection(direction: .forward, destination: .character, extending: false, confined: false)
-            case "b": moveSelection(direction: .backward, destination: .character, extending: false, confined: false)
-            case "n": moveSelection(direction: .down, destination: .character, extending: false, confined: false)
-            case "p": moveSelection(direction: .up, destination: .character, extending: false, confined: false)
-            case "a": moveSelection(direction: .backward, destination: .line, extending: false, confined: true)
-            case "e": moveSelection(direction: .forward, destination: .line, extending: false, confined: true)
+            case "f": moveSelection(direction: .forward, destination: .character, extending: isMarkActive, confined: false)
+            case "b": moveSelection(direction: .backward, destination: .character, extending: isMarkActive, confined: false)
+            case "n": moveSelection(direction: .down, destination: .character, extending: isMarkActive, confined: false)
+            case "p": moveSelection(direction: .up, destination: .character, extending: isMarkActive, confined: false)
+            case "a": moveSelection(direction: .backward, destination: .line, extending: isMarkActive, confined: true)
+            case "e": moveSelection(direction: .forward, destination: .line, extending: isMarkActive, confined: true)
             case "d": deleteForward()
             case "k": deleteToEndOfLine()
             case "o": openLineAbove()
+            case "w": killRegion()
+            case "y": yank()
+            // C-SPC, and C-@ (the same key in a terminal) where macOS keeps
+            // C-SPC for switching input sources.
+            case " ", "@": setMark()
             default: return false
             }
             return true
         }
         switch key {  // Meta (Option)
-        case "<": moveSelection(direction: .backward, destination: .document, extending: false, confined: false)
-        case ">": moveSelection(direction: .forward, destination: .document, extending: false, confined: false)
+        case "<": moveSelection(direction: .backward, destination: .document, extending: isMarkActive, confined: false)
+        case ">": moveSelection(direction: .forward, destination: .document, extending: isMarkActive, confined: false)
+        case "w": copyRegionAsKill()
+        case "y": yankPop()
         default: return false
         }
         return true
@@ -289,6 +310,7 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
             return
         }
         unsafe window?.makeFirstResponder(self)
+        mark = nil
         guard isSelectable, event.type == .leftMouseDown else {
             super.mouseDown(with: event)
             return
@@ -517,25 +539,27 @@ final class SyntaxEditorTextInputView: NSView, @preconcurrency NSTextInputClient
         setSelectedRange(NSRange(location: 0, length: storage.length))
     }
 
-    /// Delete back to the previous word boundary (or the current selection if
-    /// there is one). Extends the selection a word backward, then deletes it —
+    /// Kill back to the previous word boundary (or the current selection if
+    /// there is one), onto the kill ring. Extends the selection a word backward, then deletes it —
     /// the same primitives as `moveWordBackwardAndModifySelection` + delete.
     override func deleteWordBackward(_ sender: Any?) {
         guard isEditable else { return }
+        // Where the command began: extending the selection moves its start.
+        let caret = selectedRangeStorage.location
         if selectedRangeStorage.length == 0 {
             moveSelection(direction: .backward, destination: .word, extending: true, confined: false)
         }
-        deleteBackward()
+        kill(selectedRangeStorage, backward: true, from: caret)
     }
 
-    /// Delete forward to the next word boundary (or the current selection if
-    /// there is one) — the emacs `kill-word` counterpart to `deleteWordBackward`.
+    /// Kill forward to the next word boundary (or the current selection if
+    /// there is one), onto the kill ring — the emacs `kill-word` counterpart to `deleteWordBackward`.
     override func deleteWordForward(_ sender: Any?) {
         guard isEditable else { return }
         if selectedRangeStorage.length == 0 {
             moveSelection(direction: .forward, destination: .word, extending: true, confined: false)
         }
-        deleteForward()
+        kill(selectedRangeStorage)
     }
 
     /// Real responder-chain entry point for emacs `kill-line`, so `NSApp.sendAction`

@@ -320,6 +320,8 @@ extension SyntaxEditorTextInputView {
         textContentStorage.performEditingTransaction {
             storage.replaceCharacters(in: range, with: attributedReplacement)
         }
+        textRevision &+= 1
+        mark = nil
         lineMetrics.apply(
             edits: [SyntaxEditorTextChange.Replacement(range: range, replacement: replacement)],
             previousSource: previousSource
