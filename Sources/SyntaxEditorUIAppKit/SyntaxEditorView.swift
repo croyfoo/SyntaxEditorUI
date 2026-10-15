@@ -267,6 +267,21 @@
       textView.layoutVisibleViewportIfNeeded()
     }
 
+    /// Run a find-bar action on this editor's own text finder. Sending
+    /// `performTextFinderAction(_:)` up the responder chain instead can land
+    /// on another editor's finder when several are open (from the find bar's
+    /// search field, the chain doesn't reach this editor's text view). Hiding
+    /// then puts the caret back here: AppKit's bar, on closing, hands focus to
+    /// another editor's text view when there are two.
+    public func performFindAction(_ action: NSTextFinder.Action) {
+      guard textView.usesFindBar else { return }
+      let window = unsafe self.window
+      let hadFocus = (window?.firstResponder as? NSView)?.isDescendant(of: self) == true
+      textView.configureTextFinder()
+      textView.textFinder.performAction(action)
+      if action == .hideFindInterface, hadFocus { window?.makeFirstResponder(textView) }
+    }
+
     public override func becomeFirstResponder() -> Bool {
       guard let window = unsafe self.window else {
         return textView.becomeFirstResponder()
