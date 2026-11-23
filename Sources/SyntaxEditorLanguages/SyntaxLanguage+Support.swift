@@ -10,6 +10,7 @@ import SyntaxEditorLanguageMarkdownInline
 import SyntaxEditorLanguageObjectiveC
 import SyntaxEditorLanguagePHP
 import SyntaxEditorLanguagePlainText
+import SyntaxEditorLanguageLua
 import SyntaxEditorLanguageShell
 import SyntaxEditorLanguageSupport
 import SyntaxEditorLanguageSwift
@@ -46,6 +47,8 @@ package extension SyntaxLanguage {
             YAMLLanguage()
         case .shell:
             ShellLanguage()
+        case .lua:
+            LuaLanguage()
         case .markdown:
             MarkdownLanguage()
         case .markdownInline:

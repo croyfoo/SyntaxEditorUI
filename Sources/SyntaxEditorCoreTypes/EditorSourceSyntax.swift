@@ -160,6 +160,8 @@ private extension SyntaxLanguage {
             "yaml"
         case .shell:
             "shell"
+        case .lua:
+            "lua"
         case .markdown:
             "markdown"
         case .markdownInline:
@@ -195,6 +197,8 @@ private extension SyntaxLanguage {
             .yaml
         case "shell", "bash", "sh", "zsh":
             .shell
+        case "lua":
+            .lua
         case "markdown", "md", "mdown", "mkd":
             .markdown
         case "markdown-inline", "markdown_inline":

@@ -32,6 +32,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
     case xml
     case yaml
     case shell
+    case lua
     case markdown
     case markdownInline = "markdown-inline"
 
@@ -74,6 +75,8 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable, Identifiable {
             "YAML"
         case .shell:
             "Shell"
+        case .lua:
+            "Lua"
         case .markdown:
             "Markdown"
         case .markdownInline:
@@ -171,6 +174,8 @@ extension SyntaxLanguage {
             ["yaml", "yml"]
         case .shell:
             ["shell", "bash", "sh", "zsh"]
+        case .lua:
+            ["lua"]
         case .markdown:
             ["markdown", "md", "mdown", "mkd"]
         case .markdownInline:

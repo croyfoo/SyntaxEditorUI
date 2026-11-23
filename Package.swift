@@ -241,6 +241,28 @@ let package = Package(
             ],
             swiftSettings: syntaxEditorSwiftSettings
         ),
+        // Vendored tree-sitter-grammars/tree-sitter-lua v0.5.0 (MIT): its manifest
+        // gates scanner.c behind a relative-path `fileExists` that fails under Xcode.
+        .target(
+            name: "TreeSitterLua",
+            path: "Sources/TreeSitterLua",
+            exclude: ["LICENSE.md"],
+            sources: ["src/parser.c", "src/scanner.c"],
+            publicHeadersPath: "include",
+            cSettings: [.headerSearchPath("src")]
+        ),
+        .target(
+            name: "SyntaxEditorLanguageLua",
+            dependencies: [
+                "SyntaxEditorCoreTypes",
+                "SyntaxEditorLanguageSupport",
+                "TreeSitterLua",
+            ],
+            resources: [
+                .copy("Resources/LuaQueries"),
+            ],
+            swiftSettings: syntaxEditorSwiftSettings
+        ),
         .target(
             name: "SyntaxEditorLanguageMarkdown",
             dependencies: [
@@ -330,6 +352,7 @@ let package = Package(
                 "SyntaxEditorLanguageHTML",
                 "SyntaxEditorLanguageJavaScript",
                 "SyntaxEditorLanguageJSON",
+                "SyntaxEditorLanguageLua",
                 "SyntaxEditorLanguageMarkdown",
                 "SyntaxEditorLanguageMarkdownInline",
                 "SyntaxEditorLanguageObjectiveC",

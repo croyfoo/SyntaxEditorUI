@@ -149,6 +149,8 @@ func highlightQueryURL(language: SyntaxLanguage) -> URL {
         "YAMLQueries"
     case .shell:
         "ShellQueries"
+    case .lua:
+        "LuaQueries"
     case .markdown:
         "MarkdownQueries"
     case .markdownInline:
@@ -190,6 +192,8 @@ func canonicalCaptureLanguageName(for language: SyntaxLanguage) -> String {
         "yaml"
     case .shell:
         "shell"
+    case .lua:
+        "lua"
     case .markdown:
         "markdown"
     case .markdownInline:
@@ -225,6 +229,8 @@ func languageImplementationDirectoryName(for language: SyntaxLanguage) -> String
         "YAML"
     case .shell:
         "Shell"
+    case .lua:
+        "Lua"
     case .markdown:
         "Markdown"
     case .markdownInline:
@@ -493,6 +499,8 @@ extension SyntaxHighlighterEngineTests {
             "name: value\n"
         case .shell:
             "echo hello\n"
+        case .lua:
+            "print(\"hello\")\n"
         case .markdown:
             "# Heading\n"
         case .markdownInline:

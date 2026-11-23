@@ -337,6 +337,8 @@ struct SyntaxEditorCoreTests {
                 "YAMLLanguage"
             case .shell:
                 "ShellLanguage"
+            case .lua:
+                "LuaLanguage"
             case .markdown:
                 "MarkdownLanguage"
             case .markdownInline:
